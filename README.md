@@ -12,9 +12,11 @@ Real-Sim develops a multi-resolution X-in-the-loop (XIL) simulation framework to
 **Real-Sim Project Lead**: Oak Ridge National Lab\
 **Real-Sim Project Team**: University of Georgia, University of Texas-Dallas
 
-**Links to project presentation**\
+**Links to current project presentation**\
 https://www1.eere.energy.gov/vehiclesandfuels/downloads/2024_AMR/EEMS101_Chen_2024_o.pdf \
 https://www1.eere.energy.gov/vehiclesandfuels/downloads/2023_AMR/eems101_Shao_2023_o_v2%20-%20Yunli%20Shao.pdf_ADW373C.tmp.pdf
+
+**Links to older project presentation**\
 https://www1.eere.energy.gov/vehiclesandfuels/downloads/2022_AMR/eems101_deter_2022_o_5.1_651pm_LS.pdf
 https://www1.eere.energy.gov/vehiclesandfuels/downloads/2022_AMR/eems067_deter_2022_o_5.12_1157am_TM.pdf
 https://www.energy.gov/sites/default/files/2021-06/eems101_deter_2021_o_5-19_645pm_LR_ML.pdf
