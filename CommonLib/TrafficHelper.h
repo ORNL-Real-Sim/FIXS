@@ -11,7 +11,7 @@
 //#define NOMINMAX
 
 //#include <libsumo/libtraci.h>
-#include "TraCIAPI.h"
+#include "traci/TraCIAPI.h"
 #include "SocketHelper.h"
 
 

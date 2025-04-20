@@ -1,0 +1,9 @@
+*.slxc
+*.asv
+*.~vsdx
+*.slx.autosave
+**/Work
+*.slx.original
+Experiments/*
+__pycache__/
+*.pyc

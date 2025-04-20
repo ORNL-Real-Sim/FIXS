@@ -1,16 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
-<!-- generated on 2023-08-23 15:28:17 by Eclipse SUMO GUI Version 1.18.0
-<configuration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/sumoConfiguration.xsd">
+<!-- generated on 2025-03-17 15:08:55 by Eclipse SUMO GUI Version 1.21.0
+<sumoConfiguration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/sumoConfiguration.xsd">
 
     <input>
-        <net-file value="./sumoFiles/ShallowfordRd_RL.net.xml"/>
-        <route-files value="./sumoFiles/Trips.2021-07-26_mod.xml"/>
-        <additional-files value="./sumoFiles/ShallowfordRd_RL_SCIL.add.xml,./sumoFiles/e2Detectors_m.add.xml"/>
+        <net-file value="C:\Users\hg25079\Documents\GitHub\FIXS\tests\SignalIpg\sumoFiles\ShallowfordRd_RL.net.xml"/>
+        <route-files value="C:\Users\hg25079\Documents\GitHub\FIXS\tests\SignalIpg\sumoFiles\Trips.2021-07-26_mod.xml"/>
+        <additional-files value="C:\Users\hg25079\Documents\GitHub\FIXS\tests\SignalIpg\sumoFiles\ShallowfordRd_RL_SCIL.add.xml,C:\Users\hg25079\Documents\GitHub\FIXS\tests\SignalIpg\sumoFiles\e2Detectors_m.add.xml"/>
     </input>
 
     <time>
-        <begin value="39600"/>
         <step-length value="0.1"/>
     </time>
 
@@ -19,22 +18,15 @@
         <tls.actuated.show-detectors value="true"/>
     </processing>
 
-    <traci_server>
-        <remote-port value="1337"/>
-    </traci_server>
-
     <random_number>
         <random value="false"/>
         <seed value="23"/>
     </random_number>
 
-    <gui_only>
-        <start value="true"/>
-    </gui_only>
-
-</configuration>
+</sumoConfiguration>
 -->
 
 <detector xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/det_e2_file.xsd">
-   <interval begin="39600.00" end="39692.80" id="NB75_SB WB L3" sampledSeconds="126.65" nVehEntered="16" nVehLeft="12" nVehSeen="16" meanSpeed="3.25" meanTimeLoss="6.56" meanOccupancy="23.77" maxOccupancy="65.98" meanMaxJamLengthInVehicles="1.01" meanMaxJamLengthInMeters="6.15" maxJamLengthInVehicles="4" maxJamLengthInMeters="24.00" jamLengthInVehiclesSum="934" jamLengthInMetersSum="5709.61" meanHaltingDuration="24.35" maxHaltingDuration="31.10" haltingDurationSum="97.40" meanIntervalHaltingDuration="24.35" maxIntervalHaltingDuration="31.10" intervalHaltingDurationSum="97.40" startedHalts="4.00" meanVehicleNumber="1.38" maxVehicleNumber="4" />
+   <interval begin="0.00" end="900.00" id="NB75_SB WB L3" sampledSeconds="203.30" nVehEntered="17" nVehLeft="17" nVehSeen="17" meanSpeed="2.51" meanTimeLoss="10.49" meanOccupancy="4.38" maxOccupancy="32.53" meanMaxJamLengthInVehicles="0.18" meanMaxJamLengthInMeters="0.91" maxJamLengthInVehicles="1" maxJamLengthInMeters="5.00" jamLengthInVehiclesSum="1637" jamLengthInMetersSum="8185.00" meanHaltingDuration="55.57" maxHaltingDuration="59.80" haltingDurationSum="166.70" meanIntervalHaltingDuration="55.57" maxIntervalHaltingDuration="59.80" intervalHaltingDurationSum="166.70" startedHalts="3.00" meanVehicleNumber="0.23" maxVehicleNumber="2" />
+   <interval begin="900.00" end="1478.00" id="NB75_SB WB L3" sampledSeconds="222.65" nVehEntered="7" nVehLeft="7" nVehSeen="7" meanSpeed="0.94" meanTimeLoss="30.24" meanOccupancy="7.58" maxOccupancy="20.00" meanMaxJamLengthInVehicles="0.34" meanMaxJamLengthInMeters="1.72" maxJamLengthInVehicles="1" maxJamLengthInMeters="5.00" jamLengthInVehiclesSum="1991" jamLengthInMetersSum="9955.00" meanHaltingDuration="67.37" maxHaltingDuration="68.50" haltingDurationSum="202.10" meanIntervalHaltingDuration="67.37" maxIntervalHaltingDuration="68.50" intervalHaltingDurationSum="202.10" startedHalts="3.00" meanVehicleNumber="0.39" maxVehicleNumber="1" />
 </detector>
