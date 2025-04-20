@@ -3,6 +3,7 @@ from CommonLib.VehDataMsgDefs import VehData
 from CommonLib.MsgHelper import MsgHelper, MessageType
 from CommonLib.ConfigHelper import ConfigHelper
 import typing
+
 class SocketHelper:
 
     MSG_CODER = 'utf-8'

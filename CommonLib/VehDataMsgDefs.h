@@ -3,7 +3,7 @@
 //#include <any>
 #include <unordered_map>
 #include <vector>
-
+#include <string>
 // MESSAGE IDENTIFIER 1
 // Full vehicle data structure that will be shared between SUMO and other simulators
 // !!! This does not necessary mean all data directly communicated between simulators

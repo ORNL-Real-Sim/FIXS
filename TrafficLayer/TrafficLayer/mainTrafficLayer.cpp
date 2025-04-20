@@ -152,7 +152,7 @@ int main(int argc, char* argv[]) {
 		}
 	}
 
-	string configPath = "..\\..\\RealSimToyota\\config.yaml";
+	string configPath = ".\\ecodrivingConfig.yaml";
 	for (int i = 1; i < argc; i++) {
 		string arg = argv[i];
 		if (arg == "-h" || arg == "--help") {
