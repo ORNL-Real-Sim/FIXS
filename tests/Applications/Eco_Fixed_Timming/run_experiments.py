@@ -173,7 +173,6 @@ def run_settings(config):
         # copy the realsim script to the experiment directory
         shutil.copy(os.path.join(source_dir, 'realsim_script.m'), output_dir)
         # copy the sumo signal control file to the experiment directory
-        shutil.copy(os.path.join(source_dir, 'sumoSignalConfig_26.csv'), output_dir)
         sumo_port = sumo_setting['port']
         simulink_port = experiment_setting['Simulink']['port']
         fixs_port = experiment_setting['FIXS']['port']

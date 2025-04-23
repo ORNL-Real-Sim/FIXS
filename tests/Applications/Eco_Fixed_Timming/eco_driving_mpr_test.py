@@ -33,10 +33,11 @@ class SumoEnvMultiAgent:
         self.graph = sumolib.net.readNet(self.sumo_net_file, withInternal=True)  # internal edges are edges inside intersections or connections
         self.vertex = self.graph.getNodes()
         self.edge = self.graph.getEdges(withInternal=True)
-        self.edges = ['-2801', '-280', '-307', '-327', '-281', '-315', '-321', '-300', '-2851', '-285', '-290', '-298',
-                      '-293', '-297', '-288', '-286', '-302', '-3221', '-322', '-313', '-284', '-328', '-304', '-2801']
-        self.wb = ['-2801', '-280', '-307', '-327', '-281', '-315', '-321', '-300', '-2851', '-285', '-290', '-298', '-295']
-        self.eb = ['-312', '-293', '-297', '-288', '-286', '-302', '-3221', '-322', '-313', '-284', '-328', '-304',]
+        self.edges = ['-2801', '-280', '-307', '-327', '-3271', '-281', '-315', '-3151', '-321', '-300', '-2851', '-285', '-290', '-298',
+                      '-293', '-297', '-288', '-2881', '-286', '-302', '-3221', '-322', '-313', '-284', '-2841', '-328', '-304', '-2801']
+        self.wb = ['-2801', '-280', '-307', '-327', '-3271', '-281', '-315', '-3151', '-321', '-300', '-2851', '-285', '-290', '-298', '-295']
+        self.eb = ['-312', '-293', '-297', '-288', '-2881', '-286', '-302', '-3221', '-322', '-313', '-284', '-2841', '-328', '-304']
+             
         self.sumoSignalConfig = sumoSignalConfig
 
 
@@ -225,7 +226,7 @@ class SumoEnvMultiAgent:
         print('test')
 
         print(self.cav_object_dict.keys())
-        while sim_time <= 33000:
+        while sim_time <= 32400:
             # try:
             sim_time = traci.simulation.getTime()
             if sim_time % 100 == 0:
@@ -257,6 +258,9 @@ class SumoEnvMultiAgent:
             results_df['speed_lead'] = np.where(results_df['leader'].notnull(), results_df['speed_lead'], self.speed_max * 2.23694)
             # get the distance to the stop bar
             results_df['dist2Stop'] = np.where(results_df['next_tls'].notnull(), results_df['next_tls'].str[0].str[2] * 3.28084, 10000.0)
+            # results_df['dist2Stop'] = results_df['next_tls'].apply(
+            #     lambda tls_list: tls_list[0][2] * 3.28084 if isinstance(tls_list, list) and len(tls_list) > 0 else 10000.0
+            # )
             results_df[['t1s', 't1e', 't2s', 't2e', 'r1s', 'curr_status']] = results_df.apply(lambda row: self.get_spat(self.phase_tracking_dict,
                                                                                                                     self.spat_statuses,
                                                                                                                     row['next_tls'],
@@ -287,7 +291,7 @@ class SumoEnvMultiAgent:
                                                         results_df.loc[key, 't2e'],
                                                         results_df.loc[key, 'r1s'],
                                                         results_df.loc[key, 'curr_status']) for index, (key, veh) in enumerate(self.cav_object_dict.items()) if key in (list_cav_back_to_sumo + list_cav_control)}
-            # self.apply_vehicle_control(eco_speed_dic, smooth=False)
+            self.apply_vehicle_control(eco_speed_dic, smooth=False)
             # for index, (key, veh) in enumerate(self.cav_object_dict.items()):
             #     if key in (list_cav_back_to_sumo):
             #         veh.gain_back_sumo_control()
@@ -300,10 +304,6 @@ class SumoEnvMultiAgent:
             
 
 
-            # except:
-            #     ego_travel_direction_df.to_csv(output_dir + '\ego_travel_direction.csv', index=False)
-            #     break
-        # ego_travel_direction_df.to_csv(output_dir + '\ego_travel_direction.csv', index=False)
         self.close()
 
     
@@ -316,17 +316,13 @@ class SumoEnvMultiAgent:
         :return:
         """
         sim_state, sim_time = self.socket_helper.recv_data(self.socket2FIXS)
-        ori_speed = {''.join([chr(c) for c in (veh_data.id[:veh_data.idLength])])
-                     :veh_data.speed for veh_data in self.socket_helper.vehicle_data_receive_list}
+        ori_speed = {veh_data.id:veh_data.speed for veh_data in self.socket_helper.vehicle_data_receive_list}
         for veh_id, eco_speed in eco_speed_dic.items():
             if eco_speed is not None and veh_id == 'ego':
-                # veh_id to uint8Arr
-                veh_id_uint8Arr = [ord(c) for c in veh_id]
-                veh_id_length = len(veh_id_uint8Arr)
                 if eco_driving:
-                    veh_data = VehData(id=veh_id_uint8Arr, idLength=veh_id_length, speedDesired=eco_speed)
+                    veh_data = VehData(id=veh_id, speedDesired=eco_speed)
                 else:
-                    veh_data = VehData(id=veh_id_uint8Arr, idLength=veh_id_length, speedDesired=ori_speed[veh_id])
+                    veh_data = VehData(id=veh_id, speedDesired=ori_speed[veh_id])
                 self.socket_helper.vehicle_data_send_list.append(veh_data)
         
         self.socket_helper.sendData(sim_state, sim_time, self.socket2simulink)
@@ -339,7 +335,7 @@ class SumoEnvMultiAgent:
             speed_desired_simulink = self.socket_helper.vehicle_data_receive_list[idx].speedDesired
             if not vehicle_dynamics:
                 # if not applying vehicle dynamics, set the speedDesired to the eco_speed
-                veh_id = ''.join([chr(c) for c in (self.socket_helper.vehicle_data_receive_list[idx].id[:self.socket_helper.vehicle_data_receive_list[idx].idLength])])
+                veh_id = self.socket_helper.vehicle_data_receive_list[idx].id
                 if veh_id not in eco_speed_dic.keys():
                     continue
                 
@@ -418,6 +414,7 @@ if __name__ == "__main__":
     vehicle_dynamics = args.vehicleDynamics
     eco_driving = args.ecoDriving
     # read sumoSignalConfig_26
+    print('path_to_net: ', path_to_net)
     sumoSignalConfig = pd.read_csv(os.path.join(path_to_net, 'sumoSignalConfig_26.csv'), index_col=0)
     sumoSignalConfig['id'] = sumoSignalConfig['id'].astype(str)
     sumoSignalConfig['name'] = sumoSignalConfig['name'].astype(str)

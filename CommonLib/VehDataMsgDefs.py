@@ -5,12 +5,9 @@ from typing import List
 @dataclass
 class VehData:
     # Fixed-size arrays for string-like fields (50 bytes each)
-    id: List[int] = field(default_factory=lambda: [0] * 50)
-    idLength: int = 0
-    type: List[int] = field(default_factory=lambda: [0] * 50)
-    typeLength: int = 0
-    vehicleClass: List[int] = field(default_factory=lambda: [0] * 50)
-    vehicleClassLength: int = 0
+    id: str = field(default_factory=lambda: ' ' * 50)  # char[50]
+    type: str = field(default_factory=lambda: ' ' * 50)  # char[50]
+    vehicleClass: str = field(default_factory=lambda: ' ' * 50)  # char[50]
     
     # Floating point and integer fields
     speed: float = 0.0
@@ -19,36 +16,47 @@ class VehData:
     positionY: float = 0.0
     positionZ: float = 0.0
     heading: float = 0.0
-    color: int = 0  # Assuming color is an integer representation (e.g., ARGB or RGB)
+    color: int = 0  # uint32_t
     
-    linkId: List[int] = field(default_factory=lambda: [0] * 50)
-    linkIdLength: int = 0
-    laneId: int = 0
+    linkId: str = field(default_factory=lambda: ' ' * 50)  # char[50]
+    laneId: int = 0 # uint32_t
     distanceTravel: float = 0.0
     speedDesired: float = 0.0
     accelerationDesired: float = 0.0
     
     hasPrecedingVehicle: int = 0  # Boolean-like integer (0 or 1)
-    precedingVehicleId: List[int] = field(default_factory=lambda: [0] * 50)
-    precedingVehicleIdLength: int = 0
+    precedingVehicleId: str = field(default_factory=lambda: ' ' * 50)  # char[50]
     precedingVehicleDistance: float = 0.0
     precedingVehicleSpeed: float = 0.0
     
-    signalLightId: List[int] = field(default_factory=lambda: [0] * 50)
-    signalLightIdLength: int = 0
+    signalLightId: str = field(default_factory=lambda: ' ' * 50)  # char[50]
     signalLightHeadId: int = 0
     signalLightDistance: float = 0.0
-    signalLightColor: int = 0  # Assuming an integer representation of the color
+    signalLightColor: int = 0  # int8_t
     
     speedLimit: float = 0.0
     speedLimitNext: float = 0.0
     speedLimitChangeDistance: float = 0.0
     
-    linkIdNext: List[int] = field(default_factory=lambda: [0] * 50)
-    linkIdNextLength: int = 0
+    linkIdNext: str = field(default_factory=lambda: ' ' * 50)  # char[50]
     grade: float = 0.0
     activeLaneChange: int = 0  # Boolean-like integer (-1, 0, or 1)
 
     def get(self, field_name, default=None):
         return getattr(self, field_name, default)
+
+
+@dataclass
+class TrafficLightData:
+    id: int # uint16_t
+    name: str
+    state: str
+
+    def get(self, field_name, default=None):
+        return getattr(self, field_name, default)
     
+@dataclass
+class DetectorData:
+    id: int # uint8_t
+    name: str
+    state: int # uint8_t
