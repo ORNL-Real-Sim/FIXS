@@ -249,7 +249,7 @@ class SumoEnvMultiAgent:
             
             # get lead vehicle's speed
             results_df['speed'] = results_df['speed'] * 2.23694
-            results_df['leader'] = results_df['veh_id'].apply(lambda x: traci.vehicle.getLeader(x) if x is not None else None)
+            results_df['leader'] = results_df['veh_id'].apply(lambda x: traci.vehicle.getLeader(x, dist=200.0) if x is not None else None)
             results_df['leader_id'] = np.where(results_df['leader'].notnull(), results_df['leader'].str[0], 'None')
             results_df = results_df.join(results_df['speed'], on='leader_id', rsuffix='_lead')
             results_df['lead_dist'] = np.where(results_df['leader'].notnull(), results_df['leader'].str[1] * 3.28084, 500 * 3.28084)
@@ -291,7 +291,7 @@ class SumoEnvMultiAgent:
                                                         results_df.loc[key, 't2e'],
                                                         results_df.loc[key, 'r1s'],
                                                         results_df.loc[key, 'curr_status']) for index, (key, veh) in enumerate(self.cav_object_dict.items()) if key in (list_cav_back_to_sumo + list_cav_control)}
-            self.apply_vehicle_control(eco_speed_dic, smooth=False)
+            self.apply_vehicle_control(eco_speed_dic, smooth=True)
             # for index, (key, veh) in enumerate(self.cav_object_dict.items()):
             #     if key in (list_cav_back_to_sumo):
             #         veh.gain_back_sumo_control()
