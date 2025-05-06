@@ -231,17 +231,12 @@ class VisSimEnvMultiAgent:
         """
         carpr = 1 - cavpr
     
-        ## Connecting the COM Server => Open a new Vissim Window:
-        Vissim = com.Dispatch("Vissim.Vissim-64.2200") # Vissim
-        
-        
         ## load and parse VISSIM signal changes (LSA file)
-        # flsa = './centralize-control/maxrecall/'+timeofday+'/Shallowford_'+timeofday+'_MaxRecall_base.lsa'
         flsa = self.simulation_file_path + '/{}_{}.lsa'.format(file_name, '001')
         lsa_start = get_start_index(flsa, ';', 1)
         lsa = pd.read_csv(flsa, skiprows=lsa_start, header=None, usecols=range(0, 5), sep=';')
         lsa.columns = ["SimSec", "CycleTime", "SC", "SG", "SigState"]  # ,"RuntimeState","SC_type","SG_caused"]
-        # get the next two green window
+        # get the next two green 
         lsa = get_two_green_window(lsa, scloc)
         ## subset lsa to eastbound/westbound direction
         # elsa, eloc = lsa_sub(lsa, scloc, 'EB')
@@ -268,11 +263,11 @@ class VisSimEnvMultiAgent:
         # create an empty cav_all to store all the CAV information
         # CAV_all = pd.DataFrame(columns=['No', 'VehType', 'Speed', 'Pos', 'Lane', 'DesSpeed', 'RouteNo', 'OrgDesSpeed'])
         # Run first 300 seconds as warm up
-        Vissim.Simulation.SetAttValue('SimBreakAt', 300)
+        self.vissim.Simulation.SetAttValue('SimBreakAt', 300)
         # Set maximum speed:
-        Vissim.Simulation.SetAttValue('UseMaxSimSpeed', True)
-        Vissim.Simulation.RunContinuous()
-        simsec = Vissim.Simulation.SimulationSecond
+        self.vissim.Simulation.SetAttValue('UseMaxSimSpeed', True)
+        self.vissim.Simulation.RunContinuous()
+        simsec = self.vissim.Simulation.SimulationSecond
         if self.with_ego_veh:
             # Add an Ego Vehicle at a Specific Position
             # Parameters: Vehicle Type ID, Link Number, Lane Number, Position, Desired Speed
@@ -282,14 +277,14 @@ class VisSimEnvMultiAgent:
             position = 10  # Distance from start of link (in feet)
             desired_speed = 50  # Speed in m/s
             
-            ego_vehicle = Vissim.Net.Vehicles.AddVehicleAtLinkPosition(vehicle_type_id, link_id, lane, position, desired_speed)
+            ego_vehicle = self.vissim.Net.Vehicles.AddVehicleAtLinkPosition(vehicle_type_id, link_id, lane, position, desired_speed)
             # ego_vehicle.SetAttValue("Route", infinite_route.AttValue("No"))
             print(f"Ego vehicle added with ID: {ego_vehicle.AttValue('No')}")
         while simsec <= self.end_of_simulation - 300:
             print(simsec)
             # start_control_time = time.time()
             # get vehicle information
-            v = Vissim.Net.Vehicles.GetMultipleAttributes(('No', 'VehType', 'Speed', 'Pos', 'Lane', 'DesSpeed',
+            v = self.vissim.Net.Vehicles.GetMultipleAttributes(('No', 'VehType', 'Speed', 'Pos', 'Lane', 'DesSpeed',
                                                            'RouteNo', 'RoutDecNo', 'VehRoutSta', 'DesSpeedFrac',
                                                            'Acceleration', 'FollowDistNet', 'Clear', 'InteractState',
                                                            'InteractTargNo', 'InteractTargType', 'SpeedDiff'))
@@ -314,6 +309,10 @@ class VisSimEnvMultiAgent:
             CAV_curr['OrgDesSpeed'] = np.where(CAV_curr['DesSpeedFrac'].isna(), CAV_curr['DesSpeed'], CAV_curr['OrgDesSpeed'])
             # update the desire speed for controllable vehicles on EB and WB
             CAV_curr_control_eb = gen_desire_speed_dir_r_(CAV_curr, simsec, lsa, A, B, C, M, example_coasting_profile, static_routes_eb_wb_th)
+            
+            # vihicles controllable by Vissim (exclude ego vehicle type)
+            CAV_VISSIM = CAV_curr[CAV_curr['VehType'] != 10002]
+            CAV_FIXS = CAV_curr[CAV_curr['VehType'] == 10002]
             ################################################################################################
             # map to all the cavs
             ################################################################################################
@@ -331,7 +330,7 @@ class VisSimEnvMultiAgent:
                 vehs['ID'] = vehs.index + 1
                 setSpeeds = vehs[["ID", "DesSpeed"]]
                 # set desire speeds
-                Vissim.Net.Vehicles.SetMultiAttValues(('DesSpeed'), tuple(list(setSpeeds.itertuples(index=False, name=None))))
+                self.vissim.Net.Vehicles.SetMultiAttValues(('DesSpeed'), tuple(list(setSpeeds.itertuples(index=False, name=None))))
             except:
                 print('ERROR')
             # print('Time cost for speed control: {} seconds'.format(time.time() - start_control_time))
@@ -340,12 +339,12 @@ class VisSimEnvMultiAgent:
             # interval = 0.5
             # interval = time.time() - start_control_time + 0.1
             # print('Interval: {} seconds'.format(interval))
-            Vissim.Simulation.SetAttValue('SimBreakAt', simsec + interval)
+            self.vissim.Simulation.SetAttValue('SimBreakAt', simsec + interval)
             # Set maximum speed:
-            Vissim.Simulation.SetAttValue('UseMaxSimSpeed', True)
-            Vissim.Simulation.RunContinuous()
+            self.vissim.Simulation.SetAttValue('UseMaxSimSpeed', True)
+            self.vissim.Simulation.RunContinuous()
             # Vissim.Simulation.RunSingleStep()
-            simsec = Vissim.Simulation.SimulationSecond
+            simsec = self.vissim.Simulation.SimulationSecond
             # print(simsec)
     
         Vissim = None
