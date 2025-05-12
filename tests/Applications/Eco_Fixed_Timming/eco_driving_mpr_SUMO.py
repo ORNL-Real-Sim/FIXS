@@ -190,7 +190,7 @@ class SumoEnvMultiAgent:
 
         return t1s, t1e, t2s, t2e, r1s, curr_status
 
-    def start_subscription(self, mpr, step_length, vehicle_dynamics=True, eco_driving=True):
+    def start_subscription(self, vehicle_dynamics=True, eco_driving=True):
         """
         What needs to be subscribed
             1. speed, yes
@@ -420,7 +420,6 @@ if __name__ == "__main__":
     sumoSignalConfig['name'] = sumoSignalConfig['name'].astype(str)
     print(f'running with penetration rate: {penetration_rate}, vehicle dynamics: {vehicle_dynamics}, eco driving: {eco_driving}')
     senv = SumoEnvMultiAgent(sumoSignalConfig, traffic_layer_config=traffic_layer_config, sumo_port=sumo_port, traffic_layer_port=traffic_layer_port, simulink_port=simulink_port, path_to_net=path_to_net)
-    step_length = 1
-    senv.start_subscription(penetration_rate, step_length, vehicle_dynamics=vehicle_dynamics, eco_driving=eco_driving)
+    senv.start_subscription(vehicle_dynamics=vehicle_dynamics, eco_driving=eco_driving)
     total_time = time.time() - start_time
     print('Total time spent: ', total_time)

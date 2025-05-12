@@ -1515,6 +1515,14 @@ DRIVERMODEL_API  int  DriverModelExecuteCommand(int number)
 		//checkSubscription(&isSubscription, &iClientSub, VissimVehDataCommon);
 		try {
 			isSubscription = checkSubscription(VissimVehDataCommon);
+			if (ENABLE_LOG) {
+				FILE* f = fopen("DriverModelLog.txt", "a");
+				fprintf(f, "Try to check veh %s\n", VissimVehDataCommon.id.c_str());
+				for (const auto& pair : vehicleSubscribeId_v) {
+					fprintf(f, "isSubscription[%s] = %f\n", pair.first.c_str(), pair.second);
+				}
+				fclose(f);
+			}
 			// !!! need to update heading calculation
 
 
