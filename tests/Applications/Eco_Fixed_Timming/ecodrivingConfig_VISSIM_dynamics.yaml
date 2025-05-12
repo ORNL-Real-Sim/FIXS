@@ -29,7 +29,7 @@ SimulationSetup:
     color, linkId, laneId, distanceTravel, speedDesired]
 
     # by default it is false 
-  EnableExternalDynamics: false   # use this so that simulink will control the response
+  EnableExternalDynamics: true   # use this so that simulink will control the response
 
   TrafficSimulatorPort: 1337
 
@@ -52,7 +52,7 @@ ApplicationSetup:
     - 430
 XilSetup:
     # enable/disable XIL
-  EnableXil: false
+  EnableXil: true
 
   #--------------------------------------------------
   VehicleSubscription:

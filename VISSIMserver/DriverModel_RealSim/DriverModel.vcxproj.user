@@ -14,7 +14,7 @@
     <DebuggerFlavor>WindowsRemoteDebugger</DebuggerFlavor>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <RemoteDebuggerCommand>C:\Program Files\PTV Vision\PTV Vissim 2021\Exe\VISSIM210.exe</RemoteDebuggerCommand>
+    <RemoteDebuggerCommand>C:\Program Files\PTV Vision\PTV Vissim 2022\Exe\VISSIM220.exe</RemoteDebuggerCommand>
     <DebuggerFlavor>WindowsRemoteDebugger</DebuggerFlavor>
   </PropertyGroup>
 </Project>
