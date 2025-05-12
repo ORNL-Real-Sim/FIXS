@@ -4,6 +4,5 @@
 *.slx.autosave
 **/Work
 *.slx.original
-Experiments/*
 __pycache__/
 *.pyc
