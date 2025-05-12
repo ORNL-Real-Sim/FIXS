@@ -1,0 +1,18 @@
+root_dir: 'C:\Users\hg25079\Documents\GitHub\FIXS\tests\Applications\Eco_Fixed_Timming\'
+Experiments:
+  Experiment1:
+    source_dir: 'Experiments\'
+    config_file: 'ecodrivingConfig.yaml'
+    working_dir: 'Experiments\ACV3\'
+    eco_driving: True
+    vehicle_dynamics: True
+    step_length: 1
+    penetration_rate: 0.1
+    SUMO:
+      src_path: 'Shallowford_after_calibration_banleftturn_AdjustedFixedTime_V3\'
+      port: 1330
+    Simulink:
+      model_name: 'EV_longitude'
+      port: 420
+    FIXS:
+      port: 430
