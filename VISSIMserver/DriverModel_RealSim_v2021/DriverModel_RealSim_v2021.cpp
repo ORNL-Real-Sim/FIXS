@@ -26,7 +26,7 @@ using namespace std;
 
 
 // Master Switches
-bool ENABLE_REALSIM = true;
+bool ENABLE_REALSIM = false;
 
 // if no signal control but vehicle control depends on signal information
 bool NEED_SIGNAL = false;
@@ -46,7 +46,7 @@ bool USE_ESTIMATED_SLOPE = true;
 bool hasWriteRecvError = false;
 
 
-bool NEED_SPEED_LIMIT = true;
+bool NEED_SPEED_LIMIT = false;
 
 
 string configFile = "..\\config.yaml";
@@ -1016,8 +1016,8 @@ DRIVERMODEL_API  int  DriverModelGetValue(int   type,
 		*int_value = turning_indicator;
 		return 1;
 	case DRIVER_DATA_VEH_DESIRED_VELOCITY:
-		*double_value = VissimVehDataCommon.speedDesired;
-		//*double_value = desired_velocity;
+		//*double_value = VissimVehDataCommon.speedDesired;
+		*double_value = desired_velocity;
 		return 1;
 	case DRIVER_DATA_VEH_COLOR:
 		*int_value = VissimVehDataCommon.color;
@@ -1028,18 +1028,18 @@ DRIVERMODEL_API  int  DriverModelGetValue(int   type,
 		*int_value = 1;
 		return 1;
 	case DRIVER_DATA_DESIRED_ACCELERATION:
-		*double_value = VissimVehDataCommon.accelerationDesired;
-		//*double_value = desired_acceleration;
+		//*double_value = VissimVehDataCommon.accelerationDesired;
+		*double_value = desired_acceleration;
 		return 1;
 	case DRIVER_DATA_DESIRED_LANE_ANGLE:
 		*double_value = desired_lane_angle;
 		return 1;
 	case DRIVER_DATA_ACTIVE_LANE_CHANGE:
-		//*int_value = active_lane_change;
+		*int_value = active_lane_change;
 		//if (VissimVehDataCommon.type.compare("1000") == 0) {
 		//	VissimVehDataCommon.activeLaneChange = 0;
 		//}
-		*int_value = VissimVehDataCommon.activeLaneChange;
+		//*int_value = VissimVehDataCommon.activeLaneChange;
 		
 		//if (ENABLE_LOG) {
 		//	FILE* f = fopen("DriverModelLog.txt", "a");
