@@ -5,7 +5,6 @@ from fileinput import filename
 import pandas as pd
 import win32com.client as com # COM-Server
 import os
-import shutil
 import subprocess
 import socket
 import numpy as np
@@ -15,7 +14,9 @@ from CommonLib.ConfigHelper import ConfigHelper
 from CommonLib.MsgHelper import MsgHelper
 from CommonLib.VehDataMsgDefs import VehData
 import argparse
-import yaml
+
+ENABLE_SOCKET = True
+
 def get_start_index(fname, char_to_search, nocc):
     """
     find first line of data in VISSIM output files
@@ -182,16 +183,7 @@ class VissimEnvMultiAgent:
         self.socket2FIXS.connect(('127.0.0.1', int(self.traffic_layer_port)))
         print('Connected to FIXS server')
 
-        # self.socket2simulink = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        # print('Waiting for Simulink client to connect...')
-        # # bind the socket to the port and listen for incoming connections
-        # print('Binding to port: ', self.simulink_port)
-        # self.socket2simulink.bind(('127.0.0.1', int(self.simulink_port)))
-        # self.socket2simulink.listen(1)
-
-        # # if a connection is established, accept it
-        # self.socket2simulink, addr = self.socket2simulink.accept()
-        # print('Connected by Simulink client')
+        
 
 
     def warmup_vissim(self):
@@ -222,15 +214,18 @@ class VissimEnvMultiAgent:
 
                 
             # send the previous state to the FIXS server
-            self.socket_helper.sendData(sim_state, simsec, self.socket2FIXS)
-            self.socket_helper.clear_data()
+            if ENABLE_SOCKET:
+                self.socket_helper.sendData(sim_state, simsec, self.socket2FIXS)
+                self.socket_helper.clear_data()
             self.vissim.Simulation.RunSingleStep()
 
             # Should apply the FIXS control to the ego vehicle at this step
-            sim_state, sim_time = self.socket_helper.recv_data(self.socket2FIXS)
+            if ENABLE_SOCKET:
+                sim_state, sim_time = self.socket_helper.recv_data(self.socket2FIXS)
 
 
-        self.socket_helper.sendData(sim_state, simsec, self.socket2FIXS)
+        if ENABLE_SOCKET:
+            self.socket_helper.sendData(sim_state, simsec, self.socket2FIXS)
         if self.with_ego_veh:
             self.add_ego_veh()
 
@@ -273,8 +268,8 @@ class VissimEnvMultiAgent:
         self._load_static_routes()
         self._load_example_coasting_profile()
         self.end_of_simulation = end_of_simulation
-
-        self.vissim = com.DispatchEx("Vissim.Vissim")
+        self.vissim = com.Dispatch("Vissim.Vissim-64.2200") # Vissim
+        # self.vissim = com.DispatchEx("Vissim.Vissim")
         # Load a Vissim Network:
         # remember to enable the Evaluation --> Configuration -->Direct Output --> Signal changes
         Filename = os.path.join(self.simulation_file_path, 'calibrated_turnsSA_behaviorTS_fin_leftban_nooverlap.inpx')
@@ -312,8 +307,8 @@ class VissimEnvMultiAgent:
             vehComps_tem = pd.DataFrame(list(vehComps_tem), columns=['VehType', 'DesSpeedDistr', 'RelFlow'])
             DesSpeedDistributions = vehComps_tem.DesSpeedDistr.unique()[0]
             # add AddVehicleCompositionRelativeFlow for cav vehicle type
-            self.vehComps[vc].VehCompRelFlows.AddVehicleCompositionRelativeFlow(self.vissim.Net.VehicleTypes.ItemByKey(10001),
-                                                                           self.vissim.Net.DesSpeedDistributions.ItemByKey(DesSpeedDistributions))
+            # self.vehComps[vc].VehCompRelFlows.AddVehicleCompositionRelativeFlow(self.vissim.Net.VehicleTypes.ItemByKey(10001),
+            #                                                                self.vissim.Net.DesSpeedDistributions.ItemByKey(DesSpeedDistributions))
             relflows = self.vehComps[vc].VehCompRelFlows.GetAll()
             # if len(relflows) == 3:
             relflows[0].SetAttValue('VehType', 100) # Changing the vehicle type to ensure setting relative flow for the right type
@@ -386,94 +381,107 @@ class VissimEnvMultiAgent:
         
         simsec = self.vissim.Simulation.SimulationSecond
         is_very_first_step = True
-        sim_state, sim_time = self.socket_helper.recv_data(self.socket2FIXS)
+        if ENABLE_SOCKET:
+            sim_state, sim_time = self.socket_helper.recv_data(self.socket2FIXS)
         while simsec <= self.end_of_simulation - 300:
             if is_very_first_step:
                 is_very_first_step = False
 
-            # send the previous state to the FIXS server
-            self.socket_helper.sendData(sim_state, simsec, self.socket2FIXS)
-            self.socket_helper.clear_data()
-            print(simsec)
-            # start_control_time = time.time()
-            # get vehicle information
-            v = self.vissim.Net.Vehicles.GetMultipleAttributes(('No', 'VehType', 'Speed', 'Pos', 'Lane', 'DesSpeed',
-                                                           'RouteNo', 'RoutDecNo', 'VehRoutSta', 'DesSpeedFrac',
-                                                           'Acceleration', 'FollowDistNet', 'Clear', 'InteractState',
-                                                           'InteractTargNo', 'InteractTargType', 'SpeedDiff'))
-            vehs = pd.DataFrame(list(v), columns=['No', 'VehType', 'Speed', 'Pos', 'Lane', 'DesSpeed', 'RouteNo', 'RoutDecNo',
-                                         'VehRoutSta', 'DesSpeedFrac', 'Acceleration', 'FollowDistNet', 'Clear', 'InteractState',
-                                                           'InteractTargNo', 'InteractTargType', 'SpeedDiff'])
-            # Check the InteractTargType, make the value of Clear only meaningful when “InteractTargType” == “VEHICLE”
-            vehs['Clear'] = np.where(vehs['InteractTargType'] == 'VEHICLE', vehs['Clear'], 10000)
-            vehs['Acceleration'] = vehs['Acceleration'] * 0.3048  # convert the unit from feet/s2 to meter/s2.
-            vehs['Speed_base'] = vehs['Speed'] - vehs['SpeedDiff']
-            # veh_desspeeds = Vissim.Net.Vehicles.GetMultiAttValues('DesSpeed')
-            # get initial CAVs information and set up CAV_all to store all CAVS info for cross reference
-            CAV_curr = vehs[vehs.VehType.isin(['10001', '10002'])].copy()
-            # get the current link information
-            CAV_curr['CurrentLink'] = CAV_curr['Lane'].str.split('-').str[0].astype(int)
-            # join the linkinfo based on link id
-            CAV_curr = CAV_curr.join(self.linkinfo[['Link', 'Direction', 'nextSC', 'Length2D', 'cumLength2D', 'cumLength2D_max']].set_index('Link'), on='CurrentLink')
-            CAV_curr['d'] = CAV_curr['cumLength2D_max'] - CAV_curr['cumLength2D'] + CAV_curr['Length2D'] - CAV_curr['Pos']
-            # get original desired speed based on link information and DesSpeedFrac (given we know all the DesSpeedDistr on the major road are No. 64)
-            CAV_curr['OrgDesSpeed'] = 50 + CAV_curr['DesSpeedFrac'] * (54 - 50)
-            # For those vehicles that are not on the major road, which we are not controlling. Set the OrgDesSpeed equals to DesSpeed
-            CAV_curr['OrgDesSpeed'] = np.where(CAV_curr['DesSpeedFrac'].isna(), CAV_curr['DesSpeed'], CAV_curr['OrgDesSpeed'])
-            # coasting parameters based on tractive power
-            A = 0.083698
-            B = 0.00385
-            C = 0.000278
-            M = 1.6443
-            # update the desire speed for controllable vehicles on EB and WB
-            CAV_curr_control_eb = gen_desire_speed_dir_r_(CAV_curr, simsec, self.lsa, A, B, C, M, self.example_coasting_profile, self.static_routes_eb_wb_th)
-            
-            # vihicles controllable by Vissim (CAV)
-            CAV_VISSIM = CAV_curr[CAV_curr['VehType'] == '10001']
-            # vihicles controllable by FIXS (egoCAV)
-            CAV_FIXS = CAV_curr[CAV_curr['VehType'] == '10002']
+            try:
+                # send the previous state to the FIXS server
+                if ENABLE_SOCKET:
+                    self.socket_helper.sendData(sim_state, simsec, self.socket2FIXS)
+                    self.socket_helper.clear_data()
+                print(simsec)
+            except Exception as e:
+                print('receive FIXS done')
 
-            ################################################################################################
-            # map to all the cavs
-            ################################################################################################
-            if CAV_curr_control_eb is not None:
-                # set the controlled CAV desired speed
-                CAV_curr.loc[CAV_curr['No'].isin(CAV_curr_control_eb['No'].values), 'DesSpeed'] = CAV_curr['No'].map(CAV_curr_control_eb.set_index('No')['instant_desired_speed'])
-                # reset the uncontroller CAV's desired speed as the original desired speed
-                CAV_curr.loc[~CAV_curr['No'].isin(CAV_curr_control_eb['No'].values), 'DesSpeed'] = CAV_curr.loc[~CAV_curr['No'].isin(CAV_curr_control_eb['No'].values), 'OrgDesSpeed']
-                # update the desire speed of all CAVs to overall vehicles
-                vehs.loc[vehs['No'].isin(CAV_curr['No'].values), 'DesSpeed'] = vehs['No'].map(CAV_curr.set_index('No')['DesSpeed'])
+            try:
+                # start_control_time = time.time()
+                # get vehicle information
+                v = self.vissim.Net.Vehicles.GetMultipleAttributes(('No', 'VehType', 'Speed', 'Pos', 'Lane', 'DesSpeed',
+                                                            'RouteNo', 'RoutDecNo', 'VehRoutSta', 'DesSpeedFrac',
+                                                            'Acceleration', 'FollowDistNet', 'Clear', 'InteractState',
+                                                            'InteractTargNo', 'InteractTargType', 'SpeedDiff'))
+                vehs = pd.DataFrame(list(v), columns=['No', 'VehType', 'Speed', 'Pos', 'Lane', 'DesSpeed', 'RouteNo', 'RoutDecNo',
+                                            'VehRoutSta', 'DesSpeedFrac', 'Acceleration', 'FollowDistNet', 'Clear', 'InteractState',
+                                                            'InteractTargNo', 'InteractTargType', 'SpeedDiff'])
+                # Check the InteractTargType, make the value of Clear only meaningful when “InteractTargType” == “VEHICLE”
+                vehs['Clear'] = np.where(vehs['InteractTargType'] == 'VEHICLE', vehs['Clear'], 10000)
+                vehs['Acceleration'] = vehs['Acceleration'] * 0.3048  # convert the unit from feet/s2 to meter/s2.
+                vehs['Speed_base'] = vehs['Speed'] - vehs['SpeedDiff']
+                # veh_desspeeds = Vissim.Net.Vehicles.GetMultiAttValues('DesSpeed')
+                # get initial CAVs information and set up CAV_all to store all CAVS info for cross reference
+                CAV_curr = vehs[vehs.VehType.isin(['10001', '10002'])].copy()
+                # get the current link information
+                CAV_curr['CurrentLink'] = CAV_curr['Lane'].str.split('-').str[0].astype(int)
+                # join the linkinfo based on link id
+                CAV_curr = CAV_curr.join(self.linkinfo[['Link', 'Direction', 'nextSC', 'Length2D', 'cumLength2D', 'cumLength2D_max']].set_index('Link'), on='CurrentLink')
+                CAV_curr['d'] = CAV_curr['cumLength2D_max'] - CAV_curr['cumLength2D'] + CAV_curr['Length2D'] - CAV_curr['Pos']
+                # get original desired speed based on link information and DesSpeedFrac (given we know all the DesSpeedDistr on the major road are No. 64)
+                CAV_curr['OrgDesSpeed'] = 50 + CAV_curr['DesSpeedFrac'] * (54 - 50)
+                # For those vehicles that are not on the major road, which we are not controlling. Set the OrgDesSpeed equals to DesSpeed
+                CAV_curr['OrgDesSpeed'] = np.where(CAV_curr['DesSpeedFrac'].isna(), CAV_curr['DesSpeed'], CAV_curr['OrgDesSpeed'])
+                # coasting parameters based on tractive power
+                A = 0.083698
+                B = 0.00385
+                C = 0.000278
+                M = 1.6443
+                # update the desire speed for controllable vehicles on EB and WB
+                CAV_curr_control_eb = gen_desire_speed_dir_r_(CAV_curr, simsec, self.lsa, A, B, C, M, self.example_coasting_profile, self.static_routes_eb_wb_th)
+                
+                # vihicles controllable by Vissim (CAV)
+                CAV_VISSIM = CAV_curr[CAV_curr['VehType'] == '10001']
+                # vihicles controllable by FIXS (egoCAV)
+                CAV_FIXS = CAV_curr[CAV_curr['VehType'] == '10002']
 
-                # remove the egoCAV from the overall vehicles, to be later sent to FIXS
-                vehs = vehs[~vehs['No'].isin(CAV_FIXS['No'].values)]
-            else:
-                CAV_curr['DesSpeed'] = CAV_curr['OrgDesSpeed']
-            # add numbering to prepare set speeds data
-            vehs['ID'] = vehs.index + 1
-            setSpeeds = vehs[["ID", "DesSpeed"]]
-            # set desire speeds
-            self.vissim.Net.Vehicles.SetMultiAttValues(('DesSpeed'), tuple(list(setSpeeds.itertuples(index=False, name=None))))
-            print(setSpeeds)
+                ################################################################################################
+                # map to all the cavs
+                ################################################################################################
+                if CAV_curr_control_eb is not None:
+                    # set the controlled CAV desired speed
+                    CAV_curr.loc[CAV_curr['No'].isin(CAV_curr_control_eb['No'].values), 'DesSpeed'] = CAV_curr['No'].map(CAV_curr_control_eb.set_index('No')['instant_desired_speed'])
+                    # reset the uncontroller CAV's desired speed as the original desired speed
+                    CAV_curr.loc[~CAV_curr['No'].isin(CAV_curr_control_eb['No'].values), 'DesSpeed'] = CAV_curr.loc[~CAV_curr['No'].isin(CAV_curr_control_eb['No'].values), 'OrgDesSpeed']
+                    # update the desire speed of all CAVs to overall vehicles
+                    vehs.loc[vehs['No'].isin(CAV_curr['No'].values), 'DesSpeed'] = vehs['No'].map(CAV_curr.set_index('No')['DesSpeed'])
 
-            # get the egoCAV speed, maybe multiple egoCAV
-            egoCAV_curr = CAV_curr[CAV_curr['VehType'] == '10002']
-            eco_speed_dic = egoCAV_curr.set_index('No')['DesSpeed'].to_dict()
-        
-
-
-            self.vissim.Simulation.RunSingleStep()
-            # Should apply the FIXS control to the ego vehicle at this step
-            sim_state, sim_time = self.socket_helper.recv_data(self.socket2FIXS)
-            ori_speed = {veh_data.id:veh_data.speed for veh_data in self.socket_helper.vehicle_data_receive_list}
-            
-            for veh_id in ori_speed.keys():
-                if veh_id in eco_speed_dic.keys() and eco_driving:
-                    veh_data = VehData(id=veh_id, speedDesired=eco_speed_dic[veh_id])
+                    # remove the egoCAV from the overall vehicles, to be later sent to FIXS
+                    vehs = vehs[~vehs['No'].isin(CAV_FIXS['No'].values)]
                 else:
-                    veh_data = VehData(id=veh_id, speedDesired=ori_speed[veh_id])
-                self.socket_helper.vehicle_data_send_list.append(veh_data)
-            simsec = self.vissim.Simulation.SimulationSecond
+                    CAV_curr['DesSpeed'] = CAV_curr['OrgDesSpeed']
+                # add numbering to prepare set speeds data
+                vehs['ID'] = vehs.index + 1
+                setSpeeds = vehs[["ID", "DesSpeed"]]
+                # set desire speeds
+                self.vissim.Net.Vehicles.SetMultiAttValues(('DesSpeed'), tuple(list(setSpeeds.itertuples(index=False, name=None))))
+                print(setSpeeds)
+
+                # get the egoCAV speed, maybe multiple egoCAV
+                egoCAV_curr = CAV_curr[CAV_curr['VehType'] == '10002']
+                egoCAV_curr['No'] = egoCAV_curr['No'].astype(str)
+                eco_speed_dic = egoCAV_curr.set_index('No')['DesSpeed'].to_dict()
+            except Exception as e:
+                print('set surrounding vehicle desired speed done')
             
+            try:
+                self.vissim.Simulation.RunSingleStep()
+                # Should apply the FIXS control to the ego vehicle at this step
+                if ENABLE_SOCKET:
+                    sim_state, sim_time = self.socket_helper.recv_data(self.socket2FIXS)
+                ori_speed_dic = {veh_data.id:veh_data.speed for veh_data in self.socket_helper.vehicle_data_receive_list}
+                self.socket_helper.clear_data()
+                for veh_id in ori_speed_dic.keys():
+                    if veh_id in eco_speed_dic.keys() and eco_driving:
+                        veh_data = VehData(id=veh_id, speedDesired=eco_speed_dic[veh_id] * 0.44704)
+                    else:
+                        veh_data = VehData(id=veh_id, speedDesired=ori_speed_dic[veh_id])
+                    self.socket_helper.vehicle_data_send_list.append(veh_data)
+                
+                simsec = self.vissim.Simulation.SimulationSecond
+            except:
+                pass
+
         self.close_vissim()
 
 
@@ -507,18 +515,21 @@ def run_traffic_layer(traffic_layer_path, config_path):
 
 if __name__ == '__main__':
     experiment_config = {
-        'driver_model_path': r"DriverModel_RealSim.dll",
-        'config_path': r"ecodrivingConfig_VISSIM.yaml",
+        'driver_model_path': r"DriverModel_RealSim_v2021.dll", #r"DriverModel_RealSim_v2021_vanilla.dll", #r"DriverModel_RealSim.dll",
+        'config_path': r"ecodrivingConfig_VISSIM_dynamics.yaml",
+        'simulation_file_path':r'Experiments\\banMinorLeftTurnFixedTimingV2_WithEgo'
     }
+    experiment_config = {path_key:os.path.join(os.getcwd(), relative_path) for path_key, relative_path in experiment_config.items()}
+    print(experiment_config)
     parser = argparse.ArgumentParser()
-    parser.add_argument("-c", "--config", type=str, help="Path to the Configuration file", default=r'/ecodrivingConfig_VISSIM.yaml')
+    parser.add_argument("-c", "--config", type=str, help="Path to the Configuration file", default=r'/ecodrivingConfig_VISSIM_dynamics.yaml')
     parser.add_argument("--VissimPort", type=str, help="Specify port of vissim", default=1337)
     parser.add_argument("--trafficlayerPort", type=str, help="Specify port of traffic layer", default=430)
     parser.add_argument("--simulinkPort", type=str, help="Specify port of simulink", default=420)
     parser.add_argument("--ecoDriving", action="store_true", help="Use the eco driving controller", default=False)
     parser.add_argument("--vehicleDynamics", action="store_true", help="use the vehicle dynamis", default=False)
     parser.add_argument("--penetrationRate", type=float, help="the penetration rate of cav", default=1.0)
-    parser.add_argument("--pathToNet", type=str, help="the path to the net file", default=r'C:\Users\hg25079\Documents\GitHub\FIXS\tests\Applications\Eco_Fixed_Timming\Experiments\banMinorLeftTurnFixedTimingV2_WithEgo')
+    parser.add_argument("--pathToNet", type=str, help="the path to the net file", default=None)
     
     args = parser.parse_args()
     traffic_layer_config_path = args.config
@@ -531,17 +542,17 @@ if __name__ == '__main__':
     eco_driving = args.ecoDriving
 
     run_traffic_layer(traffic_layer_path='TrafficLayer.exe', config_path=experiment_config['config_path'])
-    run_vissim()
+    # run_vissim()
     time.sleep(3)
-    vissim_env = VissimEnvMultiAgent(traffic_layer_config_path=r'C:\Users\hg25079\Documents\GitHub\FIXS\tests\Applications\Eco_Fixed_Timming\ecodrivingConfig_VISSIM.yaml', 
-                                    driver_model_path=r'C:\Users\hg25079\Documents\GitHub\FIXS\VISSIMserver\x64\Release\DriverModel_RealSim_v2021.dll',
+    vissim_env = VissimEnvMultiAgent(traffic_layer_config_path=experiment_config['config_path'], 
+                                    driver_model_path=experiment_config['driver_model_path'],
                                     vissim_port=vissim_port,
                                     traffic_layer_port=traffic_layer_port,
                                     simulink_port=simulink_port,
-                                    simulation_file_path=path_to_net,
+                                    simulation_file_path=experiment_config['simulation_file_path'],
                                     with_ego_veh=True)
     
-    vissim_env.init_simulation_environment()
+    vissim_env.init_simulation_environment(cavpr=0.001)
     vissim_env.warmup_vissim()
     vissim_env.start_subscription()
     
