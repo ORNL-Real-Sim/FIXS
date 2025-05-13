@@ -802,12 +802,13 @@
 		<conflictArea addStopDist="0" anticipRout="0" avoidBlockMajor="true" avoidBlockMinor="1" conflTypDetmAuto="true" conflTypMan="CROSSING" frontGapDef="0.5" link1="55" link2="59" mesoCritGap="3.5" minGapBlockDef="3" no="2190" obsAdjLns="false" rearGapDef="0.5" safDistFactDef="1.5" status="PASSIVE" visibLink1="100" visibLink2="100"/>
 		<conflictArea addStopDist="0" anticipRout="0" avoidBlockMajor="true" avoidBlockMinor="1" conflTypDetmAuto="true" conflTypMan="CROSSING" frontGapDef="0.5" link1="58" link2="10055" mesoCritGap="3.5" minGapBlockDef="3" no="2191" obsAdjLns="false" rearGapDef="0.5" safDistFactDef="1.5" status="PASSIVE" visibLink1="100" visibLink2="100"/>
 		<conflictArea addStopDist="0" anticipRout="0" avoidBlockMajor="true" avoidBlockMinor="1" conflTypDetmAuto="true" conflTypMan="CROSSING" frontGapDef="0.5" link1="10055" link2="10119" mesoCritGap="3.5" minGapBlockDef="3" no="2194" obsAdjLns="false" rearGapDef="0.5" safDistFactDef="1.5" status="PASSIVE" visibLink1="100" visibLink2="100"/>
-		<conflictArea addStopDist="0" anticipRout="0" avoidBlockMajor="true" avoidBlockMinor="1" conflTypDetmAuto="true" conflTypMan="CROSSING" frontGapDef="0.5" link1="33" link2="10066" mesoCritGap="3.5" minGapBlockDef="3" no="2195" obsAdjLns="false" rearGapDef="0.5" safDistFactDef="1.5" status="PASSIVE" visibLink1="100" visibLink2="100"/>
 		<conflictArea addStopDist="0" anticipRout="0" avoidBlockMajor="true" avoidBlockMinor="1" conflTypDetmAuto="true" conflTypMan="CROSSING" frontGapDef="0.5" link1="89" link2="10036" mesoCritGap="3.5" minGapBlockDef="3" no="2196" obsAdjLns="false" rearGapDef="0.5" safDistFactDef="1.5" status="PASSIVE" visibLink1="100" visibLink2="100"/>
 		<conflictArea addStopDist="0" anticipRout="0" avoidBlockMajor="true" avoidBlockMinor="1" conflTypDetmAuto="true" conflTypMan="CROSSING" frontGapDef="0.5" link1="71" link2="76" mesoCritGap="3.5" minGapBlockDef="3" no="2197" obsAdjLns="false" rearGapDef="0.5" safDistFactDef="1.5" status="PASSIVE" visibLink1="100" visibLink2="100"/>
 		<conflictArea addStopDist="0" anticipRout="0" avoidBlockMajor="true" avoidBlockMinor="1" conflTypDetmAuto="true" conflTypMan="CROSSING" frontGapDef="0.5" link1="10153" link2="10161" mesoCritGap="3.5" minGapBlockDef="3" no="2198" obsAdjLns="false" rearGapDef="0.5" safDistFactDef="1.5" status="PASSIVE" visibLink1="100" visibLink2="100"/>
 		<conflictArea addStopDist="0" anticipRout="0" avoidBlockMajor="true" avoidBlockMinor="1" conflTypDetmAuto="true" conflTypMan="CROSSING" frontGapDef="0.5" link1="10179" link2="10185" mesoCritGap="3.5" minGapBlockDef="3" no="2199" obsAdjLns="false" rearGapDef="0.5" safDistFactDef="1.5" status="PASSIVE" visibLink1="100" visibLink2="100"/>
 		<conflictArea addStopDist="0" anticipRout="0" avoidBlockMajor="true" avoidBlockMinor="1" conflTypDetmAuto="true" conflTypMan="CROSSING" frontGapDef="0.5" link1="10248" link2="10253" mesoCritGap="3.5" minGapBlockDef="3" no="2200" obsAdjLns="false" rearGapDef="0.5" safDistFactDef="1.5" status="PASSIVE" visibLink1="100" visibLink2="100"/>
+		<conflictArea addStopDist="0" anticipRout="0" avoidBlockMajor="true" avoidBlockMinor="1" conflTypDetmAuto="true" conflTypMan="CROSSING" frontGapDef="0.5" link1="75" link2="10066" mesoCritGap="3.5" minGapBlockDef="3" no="2201" obsAdjLns="false" rearGapDef="0.5" safDistFactDef="1.5" status="PASSIVE" visibLink1="100" visibLink2="100"/>
+		<conflictArea addStopDist="0" anticipRout="0" avoidBlockMajor="true" avoidBlockMinor="1" conflTypDetmAuto="true" conflTypMan="CROSSING" frontGapDef="0.5" link1="148" link2="10067" mesoCritGap="3.5" minGapBlockDef="3" no="2202" obsAdjLns="false" rearGapDef="0.5" safDistFactDef="1.5" status="PASSIVE" visibLink1="100" visibLink2="100"/>
 	</conflictAreas>
 	<dataCollectionMeasurements>
 		<dataCollectionMeasurement name="AminEB" no="1">
@@ -2125,7 +2126,7 @@
 		<routGuid1 interval="999999" offset="0" strategy="NEWROUTETODESTINATIONPARKINGLOT"/>
 		<routGuid2 interval="999999" offset="0" strategy="NEWROUTETODESTINATIONPARKINGLOT"/>
 	</dynamicAssignment>
-	<evaluation autoCreateResultColumns="true" boschEmiCalcAct="false" databaseConnection="" evalOutDir="#data#" keepPrevResults="KEEPCURRENT" listAutoExportType="FILE" nodesDelaySegmentStart="100" queueBeginSpeed="5" queueConsiderAdjacentLanes="true" queueEndSpeed="10" queueMaxClear="20" queueMaxLength="500">
+	<evaluation autoCreateResultColumns="true" boschEmiCalcAct="false" databaseConnection="" evalOutDir="#data#" keepPrevResults="KEEPALL" listAutoExportType="FILE" nodesDelaySegmentStart="100" queueBeginSpeed="5" queueConsiderAdjacentLanes="true" queueEndSpeed="10" queueMaxClear="20" queueMaxLength="500">
 		<areaMeasRawData fromTime="0" toTime="99999" writeFile="false"/>
 		<areaMeasResults collectData="false" fromTime="0" interval="99999" toTime="99999"/>
 		<areaResults collectData="false" fromTime="0" interval="99999" toTime="99999"/>
@@ -18492,7 +18493,7 @@
 			<geometry>
 				<linkPolyPts>
 					<linkPolyPoint x="-482.21298140247393" y="283.73110011459534" zOffset="0"/>
-					<linkPolyPoint x="-493.46217117388335" y="288.50348365398111" zOffset="0"/>
+					<linkPolyPoint x="-561.50432784496206" y="322.04403496533848" zOffset="0"/>
 				</linkPolyPts>
 			</geometry>
 			<lanes>
@@ -20491,7 +20492,7 @@
 			<geometry>
 				<linkPolyPts>
 					<linkPolyPoint x="671.85179144428332" y="-247.89869050279103" zOffset="0"/>
-					<linkPolyPoint x="677.97989321277464" y="-250.75847132808698" zOffset="0"/>
+					<linkPolyPoint x="819.12175348444657" y="-310.40952764162517" zOffset="0"/>
 				</linkPolyPts>
 			</geometry>
 			<lanes>
@@ -22060,107 +22061,87 @@
 			<toLinkEndPt lane="73 1" pos="0.25183125913717047"/>
 		</link>
 		<link assumSpeedOncom="60" consVehInDynPot="false" costPerKm="0" desSpeedFact="1" direction="ALL" displayType="1" emergStopDist="5" emiCalcAct="true" gradient="0" hasOvtLn="false" isPedArea="false" linkBehavType="1" linkEvalAct="true" linkEvalSegLen="10" lnChgDist="200" lnChgDistIsPerLn="false" lnChgEvalAct="true" lookAheadDistOvt="500" mesoFollowUpGap="0" mesoSpeed="50" mesoSpeedModel="VEHICLEBASED" name="" netPerfEvalAct="true" no="10066" ovtOnlyPT="false" ovtSpeedFact="1.3" rvsPark="false" showClsfValues="true" showLinkBar="true" showVeh="true" surch1="0" surch2="0" thickness="0" vehDynPotG="3" vehRecAct="true">
-			<fromLinkEndPt lane="75 1" pos="12.043727862014709"/>
+			<fromLinkEndPt lane="75 1" pos="87.34200910058027"/>
 			<geometry>
 				<linkPolyPts>
-					<linkPolyPoint x="-492.05030212822965" y="291.38100612139613" zOffset="0"/>
-					<linkPolyPoint x="-492.69583705260595" y="291.59999916346754" zOffset="0"/>
-					<linkPolyPoint x="-493.40467814011186" y="291.74091312749329" zOffset="0"/>
-					<linkPolyPoint x="-494.16974977836412" y="291.80795265881875" zOffset="0"/>
-					<linkPolyPoint x="-494.9839763549802" y="291.80532240278967" zOffset="0"/>
-					<linkPolyPoint x="-495.84028225757697" y="291.73722700475128" zOffset="0"/>
-					<linkPolyPoint x="-496.73159187377149" y="291.60787111004885" zOffset="0"/>
-					<linkPolyPoint x="-497.65082959118104" y="291.42145936402824" zOffset="0"/>
-					<linkPolyPoint x="-498.59091979742271" y="291.18219641203467" zOffset="0"/>
-					<linkPolyPoint x="-499.54478688011346" y="290.89428689941371" zOffset="0"/>
-					<linkPolyPoint x="-500.50535522687028" y="290.56193547151071" zOffset="0"/>
-					<linkPolyPoint x="-501.46554922531027" y="290.18934677367099" zOffset="0"/>
-					<linkPolyPoint x="-502.41829326305083" y="289.7807254512403" zOffset="0"/>
-					<linkPolyPoint x="-503.35651172770861" y="289.34027614956381" zOffset="0"/>
-					<linkPolyPoint x="-504.27312900690106" y="288.87220351398724" zOffset="0"/>
-					<linkPolyPoint x="-505.16106948824523" y="288.38071218985584" zOffset="0"/>
-					<linkPolyPoint x="-506.01325755935795" y="287.87000682251522" zOffset="0"/>
-					<linkPolyPoint x="-506.8226176078565" y="287.34429205731067" zOffset="0"/>
-					<linkPolyPoint x="-507.58207402135787" y="286.80777253958775" zOffset="0"/>
-					<linkPolyPoint x="-508.28455118747928" y="286.26465291469185" zOffset="0"/>
-					<linkPolyPoint x="-508.92297349383773" y="285.7191378279685" zOffset="0"/>
-					<linkPolyPoint x="-509.49026532805033" y="285.17543192476302" zOffset="0"/>
-					<linkPolyPoint x="-509.97935107773412" y="284.63773985042104" zOffset="0"/>
-					<linkPolyPoint x="-510.38315513050622" y="284.11026625028785" zOffset="0"/>
-					<linkPolyPoint x="-510.69460187398374" y="283.59721576970895" zOffset="0"/>
-					<linkPolyPoint x="-510.90661569578378" y="283.10279305402986" zOffset="0"/>
-					<linkPolyPoint x="-511.01212098352323" y="282.63120274859591" zOffset="0"/>
-					<linkPolyPoint x="-511.00404212481953" y="282.18664949875267" zOffset="0"/>
-					<linkPolyPoint x="-510.8753035072894" y="281.77333794984554" zOffset="0"/>
-					<linkPolyPoint x="-510.61882951855029" y="281.39547274721997" zOffset="0"/>
-					<linkPolyPoint x="-510.22754454621889" y="281.05725853622141" zOffset="0"/>
-					<linkPolyPoint x="-509.69437297791262" y="280.76289996219532" zOffset="0"/>
+					<linkPolyPoint x="-559.46324245952667" y="324.61222388221029" zOffset="0"/>
+					<linkPolyPoint x="-561.76262494207515" y="325.63500570258913" zOffset="0"/>
+					<linkPolyPoint x="-563.15612490547051" y="326.05544431538732" zOffset="0"/>
+					<linkPolyPoint x="-563.71108680340842" y="325.9239212012871" zOffset="0"/>
+					<linkPolyPoint x="-563.49485508958503" y="325.29081784097025" zOffset="0"/>
+					<linkPolyPoint x="-562.57477421769693" y="324.20651571511922" zOffset="0"/>
+					<linkPolyPoint x="-561.01818864144013" y="322.7213963044162" zOffset="0"/>
+					<linkPolyPoint x="-558.89244281451067" y="320.88584108954331" zOffset="0"/>
+					<linkPolyPoint x="-556.26488119060468" y="318.75023155118248" zOffset="0"/>
+					<linkPolyPoint x="-553.20284822341841" y="316.36494917001608" zOffset="0"/>
+					<linkPolyPoint x="-549.773688366648" y="313.78037542672627" zOffset="0"/>
+					<linkPolyPoint x="-546.0447460739897" y="311.04689180199506" zOffset="0"/>
+					<linkPolyPoint x="-542.08336579913953" y="308.21487977650474" zOffset="0"/>
+					<linkPolyPoint x="-537.9568919957934" y="305.33472083093733" zOffset="0"/>
+					<linkPolyPoint x="-533.7326691176479" y="302.4567964459751" zOffset="0"/>
+					<linkPolyPoint x="-529.47804161839895" y="299.63148810230018" zOffset="0"/>
+					<linkPolyPoint x="-525.26035395174279" y="296.90917728059463" zOffset="0"/>
+					<linkPolyPoint x="-521.14695057137556" y="294.34024546154069" zOffset="0"/>
+					<linkPolyPoint x="-517.20517593099362" y="291.97507412582053" zOffset="0"/>
+					<linkPolyPoint x="-513.50237448429266" y="289.86404475411621" zOffset="0"/>
+					<linkPolyPoint x="-510.10589068496915" y="288.05753882710997" zOffset="0"/>
+					<linkPolyPoint x="-507.08306898671918" y="286.60593782548386" zOffset="0"/>
 				</linkPolyPts>
 			</geometry>
 			<lanes>
 				<lane/>
 			</lanes>
-			<toLinkEndPt lane="33 1" pos="0.47579567164232822"/>
+			<toLinkEndPt lane="33 3" pos="0.47579567164232822"/>
 		</link>
 		<link assumSpeedOncom="60" consVehInDynPot="false" costPerKm="0" desSpeedFact="1" direction="ALL" displayType="1" emergStopDist="5" emiCalcAct="true" gradient="0" hasOvtLn="false" isPedArea="false" linkBehavType="1" linkEvalAct="true" linkEvalSegLen="10" lnChgDist="200" lnChgDistIsPerLn="false" lnChgEvalAct="true" lookAheadDistOvt="500" mesoFollowUpGap="0" mesoSpeed="50" mesoSpeedModel="VEHICLEBASED" name="" netPerfEvalAct="true" no="10067" ovtOnlyPT="false" ovtSpeedFact="1.3" rvsPark="false" showClsfValues="true" showLinkBar="true" showVeh="true" surch1="0" surch2="0" thickness="0" vehDynPotG="3" vehRecAct="true">
-			<fromLinkEndPt lane="148 1" pos="6.6109362520375905"/>
+			<fromLinkEndPt lane="148 1" pos="158.83394952209278"/>
 			<geometry>
 				<linkPolyPts>
-					<linkPolyPoint x="676.48910777221761" y="-253.59450787724919" zOffset="0"/>
-					<linkPolyPoint x="676.75513492756033" y="-253.69588313777373" zOffset="0"/>
-					<linkPolyPoint x="677.03104899294567" y="-253.75784329000317" zOffset="0"/>
-					<linkPolyPoint x="677.3156867677003" y="-253.78211424338986" zOffset="0"/>
-					<linkPolyPoint x="677.60788505115045" y="-253.77042190738598" zOffset="0"/>
-					<linkPolyPoint x="677.90648064262257" y="-253.72449219144406" zOffset="0"/>
-					<linkPolyPoint x="678.21031034144278" y="-253.64605100501635" zOffset="0"/>
-					<linkPolyPoint x="678.51821094693821" y="-253.53682425755531" zOffset="0"/>
-					<linkPolyPoint x="678.82901925843453" y="-253.39853785851327" zOffset="0"/>
-					<linkPolyPoint x="679.14157207525841" y="-253.2329177173425" zOffset="0"/>
-					<linkPolyPoint x="679.45470619673631" y="-253.0416897434954" zOffset="0"/>
-					<linkPolyPoint x="679.76725842219469" y="-252.82657984642435" zOffset="0"/>
-					<linkPolyPoint x="680.07806555095965" y="-252.58931393558177" zOffset="0"/>
-					<linkPolyPoint x="680.38596438235811" y="-252.33161792041992" zOffset="0"/>
-					<linkPolyPoint x="680.68979171571607" y="-252.05521771039113" zOffset="0"/>
-					<linkPolyPoint x="680.98838435036032" y="-251.76183921494791" zOffset="0"/>
-					<linkPolyPoint x="681.28057908561664" y="-251.45320834354251" zOffset="0"/>
-					<linkPolyPoint x="681.56521272081216" y="-251.13105100562728" zOffset="0"/>
-					<linkPolyPoint x="681.84112205527276" y="-250.7970931106546" zOffset="0"/>
-					<linkPolyPoint x="682.10714388832491" y="-250.45306056807675" zOffset="0"/>
-					<linkPolyPoint x="682.36211501929506" y="-250.10067928734617" zOffset="0"/>
-					<linkPolyPoint x="682.60487224750989" y="-249.74167517791523" zOffset="0"/>
-					<linkPolyPoint x="682.83425237229574" y="-249.37777414923633" zOffset="0"/>
-					<linkPolyPoint x="683.04909219297861" y="-249.01070211076166" zOffset="0"/>
-					<linkPolyPoint x="683.24822850888518" y="-248.64218497194372" zOffset="0"/>
-					<linkPolyPoint x="683.43049811934225" y="-248.27394864223481" zOffset="0"/>
-					<linkPolyPoint x="683.59473782367536" y="-247.90771903108728" zOffset="0"/>
-					<linkPolyPoint x="683.73978442121177" y="-247.54522204795353" zOffset="0"/>
-					<linkPolyPoint x="683.86447471127735" y="-247.1881836022859" zOffset="0"/>
-					<linkPolyPoint x="683.96764549319869" y="-246.83832960353672" zOffset="0"/>
-					<linkPolyPoint x="684.04813356630211" y="-246.49738596115836" zOffset="0"/>
-					<linkPolyPoint x="684.10477572991431" y="-246.16707858460319" zOffset="0"/>
-					<linkPolyPoint x="684.13640878336116" y="-245.84913338332353" zOffset="0"/>
-					<linkPolyPoint x="684.14186952596958" y="-245.54527626677185" zOffset="0"/>
-					<linkPolyPoint x="684.11999475706591" y="-245.25723314440037" zOffset="0"/>
-					<linkPolyPoint x="684.06962127597626" y="-244.98672992566151" zOffset="0"/>
-					<linkPolyPoint x="683.98958588202731" y="-244.7354925200076" zOffset="0"/>
-					<linkPolyPoint x="683.8787253745453" y="-244.50524683689099" zOffset="0"/>
-					<linkPolyPoint x="683.73587655285678" y="-244.29771878576412" zOffset="0"/>
-					<linkPolyPoint x="683.55987621628799" y="-244.11463427607927" zOffset="0"/>
-					<linkPolyPoint x="683.34956116416549" y="-243.9577192172888" zOffset="0"/>
-					<linkPolyPoint x="683.10376819581563" y="-243.8286995188451" zOffset="0"/>
+					<linkPolyPoint x="816.80929780012082" y="-312.90474739016156" zOffset="0"/>
+					<linkPolyPoint x="820.75146340163928" y="-314.52048291016814" zOffset="0"/>
+					<linkPolyPoint x="823.636623374176" y="-315.57741338901064" zOffset="0"/>
+					<linkPolyPoint x="825.51773821065638" y="-316.10552157779784" zOffset="0"/>
+					<linkPolyPoint x="826.44776840400675" y="-316.13479022763875" zOffset="0"/>
+					<linkPolyPoint x="826.47967444715255" y="-315.69520208964201" zOffset="0"/>
+					<linkPolyPoint x="825.66641683301884" y="-314.81673991491641" zOffset="0"/>
+					<linkPolyPoint x="824.06095605453197" y="-313.52938645457095" zOffset="0"/>
+					<linkPolyPoint x="821.71625260461735" y="-311.86312445971441" zOffset="0"/>
+					<linkPolyPoint x="818.68526697620086" y="-309.84793668145556" zOffset="0"/>
+					<linkPolyPoint x="815.02095966220782" y="-307.51380587090324" zOffset="0"/>
+					<linkPolyPoint x="810.77629115556374" y="-304.8907147791661" zOffset="0"/>
+					<linkPolyPoint x="806.00422194919452" y="-302.00864615735333" zOffset="0"/>
+					<linkPolyPoint x="800.75771253602591" y="-298.8975827565734" zOffset="0"/>
+					<linkPolyPoint x="795.08972340898367" y="-295.58750732793538" zOffset="0"/>
+					<linkPolyPoint x="789.05321506099313" y="-292.10840262254806" zOffset="0"/>
+					<linkPolyPoint x="782.70114798498025" y="-288.49025139152013" zOffset="0"/>
+					<linkPolyPoint x="776.08648267387036" y="-284.7630363859605" zOffset="0"/>
+					<linkPolyPoint x="769.26217962058911" y="-280.95674035697795" zOffset="0"/>
+					<linkPolyPoint x="762.28119931806236" y="-277.10134605568135" zOffset="0"/>
+					<linkPolyPoint x="755.196502259216" y="-273.22683623317954" zOffset="0"/>
+					<linkPolyPoint x="748.06104893697511" y="-269.3631936405813" zOffset="0"/>
+					<linkPolyPoint x="740.92779984426579" y="-265.54040102899546" zOffset="0"/>
+					<linkPolyPoint x="733.84971547401346" y="-261.7884411495308" zOffset="0"/>
+					<linkPolyPoint x="726.87975631914378" y="-258.13729675329625" zOffset="0"/>
+					<linkPolyPoint x="720.07088287258262" y="-254.61695059140055" zOffset="0"/>
+					<linkPolyPoint x="713.47605562725539" y="-251.25738541495252" zOffset="0"/>
+					<linkPolyPoint x="707.14823507608776" y="-248.08858397506103" zOffset="0"/>
+					<linkPolyPoint x="701.14038171200559" y="-245.14052902283487" zOffset="0"/>
+					<linkPolyPoint x="695.50545602793431" y="-242.44320330938291" zOffset="0"/>
+					<linkPolyPoint x="690.29641851679969" y="-240.02658958581389" zOffset="0"/>
+					<linkPolyPoint x="685.56622967152737" y="-237.92067060323672" zOffset="0"/>
 				</linkPolyPts>
 			</geometry>
 			<lanes>
 				<lane/>
 			</lanes>
-			<toLinkEndPt lane="1 3" pos="0.20440361388885947"/>
+			<toLinkEndPt lane="1 1" pos="0.29671914792591592"/>
 		</link>
 		<link assumSpeedOncom="60" consVehInDynPot="false" costPerKm="0" desSpeedFact="1" direction="ALL" displayType="1" emergStopDist="5" emiCalcAct="true" gradient="0" hasOvtLn="false" isPedArea="false" linkBehavType="1" linkEvalAct="true" linkEvalSegLen="10" lnChgDist="200" lnChgDistIsPerLn="false" lnChgEvalAct="true" lookAheadDistOvt="500" mesoFollowUpGap="0" mesoSpeed="50" mesoSpeedModel="VEHICLEBASED" name="" netPerfEvalAct="true" no="10068" ovtOnlyPT="false" ovtSpeedFact="1.3" rvsPark="false" showClsfValues="true" showLinkBar="true" showVeh="true" surch1="0" surch2="0" thickness="0" vehDynPotG="3" vehRecAct="true">
 			<fromLinkEndPt lane="16 1" pos="59.886208168118181"/>
 			<geometry>
 				<linkPolyPts>
 					<linkPolyPoint x="-481.88402471858404" y="281.77056172617279" zOffset="0"/>
-					<linkPolyPoint x="-482.83878104739449" y="282.25834226601853" zOffset="0"/>
+					<linkPolyPoint x="-482.90999640164586" y="282.29067970129347" zOffset="0"/>
 				</linkPolyPts>
 			</geometry>
 			<lanes>
@@ -22280,7 +22261,7 @@
 			<geometry>
 				<linkPolyPts>
 					<linkPolyPoint x="671.85477633975472" y="-246.13309089538379" zOffset="0"/>
-					<linkPolyPoint x="672.52932137976939" y="-246.44900292864011" zOffset="0"/>
+					<linkPolyPoint x="672.4778679477954" y="-246.42605032682224" zOffset="0"/>
 				</linkPolyPts>
 			</geometry>
 			<lanes>
@@ -25426,7 +25407,7 @@
 		<signalHead allPedTypes="true" allVehTypes="true" anmFlag="false" complRate="1" dischRecAct="false" isBlockSig="false" lane="10055 2" localNo="0" name="" no="119" orSG="19 2" pos="0.40665292104188933" sg="19 2" slowDownDist="3" type="CIRCULAR" vAmberBlock="0"/>
 		<signalHead allPedTypes="true" allVehTypes="true" anmFlag="false" complRate="1" dischRecAct="false" isBlockSig="false" lane="10055 1" localNo="0" name="" no="120" orSG="19 2" pos="0.36699645065149211" sg="19 2" slowDownDist="3" type="CIRCULAR" vAmberBlock="0"/>
 	</signalHeads>
-	<simulation comment="" numCores="1" numRuns="1" randSeed="21" randSeedIncr="5" retroSync="false" simMode="MICRO" simPeriod="3600" simRes="10" simSpeed="10" startTm="0" useAllCores="false" useMaxSimSpeed="true" volumeIncrDynAssign="0"/>
+	<simulation comment="" numCores="1" numRuns="1" randSeed="42" randSeedIncr="5" retroSync="false" simMode="MICRO" simPeriod="3600" simRes="10" simSpeed="10" startTm="0" useAllCores="false" useMaxSimSpeed="true" volumeIncrDynAssign="0"/>
 	<stopSigns>
 		<stopSign anmFlag="false" lane="115 1" name="" no="8" pos="3.0909553054258669" sg="22 4"/>
 		<stopSign anmFlag="false" lane="127 1" name="" no="11" pos="3.2393807753018411"/>
@@ -25564,7 +25545,8 @@
 	<vehicleCompositions>
 		<vehicleComposition name="" no="1">
 			<vehCompRelFlows>
-				<vehicleCompositionRelativeFlow desSpeedDistr="1047" relFlow="1" vehType="100"/>
+				<vehicleCompositionRelativeFlow desSpeedDistr="1047" relFlow="0.999" vehType="100"/>
+				<vehicleCompositionRelativeFlow desSpeedDistr="1047" relFlow="0.001" vehType="10001"/>
 			</vehCompRelFlows>
 		</vehicleComposition>
 	</vehicleCompositions>
@@ -26739,7 +26721,7 @@
 				<parkingLotSelectionParameters attrac="0" avail="0" decSituation="ROUTEGUIDANCETACTIC2" distFromDestM="0" genCost="0" parkFee="0"/>
 			</parkLotSelPars>
 		</vehicleType>
-		<vehicleType alightTm="0" anmFlag="false" boardTm="0" capExact="false" capacity="9999" category="CAR" clearTmPT="0" colorDistr1="205" desAccelFunc="1" desDecelFunc="1" distCoeffPerMeter="0" doorClosDur="2" dwellTmIsAdd="true" equip="" extDriver="true" extDriverDLLFile="C:\Users\hg25079\Documents\GitHub\FIXS\VISSIMserver\x64\Release\DriverModel_RealSim_v2021.dll" extDriverParFile="C:\Users\hg25079\Documents\GitHub\FIXS\tests\Applications\Eco_Fixed_Timming\ecodrivingConfig_VISSIM.yaml" extEmissionDLLFile="" linkCostCoeff="1" maxAccelFunc="1" maxDecelFunc="1" model2D3DDistr="10" name="EcoCAV" no="10002" occupDistr="1" travTmCoeff="1">
+		<vehicleType alightTm="0" anmFlag="false" boardTm="0" capExact="false" capacity="9999" category="CAR" clearTmPT="0" colorDistr1="205" desAccelFunc="1" desDecelFunc="1" distCoeffPerMeter="0" doorClosDur="2" dwellTmIsAdd="true" equip="" extDriver="true" extDriverDLLFile="C:\CM_Projects\UGA_cave\FIXS\tests\Applications\Eco_Fixed_Timming\DriverModel_RealSim.dll" extDriverParFile="C:\CM_Projects\UGA_cave\FIXS\tests\Applications\Eco_Fixed_Timming\ecodrivingConfig_VISSIM_dynamics.yaml" extEmissionDLLFile="" linkCostCoeff="1" maxAccelFunc="1" maxDecelFunc="1" model2D3DDistr="10" name="EcoCAV" no="10002" occupDistr="1" travTmCoeff="1">
 			<parkLotSelPars>
 				<parkingLotSelectionParameters attrac="0" avail="0" decSituation="DEPARTUREFROMPARKINGLOT" distFromDestM="0" genCost="0" parkFee="0"/>
 				<parkingLotSelectionParameters attrac="0" avail="0" decSituation="DYNAMICROUTINGDECISION" distFromDestM="0" genCost="0" parkFee="0"/>
