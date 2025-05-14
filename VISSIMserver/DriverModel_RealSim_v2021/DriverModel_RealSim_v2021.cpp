@@ -28,6 +28,9 @@ using namespace std;
 // Master Switches
 bool ENABLE_REALSIM = false;
 
+// flag to send only ego vehicle info if just one vehicle is subscribed
+bool SUB_EGO_ONLY = false;
+ 
 // if no signal control but vehicle control depends on signal information
 bool NEED_SIGNAL = false;
 
@@ -80,7 +83,7 @@ unordered_map <int, SignalHead_t > SignalHeadInfo_um; // signal head index => si
 unordered_map <int, TrafficLightData_t> SignalData; // signal controller index => trafficlightdata
 
 
-double simTime;
+double simTime_g;
 long nVeh_g = 0;
 long iVeh_g = 0;
 
@@ -138,7 +141,7 @@ int receiveMessage() {
 		if (ENABLE_LOG) {
 			FILE* f = fopen("DriverModelLog.txt", "a");
 			fprintf(f, "\n=============NEW TIME STEP===============\n");
-			fprintf(f, "simTime %f\n", simTime);
+			fprintf(f, "simTime %f\n", simTime_g);
 			fclose(f);
 		}
 
@@ -202,7 +205,7 @@ int receiveMessage() {
 int sendMessage() {
 	try {
 		// send out to Traffic Layer
-		float simTimeSend = simTime;
+		float simTimeSend = simTime_g;
 		uint8_t simStateSend = 1;
 
 		if (VehDataSend_v.size() == 0) {
@@ -488,7 +491,7 @@ DRIVERMODEL_API  int  DriverModelSetValue(int   type,
 		if (type == DRIVER_DATA_TIME) {
 			// if time step changes, then need to check nVeh_g. if nVeh_g == 0, send empty message to Traffic Layer, otherwise, do nothing
 			// need to skip 0.1 second to accomodate for signal controller
-			if (NEW_TIMESTEP) {
+			if (NEW_TIMESTEP & !SUB_EGO_ONLY) {
 				if (nVeh_g < 1) {
 					if (ENABLE_REALSIM) {
 						if (isVeryFirstStep) {
@@ -500,7 +503,7 @@ DRIVERMODEL_API  int  DriverModelSetValue(int   type,
 						else {
 							// send out to Traffic Layer
 							// use previous time
-							float simTimeSend = simTime;
+							float simTimeSend = simTime_g;
 							uint8_t simStateSend = 1;
 							if (Sock_c.sendData(VissimSock, 0, simTimeSend, simStateSend, Msg_c) < 0) {
 								FILE* f = fopen("DriverModelError.txt", "a");
@@ -556,13 +559,14 @@ DRIVERMODEL_API  int  DriverModelSetValue(int   type,
 					int receiveStatus = receiveMessage();
 				}
 			}
-			if (double_value > simTime + 1e-5 && double_value > 0.1 - 1e-5) {
+			// check if new timestep
+			if (double_value > simTime_g + 1e-5 && double_value > 0.1 - 1e-5) {
 				NEW_TIMESTEP = true;
 			}
 			else {
 				NEW_TIMESTEP = false;
 			}
-			simTime = double_value;
+			simTime_g = double_value;
 		}
 		return 1;
 	case DRIVER_DATA_PARAMETERFILE:
@@ -822,7 +826,7 @@ DRIVERMODEL_API  int  DriverModelSetValue(int   type,
 				if (sigController > 0) {
 					fstream fLog;
 					fLog.open("DriverModelLog.txt", fstream::in | fstream::out | fstream::app);
-					fLog << simTime << " seconds, signal group index out of range, signal controller " << sigController << ", signal head " << sigHead << endl;
+					fLog << simTime_g << " seconds, signal group index out of range, signal controller " << sigController << ", signal head " << sigHead << endl;
 					fLog.close();
 
 					int msgboxID = MessageBox(
@@ -1497,15 +1501,15 @@ DRIVERMODEL_API  int  DriverModelExecuteCommand(int number)
 		return 1;
 	case DRIVER_COMMAND_MOVE_DRIVER:
 
-		// ===========================================================================
-		// 			RECV DATA FROM TRAFFIC LAYER <<<<<<<<<=======
-		// ===========================================================================
-		// only receive once when its the FIRST vehicle
-		if (iVeh_g == 0 && nVeh_g >= 1) {
-			if (ENABLE_REALSIM) {
-				//int receiveStatus = receiveMessage();
-			}
-		}
+		//// ===========================================================================
+		//// 			RECV DATA FROM TRAFFIC LAYER <<<<<<<<<=======
+		//// ===========================================================================
+		//// only receive once when its the FIRST vehicle
+		//if (iVeh_g == 0 && nVeh_g >= 1) {
+		//	if (ENABLE_REALSIM) {
+		//		//int receiveStatus = receiveMessage();
+		//	}
+		//}
 
 		// ===========================================================================
 		// 			Update Vehicle Data to Send
@@ -1535,7 +1539,7 @@ DRIVERMODEL_API  int  DriverModelExecuteCommand(int number)
 				if (NEED_SPEED_LIMIT) {
 					try {
 
-						Net_c.getSpeedLimit(simTime, VehicleDataAuxiliary, VissimVehDataCommon);
+						Net_c.getSpeedLimit(simTime_g, VehicleDataAuxiliary, VissimVehDataCommon);
 
 					}
 					catch (const std::exception& e) {
@@ -1613,7 +1617,7 @@ DRIVERMODEL_API  int  DriverModelExecuteCommand(int number)
 
 				if (ENABLE_LOG) {
 					FILE* f = fopen("DriverModelLog.txt", "a");
-					fprintf(f, "send lane change time %f activeLaneChange %d, laneChangeStatus %d\n", simTime, VissimVehDataCommon.activeLaneChange, laneChangeStatus);
+					fprintf(f, "send lane change time %f activeLaneChange %d, laneChangeStatus %d\n", simTime_g, VissimVehDataCommon.activeLaneChange, laneChangeStatus);
 					fclose(f);
 				}
 
@@ -1637,6 +1641,14 @@ DRIVERMODEL_API  int  DriverModelExecuteCommand(int number)
 					VissimVehDataCommon.activeLaneChange = 0;
 				}
 
+				// ===========================================================================
+				// 			Send out for ego vehicle only if this flag is toggled
+				// ===========================================================================
+				if (SUB_EGO_ONLY){
+					// sendData will use VehDataSend_v to update Msg_c send buffer and then send
+					int sendStatus = sendMessage();
+					int receiveStatus = receiveMessage();
+				}
 			}
 		}
 		catch (const std::exception& e) {
@@ -1760,7 +1772,7 @@ DRIVERMODEL_API  int  DriverModelExecuteCommand(int number)
 					// activeLaneChange command has to be -1, 1, 0, otherwise record error message
 					else if (activeLaneChange > 1 || activeLaneChange < -1) {
 						FILE* f = fopen("DriverModelError.txt", "a");
-						fprintf(f, "ERROR: simTime %f, incorrect activeLaneChange %d (has to be one of -1,1,0), use VISSIM default value\n", simTime, activeLaneChange);
+						fprintf(f, "ERROR: simTime %f, incorrect activeLaneChange %d (has to be one of -1,1,0), use VISSIM default value\n", simTime_g, activeLaneChange);
 						fclose(f);
 						activeLaneChange = min(max(vehPreferredRelLane, -1), 1);;
 					}
@@ -1773,7 +1785,7 @@ DRIVERMODEL_API  int  DriverModelExecuteCommand(int number)
 					// rightmost == 1, activeLaneChange +1 = to left
 					else if ((VissimVehDataCommon.laneId == numOfLanes && activeLaneChange > 0) || (VissimVehDataCommon.laneId == 1 && activeLaneChange < 0)) {
 						FILE* f = fopen("DriverModelError.txt", "a");
-						fprintf(f, "ERROR: simTime %f, incorrect activeLaneChange %d, already at rightmost or leftmost lanes, use VISSIM default value\n", simTime, activeLaneChange);
+						fprintf(f, "ERROR: simTime %f, incorrect activeLaneChange %d, already at rightmost or leftmost lanes, use VISSIM default value\n", simTime_g, activeLaneChange);
 						fclose(f);
 						activeLaneChange = 0;
 					}
@@ -1787,7 +1799,7 @@ DRIVERMODEL_API  int  DriverModelExecuteCommand(int number)
 
 					if (ENABLE_LOG) {
 						FILE* f = fopen("DriverModelLog.txt", "a");
-						fprintf(f, "enters lane change loop at time %f activeLaneChange %d, vehPreferredRelLane %d\n", simTime, VissimVehDataCommon.activeLaneChange, vehPreferredRelLane);
+						fprintf(f, "enters lane change loop at time %f activeLaneChange %d, vehPreferredRelLane %d\n", simTime_g, VissimVehDataCommon.activeLaneChange, vehPreferredRelLane);
 						fclose(f);
 					}
 
