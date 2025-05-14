@@ -5,7 +5,7 @@ function startVissim(netName, stopTime, configFilename)
 
 %% Connecting the COM Server => Open a new Vissim Window:
 % vis = actxserver('Vissim.Vissim');
-Vissim=actxserver('VISSIM.Vissim.2100');
+Vissim=actxserver('VISSIM.Vissim.2200');
 % access_path=pwd;
 % vis.LoadNet([access_path '\TrafficModel\Headquarters 11.inpx']);
 % vis.LoadLayout([access_path '\TrafficModel\Headquarters 10.layx']);
