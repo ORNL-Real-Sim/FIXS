@@ -26,11 +26,14 @@ using namespace std;
 
 
 // Master Switches
-bool ENABLE_REALSIM = false;
+bool ENABLE_REALSIM = true;
 
 // flag to send only ego vehicle info if just one vehicle is subscribed
-bool SUB_EGO_ONLY = false;
- 
+bool SUB_EGO_ONLY = true;
+
+bool ENABLE_WARMUP = true; // if enabled, will have warm up period where not transmitting FIXS messages. !! need to use Config_c.SimulationSetup.SimulationMode to toggler this flag later
+bool isInitialTimeFinished = false; // FIXS message transmitting will only be enabled if this flag is set
+
 // if no signal control but vehicle control depends on signal information
 bool NEED_SIGNAL = false;
 
@@ -491,8 +494,14 @@ DRIVERMODEL_API  int  DriverModelSetValue(int   type,
 		if (type == DRIVER_DATA_TIME) {
 			// if time step changes, then need to check nVeh_g. if nVeh_g == 0, send empty message to Traffic Layer, otherwise, do nothing
 			// need to skip 0.1 second to accomodate for signal controller
-			if (NEW_TIMESTEP & !SUB_EGO_ONLY) {
-				if (nVeh_g < 1) {
+			if (NEW_TIMESTEP) {
+				bool skipMessage = false;
+				if (SUB_EGO_ONLY) {
+					if (ENABLE_WARMUP && VehDataSend_v.size() == 0) {
+						skipMessage = true;
+					}
+				}
+				if (nVeh_g < 1) { // this is at the very beginning where no cars in the network
 					if (ENABLE_REALSIM) {
 						if (isVeryFirstStep) {
 							isVeryFirstStep = false;
@@ -501,52 +510,54 @@ DRIVERMODEL_API  int  DriverModelSetValue(int   type,
 							//fclose(f);
 						}
 						else {
-							// send out to Traffic Layer
-							// use previous time
-							float simTimeSend = simTime_g;
-							uint8_t simStateSend = 1;
-							if (Sock_c.sendData(VissimSock, 0, simTimeSend, simStateSend, Msg_c) < 0) {
-								FILE* f = fopen("DriverModelError.txt", "a");
-								fprintf(f, "ERROR: send to client fails\n");
-								fclose(f);
-								//exit(-1);
-								RealSimShutdown();
-								return 1; // return 1 to suppress error messages from VISSIM
-							}
-							else {
-								if (ENABLE_LOG) {
-									FILE* f = fopen("DriverModelLog.txt", "a");
-									fprintf(f, "send, no vehicle yet\n");
-									fclose(f);
-								}
-							};
-
-							Msg_c.clearSendStorage();
-
-							// recv from Traffic Layer
-							Msg_c.clearRecvStorage();
-
-							int simStateRecv;
-							float simTimeRecv;
-							if (Sock_c.recvData(VissimSock, &simStateRecv, &simTimeRecv, Msg_c) < 0) {
-								// only write this error once
-								if (!hasWriteRecvError) {
+							if (!skipMessage) {
+								// send out to Traffic Layer
+								// use previous time
+								float simTimeSend = simTime_g;
+								uint8_t simStateSend = 1;
+								if (Sock_c.sendData(VissimSock, 0, simTimeSend, simStateSend, Msg_c) < 0) {
 									FILE* f = fopen("DriverModelError.txt", "a");
-									fprintf(f, "ERROR: receive from client fails\n");
+									fprintf(f, "ERROR: send to client fails\n");
 									fclose(f);
+									//exit(-1);
+									RealSimShutdown();
+									return 1; // return 1 to suppress error messages from VISSIM
+								}
+								else {
+									if (ENABLE_LOG) {
+										FILE* f = fopen("DriverModelLog.txt", "a");
+										fprintf(f, "send, no vehicle yet\n");
+										fclose(f);
+									}
+								};
 
-									hasWriteRecvError = true;
+								Msg_c.clearSendStorage();
+
+								// recv from Traffic Layer
+								Msg_c.clearRecvStorage();
+
+								int simStateRecv;
+								float simTimeRecv;
+								if (Sock_c.recvData(VissimSock, &simStateRecv, &simTimeRecv, Msg_c) < 0) {
+									// only write this error once
+									if (!hasWriteRecvError) {
+										FILE* f = fopen("DriverModelError.txt", "a");
+										fprintf(f, "ERROR: receive from client fails\n");
+										fclose(f);
+
+										hasWriteRecvError = true;
+									}
+									RealSimShutdown();
+									return 1; // return 1 to suppress error messages from VISSIM
 								}
-								RealSimShutdown();
-								return 1; // return 1 to suppress error messages from VISSIM
+								else {
+									if (ENABLE_LOG) {
+										FILE* f = fopen("DriverModelLog.txt", "a");
+										fprintf(f, "receive, no vehicle yet\n");
+										fclose(f);
+									}
+								};
 							}
-							else {
-								if (ENABLE_LOG) {
-									FILE* f = fopen("DriverModelLog.txt", "a");
-									fprintf(f, "receive, no vehicle yet\n");
-									fclose(f);
-								}
-							};
 
 						}
 
@@ -555,8 +566,10 @@ DRIVERMODEL_API  int  DriverModelSetValue(int   type,
 					}
 				}
 				else {
-					int sendStatus = sendMessage();
-					int receiveStatus = receiveMessage();
+					if (!SUB_EGO_ONLY) {
+						int sendStatus = sendMessage();
+						int receiveStatus = receiveMessage();
+					}
 				}
 			}
 			// check if new timestep
@@ -1020,8 +1033,8 @@ DRIVERMODEL_API  int  DriverModelGetValue(int   type,
 		*int_value = turning_indicator;
 		return 1;
 	case DRIVER_DATA_VEH_DESIRED_VELOCITY:
-		//*double_value = VissimVehDataCommon.speedDesired;
-		*double_value = desired_velocity;
+		*double_value = VissimVehDataCommon.speedDesired;
+		//*double_value = desired_velocity;
 		return 1;
 	case DRIVER_DATA_VEH_COLOR:
 		*int_value = VissimVehDataCommon.color;
@@ -1032,8 +1045,8 @@ DRIVERMODEL_API  int  DriverModelGetValue(int   type,
 		*int_value = 1;
 		return 1;
 	case DRIVER_DATA_DESIRED_ACCELERATION:
-		//*double_value = VissimVehDataCommon.accelerationDesired;
-		*double_value = desired_acceleration;
+		*double_value = VissimVehDataCommon.accelerationDesired;
+		//*double_value = desired_acceleration;
 		return 1;
 	case DRIVER_DATA_DESIRED_LANE_ANGLE:
 		*double_value = desired_lane_angle;
@@ -1645,9 +1658,11 @@ DRIVERMODEL_API  int  DriverModelExecuteCommand(int number)
 				// 			Send out for ego vehicle only if this flag is toggled
 				// ===========================================================================
 				if (SUB_EGO_ONLY){
-					// sendData will use VehDataSend_v to update Msg_c send buffer and then send
-					int sendStatus = sendMessage();
-					int receiveStatus = receiveMessage();
+					if (ENABLE_WARMUP && VehDataSend_v.size() > 0) {
+						// sendData will use VehDataSend_v to update Msg_c send buffer and then send
+						int sendStatus = sendMessage();
+						int receiveStatus = receiveMessage();
+					}
 				}
 			}
 		}
