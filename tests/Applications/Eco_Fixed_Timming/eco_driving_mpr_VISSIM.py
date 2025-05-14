@@ -367,7 +367,7 @@ class VissimEnvMultiAgent:
         assert self.scloc is not None, "scloc is not loaded"
 
         ## load and parse VISSIM signal changes (LSA file)
-        flsa = self.simulation_file_path + '/{}_{}.lsa'.format(lsa_file_name, '001')
+        flsa = self.simulation_file_path + '/{}_{}.lsa'.format(lsa_file_name, 'vanilla')
         lsa_start = get_start_index(flsa, ';', 1)
         lsa = pd.read_csv(flsa, skiprows=lsa_start, header=None, usecols=range(0, 5), sep=';')
         lsa.columns = ["SimSec", "CycleTime", "SC", "SG", "SigState"]  # ,"RuntimeState","SC_type","SG_caused"]
