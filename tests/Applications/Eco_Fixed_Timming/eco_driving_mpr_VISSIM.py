@@ -215,69 +215,13 @@ class VissimEnvMultiAgent:
         :return:
         """
         
-        
-        # create an empty cav_all to store all the CAV information
-        # CAV_all = pd.DataFrame(columns=['No', 'VehType', 'Speed', 'Pos', 'Lane', 'DesSpeed', 'RouteNo', 'OrgDesSpeed'])
-        
-        self.vissim.Simulation.RunSingleStep()
-        self.vissim.Simulation.RunSingleStep()
-        simsec = self.vissim.Simulation.SimulationSecond
-        is_very_first_step = True
-        # Run first 300 seconds as warm up
-        while simsec < 0.5:
-            simsec = self.vissim.Simulation.SimulationSecond
+        self.vissim.Simulation.SetAttValue('SimBreakAt', 0.5)
+        self.vissim.Simulation.RunContinuous()
 
-            if is_very_first_step:
-                is_very_first_step = False
-                sim_state = 1
-                self.socket_helper.vehicle_data_send_list.append(VehData())
-
-                
-            # send the previous state to the FIXS server
-            if ENABLE_SOCKET:
-                self.socket_helper.sendData(sim_state, simsec, self.socket2FIXS)
-                self.socket_helper.clear_data()
-            self.vissim.Simulation.RunSingleStep()
-
-            # Should apply the FIXS control to the ego vehicle at this step
-            if ENABLE_SOCKET:
-                sim_state, sim_time = self.socket_helper.recv_data(self.socket2FIXS)
-
-
-        if ENABLE_SOCKET:
-            self.socket_helper.sendData(sim_state, simsec, self.socket2FIXS)
         if self.with_ego_veh:
             self.add_ego_veh()
 
         print('warmup finished')
-        # while simsec < self.end_of_simulation:
-        #     simsec = self.vissim.Simulation.SimulationSecond
-        #     self.socket_helper.sendData(sim_state, simsec, self.socket2FIXS)
-        #     self.socket_helper.clear_data()
-        #     self.vissim.Simulation.RunSingleStep()
-        #     # the vehicle control is applied here:
-            
-
-        #     # Should apply the FIXS control to the ego vehicle at this step
-        #     sim_state, sim_time = self.socket_helper.recv_data(self.socket2FIXS)
-        #     ori_speed_dic = {veh_data.id:veh_data.speed for veh_data in self.socket_helper.vehicle_data_receive_list}
-        #     eco_speed_dic_dummy = {veh_id:ori_speed_dic[veh_id] * 0.9 for veh_id in ori_speed_dic.keys()}
-        #     for veh_id in ori_speed_dic.keys():
-        #         veh_data = VehData(id=veh_id, speedDesired=eco_speed_dic_dummy[veh_id])
-        #         print('eco speed: ', eco_speed_dic_dummy[veh_id])
-        #         self.socket_helper.vehicle_data_send_list.append(veh_data)
-            
-        #     self.socket_helper.sendData(sim_state, sim_time, self.socket2simulink)
-        #     # receive data from the client (the actual vehicle data after the vehidle dynamics model)
-        #     self.socket_helper.recv_data(self.socket2simulink)
-        #     simulink_speed_dic = {veh_data.id:veh_data.speedDesired for veh_data in self.socket_helper.vehicle_data_receive_list}
-        #     for veh_id in ori_speed_dic.keys():
-        #         if veh_id not in simulink_speed_dic.keys():
-        #             continue
-                
-        #         speed_desired_simulink = simulink_speed_dic[veh_id]
-        #         self.socket_helper.vehicle_data_send_list[veh_id].speedDesired = speed_desired_simulink
-        #         print('simulink speed: ', speed_desired_simulink)
             
 
     def init_simulation_environment(self, cavpr=0.1, end_of_simulation=3600, seed=42):
@@ -401,11 +345,13 @@ class VissimEnvMultiAgent:
         
         simsec = self.vissim.Simulation.SimulationSecond
         is_very_first_step = True
-        if ENABLE_SOCKET:
-            sim_state, sim_time = self.socket_helper.recv_data(self.socket2FIXS)
+        # if ENABLE_SOCKET:
+        #     sim_state, sim_time = self.socket_helper.recv_data(self.socket2FIXS)
         while simsec <= self.end_of_simulation - 300:
             if is_very_first_step:
                 is_very_first_step = False
+                sim_state = 1
+                self.socket_helper.vehicle_data_send_list.append(VehData())
 
             try:
                 # send the previous state to the FIXS server
