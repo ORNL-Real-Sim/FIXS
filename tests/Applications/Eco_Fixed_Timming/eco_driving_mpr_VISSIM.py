@@ -442,8 +442,14 @@ class VissimEnvMultiAgent:
                     self.socket_helper.clear_data()
                     # set the disired speed or acceleration for the vehicles to control
                     for veh_id in ori_speed_dic.keys():
+                        # if using eco driving, and set the accelerationDesired
                         if self.use_accel and veh_id in eco_accel_dic.keys() and eco_driving:
-                            veh_data = VehData(id=veh_id, accelerationDesired=eco_accel_dic[veh_id])
+                            # veh_data = VehData(id=veh_id, accelerationDesired=eco_accel_dic[veh_id])
+                            veh_data = VehData(id=veh_id, 
+                                               speedDesired=(eco_accel_dic[veh_id] * self.step_length) + ori_speed_dic[veh_id],
+                                               accelerationDesired=eco_accel_dic[veh_id]
+                                               )
+                        # if using eco driving, and set the speedDesired
                         elif (not self.use_accel) and veh_id in eco_speed_dic.keys() and eco_driving:
                             veh_data = VehData(id=veh_id, speedDesired=eco_speed_dic[veh_id])
                         else:

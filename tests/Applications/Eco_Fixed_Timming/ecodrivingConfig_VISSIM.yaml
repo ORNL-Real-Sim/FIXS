@@ -26,7 +26,7 @@ SimulationSetup:
 
     # default will send all
   VehicleMessageField: [id, type, speed, acceleration, positionX, positionY, positionZ,
-    color, linkId, laneId, distanceTravel, accelerationDesired]
+    color, linkId, laneId, distanceTravel, speedDesired, accelerationDesired]
 
     # by default it is false 
   EnableExternalDynamics: false   # use this so that simulink will control the response
