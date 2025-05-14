@@ -60,7 +60,7 @@ def lsa_sub(df, sloc, direction):
 
 
 
-def gen_desire_speed_dir_r_(CAV_curr, simsec, lsa, A, B, C, M, example_coasting_profile, static_routes_eb_wb_th):
+def gen_desire_speed_dir_r_(CAV_curr, simsec, step_length, lsa, A, B, C, M, example_coasting_profile, static_routes_eb_wb_th):
 
     # select only the controllable vehicles
     CAV_curr = CAV_curr[~((CAV_curr['Direction'].isnull())
@@ -80,7 +80,7 @@ def gen_desire_speed_dir_r_(CAV_curr, simsec, lsa, A, B, C, M, example_coasting_
             if len(CAV_curr_control) > 0:
                 CAV_curr_control['instant_desired_speed'], CAV_curr_control['mode'], CAV_curr_control['a_out'], CAV_curr_control['max_desired_speed'], CAV_curr_control['minimum_desired_speed'] = np.vectorize(
                     gen_desired_spd, excluded=['example_coasting_profile'])(
-                    step_length=1,
+                    step_length=step_length,
                     example_coasting_profile=example_coasting_profile,
                     A=A, B=B, C=C, M=M,
                     orginal_desire_spd=CAV_curr_control['OrgDesSpeed'],
@@ -149,8 +149,7 @@ def get_two_green_window(lsa, scloc):
     return lsa
 
 class VissimEnvMultiAgent:
-    def __init__(self, 
-                 
+    def __init__(self,
                  driver_model_path, 
                  vissim_port=1337, 
                  traffic_layer_port=430, 
@@ -158,7 +157,10 @@ class VissimEnvMultiAgent:
                  simulation_file_path='', 
                  with_ego_veh=True,
                  with_ext_driver=True,
-                 traffic_layer_config_path=''):
+                 traffic_layer_config_path='',
+                 with_vehicle_dynamics=False,
+                 eco_driving=False,
+                 step_length=0.1):
         # sumo startup utils
         # remember to enable the Evaluation --> Configuration -->Direct Output --> Signal changes
         self.with_ego_veh = with_ego_veh
@@ -170,20 +172,38 @@ class VissimEnvMultiAgent:
         config_helper.getConfig(self.traffic_layer_config_path)
         msg_helper = MsgHelper()
         msg_helper.set_vehicle_message_field(config_helper.simulation_setup['VehicleMessageField'])
+        self.use_accel = msg_helper.vehicle_msg_field_valid['accelerationDesired']
+        assert msg_helper.vehicle_msg_field_valid['accelerationDesired'] or msg_helper.vehicle_msg_field_valid['speedDesired'] , "Must have either accelerationDesired or speedDesired in the VehicleMessageField"
         self.socket_helper = SocketHelper(config_helper=config_helper, msg_helper=msg_helper)
         # IP to connect to the FIXS server
         
         self.vissim_port = vissim_port
         self.simulation_file_path = simulation_file_path
-
+        
+        
         self.traffic_layer_port = traffic_layer_port
         self.simulink_port = simulink_port
 
+        self.with_vehicle_dynamics = with_vehicle_dynamics
+        self.eco_driving = eco_driving
+        self.step_length = step_length
+        
+        
+        
         self.socket2FIXS = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.socket2FIXS.connect(('127.0.0.1', int(self.traffic_layer_port)))
         print('Connected to FIXS server')
 
-        
+        if self.with_vehicle_dynamics:
+            self.socket2simulink = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            print('Waiting for Simulink client to connect...')      
+            # bind the socket to the port and listen for incoming connections       
+            print('Binding to port: ', self.simulink_port)      
+            self.socket2simulink.bind(('127.0.0.1', int(self.simulink_port)))       
+            self.socket2simulink.listen(1)      
+            # if a connection is established, accept it     
+            self.socket2simulink, addr = self.socket2simulink.accept()      
+            print('Connected by Simulink client')
 
 
     def warmup_vissim(self):
@@ -371,7 +391,7 @@ class VissimEnvMultiAgent:
         example_coasting_profile = pd.read_csv(example_coasting_profile_file_path, index_col=0)
         self.example_coasting_profile = example_coasting_profile
 
-    def start_subscription(self, vehicle_dynamics=True, eco_driving=True):
+    def start_subscription(self):
         """
     
         :param vehicle_dynamics:
@@ -428,7 +448,7 @@ class VissimEnvMultiAgent:
                 C = 0.000278
                 M = 1.6443
                 # update the desire speed for controllable vehicles on EB and WB
-                CAV_curr_control_eb = gen_desire_speed_dir_r_(CAV_curr, simsec, self.lsa, A, B, C, M, self.example_coasting_profile, self.static_routes_eb_wb_th)
+                CAV_curr_control_eb = gen_desire_speed_dir_r_(CAV_curr, simsec, self.step_length, self.lsa, A, B, C, M, self.example_coasting_profile, self.static_routes_eb_wb_th)
                 
                 # vihicles controllable by Vissim (CAV)
                 CAV_VISSIM = CAV_curr[CAV_curr['VehType'] == '10001']
@@ -458,9 +478,12 @@ class VissimEnvMultiAgent:
                 print(setSpeeds)
 
                 # get the egoCAV speed, maybe multiple egoCAV
-                egoCAV_curr = CAV_curr[CAV_curr['VehType'] == '10002']
+                egoCAV_curr = CAV_curr_control_eb[CAV_curr_control_eb['VehType'] == '10002']
+                egoCAV_curr['DesAcceleration'] = egoCAV_curr['a_out'] # m/s2
                 egoCAV_curr['No'] = egoCAV_curr['No'].astype(str)
+                egoCAV_curr['DesSpeed'] = egoCAV_curr['DesSpeed'].astype(float) * 0.44704 # mph to m/s
                 eco_speed_dic = egoCAV_curr.set_index('No')['DesSpeed'].to_dict()
+                eco_accel_dic = egoCAV_curr.set_index('No')['DesAcceleration'].to_dict()
             except Exception as e:
                 print('set surrounding vehicle desired speed done')
             
@@ -469,15 +492,26 @@ class VissimEnvMultiAgent:
                 # Should apply the FIXS control to the ego vehicle at this step
                 if ENABLE_SOCKET:
                     sim_state, sim_time = self.socket_helper.recv_data(self.socket2FIXS)
-                ori_speed_dic = {veh_data.id:veh_data.speed for veh_data in self.socket_helper.vehicle_data_receive_list}
-                self.socket_helper.clear_data()
-                for veh_id in ori_speed_dic.keys():
-                    if veh_id in eco_speed_dic.keys() and eco_driving:
-                        veh_data = VehData(id=veh_id, speedDesired=eco_speed_dic[veh_id] * 0.44704)
-                    else:
-                        veh_data = VehData(id=veh_id, speedDesired=ori_speed_dic[veh_id])
-                    self.socket_helper.vehicle_data_send_list.append(veh_data)
-                
+                    ori_speed_dic = {veh_data.id:veh_data.speed for veh_data in self.socket_helper.vehicle_data_receive_list}
+                    self.socket_helper.clear_data()
+                    # set the disired speed or acceleration for the vehicles to control
+                    for veh_id in ori_speed_dic.keys():
+                        if self.use_accel and veh_id in eco_accel_dic.keys() and eco_driving:
+                            veh_data = VehData(id=veh_id, accelerationDesired=eco_accel_dic[veh_id])
+                        elif (not self.use_accel) and veh_id in eco_speed_dic.keys() and eco_driving:
+                            veh_data = VehData(id=veh_id, speedDesired=eco_speed_dic[veh_id])
+                        else:
+                            veh_data = VehData(id=veh_id, speedDesired=ori_speed_dic[veh_id])
+                        self.socket_helper.vehicle_data_send_list.append(veh_data)
+                    
+                    if self.with_vehicle_dynamics:
+                        self.socket_helper.sendData(sim_state, simsec, self.socket2simulink)    
+                        self.socket_helper.clear_data() 
+                        # receive data from the client (the actual vehicle data after the vehidle dynamics model)   
+                        self.socket_helper.recv_data(self.socket2simulink)  
+                        vehicle_data_send_tmp = [].extend(self.socket_helper.vehicle_data_receive_list)
+                        self.socket_helper.vehicle_data_send_list.extend(vehicle_data_send_tmp)
+                    
                 simsec = self.vissim.Simulation.SimulationSecond
             except:
                 pass
@@ -516,7 +550,7 @@ def run_traffic_layer(traffic_layer_path, config_path):
 if __name__ == '__main__':
     experiment_config = {
         'driver_model_path': r"DriverModel_RealSim_v2021.dll", #r"DriverModel_RealSim_v2021_vanilla.dll", #r"DriverModel_RealSim.dll",
-        'config_path': r"ecodrivingConfig_VISSIM_dynamics.yaml",
+        'config_path': r"ecodrivingConfig_VISSIM.yaml",
         'simulation_file_path':r'Experiments\\banMinorLeftTurnFixedTimingV2_WithEgo'
     }
     experiment_config = {path_key:os.path.join(os.getcwd(), relative_path) for path_key, relative_path in experiment_config.items()}
@@ -526,7 +560,7 @@ if __name__ == '__main__':
     parser.add_argument("--VissimPort", type=str, help="Specify port of vissim", default=1337)
     parser.add_argument("--trafficlayerPort", type=str, help="Specify port of traffic layer", default=430)
     parser.add_argument("--simulinkPort", type=str, help="Specify port of simulink", default=420)
-    parser.add_argument("--ecoDriving", action="store_true", help="Use the eco driving controller", default=False)
+    parser.add_argument("--ecoDriving", action="store_true", help="Use the eco driving controller", default=True)
     parser.add_argument("--vehicleDynamics", action="store_true", help="use the vehicle dynamis", default=False)
     parser.add_argument("--penetrationRate", type=float, help="the penetration rate of cav", default=1.0)
     parser.add_argument("--pathToNet", type=str, help="the path to the net file", default=None)
@@ -540,17 +574,20 @@ if __name__ == '__main__':
     path_to_net = args.pathToNet
     vehicle_dynamics = args.vehicleDynamics
     eco_driving = args.ecoDriving
-
+    
     run_traffic_layer(traffic_layer_path='TrafficLayer.exe', config_path=experiment_config['config_path'])
-    # run_vissim()
     time.sleep(3)
-    vissim_env = VissimEnvMultiAgent(traffic_layer_config_path=experiment_config['config_path'], 
-                                    driver_model_path=experiment_config['driver_model_path'],
+    vissim_env = VissimEnvMultiAgent(driver_model_path=experiment_config['driver_model_path'],
                                     vissim_port=vissim_port,
                                     traffic_layer_port=traffic_layer_port,
                                     simulink_port=simulink_port,
                                     simulation_file_path=experiment_config['simulation_file_path'],
-                                    with_ego_veh=True)
+                                    with_ego_veh=True,
+                                    with_ext_driver=True,
+                                    traffic_layer_config_path=experiment_config['config_path'], 
+                                    eco_driving=eco_driving,
+                                    with_vehicle_dynamics=vehicle_dynamics,
+                                    step_length=0.1)
     
     vissim_env.init_simulation_environment(cavpr=0.001)
     vissim_env.warmup_vissim()
