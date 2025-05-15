@@ -16,6 +16,8 @@ from CommonLib.VehDataMsgDefs import VehData
 import argparse
 
 ENABLE_SOCKET = True
+WARMUP_SECONDS = 20
+INIT_SPEED = 22.35
 
 def get_start_index(fname, char_to_search, nocc):
     """
@@ -215,8 +217,37 @@ class VissimEnvMultiAgent:
         :return:
         """
         
-        self.vissim.Simulation.SetAttValue('SimBreakAt', 0.5)
-        self.vissim.Simulation.RunContinuous()
+        # self.vissim.Simulation.SetAttValue('SimBreakAt', WARMUP_SECONDS)
+        # self.vissim.Simulation.RunContinuous()
+        self.vissim.Simulation.RunSingleStep()
+        simsec = self.vissim.Simulation.SimulationSecond
+        is_very_first_step = True
+        # Run first WARMUP_SECONDS seconds as warm up
+        while simsec < WARMUP_SECONDS:
+            simsec = self.vissim.Simulation.SimulationSecond
+
+            if is_very_first_step:
+                is_very_first_step = False
+                sim_state = 1
+                self.socket_helper.vehicle_data_send_list.append(VehData(id='ego', 
+                                               speedDesired=22.0,
+                                               accelerationDesired=0.0
+                                               ))
+
+            if self.with_vehicle_dynamics:
+                self.socket_helper.sendData(sim_state, simsec, self.socket2simulink)    
+                self.socket_helper.clear_data() 
+                self.socket_helper.vehicle_data_send_list.append(VehData(id='ego', 
+                                               speedDesired=22.0,
+                                               accelerationDesired=0.0
+                                               ))
+                # receive data from the client (the actual vehicle data after the vehidle dynamics model)   
+                self.socket_helper.recv_data(self.socket2simulink)  
+                sim_state = 1
+                #vehicle_data_send_tmp = [].extend(self.socket_helper.vehicle_data_receive_list)
+                #self.socket_helper.vehicle_data_send_list.extend(vehicle_data_send_tmp)
+
+            self.vissim.Simulation.RunSingleStep()
 
         if self.with_ego_veh:
             self.add_ego_veh()
@@ -345,6 +376,7 @@ class VissimEnvMultiAgent:
         
         simsec = self.vissim.Simulation.SimulationSecond
         is_very_first_step = True
+        speed_previous = INIT_SPEED
         # if ENABLE_SOCKET:
         #     sim_state, sim_time = self.socket_helper.recv_data(self.socket2FIXS)
         while simsec <= self.end_of_simulation - 300:
@@ -513,7 +545,7 @@ if __name__ == '__main__':
     parser.add_argument("--trafficlayerPort", type=str, help="Specify port of traffic layer", default=430)
     parser.add_argument("--simulinkPort", type=str, help="Specify port of simulink", default=420)
     parser.add_argument("--ecoDriving", action="store_true", help="Use the eco driving controller", default=True)
-    parser.add_argument("--vehicleDynamics", action="store_true", help="use the vehicle dynamis", default=False)
+    parser.add_argument("--vehicleDynamics", action="store_true", help="use the vehicle dynamis", default=True)
     parser.add_argument("--penetrationRate", type=float, help="the penetration rate of cav", default=1.0)
     parser.add_argument("--pathToNet", type=str, help="the path to the net file", default=None)
     
