@@ -459,7 +459,7 @@ class VissimEnvMultiAgent:
                 egoCAV_curr = CAV_curr_control_eb[CAV_curr_control_eb['VehType'] == '10002']
                 egoCAV_curr['DesAcceleration'] = egoCAV_curr['a_out'] # m/s2
                 egoCAV_curr['No'] = egoCAV_curr['No'].astype(str)
-                egoCAV_curr['DesSpeed'] = egoCAV_curr['DesSpeed'].astype(float) * 0.44704 # mph to m/s
+                egoCAV_curr['DesSpeed'] = egoCAV_curr['instant_desired_speed'].astype(float) * 0.44704 # mph to m/s
                 eco_speed_dic = egoCAV_curr.set_index('No')['DesSpeed'].to_dict()
                 eco_accel_dic = egoCAV_curr.set_index('No')['DesAcceleration'].to_dict()
             except Exception as e:
@@ -478,14 +478,17 @@ class VissimEnvMultiAgent:
                         if self.use_accel and veh_id in eco_accel_dic.keys() and eco_driving:
                             # veh_data = VehData(id=veh_id, accelerationDesired=eco_accel_dic[veh_id])
                             veh_data = VehData(id=veh_id, 
-                                               speedDesired=(eco_accel_dic[veh_id] * self.step_length) + ori_speed_dic[veh_id],
+                                            #    speedDesired=(eco_accel_dic[veh_id] * self.step_length) + ori_speed_dic[veh_id],
+                                               speedDesired=eco_speed_dic[veh_id],
                                                accelerationDesired=eco_accel_dic[veh_id]
                                                )
+                            print(f"Trying to set {veh_id} from {ori_speed_dic[veh_id]} to  {eco_speed_dic[veh_id]} with acc {eco_accel_dic[veh_id]}")
                         # if using eco driving, and set the speedDesired
                         elif (not self.use_accel) and veh_id in eco_speed_dic.keys() and eco_driving:
                             veh_data = VehData(id=veh_id, speedDesired=eco_speed_dic[veh_id])
                         else:
                             veh_data = VehData(id=veh_id, speedDesired=ori_speed_dic[veh_id])
+                        
                         self.socket_helper.vehicle_data_send_list.append(veh_data)
                     
                     if self.with_vehicle_dynamics:
@@ -493,8 +496,32 @@ class VissimEnvMultiAgent:
                         self.socket_helper.clear_data() 
                         # receive data from the client (the actual vehicle data after the vehidle dynamics model)   
                         self.socket_helper.recv_data(self.socket2simulink)  
-                        vehicle_data_send_tmp = [].extend(self.socket_helper.vehicle_data_receive_list)
-                        self.socket_helper.vehicle_data_send_list.extend(vehicle_data_send_tmp)
+                        # vehicle_data_send_tmp = [].extend(self.socket_helper.vehicle_data_receive_list)
+                        # self.socket_helper.vehicle_data_send_list.extend(vehicle_data_send_tmp)
+                        # self.socket_helper.vehicle_data_send_list = self.socket_helper.vehicle_data_receive_list
+                        simulink_speed_dic = {veh_data.id:veh_data.speedDesired for veh_data in self.socket_helper.vehicle_data_receive_list}
+
+                        for veh_id in ori_speed_dic.keys():
+                            # if using eco driving, and set the accelerationDesired
+                            if self.use_accel and veh_id in simulink_speed_dic.keys() and eco_driving:
+                                # veh_data = VehData(id=veh_id, accelerationDesired=eco_accel_dic[veh_id])
+                                veh_data = VehData(id=veh_id, 
+                                                #    speedDesired=(eco_accel_dic[veh_id] * self.step_length) + ori_speed_dic[veh_id],
+                                                   speedDesired=simulink_speed_dic[veh_id],
+                                                   accelerationDesired=(simulink_speed_dic[veh_id] - ori_speed_dic[veh_id])/ self.step_length
+                                                   )
+                                print(f"Trying to set {veh_id} from {ori_speed_dic[veh_id]} to  {simulink_speed_dic[veh_id]} with acc {(simulink_speed_dic[veh_id] - ori_speed_dic[veh_id])/ self.step_length}")
+                            # if using eco driving, and set the speedDesired
+                            elif (not self.use_accel) and veh_id in simulink_speed_dic.keys() and eco_driving:
+                                veh_data = VehData(id=veh_id, speedDesired=simulink_speed_dic[veh_id])
+                            else:
+                                veh_data = VehData(id=veh_id, speedDesired=ori_speed_dic[veh_id])
+
+                            self.socket_helper.vehicle_data_send_list.append(veh_data)
+
+
+                        speed_previous = veh_data.speedDesired
+                        pass
                     
                 simsec = self.vissim.Simulation.SimulationSecond
             except:
