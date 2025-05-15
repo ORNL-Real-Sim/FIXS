@@ -2126,7 +2126,7 @@
 		<routGuid1 interval="999999" offset="0" strategy="NEWROUTETODESTINATIONPARKINGLOT"/>
 		<routGuid2 interval="999999" offset="0" strategy="NEWROUTETODESTINATIONPARKINGLOT"/>
 	</dynamicAssignment>
-	<evaluation autoCreateResultColumns="true" boschEmiCalcAct="false" databaseConnection="" evalOutDir="#data#" keepPrevResults="KEEPALL" listAutoExportType="FILE" nodesDelaySegmentStart="100" queueBeginSpeed="5" queueConsiderAdjacentLanes="true" queueEndSpeed="10" queueMaxClear="20" queueMaxLength="500">
+	<evaluation autoCreateResultColumns="true" boschEmiCalcAct="false" databaseConnection="" evalOutDir="#data#" keepPrevResults="KEEPCURRENT" listAutoExportType="FILE" nodesDelaySegmentStart="100" queueBeginSpeed="5" queueConsiderAdjacentLanes="true" queueEndSpeed="10" queueMaxClear="20" queueMaxLength="500">
 		<areaMeasRawData fromTime="0" toTime="99999" writeFile="false"/>
 		<areaMeasResults collectData="false" fromTime="0" interval="99999" toTime="99999"/>
 		<areaResults collectData="false" fromTime="0" interval="99999" toTime="99999"/>
@@ -26721,7 +26721,7 @@
 				<parkingLotSelectionParameters attrac="0" avail="0" decSituation="ROUTEGUIDANCETACTIC2" distFromDestM="0" genCost="0" parkFee="0"/>
 			</parkLotSelPars>
 		</vehicleType>
-		<vehicleType alightTm="0" anmFlag="false" boardTm="0" capExact="false" capacity="9999" category="CAR" clearTmPT="0" colorDistr1="205" desAccelFunc="1" desDecelFunc="1" distCoeffPerMeter="0" doorClosDur="2" dwellTmIsAdd="true" equip="" extDriver="true" extDriverDLLFile="C:\CM_Projects\UGA_cave\FIXS\tests\Applications\Eco_Fixed_Timming\DriverModel_RealSim.dll" extDriverParFile="C:\CM_Projects\UGA_cave\FIXS\tests\Applications\Eco_Fixed_Timming\ecodrivingConfig_VISSIM_dynamics.yaml" extEmissionDLLFile="" linkCostCoeff="1" maxAccelFunc="1" maxDecelFunc="1" model2D3DDistr="10" name="EcoCAV" no="10002" occupDistr="1" travTmCoeff="1">
+		<vehicleType alightTm="0" anmFlag="false" boardTm="0" capExact="false" capacity="9999" category="CAR" clearTmPT="0" colorDistr1="205" desAccelFunc="1" desDecelFunc="1" distCoeffPerMeter="0" doorClosDur="2" dwellTmIsAdd="true" equip="" extDriver="false" extDriverDLLFile="C:\CM_Projects\UGA_cave\FIXS\tests\Applications\Eco_Fixed_Timming\DriverModel_RealSim_v2021.dll" extDriverParFile="C:\CM_Projects\UGA_cave\FIXS\tests\Applications\Eco_Fixed_Timming\ecodrivingConfig_VISSIM_dynamics.yaml" extEmissionDLLFile="" linkCostCoeff="1" maxAccelFunc="1" maxDecelFunc="1" model2D3DDistr="10" name="EcoCAV" no="10002" occupDistr="1" travTmCoeff="1">
 			<parkLotSelPars>
 				<parkingLotSelectionParameters attrac="0" avail="0" decSituation="DEPARTUREFROMPARKINGLOT" distFromDestM="0" genCost="0" parkFee="0"/>
 				<parkingLotSelectionParameters attrac="0" avail="0" decSituation="DYNAMICROUTINGDECISION" distFromDestM="0" genCost="0" parkFee="0"/>
