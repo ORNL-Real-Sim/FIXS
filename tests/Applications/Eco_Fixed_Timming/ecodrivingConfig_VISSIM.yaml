@@ -18,7 +18,7 @@ SimulationSetup:
   EnableRealSim: true
 
     # Whether or not to save verbose log during the simulation. skip log can potentially speed up
-  EnableVerboseLog: true
+  EnableVerboseLog: false
 
     # specify which traffic simulator
     #--------------------------------------------------

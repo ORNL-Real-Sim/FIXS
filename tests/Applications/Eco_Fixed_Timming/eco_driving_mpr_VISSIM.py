@@ -16,7 +16,7 @@ from CommonLib.VehDataMsgDefs import VehData
 import argparse
 
 ENABLE_SOCKET = True
-WARMUP_SECONDS = 20
+WARMUP_SECONDS = 0.5
 INIT_SPEED = 22.35
 
 def get_start_index(fname, char_to_search, nocc):
@@ -229,7 +229,7 @@ class VissimEnvMultiAgent:
             if is_very_first_step:
                 is_very_first_step = False
                 sim_state = 1
-                self.socket_helper.vehicle_data_send_list.append(VehData(id='ego', 
+                self.socket_helper.vehicle_data_send_list.append(VehData(id='20', 
                                                speedDesired=22.0,
                                                accelerationDesired=0.0
                                                ))
@@ -237,7 +237,7 @@ class VissimEnvMultiAgent:
             if self.with_vehicle_dynamics:
                 self.socket_helper.sendData(sim_state, simsec, self.socket2simulink)    
                 self.socket_helper.clear_data() 
-                self.socket_helper.vehicle_data_send_list.append(VehData(id='ego', 
+                self.socket_helper.vehicle_data_send_list.append(VehData(id='20', 
                                                speedDesired=22.0,
                                                accelerationDesired=0.0
                                                ))
@@ -251,7 +251,6 @@ class VissimEnvMultiAgent:
 
         if self.with_ego_veh:
             self.add_ego_veh()
-
         print('warmup finished')
             
 
@@ -331,6 +330,7 @@ class VissimEnvMultiAgent:
         desired_speed = 50  # Speed in m/s
         ego_vehicle = self.vissim.Net.Vehicles.AddVehicleAtLinkPosition(ego_vt_no, link_id, lane, position, desired_speed)
         print(f"Ego vehicle added with ID: {ego_vehicle.AttValue('No')}")
+        self.ego_vehicle_id = ego_vehicle.AttValue('No') 
     
     def _load_scloc(self, sloc_file_path='sc_loc.csv'):
         scloc = pd.read_csv(sloc_file_path)
@@ -373,7 +373,7 @@ class VissimEnvMultiAgent:
         :param eco_driving:
         :return:
         """
-        
+        self.socket_helper.clear_data()
         simsec = self.vissim.Simulation.SimulationSecond
         is_very_first_step = True
         speed_previous = INIT_SPEED
@@ -383,7 +383,9 @@ class VissimEnvMultiAgent:
             if is_very_first_step:
                 is_very_first_step = False
                 sim_state = 1
-                self.socket_helper.vehicle_data_send_list.append(VehData())
+                self.socket_helper.vehicle_data_send_list.append(VehData(id=str(self.ego_vehicle_id),
+                                                                        speedDesired=22.0,
+                                                                        accelerationDesired=0.0))
 
             try:
                 # send the previous state to the FIXS server
@@ -467,6 +469,7 @@ class VissimEnvMultiAgent:
             
             try:
                 self.vissim.Simulation.RunSingleStep()
+                simsec = self.vissim.Simulation.SimulationSecond
                 # Should apply the FIXS control to the ego vehicle at this step
                 if ENABLE_SOCKET:
                     sim_state, sim_time = self.socket_helper.recv_data(self.socket2FIXS)
@@ -503,7 +506,7 @@ class VissimEnvMultiAgent:
 
                         for veh_id in ori_speed_dic.keys():
                             # if using eco driving, and set the accelerationDesired
-                            if self.use_accel and veh_id in simulink_speed_dic.keys() and eco_driving:
+                            if self.use_accel and eco_driving: #veh_id in simulink_speed_dic.keys() 
                                 # veh_data = VehData(id=veh_id, accelerationDesired=eco_accel_dic[veh_id])
                                 veh_data = VehData(id=veh_id, 
                                                 #    speedDesired=(eco_accel_dic[veh_id] * self.step_length) + ori_speed_dic[veh_id],
@@ -523,8 +526,8 @@ class VissimEnvMultiAgent:
                         speed_previous = veh_data.speedDesired
                         pass
                     
-                simsec = self.vissim.Simulation.SimulationSecond
-            except:
+            except Exception as e:
+                print('\nERROR: FIXS simulink exception\n')
                 pass
 
         self.close_vissim()
