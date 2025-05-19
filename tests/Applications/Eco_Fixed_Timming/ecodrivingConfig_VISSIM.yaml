@@ -52,7 +52,7 @@ ApplicationSetup:
     - 430
 XilSetup:
     # enable/disable XIL
-  EnableXil: false
+  EnableXil: true
 
   #--------------------------------------------------
   VehicleSubscription:
@@ -62,6 +62,6 @@ XilSetup:
     # 3. Send data back to the FIXS LAYER
   - type: vehicleType
     attribute: {id: ['10002'], radius: [0]}
-    ip: ["127.0.0.1"]
+    ip: ["192.168.140.11"]
     port:
     - 420
