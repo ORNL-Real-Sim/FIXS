@@ -3,9 +3,9 @@
 from __future__ import print_function
 from fileinput import filename
 from tabnanny import verbose
-from cycler import V
+#from cycler import V
 import pandas as pd
-from regex import F
+#from regex import F
 import win32com.client as com # COM-Server
 import os
 import subprocess
@@ -19,8 +19,9 @@ from CommonLib.VehDataMsgDefs import VehData
 import argparse
 
 ENABLE_SOCKET = True
-WARMUP_SECONDS = 0.5
+WARMUP_SECONDS = 20
 INIT_SPEED = 22.35
+LOOKAHEAD_STEP = 0.5 # look ahead speed time step
 
 def get_start_index(fname, char_to_search, nocc):
     """
@@ -206,12 +207,13 @@ class VissimEnvMultiAgent:
 
         if self.with_vehicle_dynamics:
             self.socket2simulink = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            print('Waiting for Simulink client to connect...')
-            # bind the socket to the port and listen for incoming connections
-            print('Binding to port: ', self.simulink_port)
-            self.socket2simulink.bind((self.simulink_ip, int(self.simulink_port)))
-            self.socket2simulink.listen(1)
-            # if a connection is established, accept it
+            print('Waiting for Simulink client to connect...')      
+            # bind the socket to the port and listen for incoming connections       
+            print('Binding to port: ', self.simulink_port)      
+            # self.socket2simulink.bind(('192.168.140.11', int(self.simulink_port)))   
+            self.socket2simulink.bind(('192.168.140.11', int(self.simulink_port)))        
+            self.socket2simulink.listen(1)      
+            # if a connection is established, accept it     
             self.socket2simulink, addr = self.socket2simulink.accept()      
             print('Connected by Simulink client')
             
@@ -360,8 +362,11 @@ class VissimEnvMultiAgent:
                 # receive data from the client (the actual vehicle data after the vehidle dynamics model)   
                 self.socket_helper.recv_data(self.socket2simulink)  
                 sim_state = 1
-                self.socket_helper.vehicle_data_send_list.extend(self.socket_helper.vehicle_data_receive_list)
-
+                #self.socket_helper.vehicle_data_send_list.extend(self.socket_helper.vehicle_data_receive_list)
+                self.socket_helper.vehicle_data_send_list.append(VehData(id='20', 
+                                               speedDesired=22.0,
+                                               accelerationDesired=0.0
+                                               ))
             self.vissim.Simulation.RunSingleStep()
 
         if self.with_ego_veh:
@@ -439,7 +444,7 @@ class VissimEnvMultiAgent:
                 C = 0.000278
                 M = 1.6443
                 # update the desire speed for controllable vehicles on EB and WB
-                CAV_curr_control_eb = gen_desire_speed_dir_r_(CAV_curr, simsec, self.step_length, self.lsa, A, B, C, M, self.example_coasting_profile, self.static_routes_eb_wb_th)
+                CAV_curr_control_eb = gen_desire_speed_dir_r_(CAV_curr, simsec, LOOKAHEAD_STEP, self.lsa, A, B, C, M, self.example_coasting_profile, self.static_routes_eb_wb_th)
                 
                 # vihicles controllable by Vissim (CAV)
                 CAV_VISSIM = CAV_curr[CAV_curr['VehType'] == '10001']
@@ -469,14 +474,18 @@ class VissimEnvMultiAgent:
                     self.vissim.Net.Vehicles.SetMultiAttValues(('DesSpeed'), tuple(list(setSpeeds.itertuples(index=False, name=None))))
                     if self.verbose:
                         print(setSpeeds)
+                if CAV_curr_control_eb is not None:
+                    # get the egoCAV speed, maybe multiple egoCAV
+                    egoCAV_curr = CAV_curr_control_eb[CAV_curr_control_eb['VehType'] == '10002']
+                    egoCAV_curr['DesAcceleration'] = egoCAV_curr['a_out'] # m/s2
+                    egoCAV_curr['No'] = egoCAV_curr['No'].astype(str)
+                    egoCAV_curr['DesSpeed'] = egoCAV_curr['instant_desired_speed'].astype(float) * 0.44704 # mph to m/s
+                    eco_speed_dic = egoCAV_curr.set_index('No')['DesSpeed'].to_dict()
+                    eco_accel_dic = egoCAV_curr.set_index('No')['DesAcceleration'].to_dict()
+                else: 
+                    eco_speed_dic = vehs.set_index('No')['Speed'].to_dict()
+                    eco_accel_dic = vehs.set_index('No')['Acceleration'].to_dict()
 
-                # get the egoCAV speed, maybe multiple egoCAV
-                egoCAV_curr = CAV_curr_control_eb[CAV_curr_control_eb['VehType'] == '10002']
-                egoCAV_curr['DesAcceleration'] = egoCAV_curr['a_out'] # m/s2
-                egoCAV_curr['No'] = egoCAV_curr['No'].astype(str)
-                egoCAV_curr['DesSpeed'] = egoCAV_curr['instant_desired_speed'].astype(float) * 0.44704 # mph to m/s
-                eco_speed_dic = egoCAV_curr.set_index('No')['DesSpeed'].to_dict()
-                eco_accel_dic = egoCAV_curr.set_index('No')['DesAcceleration'].to_dict()
             except Exception as e:
                 print('set surrounding vehicle desired speed done')
             
@@ -568,7 +577,7 @@ if __name__ == '__main__':
     parser.add_argument("--simulinkIP", type=str, help="Specify IP of simulink", default="127.0.0.1")
     parser.add_argument("--simulinkPort", type=str, help="Specify port of simulink", default=420)
     parser.add_argument("--ecoDriving", action="store_true", help="Use the eco driving controller", default=True)
-    parser.add_argument("--vehicleDynamics", action="store_true", help="use the vehicle dynamis", default=False)
+    parser.add_argument("--vehicleDynamics", action="store_true", help="use the vehicle dynamis", default=True)
     parser.add_argument("--penetrationRate", type=float, help="the penetration rate of cav", default=1.0)
     parser.add_argument("--pathToNet", type=str, help="the path to the net file", default=None)
     parser.add_argument("--verbose", action="store_true", help="print verbose output", default=False)
