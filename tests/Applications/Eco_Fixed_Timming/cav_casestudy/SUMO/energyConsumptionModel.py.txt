@@ -1,0 +1,41 @@
+def getICVenergy(v, a):
+    # Input:
+    #   v: speed in m/s
+    #   a: acceleration in m/s^2
+    # Output:
+    #   fuel: fuel consumption in liter per second
+
+    p00 = 0.4415
+    p10 = 0.02964
+    p01 = 0.04654
+    p20 = -0.000134
+    p11 = 0.07274
+         
+    idleFuelGramPerSecond = 0.318
+
+    fuelGramPerSecond = max(p00 + p10*v + p01*a + p20*v**2 + p11*v*a, idleFuelGramPerSecond)
+
+    fuelLiterPerSecond = fuelGramPerSecond*	0.00133529
+
+    return fuelLiterPerSecond
+     
+def getEVenergy(v, a):
+    # Input:
+    #   v: speed in m/s
+    #   a: acceleration in m/s^2
+    # Output:
+    #   batteryPowerKw: battery power in kW
+    #
+    #   after getting power of each (v,a), multiply all battery power with delta time: batteryTotalKwh=sum(batteryPowerKw*dt/3600)
+    #   after getting batteryTotalKwh, calculate equivalent gallon as batteryGallonEquivalent = batteryTotalKwh/33.7
+    #   then can calculate MPGe using MPGe=distanceTotalMile/batteryGallonEquivalent
+
+    p00 = 6.3331
+    p10 = 0.6529
+    p01 = 0.5910
+    p20 = 0.0239
+    p11 = 1.8354
+         
+    batteryPowerKw = p00 + p10*v + p01*a + p20*v**2 + p11*v*a
+
+    return batteryPowerKw       
