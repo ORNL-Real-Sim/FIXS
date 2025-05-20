@@ -156,8 +156,10 @@ def get_two_green_window(lsa, scloc):
 class VissimEnvMultiAgent:
     def __init__(self,
                  driver_model_path, 
-                 vissim_port=1337, 
+                 vissim_port=1337,
+                 traffic_layer_ip='127.0.0.1',
                  traffic_layer_port=430, 
+                 simulink_ip='127.0.0.1',
                  simulink_port=420, 
                  simulation_file_path='', 
                  with_ego_veh=True,
@@ -185,9 +187,11 @@ class VissimEnvMultiAgent:
         
         self.vissim_port = vissim_port
         self.simulation_file_path = simulation_file_path
-        
-        
+        # IP to connect to the traffic layer
+        self.traffic_layer_ip = traffic_layer_ip
         self.traffic_layer_port = traffic_layer_port
+        # IP to connect to the Simulink server
+        self.simulink_ip = simulink_ip
         self.simulink_port = simulink_port
 
         self.with_vehicle_dynamics = with_vehicle_dynamics
@@ -196,19 +200,18 @@ class VissimEnvMultiAgent:
         
         # whether print our the controller information
         self.verbose = verbose
-        
         self.socket2FIXS = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.socket2FIXS.connect(('127.0.0.1', int(self.traffic_layer_port)))
+        self.socket2FIXS.connect((self.traffic_layer_ip, int(self.traffic_layer_port)))
         print('Connected to FIXS server')
 
         if self.with_vehicle_dynamics:
             self.socket2simulink = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            print('Waiting for Simulink client to connect...')      
-            # bind the socket to the port and listen for incoming connections       
-            print('Binding to port: ', self.simulink_port)      
-            self.socket2simulink.bind(('127.0.0.1', int(self.simulink_port)))       
-            self.socket2simulink.listen(1)      
-            # if a connection is established, accept it     
+            print('Waiting for Simulink client to connect...')
+            # bind the socket to the port and listen for incoming connections
+            print('Binding to port: ', self.simulink_port)
+            self.socket2simulink.bind((self.simulink_ip, int(self.simulink_port)))
+            self.socket2simulink.listen(1)
+            # if a connection is established, accept it
             self.socket2simulink, addr = self.socket2simulink.accept()      
             print('Connected by Simulink client')
             
@@ -559,9 +562,10 @@ if __name__ == '__main__':
     experiment_config = {path_key:os.path.join(os.getcwd(), relative_path) for path_key, relative_path in experiment_config.items()}
     print(experiment_config)
     parser = argparse.ArgumentParser()
-    parser.add_argument("-c", "--config", type=str, help="Path to the Configuration file", default=r'/ecodrivingConfig_VISSIM_dynamics.yaml')
     parser.add_argument("--VissimPort", type=str, help="Specify port of vissim", default=1337)
+    parser.add_argument("--trafficLayerIP", type=str, help="Specify IP of traffic layer", default="127.0.0.1")
     parser.add_argument("--trafficlayerPort", type=str, help="Specify port of traffic layer", default=430)
+    parser.add_argument("--simulinkIP", type=str, help="Specify IP of simulink", default="127.0.0.1")
     parser.add_argument("--simulinkPort", type=str, help="Specify port of simulink", default=420)
     parser.add_argument("--ecoDriving", action="store_true", help="Use the eco driving controller", default=True)
     parser.add_argument("--vehicleDynamics", action="store_true", help="use the vehicle dynamis", default=False)
@@ -570,9 +574,10 @@ if __name__ == '__main__':
     parser.add_argument("--verbose", action="store_true", help="print verbose output", default=False)
     
     args = parser.parse_args()
-    traffic_layer_config_path = args.config
     vissim_port = args.VissimPort
+    traffic_layer_ip = args.trafficLayerIP
     traffic_layer_port = args.trafficlayerPort
+    simulink_ip = args.simulinkIP
     simulink_port = args.simulinkPort
     penetration_rate = float(args.penetrationRate)
     path_to_net = args.pathToNet
@@ -584,7 +589,9 @@ if __name__ == '__main__':
     time.sleep(3)
     vissim_env = VissimEnvMultiAgent(driver_model_path=experiment_config['driver_model_path'],
                                     vissim_port=vissim_port,
+                                    traffic_layer_ip=traffic_layer_ip,
                                     traffic_layer_port=traffic_layer_port,
+                                    simulink_ip=simulink_ip,
                                     simulink_port=simulink_port,
                                     simulation_file_path=experiment_config['simulation_file_path'],
                                     with_ego_veh=True,
