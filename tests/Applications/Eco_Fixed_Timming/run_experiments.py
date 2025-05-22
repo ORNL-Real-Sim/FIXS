@@ -96,7 +96,7 @@ def run_traffic_layer(setting_dir, port):
     os.system(f'start cmd /k {setting_dir}\\TrafficLayer.exe -f {setting_dir}\\ecodrivingConfig.yaml')
 
 def run_controller(setting_dir, sumo_port, traffic_layer_port, simulink_port, penetration_rate, eco_driving=True, vehicle_dynamics=True):
-    command = f'start cmd /k python .\\eco_driving_mpr_test.py -c {setting_dir}\\ecodrivingConfig.yaml --sumoPort {sumo_port} --trafficlayerPort {traffic_layer_port} --simulinkPort {simulink_port} --pathToNet {setting_dir} --penetrationRate {penetration_rate}'
+    command = f'start cmd /k python .\\eco_driving_mpr_SUMO.py -c {setting_dir}\\ecodrivingConfig.yaml --sumoPort {sumo_port} --trafficlayerPort {traffic_layer_port} --simulinkPort {simulink_port} --pathToNet {setting_dir} --penetrationRate {penetration_rate}'
     if eco_driving:
         command += ' --ecoDriving'
     if vehicle_dynamics:
@@ -199,9 +199,9 @@ def run_settings(config):
         
 # main function
 if __name__ == '__main__':
-    # config_file = './Experiments/experiment_config.yaml'
-    # with open(config_file, 'r') as f:
-    #     config = yaml.load(f, Loader=yaml.FullLoader)
+    config_file = './Experiments/experiment_config_SUMO.yaml'
+    with open(config_file, 'r') as f:
+        config = yaml.load(f, Loader=yaml.FullLoader)
     
-    # run_settings(config)
-    run_simulink('.\\', 'EV_longitude')
+    run_settings(config)
+    # run_simulink('.\\', 'EV_longitude')

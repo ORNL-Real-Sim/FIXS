@@ -1,6 +1,6 @@
 import traci
-from speed_control_utils import *
-from utils1 import *
+from .speed_control_utils import *
+from .utils1 import *
 from configparser import ConfigParser
 
 
