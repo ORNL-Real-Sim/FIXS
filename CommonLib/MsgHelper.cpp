@@ -117,6 +117,15 @@ void MsgHelper::printVehData(VehFullData_t VehData) {
 	if (VehicleMessageField_set.find("activeLaneChange") != VehicleMessageField_set.end()) {
 		printf("\t activeLaneChange: %d\n", VehData.activeLaneChange);
 	}
+	if (VehicleMessageField_set.find("length") != VehicleMessageField_set.end()) {
+		printf("\t length: %f\n", VehData.length);
+	}
+	if (VehicleMessageField_set.find("width") != VehicleMessageField_set.end()) {
+		printf("\t width: %f\n", VehData.width);
+	}
+	if (VehicleMessageField_set.find("height") != VehicleMessageField_set.end()) {
+		printf("\t height: %f\n", VehData.height);
+	}
 	if (VehicleMessageField_set.find("lightIndicators") != VehicleMessageField_set.end()) {
 		printf("\t lightIndicators: %d\n", VehData.lightIndicators);
 	}
@@ -218,7 +227,18 @@ void MsgHelper::printVehDataToFile(const std::string fileName, VehFullData_t Veh
 	if (VehicleMessageField_set.find("activeLaneChange") != VehicleMessageField_set.end()) {
 		fprintf(f, "\t activeLaneChange: %d\n", VehData.activeLaneChange);
 	}
-
+	if (VehicleMessageField_set.find("length") != VehicleMessageField_set.end()) {
+		fprintf(f, "\t length: %f\n", VehData.length);
+	}
+	if (VehicleMessageField_set.find("width") != VehicleMessageField_set.end()) {
+		fprintf(f, "\t width: %f\n", VehData.width);
+	}
+	if (VehicleMessageField_set.find("height") != VehicleMessageField_set.end()) {
+		fprintf(f, "\t height: %f\n", VehData.height);
+	}
+	if (VehicleMessageField_set.find("lightIndicators") != VehicleMessageField_set.end()) {
+		fprintf(f, "\t lightIndicators: %d\n", VehData.lightIndicators);
+	}
 	fclose(f);
 
 }
@@ -360,8 +380,11 @@ void MsgHelper::packVehData(VehFullData_t VehData, char* buffer, int* iByte) {
 	stringVehDataToBuffer(VehData.linkIdNext, "linkIdNext", buffer, iByte);
 	numericVehDataToBuffer<float>(VehData.grade, "grade", buffer, iByte);
 	numericVehDataToBuffer<int8_t>(VehData.activeLaneChange, "activeLaneChange", buffer, iByte);
+	numericVehDataToBuffer<float>(VehData.length, "length", buffer, iByte);
+	numericVehDataToBuffer<float>(VehData.width, "width", buffer, iByte);
+	numericVehDataToBuffer<float>(VehData.height, "height", buffer, iByte);
 	numericVehDataToBuffer<uint16_t>(VehData.lightIndicators, "lightIndicators", buffer, iByte);
-
+	
 	// packVehData: add new vehicle message field here
 	
 	// go back to the first byte location and parser message size 
@@ -412,6 +435,9 @@ void MsgHelper::depackVehData(char* buffer, VehFullData_t& VehData) {
 	bufferToStringVehData(buffer, &iByte, "linkIdNext", tempString); VehData.linkIdNext = tempString;
 	bufferToNumericVehData<float>(buffer, &iByte, "grade", tempFloat); VehData.grade = tempFloat;
 	bufferToNumericVehData<int8_t>(buffer, &iByte, "activeLaneChange", tempInt8); VehData.activeLaneChange = tempInt8;
+	bufferToNumericVehData<float>(buffer, &iByte, "length", tempFloat); VehData.length = tempFloat;
+	bufferToNumericVehData<float>(buffer, &iByte, "width", tempFloat); VehData.width = tempFloat;
+	bufferToNumericVehData<float>(buffer, &iByte, "height", tempFloat); VehData.height = tempFloat;
 	bufferToNumericVehData<uint16_t>(buffer, &iByte, "lightIndicators", tempUint16); VehData.lightIndicators = tempUint16;
 
 	// depackVehData: add new vehicle message field here

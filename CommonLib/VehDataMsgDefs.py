@@ -40,6 +40,11 @@ class VehData:
     
     linkIdNext: str = field(default_factory=lambda: ' ' * 50)  # char[50]
     grade: float = 0.0
+    
+    length: float = 0.0
+    width: float = 0.0
+    height: float = 0.0
+    
     activeLaneChange: int = 0  # Boolean-like integer (-1, 0, or 1)
 
     def get(self, field_name, default=None):

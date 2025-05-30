@@ -1,0 +1,70 @@
+#pragma once
+# Global Simulation setup
+SimulationSetup:
+    # Master Switch to turn on/off RealSim interface
+    # if turned off, VISSIM will just run without RealSim
+    # SUMO needs to run without traci
+  EnableRealSim: true
+
+    # Whether or not to save verbose log during the simulation. skip log can potentially speed up
+  EnableVerboseLog: true
+
+    # Simulation end time
+    # if NOT specificed, SimulationEndTime will be set to a large value (90000 seconds)
+    #--------------------------------------------------
+  SimulationEndTime: 33000
+
+    # specify which traffic simulator
+    #--------------------------------------------------
+  SelectedTrafficSimulator: 'SUMO'
+
+    # default will send all
+  VehicleMessageField: [id, type, speed, acceleration, positionX, positionY, positionZ,
+    color, linkId, laneId, distanceTravel, speedDesired]
+
+    # by default it is false 
+  EnableExternalDynamics: true   # use this so that simulink will control the response
+
+  TrafficSimulatorPort: 1337
+SumoSetup:
+    # set the speed mode, in integer. default value is 0
+    # check Sumo documentation https://sumo.dlr.de/docs/TraCI/Change_Vehicle_State.html#speed_mode_0xb3
+
+  SpeedMode: 32   # 31: default mode. 32: all checks off
+
+# ip and port are server ip and port
+
+# setup Application Layer
+ApplicationSetup:
+    # turn on/off application layer
+  EnableApplicationLayer: true
+
+    #--------------------------------------------------
+  VehicleSubscription:
+    # Application from where to accept the vehicle data
+    # 1. Receive data from FIXS LAYER
+    # 2. Send data to XIL LAYER / Back to FIXS LAYER
+  - type: ego
+    attribute: {id: ['ego'], radius: [200]}
+    ip: ["127.0.0.1"]
+    port:
+    - 430
+
+CarlaClientSetup:
+    # whether or not enable Carla (default: false)
+    EnableCosimulation: true
+    
+    # if true, ego state is sent from Simulink.
+    # if false, ego state is sent from User.cpp 
+    EnableEgoSimulink: false
+    
+    # Ip and Port settings 
+    CarlaServerIP: 127.0.0.1
+    
+    CarlaServer: 2000
+    
+    # refresh rate, default Traffic Objects updates every 0.1 seconds
+    TrafficRefreshRate: 0.1
+    
+    # ego settings
+    EgoIds: ['ego']
