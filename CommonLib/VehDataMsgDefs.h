@@ -43,9 +43,11 @@ typedef struct  {
 	int8_t activeLaneChange; // 1 to the left, -1 to the right, 0 stay on the lane, 
 
 
-	// variables not retrievable yet
+	// variables not retrievable from VISSIM yet
 	float length;
 	float width;
+	float height;
+	// variables not retrievable yet
 	float weight;
 
 

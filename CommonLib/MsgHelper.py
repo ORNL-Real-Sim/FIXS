@@ -45,6 +45,9 @@ class MsgHelper:
             'speedLimitChangeDistance': False,
             'linkIdNext': False,
             'grade': False,
+            'length': False,
+            'width': False,
+            'height': False,
             'activeLaneChange': False
         }
         self.traffic_light_msg_field_valid = {
@@ -204,7 +207,16 @@ class MsgHelper:
 
         if self.vehicle_msg_field_valid.get('activeLaneChange'):
             veh_data.activeLaneChange, byte_index = MsgHelper.unpack_int8(byte_data, byte_index)
-
+            
+        if self.vehicle_msg_field_valid.get('length'):
+            veh_data.length, byte_index = MsgHelper.unpack_float(byte_data, byte_index)
+            
+        if self.vehicle_msg_field_valid.get('width'):
+            veh_data.width, byte_index = MsgHelper.unpack_float(byte_data, byte_index)
+            
+        if self.vehicle_msg_field_valid.get('height'):
+            veh_data.height, byte_index = MsgHelper.unpack_float(byte_data, byte_index)
+            
         return  veh_data
 
     def pack_veh_data(self, byte_data: bytearray, byte_index, veh_data: VehData):
@@ -241,6 +253,9 @@ class MsgHelper:
                   + self.vehicle_msg_field_valid.get('linkIdNext', 0) * (1 + len(veh_data.linkIdNext))  # linkIdNext
                   + self.vehicle_msg_field_valid.get('grade', 0) * 4  # grade
                   + self.vehicle_msg_field_valid.get('activeLaneChange', 0) * 1  # activeLaneChange
+                  + self.vehicle_msg_field_valid.get('length', 0) * 4  # length
+                  + self.vehicle_msg_field_valid.get('width', 0) * 4  # width
+                  + self.vehicle_msg_field_valid.get('height', 0) * 4  # height
             )
         )
         veh_msg_size = round(msg_size) + self.msg_each_header_size
@@ -363,6 +378,18 @@ class MsgHelper:
             byte_data[byte_index] = veh_data.activeLaneChange
             byte_index += 1
 
+        if self.vehicle_msg_field_valid.get('length'):
+            byte_data[byte_index:byte_index+4] = struct.pack('f', veh_data.length)
+            byte_index += 4
+            
+        if self.vehicle_msg_field_valid.get('width'):
+            byte_data[byte_index:byte_index+4] = struct.pack('f', veh_data.width)
+            byte_index += 4
+            
+        if self.vehicle_msg_field_valid.get('height'):
+            byte_data[byte_index:byte_index+4] = struct.pack('f', veh_data.height)
+            byte_index += 4
+        
         return byte_data, msg_size, byte_index
 
     def depack_traffic_light_data(self, byte_data: bytes)-> TrafficLightData:

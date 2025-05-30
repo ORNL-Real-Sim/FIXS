@@ -104,6 +104,10 @@ void TrafficHelper::connectionSetup(string trafficIp, int trafficPort, int nClie
 	//VEH_SIGNAL_EMERGENCY_YELLOW	13
 	VehDataSubscribeList.push_back(libsumo::VAR_SIGNALS);
 
+	// Return the length, width, height of the vehicle
+	VehDataSubscribeList.push_back(libsumo::VAR_LENGTH);
+	VehDataSubscribeList.push_back(libsumo::VAR_WIDTH);
+	VehDataSubscribeList.push_back(libsumo::VAR_HEIGHT);
 	// -------------------
 	// These variables are subscribed for testing purposes
 	// -------------------
@@ -1476,7 +1480,17 @@ void TrafficHelper::parserSumoSubscription(libsumo::TraCIResults VehDataSubscrib
 	CurVehData.activeLaneChange = 0;
 
 
+	//=================
+	// get length, width, height
+	//=================
+	tempDoublePtr = static_pointer_cast<libsumo::TraCIDouble> (VehDataSubscribeTraciResults[libsumo::VAR_LENGTH]);
+	CurVehData.length = tempDoublePtr->value;
 
+	tempDoublePtr = static_pointer_cast<libsumo::TraCIDouble> (VehDataSubscribeTraciResults[libsumo::VAR_WIDTH]);
+	CurVehData.width = tempDoublePtr->value;
+
+	tempDoublePtr = static_pointer_cast<libsumo::TraCIDouble> (VehDataSubscribeTraciResults[libsumo::VAR_HEIGHT]);
+	CurVehData.height = tempDoublePtr->value;
 	//=================
 	// get vehicle indicators
 	//=================
