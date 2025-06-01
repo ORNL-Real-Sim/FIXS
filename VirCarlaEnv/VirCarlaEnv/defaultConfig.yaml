@@ -12,15 +12,15 @@ SimulationSetup:
     # Simulation end time
     # if NOT specificed, SimulationEndTime will be set to a large value (90000 seconds)
     #--------------------------------------------------
-  SimulationEndTime: 33000
+  SimulationEndTime: 250
 
     # specify which traffic simulator
     #--------------------------------------------------
   SelectedTrafficSimulator: 'SUMO'
 
     # default will send all
-  VehicleMessageField: [id, type, speed, acceleration, positionX, positionY, positionZ,
-    color, linkId, laneId, distanceTravel, speedDesired]
+  VehicleMessageField: [id, type, speed, acceleration, positionX, positionY, positionZ, heading
+    color, linkId, laneId, distanceTravel, speedDesired, grade, length, width, height]
 
     # by default it is false 
   EnableExternalDynamics: true   # use this so that simulink will control the response
@@ -50,7 +50,7 @@ ApplicationSetup:
     port:
     - 430
 
-CarlaClientSetup:
+CarlaSetup:
     # whether or not enable Carla (default: false)
     EnableCosimulation: true
     
@@ -58,13 +58,19 @@ CarlaClientSetup:
     # if false, ego state is sent from User.cpp 
     EnableEgoSimulink: false
     
-    # Ip and Port settings 
+    # Carla Server Ip and Port settings 
     CarlaServerIP: 127.0.0.1
     
-    CarlaServer: 2000
+    CarlaServerPort: 2000
+    # Carla Client Ip and Port settings 
+    CarlaClientIP: 127.0.0.1
+
+    CarlaClientPort: 2000
+
+    CarlaMap: Town01
+
+    # default Traffic Objects updates every 0.1 seconds
+    TimeStep: 0.1
     
-    # refresh rate, default Traffic Objects updates every 0.1 seconds
-    TrafficRefreshRate: 0.1
-    
-    # ego settings
-    EgoIds: ['ego']
+    # ego ids should be a subset of the vehicleSubscription ids
+    InterestedIds: ['ego']

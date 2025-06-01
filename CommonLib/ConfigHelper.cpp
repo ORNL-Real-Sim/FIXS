@@ -386,7 +386,87 @@ int ConfigHelper::getConfig(string configName) {
 		//printf("\nXil not specified as server or client! Will set Xil as client!\n");
 	}
 
+	// ===========================================================================
+	// 			READ Carla Setup section
+	// ===========================================================================
+	node = config["CarlaSetup"];
 
+	if (node["EnableCosimulation"]) {
+		CarlaSetup.EnableCosimulation = parserFlag(node, "EnableCosimulation");
+	}
+	else {
+		CarlaSetup.EnableCosimulation = false;
+	}
+
+	if (node["EnableEgoSimulink"]) {
+		CarlaSetup.EnableEgoSimulink = parserFlag(node, "EnableEgoSimulink");
+	}
+	else {
+		CarlaSetup.EnableEgoSimulink = false;
+	}
+
+	if (node["CarlaServerIP"]) {
+		CarlaSetup.CarlaServerIP = parserString(node, "CarlaServerIP");
+	}
+	else {
+		CarlaSetup.CarlaServerIP = "127.0.0.1";
+	}
+
+	if (node["CarlaServerPort"]) {
+		CarlaSetup.CarlaServerPort = parserInteger(node, "CarlaServerPort");
+	}
+	else {
+		CarlaSetup.CarlaServerPort = 2000;
+	}
+
+	if (node["CarlaClientIP"]) {
+		CarlaSetup.CarlaClientIP = parserString(node, "CarlaClientIP");
+	}
+	else {
+		if (SubscriptionVehicleList.vehicleSubscribeId_v.size() == 1) {
+			if (!ApplicationSetup.EnableApplicationLayer && XilSetup.EnableXil) {
+				CarlaSetup.CarlaClientIP = get<2>(XilSetup.VehicleSubscription[0])[0];
+			}
+			else {
+				CarlaSetup.CarlaClientIP = get<2>(ApplicationSetup.VehicleSubscription[0])[0];
+			}
+		}
+		else {
+			CarlaSetup.CarlaClientIP = "127.0.0.1";
+		}
+	}
+
+	if (node["CarlaClientPort"]) {
+		CarlaSetup.CarlaClientPort = parserInteger(node, "CarlaClientPort");
+	}
+	else {
+		if (SubscriptionVehicleList.vehicleSubscribeId_v.size() == 1) {
+			if (!ApplicationSetup.EnableApplicationLayer && XilSetup.EnableXil) {
+				CarlaSetup.CarlaClientPort = get<3>(XilSetup.VehicleSubscription[0])[0];
+			}
+			else {
+				CarlaSetup.CarlaClientPort = get<3>(ApplicationSetup.VehicleSubscription[0])[0];
+			}
+		}
+		else {
+			CarlaSetup.CarlaClientPort = 2001;
+		}
+	}
+	if (node["TrafficRefreshRate"]) {
+		CarlaSetup.TrafficRefreshRate = parserDouble(node, "TrafficRefreshRate");
+	}
+	else {
+		CarlaSetup.TrafficRefreshRate = 0.1;
+		//printf("\nCarMaker Port not specified! Will use 7331 as default!\n");
+	}
+
+	if (node["InterestedIds"]) {
+		parserStringVector(node, "InterestedIds", CarlaSetup.InterestedIds);
+	}
+	else {
+		CarlaSetup.InterestedIds = {"ego"};
+		printf("\nDefault to track actor with id ego\n");
+	}
 
 	return 0;
 }
