@@ -109,6 +109,26 @@ struct CarMakerSetup_t {
 
 };
 
+struct CarlaSetup_t {
+	bool EnableCosimulation;
+
+	bool EnableEgoSimulink;
+
+	std::string CarlaServerIP;
+
+	int CarlaServerPort;
+
+	std::string CarlaClientIP;
+
+	int CarlaClientPort;
+
+	std::string CarlaMap;
+
+	double TrafficRefreshRate;
+
+	std::vector<std::string> InterestedIds;
+
+};
 
 struct SumoSetup_t {
 
@@ -178,6 +198,7 @@ public:
 	XilSetup_t XilSetup;
 	CarMakerSetup_t CarMakerSetup;
 	SumoSetup_t SumoSetup;
+	CarlaSetup_t CarlaSetup;
 
 
 
