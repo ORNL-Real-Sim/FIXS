@@ -137,15 +137,14 @@ int main(int argc, const char* argv[]) {
     try {
         cc::Client client = cc::Client(carlaServerIp, carlaServerPort);
 		// initialize carla client and world
-        cc::World world = client.GetWorld();
         std::cout << "Client API version : " << client.GetClientVersion() << '\n';
         std::cout << "Server API version : " << client.GetServerVersion() << '\n';
-        // Enable synchronous mode
-        cr::EpisodeSettings settings = world.GetSettings();
+        
         // To be replaced with the actual Carla Map from configuration file
         std::cout << "Loading world: " << carlaMap << std::endl;
         cc::World world = client.LoadWorld(carlaMap);
-        auto settings = world.GetSettings();
+        // Enable synchronous mode
+        cr::EpisodeSettings settings = world.GetSettings();
         if (!settings.synchronous_mode) {
             settings.synchronous_mode = true;            // Turn on synchronous mode
 			settings.fixed_delta_seconds = trafficRefreshRate;         // time step of 0.1 seconds
@@ -210,7 +209,7 @@ int main(int argc, const char* argv[]) {
 				mapSumoActor[tmpVehData.id] = Actor(tmpVehData.id, tmpVehData.type, tmpTransform, tmpExtent);
 				setCurrentSumoIds.insert(tmpVehData.id);
             }
-			// Check if the mapSumoActor contains vehicles that are not in the current step
+			// Check if the mapSumoActor contains vehicles that are not in the current step (vehicles have left the simulation)
 			// If so, remove them from the mapSumoActor and mapCarlaActor
             for (auto it : mapSumoActor) {
                 std::string sumoActorId = it.first;
@@ -243,16 +242,16 @@ int main(int argc, const char* argv[]) {
                 }
             }
 
-            for (auto it : mapSumoActor) {
-                std::string sumoActorId = it.first;
-                Actor sumoActor = it.second;
-                cg::Transform carlaTransform = BridgeHelper::map_transfrom_sumo_to_carla(sumoActor.transform, sumoActor.extent);
+            for (const auto& pair : mapSumoActor) {
+                std::string sumoActorId = pair.first;
+                Actor sumoActor = pair.second;
+                cg::Transform carlaTransform = BridgeHelper::map_transfrom_Sumo_to_Carla(sumoActor.transform, sumoActor.extent);
                 // =======================================================
                 // Spawn the Sumo actors that are not in the current step
                 // =======================================================
                 if (!MAP_CONTAINS_KEY(mapCarlaActor, sumoActorId)) {
 					
-                    std::string carlaActorTypeId = BridgeHelper::map_sumo_vehicle_class_to_carla_typeId(sumoActor.vclass);
+                    std::string carlaActorTypeId = BridgeHelper::map_Sumo_vClass_to_Carla_blueprintId(sumoActor.vClass);
                     auto blueprint = blueprint_library->Find(carlaActorTypeId);
                     if (!blueprint) {
                         std::cerr << "Blueprint not found: " << carlaActorTypeId << std::endl;
@@ -310,7 +309,7 @@ int main(int argc, const char* argv[]) {
             // Note: In the control script, the control commands should be applied before the world.wait_for_tick() function.
             world.Tick(timeout_1s);
 
-			//The posions (transform) of the interested actors should be updated by the other script, so we just retrive the current transform
+			//The posions (transform) of the interested actors should be updated by the control script, so we just retrive the current transform
             //of the interested actors
             for (const auto& sumoId : setInterestedIds) {
                 if (MAP_CONTAINS_KEY(mapSumoToCarla, sumoId)) {
@@ -326,12 +325,13 @@ int main(int argc, const char* argv[]) {
                         cg::Rotation sumoRotation = sumoTransform.rotation;
                         VehFullData_t tmpVehData;
 						tmpVehData.id = sumoId;
-						tmpVehData.type = mapSumoActor[sumoId].vclass;
+						tmpVehData.type = mapSumoActor[sumoId].vClass;
 						tmpVehData.positionX = sumoLocation.x;
 						tmpVehData.positionY = sumoLocation.y;
 						tmpVehData.positionZ = sumoLocation.z;
 						tmpVehData.heading = sumoRotation.yaw;
 						tmpVehData.grade = sumoRotation.pitch * M_PI / 180.0; // Convert to radians
+						
 						tmpVehData.length = carlaExtent.x * 2; // The extent is half the length, so multiply by 2
 						tmpVehData.width = carlaExtent.y * 2; // The extent is half the width, so multiply by 2
 						tmpVehData.height = carlaExtent.z * 2; // The extent is half the height, so multiply by 2
@@ -339,7 +339,34 @@ int main(int argc, const char* argv[]) {
 					}
                 }
             }
+            
+            for (auto& pair : mapSumoActor) {
+                std::string sumoId = pair.first;
+                Actor& sumoActor = pair.second;
+                // If the sumo actor' extent has not been set back, we use the carla actor's extent and send to FIXs
+				// flagged: true means the extent has been send to FIXs, false means the extent has not been set back
+                if (SET_CONTAINS_ID(setInterestedIds, sumoId) || sumoActor.flagged) {
+                    // Do nothing
+                }
+                else {
+                    if (MAP_CONTAINS_KEY(mapSumoToCarla, sumoId)) {
+						sumoActor.flagged = true; // Set the flagged to true, so that we don't send the extent again
+                        std::string carlaActorId = mapSumoToCarla[sumoId];
+                        carla::SharedPtr<cc::Actor> carlaActor = world.GetActor(std::stoul(carlaActorId));
+                        cg::Vector3D carlaExtent = carlaActor->GetBoundingBox().extent;
+                        // Update the Sumo actor's transform
+                        if (MAP_CONTAINS_KEY(mapSumoActor, sumoId)) {
+                            VehFullData_t tmpVehData;
+                            tmpVehData.id = sumoId;
 
+                            tmpVehData.length = carlaExtent.x * 2; // The extent is half the length, so multiply by 2
+                            tmpVehData.width = carlaExtent.y * 2; // The extent is half the width, so multiply by 2
+                            tmpVehData.height = carlaExtent.z * 2; // The extent is half the height, so multiply by 2
+                            msgHelper.VehDataSend_um[socketHelper.serverSock[sockId]].push_back(tmpVehData);
+                        }
+                    }
+                }
+            }
             // =======================================================================================
 			// Semd data to the traffic layer server, to update the positions of the interested actors
             // =======================================================================================
