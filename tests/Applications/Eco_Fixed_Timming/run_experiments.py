@@ -199,9 +199,8 @@ def run_settings(config):
         
 # main function
 if __name__ == '__main__':
-    # config_file = './Experiments/experiment_config.yaml'
-    # with open(config_file, 'r') as f:
-    #     config = yaml.load(f, Loader=yaml.FullLoader)
+    config_file = './Experiments/experiment_config.yaml'
+    with open(config_file, 'r') as f:
+        config = yaml.load(f, Loader=yaml.FullLoader)
     
-    # run_settings(config)
-    run_simulink('.\\', 'EV_longitude')
+    run_settings(config)

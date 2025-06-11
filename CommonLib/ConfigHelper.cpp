@@ -452,6 +452,13 @@ int ConfigHelper::getConfig(string configName) {
 			CarlaSetup.CarlaClientPort = 2001;
 		}
 	}
+	if (node["CarlaMap"]) {
+		CarlaSetup.CarlaMap = parserString(node, "CarlaMap");
+	}
+	else {
+		CarlaSetup.CarlaMap = "Town01";
+		printf("\nCarla Map not specified! Will use Town01 as default!\n");
+	}
 	if (node["TrafficRefreshRate"]) {
 		CarlaSetup.TrafficRefreshRate = parserDouble(node, "TrafficRefreshRate");
 	}
