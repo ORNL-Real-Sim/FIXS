@@ -122,7 +122,7 @@ struct CarlaSetup_t {
 
 	int CarlaClientPort;
 
-	std::string CarlaMap;
+	std::string CarlaMapName;
 
 	double TrafficRefreshRate;
 

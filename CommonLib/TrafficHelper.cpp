@@ -585,6 +585,9 @@ int TrafficHelper::sendToSUMO(double simTime, MsgHelper Msg_c) {
 
 				}
 			}
+			/*else if (ENABLE_CARLA) {
+
+			}*/
 			else {
 				if (1 && find(VehIdInSimulator.begin(), VehIdInSimulator.end(), idStr) != VehIdInSimulator.end()) {
 					if (ENABLE_EXT_DYN) {

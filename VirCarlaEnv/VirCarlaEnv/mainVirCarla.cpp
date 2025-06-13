@@ -20,10 +20,12 @@
 #include <carla/client/Map.h>
 #include <carla/client/Sensor.h>
 #include <carla/client/TimeoutException.h>
+#include <carla/trafficmanager/TrafficManager.h>
 #include <carla/geom/Transform.h>
 #include <carla/image/ImageIO.h>
 #include <carla/image/ImageView.h>
 #include <carla/sensor/data/Image.h>
+#include <carla/rpc/ActorDescription.h>
 #include <carla/Memory.h>
 #include "BridgeHelper.h"
 #include "MsgHelper.h"
@@ -44,7 +46,7 @@ using namespace std::string_literals;
 #define EXPECT_TRUE(pred) if (!(pred)) { throw std::runtime_error(#pred); }
 #define SET_CONTAINS_ID(set, value) ((set).find(value) != (set).end())
 #define MAP_CONTAINS_KEY(map, key) ((map).find(key) != (map).end())
-
+#define SPAWN_OFFSET_Z 25.0f // Offset for spawning actors above the ground
 static void show_usage(std::string name)
 {
     std::cerr << "Usage: " << name << std::endl
@@ -52,6 +54,58 @@ static void show_usage(std::string name)
         << "\t-h,--help\t\tShow this help message\n"
         << "\t-f,--file PATH\\FILENAME\tSpecify the path and filename of configuration yaml file"
         << std::endl;
+}
+
+double periodicCosineSpeed(double t, double T_period, double v_max) {
+    if (T_period <= 0.0) return 0.0;
+
+    // Time within the current period
+    double t_in_period = std::fmod(t, T_period);
+
+    // Compute speed using cosine profile within the period
+    return 0.5 * v_max * (1 - std::cos(2 * M_PI * t_in_period / T_period));
+}
+
+void drawCircle(carla::client::DebugHelper debug,
+    const carla::geom::Location& center,
+    float radius = 50.0f,
+    int segments = 64,
+    float z_offset = 0.5f,
+    float thickness = 0.1f,
+    float life_time = 0.0f,  // 0 = forever
+    bool persistent = false,
+    bool fill = true) {
+
+    using carla::geom::Location;
+    using carla::rpc::Color;
+    carla::geom::Location adjusted_center(center.x, center.y, 0.0f);
+	adjusted_center = adjusted_center + carla::geom::Location{ 0.0f, 0.0f, z_offset };
+
+    // Adjust center Z level
+
+    for (int i = 0; i < segments; ++i) {
+        float angle1 = (2 * M_PI * i) / segments;
+        float angle2 = (2 * M_PI * (i + 1)) / segments;
+
+        Location p1 = adjusted_center + Location{
+            radius * std::cos(angle1),
+            radius * std::sin(angle1),
+            0.0f
+        };
+        Location p2 = adjusted_center + Location{
+            radius * std::cos(angle2),
+            radius * std::sin(angle2),
+            0.0f
+        };
+
+        // Perimeter circle
+        debug.DrawLine(p1, p2, thickness, carla::client::DebugHelper::Color(255, 0, 0), life_time, persistent);
+
+        if (fill) {
+            // Fill with "triangle fans" (radial lines)
+            debug.DrawLine(adjusted_center, p1, thickness * 0.5f, carla::client::DebugHelper::Color(255, 100, 100), life_time, persistent);
+        }
+    }
 }
 
 int main(int argc, const char* argv[]) {
@@ -113,21 +167,23 @@ int main(int argc, const char* argv[]) {
     int carlaServerPort = carlaSetup.CarlaServerPort;
 	std::string carlaClientIp = carlaSetup.CarlaClientIP;
 	int carlaClientPort = carlaSetup.CarlaClientPort;
-	std::string carlaMap = carlaSetup.CarlaMap;
+	std::string carlaMapName = carlaSetup.CarlaMapName;
 	double trafficRefreshRate = carlaSetup.TrafficRefreshRate;
 	
     std::unordered_set<std::string> setInterestedIds;
     for (const std::string& id : carlaSetup.InterestedIds) {
         setInterestedIds.insert(id);
 	}
-
+	// This is important for the reveived data parser to work correctly
+    msgHelper.getConfig(configHelper);
 	// Setup Connection to the Traffic Server
     //void SocketHelper::socketSetup(vector <string> SERVERADDR_UserInput, vector <int> SERVERPORT_UserInput) {
 	std::vector<std::string> SERVERADDR_UserInput = { carlaClientIp };
     std::vector<int> SERVERPORT_UserInput = { carlaClientPort };
-	socketHelper.socketSetup(SERVERADDR_UserInput, SERVERPORT_UserInput);
     socketHelper.disableWaitClientTrigger();
     socketHelper.disableServerTrigger();
+	socketHelper.socketSetup(SERVERADDR_UserInput, SERVERPORT_UserInput);
+
     if (socketHelper.initConnection(CarlaClientLogFile) < 0) {
         printf("Connect to Traffic Layer failed!\n");
         exit(-1);
@@ -141,25 +197,36 @@ int main(int argc, const char* argv[]) {
         std::cout << "Server API version : " << client.GetServerVersion() << '\n';
         
         // To be replaced with the actual Carla Map from configuration file
-        std::cout << "Loading world: " << carlaMap << std::endl;
-        cc::World world = client.LoadWorld(carlaMap);
+        std::cout << "Loading world: " << carlaMapName << std::endl;
+        cc::World carlaWorld = client.LoadWorld(carlaMapName);
+		carla::SharedPtr<carla::client::Map> carlaMap = carlaWorld.GetMap();
+        carla::SharedPtr<carla::client::Actor> carlaSpectator = carlaWorld.GetSpectator();
+
+        // Define a high top-down transform (e.g., 100 meters above 0,0)
+        carla::geom::Location top_down_location(150.0f, 150.0f, 550.0f);   // z = height
+        carla::geom::Rotation top_down_rotation(-90.0f, -90.0f, 0.0f);   // pitch -90 looks straight down
+
+        carla::geom::Transform top_down_view(top_down_location, top_down_rotation);
+
+        // Apply the transform
+        carlaSpectator->SetTransform(top_down_view);
         // Enable synchronous mode
-        cr::EpisodeSettings settings = world.GetSettings();
+        cr::EpisodeSettings settings = carlaWorld.GetSettings();
         if (!settings.synchronous_mode) {
             settings.synchronous_mode = true;            // Turn on synchronous mode
 			settings.fixed_delta_seconds = trafficRefreshRate;         // time step of 0.1 seconds
             //the time_out is of carla::time_duration
-            world.ApplySettings(settings, timeout_1s);
+            carlaWorld.ApplySettings(settings, timeout_1s);
             std::cout << "Synchronous mode enabled.\n";
         }
-        carla::SharedPtr<cc::BlueprintLibrary> blueprint_library = world.GetBlueprintLibrary();
+        carla::SharedPtr<cc::BlueprintLibrary> blueprint_library = carlaWorld.GetBlueprintLibrary();
 
 		// Map the Sumo Ids to Carla Ids
 		std::unordered_map<std::string, std::string> mapSumoToCarla;
 		// Map the Carla Ids to Sumo Ids
 		std::unordered_map<std::string, std::string> mapCarlaToSumo;
 
-		uint32_t simTime = 0; // Initialize the current simulation time
+        float simTime = 0; // Initialize the current simulation time
         std::unordered_map<std::string, Actor> mapSumoActor;
 		std::unordered_map<std::string, Actor> mapCarlaActor;
 
@@ -175,16 +242,17 @@ int main(int argc, const char* argv[]) {
             // ==========================================
             int simStateRecv;
             float simTimeRecv;
+            msgHelper.clearRecvStorage();
             for (unsigned int iServer = 0; iServer < socketHelper.serverSock.size(); iServer++) {
 
                 int simStateRecv;
                 float simTimeRecv;
 
                 if (enableVerbose) {
-                    printf("receiving server at port %d\n", socketHelper.serverSock[iServer]);
+                    printf("receiving server at port %d\n", socketHelper.SERVERPORT[iServer]);
 
                     FILE* f = fopen(CarlaClientLogFile.c_str(), "a");
-                    fprintf(f, "recv server: %d\n", socketHelper.serverSock[iServer]);
+                    fprintf(f, "recv server: %d\n", socketHelper.SERVERPORT[iServer]);
                     fclose(f);
                 }
 
@@ -206,63 +274,109 @@ int main(int argc, const char* argv[]) {
 				cg::Rotation tmpRotation(tmpVehData.grade * 180/M_PI, tmpVehData.heading, 0.0f);
 				cg::Vector3D tmpExtent(tmpVehData.length / 2, tmpVehData.width / 2, tmpVehData.height / 2);
 				cg::Transform tmpTransform(tmpLocation, tmpRotation);
-				mapSumoActor[tmpVehData.id] = Actor(tmpVehData.id, tmpVehData.type, tmpTransform, tmpExtent);
+				mapSumoActor[tmpVehData.id] = Actor(tmpVehData.id, tmpVehData.vehicleClass, tmpTransform, tmpExtent);
 				setCurrentSumoIds.insert(tmpVehData.id);
+                
             }
+			// print out the map sumo actor
+            /*for (const auto& pair : mapSumoActor) {
+                std::cout << "Sumo Actor ID: " << pair.first 
+                          << ", Type: " << pair.second.vClass 
+                          << std::endl;
+			}*/
 			// Check if the mapSumoActor contains vehicles that are not in the current step (vehicles have left the simulation)
 			// If so, remove them from the mapSumoActor and mapCarlaActor
-            for (auto it : mapSumoActor) {
-                std::string sumoActorId = it.first;
+            for (auto it = mapSumoActor.begin(); it != mapSumoActor.end(); ) {
+                std::string sumoActorId = it->first;
 
                 if (!SET_CONTAINS_ID(setCurrentSumoIds, sumoActorId)) {
-                    // If the sumo actor is not in the current step, remove it from the map
                     std::cout << "Removing Sumo actor with ID: " << sumoActorId << std::endl;
-					// Remove from mapSumoActor
-					mapSumoActor.erase(sumoActorId);
-					// Remove from mapCarlaActor
+
+                    // Remove associated Carla actor
                     if (MAP_CONTAINS_KEY(mapSumoToCarla, sumoActorId)) {
                         std::string carlaActorId = mapSumoToCarla[sumoActorId];
                         if (MAP_CONTAINS_KEY(mapCarlaActor, carlaActorId)) {
-                            std::cout << "Removing Carla actor with ID: " << carlaActorId << std::endl;
-                            // Remove the actor from Carla world
-                            carla::SharedPtr<cc::Actor> carlaActor = world.GetActor(std::stoul(carlaActorId));
+                            auto carlaActor = carlaWorld.GetActor(std::stoul(carlaActorId));
                             if (carlaActor) {
                                 carlaActor->Destroy();
                                 std::cout << "Destroyed Carla actor with ID: " << carlaActorId << std::endl;
                             }
+                            mapCarlaActor.erase(carlaActorId);
                         }
-                        // Remove from mapCarlaActor
-                        mapCarlaActor.erase(carlaActorId);
-                        // Remove from mapSumoToCarla
                         mapSumoToCarla.erase(sumoActorId);
-                        // Remove from mapCarlaToSumo
                         mapCarlaToSumo.erase(carlaActorId);
-
                     }
+
+                    // Safely erase from mapSumoActor and advance the iterator
+                    it = mapSumoActor.erase(it);
+                }
+                else {
+                    ++it;
                 }
             }
 
             for (const auto& pair : mapSumoActor) {
                 std::string sumoActorId = pair.first;
                 Actor sumoActor = pair.second;
+                
+
                 cg::Transform carlaTransform = BridgeHelper::map_transfrom_Sumo_to_Carla(sumoActor.transform, sumoActor.extent);
+
+                carla::SharedPtr<carla::client::Waypoint> carlaWaypoint = carlaMap->GetWaypoint(carlaTransform.location);
+                carla::geom::Transform waypointTransform = carlaWaypoint->GetTransform();
+                // =======================================================
+                // Get the waypoint of the carla transform
+                // This is to ensure that the carla transform is on the road
+                // =======================================================
+                carlaTransform.location = waypointTransform.location;
+				// Add a small offset to the z coordinate to avoid collision with the ground
+                carlaTransform.location.z = carlaTransform.location.z + SPAWN_OFFSET_Z;
+    //            // [Optianal] Use the waypoint's rotation to ensure the vehicle is aligned with the road
+				carlaTransform.rotation = waypointTransform.rotation; 
+                //print the sumo and carla transform
+
+                
                 // =======================================================
                 // Spawn the Sumo actors that are not in the current step
                 // =======================================================
-                if (!MAP_CONTAINS_KEY(mapCarlaActor, sumoActorId)) {
+                if (!MAP_CONTAINS_KEY(mapSumoToCarla , sumoActorId)) {
 					
                     std::string carlaActorTypeId = BridgeHelper::map_Sumo_vClass_to_Carla_blueprintId(sumoActor.vClass);
-                    auto blueprint = blueprint_library->Find(carlaActorTypeId);
-                    if (!blueprint) {
+                    auto vehicle_blueprint = blueprint_library->Find(carlaActorTypeId);
+
+                    if (!vehicle_blueprint) {
                         std::cerr << "Blueprint not found: " << carlaActorTypeId << std::endl;
                         return 1;
                     }
-                    auto carlaActor = world.TrySpawnActor(*blueprint, carlaTransform);
+					
+					std::cout << "Spawning actor with Carla Type ID: " << carlaActorTypeId << " SUMO ID:" << sumoActorId << std::endl;
+                    carla::SharedPtr<cc::Actor> carlaActor = carlaWorld.SpawnActor(*vehicle_blueprint, carlaTransform);
+					//carlaActor->SetSimulatePhysics(false);
                     if (carlaActor) {
-                        std::cout << "Spawned actor with ID: " << carlaActor->GetId() << std::endl;
+                        std::cout << "Spawned actor with Carla ID: " << carlaActor->GetId() << " SUMO ID:" << sumoActorId << std::endl;
+                        if (sumoActorId == "ego") {
+                            std::cout << "Sumo Transform:" << std::endl;
+                            std::cout << "  Location -> x: " << sumoActor.transform.location.x
+                                << ", y: " << sumoActor.transform.location.y
+                                << ", z: " << sumoActor.transform.location.z << std::endl;
+
+                            std::cout << "  Rotation -> pitch: " << sumoActor.transform.rotation.pitch
+                                << ", yaw: " << sumoActor.transform.rotation.yaw
+                                << ", roll: " << sumoActor.transform.rotation.roll << std::endl;
+
+                            std::cout << "Carla Transform:" << std::endl;
+                            std::cout << "  Location -> x: " << carlaTransform.location.x
+                                << ", y: " << carlaTransform.location.y
+                                << ", z: " << carlaTransform.location.z << std::endl;
+
+                            std::cout << "  Rotation -> pitch: " << carlaTransform.rotation.pitch
+                                << ", yaw: " << carlaTransform.rotation.yaw
+                                << ", roll: " << carlaTransform.rotation.roll << std::endl;
+                        }
+                        
                     }
                     else {
-                        std::cerr << "Failed to spawn actor. " << carlaActorTypeId << std::endl;
+                        std::cerr << "Failed to spawn actor. " << sumoActorId << std::endl;
                         return 1;
                     }
                     // convert the carla actor id (uint_32 to string)
@@ -279,17 +393,37 @@ int main(int argc, const char* argv[]) {
                     std::string carlaActorId = mapSumoToCarla[sumoActorId];
 					
                     if (MAP_CONTAINS_KEY(mapCarlaActor, carlaActorId)) {
-                        if (SET_CONTAINS_ID(setInterestedIds, sumoActorId)) {
+                        //if (SET_CONTAINS_ID(setInterestedIds, sumoActorId)) {
+                        if (false){
                             
                         }
                         else {
                             // If not interested, update its position according to the sumo actor
                             // convert the id back to uint32_t
-                            carla::SharedPtr<cc::Actor> carlaActor = world.GetActor(std::stoul(carlaActorId));
+                            carla::SharedPtr<cc::Actor> carlaActor = carlaWorld.GetActor(std::stoul(carlaActorId));
                             // update the actor's transform
                             if (carlaActor) {
                                 carlaActor->SetTransform(carlaTransform);
-                                std::cout << "Updated actor with ID: " << carlaActorId << std::endl;
+                                std::cout << "Updating actor with ID: " << carlaActorId << " SUMO ID:" << sumoActorId << std::endl;
+                                if (sumoActorId == "ego") {
+                                    std::cout << "Sumo Transform:" << std::endl;
+                                    std::cout << "  Location -> x: " << sumoActor.transform.location.x
+                                        << ", y: " << sumoActor.transform.location.y
+                                        << ", z: " << sumoActor.transform.location.z << std::endl;
+
+                                    std::cout << "  Rotation -> pitch: " << sumoActor.transform.rotation.pitch
+                                        << ", yaw: " << sumoActor.transform.rotation.yaw
+                                        << ", roll: " << sumoActor.transform.rotation.roll << std::endl;
+
+                                    std::cout << "Carla Transform:" << std::endl;
+                                    std::cout << "  Location -> x: " << carlaTransform.location.x
+                                        << ", y: " << carlaTransform.location.y
+                                        << ", z: " << carlaTransform.location.z << std::endl;
+
+                                    std::cout << "  Rotation -> pitch: " << carlaTransform.rotation.pitch
+                                        << ", yaw: " << carlaTransform.rotation.yaw
+                                        << ", roll: " << carlaTransform.rotation.roll << std::endl;
+                                }
                                 mapCarlaActor[carlaActorId].transform = carlaTransform;
                             }
                             else {
@@ -307,14 +441,14 @@ int main(int argc, const char* argv[]) {
             // these are the ego vehicles in this case. We want to get the updated positions of the interested actors
             // by sending back the updated positions to the Sumo server.
             // Note: In the control script, the control commands should be applied before the world.wait_for_tick() function.
-            world.Tick(timeout_1s);
+            carlaWorld.Tick(timeout_1s);
 
 			//The posions (transform) of the interested actors should be updated by the control script, so we just retrive the current transform
             //of the interested actors
             for (const auto& sumoId : setInterestedIds) {
                 if (MAP_CONTAINS_KEY(mapSumoToCarla, sumoId)) {
                     std::string carlaActorId = mapSumoToCarla[sumoId];
-                    carla::SharedPtr<cc::Actor> carlaActor = world.GetActor(std::stoul(carlaActorId));
+                    carla::SharedPtr<cc::Actor> carlaActor = carlaWorld.GetActor(std::stoul(carlaActorId));
 					cg::Transform carlaTransform = carlaActor->GetTransform();
                     cg::Vector3D carlaExtent = carlaActor->GetBoundingBox().extent;
                     cg::Transform sumoTransform = BridgeHelper::map_transfrom_Carla_to_Sumo(carlaTransform, carlaExtent);
@@ -326,6 +460,9 @@ int main(int argc, const char* argv[]) {
                         VehFullData_t tmpVehData;
 						tmpVehData.id = sumoId;
 						tmpVehData.type = mapSumoActor[sumoId].vClass;
+                        double simulatedSpeed = periodicCosineSpeed(simTime, 8.0f, 20.0f);
+						std::cout << "Simulated Speed: " << simulatedSpeed << std::endl;
+						tmpVehData.speedDesired = simulatedSpeed;
 						tmpVehData.positionX = sumoLocation.x;
 						tmpVehData.positionY = sumoLocation.y;
 						tmpVehData.positionZ = sumoLocation.z;
@@ -336,37 +473,44 @@ int main(int argc, const char* argv[]) {
 						tmpVehData.width = carlaExtent.y * 2; // The extent is half the width, so multiply by 2
 						tmpVehData.height = carlaExtent.z * 2; // The extent is half the height, so multiply by 2
 						msgHelper.VehDataSend_um[socketHelper.serverSock[sockId]].push_back(tmpVehData);
+                        // Apply the transform
+						carla::geom::Location tmpLocation = carlaTransform.location;
+                        tmpLocation.z += 150.0; // Set height to 50 meters above the ground
+                        //pitch = -90.0, yaw = 0.0, roll = 0.0
+						carla::geom::Rotation tmpRotation(-90.0f, 0.0f, 0.0f);
+                        cg::Transform tmpTransform(tmpLocation, tmpRotation);
+                        carlaSpectator->SetTransform(tmpTransform);
+                        drawCircle(carlaWorld.MakeDebugHelper(), tmpLocation, 50.0f, 64, 0.0f);
 					}
                 }
             }
             
-            for (auto& pair : mapSumoActor) {
-                std::string sumoId = pair.first;
-                Actor& sumoActor = pair.second;
-                // If the sumo actor' extent has not been set back, we use the carla actor's extent and send to FIXs
-				// flagged: true means the extent has been send to FIXs, false means the extent has not been set back
-                if (SET_CONTAINS_ID(setInterestedIds, sumoId) || sumoActor.flagged) {
-                    // Do nothing
-                }
-                else {
-                    if (MAP_CONTAINS_KEY(mapSumoToCarla, sumoId)) {
-						sumoActor.flagged = true; // Set the flagged to true, so that we don't send the extent again
-                        std::string carlaActorId = mapSumoToCarla[sumoId];
-                        carla::SharedPtr<cc::Actor> carlaActor = world.GetActor(std::stoul(carlaActorId));
-                        cg::Vector3D carlaExtent = carlaActor->GetBoundingBox().extent;
-                        // Update the Sumo actor's transform
-                        if (MAP_CONTAINS_KEY(mapSumoActor, sumoId)) {
-                            VehFullData_t tmpVehData;
-                            tmpVehData.id = sumoId;
-
-                            tmpVehData.length = carlaExtent.x * 2; // The extent is half the length, so multiply by 2
-                            tmpVehData.width = carlaExtent.y * 2; // The extent is half the width, so multiply by 2
-                            tmpVehData.height = carlaExtent.z * 2; // The extent is half the height, so multiply by 2
-                            msgHelper.VehDataSend_um[socketHelper.serverSock[sockId]].push_back(tmpVehData);
-                        }
-                    }
-                }
-            }
+    //        for (auto& pair : mapSumoActor) {
+    //            std::string sumoId = pair.first;
+    //            Actor& sumoActor = pair.second;
+    //            // If the sumo actor' extent has not been set back, we use the carla actor's extent and send to FIXs
+				//// flagged: true means the extent has been send to FIXs, false means the extent has not been set back
+    //            if (SET_CONTAINS_ID(setInterestedIds, sumoId) || sumoActor.flagged) {
+    //                // Do nothing
+    //            }
+    //            else {
+    //                if (MAP_CONTAINS_KEY(mapSumoToCarla, sumoId)) {
+				//		sumoActor.flagged = true; // Set the flagged to true, so that we don't send the extent again
+    //                    std::string carlaActorId = mapSumoToCarla[sumoId];
+    //                    carla::SharedPtr<cc::Actor> carlaActor = carlaWorld.GetActor(std::stoul(carlaActorId));
+    //                    cg::Vector3D carlaExtent = carlaActor->GetBoundingBox().extent;
+    //                    // Update the Sumo actor's transform
+    //                    if (MAP_CONTAINS_KEY(mapSumoActor, sumoId)) {
+    //                        VehFullData_t tmpVehData;
+    //                        tmpVehData.id = sumoId;
+    //                        tmpVehData.length = carlaExtent.x * 2; // The extent is half the length, so multiply by 2
+    //                        tmpVehData.width = carlaExtent.y * 2; // The extent is half the width, so multiply by 2
+    //                        tmpVehData.height = carlaExtent.z * 2; // The extent is half the height, so multiply by 2
+    //                        msgHelper.VehDataSend_um[socketHelper.serverSock[sockId]].push_back(tmpVehData);
+    //                    }
+    //                }
+    //            }
+    //        }
             // =======================================================================================
 			// Semd data to the traffic layer server, to update the positions of the interested actors
             // =======================================================================================
@@ -378,10 +522,10 @@ int main(int argc, const char* argv[]) {
                 float simTimeRecv;
 
                 if (enableVerbose) {
-                    printf("sending server at port %d\n", socketHelper.serverSock[iServer]);
+                    printf("sending server at port %d\n", socketHelper.SERVERPORT[iServer]);
 
                     FILE* f = fopen(CarlaClientLogFile.c_str(), "a");
-                    fprintf(f, "send server: %d\n", socketHelper.serverSock[iServer]);
+                    fprintf(f, "send server: %d\n", socketHelper.SERVERPORT[iServer]);
                     fclose(f);
                 }
 
@@ -395,17 +539,19 @@ int main(int argc, const char* argv[]) {
                 };
             }
             simTime += trafficRefreshRate;
-            socketHelper.socketShutdown();
+            
 			msgHelper.clearRecvStorage();
             msgHelper.clearSendStorage();
         }
         
     }
     catch (const cc::TimeoutException& e) {
+        socketHelper.socketShutdown();
         std::cout << '\n' << e.what() << std::endl;
         return 1;
     }
     catch (const std::exception& e) {
+        socketHelper.socketShutdown();
         std::cout << "\nException: " << e.what() << std::endl;
         return 2;
     }

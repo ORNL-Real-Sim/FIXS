@@ -19,11 +19,8 @@ SimulationSetup:
   SelectedTrafficSimulator: "SUMO"
 
     # default will send all
-  VehicleMessageField: [id, type, speed, acceleration, positionX, positionY, positionZ, heading
+  VehicleMessageField: [id, type, vehicleClass, speed, acceleration, positionX, positionY, positionZ, heading
     color, linkId, laneId, distanceTravel, speedDesired, grade, length, width, height]
-
-    # by default it is false 
-  EnableExternalDynamics: true   # use this so that simulink will control the response
 
   TrafficSimulatorIP: "127.0.0.1"
   TrafficSimulatorPort: 1337
@@ -71,7 +68,7 @@ CarlaSetup:
 
     CarlaClientPort: 430
 
-    CarlaMap: "Town01"
+    CarlaMapName: "Town04"
 
     # default Traffic Objects updates every 0.1 seconds
     TrafficRefreshRate: 0.1
