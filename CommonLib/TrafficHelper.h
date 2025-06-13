@@ -139,6 +139,8 @@ public:
 
 	bool ENABLE_VEH_SIMULATOR = false;
 
+	bool ENABLE_CARLA = false;
+
 	double tSimuEnd = 90000;
 
 

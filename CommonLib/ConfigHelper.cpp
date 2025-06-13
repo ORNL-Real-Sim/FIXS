@@ -453,10 +453,10 @@ int ConfigHelper::getConfig(string configName) {
 		}
 	}
 	if (node["CarlaMap"]) {
-		CarlaSetup.CarlaMap = parserString(node, "CarlaMap");
+		CarlaSetup.CarlaMapName = parserString(node, "CarlaMapName");
 	}
 	else {
-		CarlaSetup.CarlaMap = "Town01";
+		CarlaSetup.CarlaMapName = "Town01";
 		printf("\nCarla Map not specified! Will use Town01 as default!\n");
 	}
 	if (node["TrafficRefreshRate"]) {

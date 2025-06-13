@@ -200,7 +200,11 @@ int main(int argc, char* argv[]) {
 	bool ENABLE_CLIENT = false;
 	bool ENABLE_VERBOSE = false;
 	bool ENABLE_EXT_DYN = false;
+	// Potentially, the 'ENABLE_VEH_SIMULATOR' and 'ENABLE_CARLA' flags can be merged into a single flag
+	// ENABLE_VEH_SIMULATOR: CarMaker or other vehicle simulator
+	// ENABLE_CARLA: CARLA simulator
 	bool ENABLE_VEH_SIMULATOR = false;
+	bool ENABLE_CARLA = false;
 
 	vector <int> selfServerPortAll = {};
 	vector <string> serverAddr = {};
@@ -257,6 +261,7 @@ int main(int argc, char* argv[]) {
 	}
 
 	ENABLE_VEH_SIMULATOR = Config_c.CarMakerSetup.EnableCosimulation;
+	ENABLE_CARLA = Config_c.CarlaSetup.EnableCosimulation;
 
 	if (ENABLE_VERBOSE) {
 		//FILE* f = fopen(MasterLogName.c_str(), "a");
@@ -522,7 +527,7 @@ int main(int argc, char* argv[]) {
 	Traffic_c.MasterLogName = MasterLogName;
 
 	Traffic_c.ENABLE_VEH_SIMULATOR = ENABLE_VEH_SIMULATOR;
-
+	Traffic_c.ENABLE_CARLA = ENABLE_CARLA;
 	/********************************************
 	* Message Setups
 	*********************************************/
