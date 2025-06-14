@@ -2,7 +2,7 @@ from re import T
 import carla
 
 carla_server_ip = '127.0.0.1'
-carla_server_port = 432
+carla_server_port = 422
 
 carla_client = carla.Client(carla_server_ip, carla_server_port)
 
@@ -37,7 +37,7 @@ def try_to_spawn_vehicle(world, location, rotation):
     vehicle_bp = world.get_blueprint_library().find('vehicle.mini.cooper_s')
     vehicle = world.try_spawn_actor(vehicle_bp, carla.Transform(location, rotation))
     return vehicle
-# world = carla_client.load_world('Town01')
+world = carla_client.load_world('Town01')
 world = carla_client.get_world()
 settings = world.get_settings()
 settings.synchronous_mode = False

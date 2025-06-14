@@ -34,25 +34,33 @@ public:
 
 
 
-struct Actor {
+struct SumoActor {
     std::string id;
+    std::string vType;
     std::string vClass;
-    carla::geom::Transform transform;
+    carla::geom::Transform sumoTransform;
+    carla::geom::Transform carlaTransform;
+	// The extent of the actor is the size of the bounding box in Carla
     carla::geom::Vector3D extent;
 	// Additional properties can be added as needed, e.g.:
-	bool flagged = false; // Indicates if the actor is flagged for some reason
+	// Indicates if the actor is spawned in Carla
+	bool spawnedInCarla = false;
+	carla::SharedPtr<carla::client::Actor> carlaActor = nullptr;
     //std::vector<std::string> signals;
     //carla::rpc::Color color;
 
-    Actor() = default;
-
-    Actor(const std::string& _id,
+    SumoActor() = default;
+	// Initialize an Actor with all required fields
+	// (vehicle id, vehicle type, vehicle class, transform, extent)
+    SumoActor(const std::string& _id,
+		const std::string& _vType,
         const std::string& _vClass,
-        const carla::geom::Transform& _transform,
+        const carla::geom::Transform& _sumoTransform,
         const carla::geom::Vector3D& _extent)
         : id(_id),
+		vType(_vType),
         vClass(_vClass),
-        transform(_transform),
+        sumoTransform(_sumoTransform),
         extent(_extent) {
     }
 };

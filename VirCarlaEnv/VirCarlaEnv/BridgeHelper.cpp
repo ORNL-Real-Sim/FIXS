@@ -8,10 +8,9 @@ carla::geom::Location BridgeHelper::offset = carla::geom::Location(0.06f, 328.61
 
 carla::geom::Transform BridgeHelper::map_transfrom_Sumo_to_Carla(const carla::geom::Transform& in_sumo_transform,
     const carla::geom::Vector3D& extent) {
-    using namespace carla::geom;
 
-    Location in_location = in_sumo_transform.location;
-    Rotation in_rotation = in_sumo_transform.rotation;
+    carla::geom::Location in_location = in_sumo_transform.location;
+    carla::geom::Rotation in_rotation = in_sumo_transform.rotation;
 
     float yaw = -1.0f * in_rotation.yaw + 90.0f;
     float pitch = in_rotation.pitch;
@@ -23,18 +22,17 @@ carla::geom::Transform BridgeHelper::map_transfrom_Sumo_to_Carla(const carla::ge
     x -= offset.x;
     y -= offset.y;
 
-    Location out_location{ x, -y, z };
-    Rotation out_rotation{ in_rotation.pitch, in_rotation.yaw - 90.0f, in_rotation.roll };
+    carla::geom::Location out_location{ x, -y, z };
+    carla::geom::Rotation out_rotation{ in_rotation.pitch, in_rotation.yaw - 90.0f, in_rotation.roll };
 
-    return Transform(out_location, out_rotation);
+    return carla::geom::Transform(out_location, out_rotation);
 }
 
 carla::geom::Transform BridgeHelper::map_transfrom_Carla_to_Sumo(const carla::geom::Transform& in_carla_transform,
     const carla::geom::Vector3D& extent) {
-    using namespace carla::geom;
 
-    Location in_location = in_carla_transform.location;
-    Rotation in_rotation = in_carla_transform.rotation;
+    carla::geom::Location in_location = in_carla_transform.location;
+    carla::geom::Rotation in_rotation = in_carla_transform.rotation;
 
     float yaw = -1.0f * in_rotation.yaw;
     float pitch = in_rotation.pitch;
@@ -46,10 +44,10 @@ carla::geom::Transform BridgeHelper::map_transfrom_Carla_to_Sumo(const carla::ge
     x += offset.x;
     y -= offset.y;
 
-    Location out_location{ x, -y, z };
-    Rotation out_rotation{ in_rotation.pitch, in_rotation.yaw + 90.0f, in_rotation.roll };
+    carla::geom::Location out_location{ x, -y, z };
+    carla::geom::Rotation out_rotation{ in_rotation.pitch, in_rotation.yaw + 90.0f, in_rotation.roll };
 
-    return Transform(out_location, out_rotation);
+    return carla::geom::Transform(out_location, out_rotation);
 }
 
 std::string BridgeHelper::map_Sumo_vClass_to_Carla_blueprintId(const std::string& vClass)

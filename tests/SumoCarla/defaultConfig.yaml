@@ -7,7 +7,7 @@ SimulationSetup:
   EnableRealSim: true
 
     # Whether or not to save verbose log during the simulation. skip log can potentially speed up
-  EnableVerboseLog: true
+  EnableVerboseLog: false
 
     # Simulation end time
     # if NOT specificed, SimulationEndTime will be set to a large value (90000 seconds)
@@ -19,8 +19,11 @@ SimulationSetup:
   SelectedTrafficSimulator: "SUMO"
 
     # default will send all
-  VehicleMessageField: [id, type, vehicleClass, speed, acceleration, positionX, positionY, positionZ, heading
+  VehicleMessageField: [id, type, vehicleClass, speed, acceleration, positionX, positionY, positionZ, heading,
     color, linkId, laneId, distanceTravel, speedDesired, grade, length, width, height]
+
+    # by default it is false 
+  EnableExternalDynamics: true   # use this so that simulink will control the response
 
   TrafficSimulatorIP: "127.0.0.1"
   TrafficSimulatorPort: 1337
@@ -43,7 +46,7 @@ ApplicationSetup:
     # 1. Receive data from FIXS LAYER
     # 2. Send data to XIL LAYER / Back to FIXS LAYER
   - type: "ego"
-    attribute: {id: ["ego"], radius: [200]}
+    attribute: {id: ["ego"], radius: [100]}
     ip: ["127.0.0.1"]
     port:
     - 430
@@ -52,6 +55,7 @@ XilSetup:
   EnableXil: false
 
 CarlaSetup:
+    EnableVerboseLog: false
     # whether or not enable Carla (default: false)
     EnableCosimulation: true
     
@@ -62,13 +66,13 @@ CarlaSetup:
     # Carla Server Ip and Port settings 
     CarlaServerIP: 127.0.0.1
     
-    CarlaServerPort: 2000
+    CarlaServerPort: 420
     # Carla Client Ip and Port settings 
     CarlaClientIP: 127.0.0.1
 
     CarlaClientPort: 430
 
-    CarlaMapName: "Town04"
+    CarlaMapName: "Town01"
 
     # default Traffic Objects updates every 0.1 seconds
     TrafficRefreshRate: 0.1
