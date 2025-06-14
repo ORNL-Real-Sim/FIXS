@@ -110,6 +110,7 @@ struct CarMakerSetup_t {
 };
 
 struct CarlaSetup_t {
+	bool EnableVerboseLog;
 	bool EnableCosimulation;
 
 	bool EnableEgoSimulink;

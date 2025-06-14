@@ -133,6 +133,7 @@
     <ClCompile Include="..\..\CommonLib\MsgHelper.cpp" />
     <ClCompile Include="..\..\CommonLib\SocketHelper.cpp" />
     <ClCompile Include="BridgeHelper.cpp" />
+    <ClCompile Include="DebugHelper.cpp" />
     <ClCompile Include="mainVirCarla.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -141,6 +142,7 @@
     <ClInclude Include="..\..\CommonLib\SocketHelper.h" />
     <ClInclude Include="..\..\CommonLib\VehDataMsgDefs.h" />
     <ClInclude Include="BridgeHelper.h" />
+    <ClInclude Include="DebugHelper.h" />
     <ClInclude Include="RandomUtils.h" />
   </ItemGroup>
   <ItemGroup>

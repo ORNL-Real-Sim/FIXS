@@ -390,7 +390,13 @@ int ConfigHelper::getConfig(string configName) {
 	// 			READ Carla Setup section
 	// ===========================================================================
 	node = config["CarlaSetup"];
-
+	if (node["EnableVerboseLog"]) {
+		CarlaSetup.EnableVerboseLog = parserFlag(node, "EnableVerboseLog");
+	}
+	else {
+		CarlaSetup.EnableVerboseLog = false;
+		printf("\nWill disable verbose log as default!\n");
+	}
 	if (node["EnableCosimulation"]) {
 		CarlaSetup.EnableCosimulation = parserFlag(node, "EnableCosimulation");
 	}
