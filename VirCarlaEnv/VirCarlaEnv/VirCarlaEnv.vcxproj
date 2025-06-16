@@ -145,9 +145,6 @@
     <ClInclude Include="DebugHelper.h" />
     <ClInclude Include="RandomUtils.h" />
   </ItemGroup>
-  <ItemGroup>
-    <None Include="defaultConfig.yaml" />
-  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
