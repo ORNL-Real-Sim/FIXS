@@ -46,7 +46,7 @@ using namespace std::string_literals;
 #define EXPECT_TRUE(pred) if (!(pred)) { throw std::runtime_error(#pred); }
 #define SET_CONTAINS_ID(set, value) ((set).find(value) != (set).end())
 #define MAP_CONTAINS_KEY(map, key) ((map).find(key) != (map).end())
-#define SPAWN_OFFSET_Z 25.0f // Offset for spawning actors above the ground
+#define SPAWN_OFFSET_Z 0.5f // Offset for spawning actors above the ground
 
 static void show_usage(std::string name)
 {
@@ -129,7 +129,7 @@ int main(int argc, const char* argv[]) {
 	int carlaClientPort = carlaSetup.CarlaClientPort;
 	std::string carlaMapName = carlaSetup.CarlaMapName;
 	double trafficRefreshRate = carlaSetup.TrafficRefreshRate;
-
+    const std::chrono::milliseconds step_duration_ms(static_cast<int>(trafficRefreshRate * 1000));
 	// If the vehicle type is used as the blueprint ID, set this to true
     bool USE_VEHICLE_TYPE_AS_BLUEPRINT = true;
 
@@ -160,9 +160,11 @@ int main(int argc, const char* argv[]) {
         std::cout << "Server API version : " << carlaClient.GetServerVersion() << '\n';
         
         // To be replaced with the actual Carla Map from configuration file
-        std::cout << "Loading world: " << carlaMapName << std::endl;
-        carla::client::World carlaWorld = carlaClient.LoadWorld(carlaMapName);
-		carla::SharedPtr<carla::client::Map> carlaMap = carlaWorld.GetMap();
+        /*std::cout << "Loading world: " << carlaMapName << std::endl;
+        carla::client::World carlaWorld = carlaClient.LoadWorld(carlaMapName);*/
+		
+		carla::client::World carlaWorld = carlaClient.GetWorld();
+        carla::SharedPtr<carla::client::Map> carlaMap = carlaWorld.GetMap();
         carla::SharedPtr<carla::client::Actor> carlaSpectator = carlaWorld.GetSpectator();
 
         //// Define a high top-down transform (e.g., 100 meters above 0,0)
@@ -197,6 +199,7 @@ int main(int argc, const char* argv[]) {
 
         
         while (simTime < simEndTime) {
+            std::chrono::steady_clock::time_point loop_start_time = std::chrono::steady_clock::now();
             ///***********************
             // RUN one-step simulation
             ///***********************
@@ -277,6 +280,24 @@ int main(int argc, const char* argv[]) {
                 }
             }
 
+			// Get the Carla Actor Role Name Mapping
+            carla::SharedPtr <carla::client::ActorList >carlaActors = carlaWorld.GetActors()->Filter("vehicle.*");
+			std::unordered_map<std::string, std::string> mapActorIdToRoleName;
+            std::unordered_map<std::string, std::string> mapRoleNameToActorId;
+            for (const carla::SharedPtr<carla::client::Actor>& carlaActor : *carlaActors) {
+                const std::vector<carla::client::ActorAttributeValue> carlaAttributes = carlaActor->GetAttributes(); // Ensure the attributes are loaded
+                for (const carla::client::ActorAttributeValue& attr : carlaAttributes) {
+                    //std::cout << "Attribute ID: " << attr.GetId() << ", value: " << attr.GetValue() << std::endl;
+                    if (attr.GetId() == "role_name") {
+                        std::string carlaRoleName = attr.GetValue();
+						std::string carlaActorId = std::to_string(carlaActor->GetId());
+                        mapActorIdToRoleName[carlaActorId] = carlaRoleName;
+						mapRoleNameToActorId[carlaRoleName] = carlaActorId;
+						break; // No need to check further attributes for this actor
+                    }
+                }
+			}
+
             for (std::pair<const std::string, SumoActor>& pair : mapSumoActor) {
                 const std::string& sumoActorId = pair.first;
                 SumoActor& sumoActor = pair.second;
@@ -284,15 +305,17 @@ int main(int argc, const char* argv[]) {
 
                 carla::geom::Transform carlaTransform = BridgeHelper::map_transfrom_Sumo_to_Carla(sumoActor.sumoTransform, sumoActor.extent);
 
-                carla::SharedPtr<carla::client::Waypoint> carlaWaypoint = carlaMap->GetWaypoint(carlaTransform.location);
-                carla::geom::Transform waypointTransform = carlaWaypoint->GetTransform();
+                //carla::SharedPtr<carla::client::Waypoint> carlaWaypoint = carlaMap->GetWaypoint(carlaTransform.location);
+                //carla::geom::Transform waypointTransform = carlaWaypoint->GetTransform();
                 // =======================================================
                 // Get the waypoint of the carla transform
                 // This is to ensure that the carla transform is on the road
                 // =======================================================
                 //carlaTransform.location = waypointTransform.location;
 				// Add a small offset to the z coordinate to avoid collision with the ground
-                carlaTransform.location.z = carlaTransform.location.z + SPAWN_OFFSET_Z;
+				
+                
+                //carlaTransform.location.z = carlaTransform.location.z + SPAWN_OFFSET_Z;
                 
     //            // [Optianal] Use the waypoint's rotation to ensure the vehicle is aligned with the road
 				//carlaTransform.rotation = waypointTransform.rotation; 
@@ -303,6 +326,9 @@ int main(int argc, const char* argv[]) {
                 // Spawn the Sumo actors that are not in the current step
                 // =======================================================
                 if (!MAP_CONTAINS_KEY(mapSumoToCarla , sumoActorId) || !sumoActor.spawnedInCarla || sumoActor.carlaActor==nullptr) {
+                    carlaTransform.location.z = SPAWN_OFFSET_Z;
+					
+
                     std::string carlaActorTypeId;
                     if (USE_VEHICLE_TYPE_AS_BLUEPRINT) {
                         carlaActorTypeId = sumoActor.vType;
@@ -311,17 +337,34 @@ int main(int argc, const char* argv[]) {
                         carlaActorTypeId = BridgeHelper::map_Sumo_vClass_to_Carla_blueprintId(sumoActor.vClass);
                     }
 
-                    auto vehicle_blueprint = blueprint_library->Find(carlaActorTypeId);
-
+                    const carla::client::ActorBlueprint* vehicle_blueprint = blueprint_library->Find(carlaActorTypeId);
+					// C++ API does not allow modifying a blueprint after retrieval.
+                    // To work around this in C++, we need to make a copy of the ActorBlueprint,
+                    // then modify the attributes on the copy — not the original const pointer returned by Find.
+                    carla::client::ActorBlueprint vehicle_blueprint_local = *vehicle_blueprint;
+                    vehicle_blueprint_local.SetAttribute("role_name", sumoActorId); // Set the role name to the Sumo actor ID
+                    
                     if (!vehicle_blueprint) {
                         std::cerr << "Blueprint not found: " << carlaActorTypeId << std::endl;
                         return 1;
                     }
+                    carla::SharedPtr<carla::client::Actor> carlaActor;
+                    // If the Intertested vehicle has been spawned in the Carla
+                    // Note: For the interested vehicles spawned by the extrernal control script, its role_name should be set to the sumo id name
+					// And their blueprint should be the same as its vehicle type
+                    if (SET_CONTAINS_ID(setInterestedIds, sumoActorId) && MAP_CONTAINS_KEY(mapRoleNameToActorId, sumoActorId) && USE_VEHICLE_TYPE_AS_BLUEPRINT) {
+                        carlaActor = carlaWorld.GetActor(std::stoul(mapRoleNameToActorId[sumoActorId]));
+                        if (enableVerboseLog) std::cout << "Found Intertested Vehicle with Carla Type ID: " << carlaActorTypeId << " SUMO ID:" << sumoActorId << std::endl;
+                    }
+                    else {
+                        carlaActor = carlaWorld.SpawnActor(vehicle_blueprint_local, carlaTransform);
+                        if (enableVerboseLog) std::cout << "Spawning actor with Carla Type ID: " << carlaActorTypeId << " SUMO ID:" << sumoActorId << std::endl;
+                        // set the simulate physics to false, so that the actor does not fall down
+                        //carlaActor->SetSimulatePhysics(false);
+                    }
+                    
+                     
 					
-                    if (enableVerboseLog) std::cout << "Spawning actor with Carla Type ID: " << carlaActorTypeId << " SUMO ID:" << sumoActorId << std::endl;
-                    carla::SharedPtr<carla::client::Actor> carlaActor = carlaWorld.SpawnActor(*vehicle_blueprint, carlaTransform);
-					// set the simulate physics to false, so that the actor does not fall down
-					carlaActor->SetSimulatePhysics(false);
                     if (carlaActor) {
 						sumoActor.spawnedInCarla = true; // Mark the Sumo actor as spawned in Carla
 						sumoActor.carlaActor = carlaActor; // Store the Carla actor in the SumoActor
@@ -370,13 +413,31 @@ int main(int argc, const char* argv[]) {
                     if (sumoActor.spawnedInCarla && sumoActor.carlaActor!=nullptr) {
                         //if (SET_CONTAINS_ID(setInterestedIds, sumoActorId)) {
                         if (false){
-                            
-                        }
+							carla::SharedPtr<carla::client::Actor> carlaActor = carlaWorld.GetActor(carlaActorId);
+                            carla::geom::Transform carlaTransform = carlaActor->GetTransform();
+                            std::cout << "Carla Transform:" << std::endl;
+                            std::cout << "  Location -> x: " << carlaTransform.location.x
+                                << ", y: " << carlaTransform.location.y
+                                << ", z: " << carlaTransform.location.z << std::endl;
+                        }  
                         else {
                             // If not interested, update its position according to the sumo actor
                             // convert the id back to uint32_t
                             //carla::SharedPtr<carla::client::Actor> carlaActor = carlaWorld.GetActor(std::stoul(carlaActorId));
 							carla::SharedPtr<carla::client::Actor>& carlaActor = sumoActor.carlaActor;
+                            const std::vector<carla::client::ActorAttributeValue> carlaAttributes = carlaActor->GetAttributes(); // Ensure the attributes are loaded
+                            if (enableVerboseLog) {
+                                for (const carla::client::ActorAttributeValue& attr : carlaAttributes) {
+
+                                    //std::cout << "Attribute ID: " << attr.GetId() << ", value: " << attr.GetValue() << std::endl;
+
+                                    if (attr.GetId() == "role_name") {
+                                        std::string role_name = attr.GetValue();
+
+                                        std::cout << "This vehicle's role_name is: " << role_name << std::endl;
+                                    }
+                                }
+                            }
                             // update the actor's transform
                             carla::rpc::Command::ApplyTransform applyTransformCommand(carlaActorId, carlaTransform);
                             transformCommandBatch.push_back(applyTransformCommand);
@@ -459,7 +520,7 @@ int main(int argc, const char* argv[]) {
 						carla::geom::Rotation tmpRotation(-90.0f, 0.0f, 0.0f);
                         carla::geom::Transform tmpTransform(tmpLocation, tmpRotation);
                         carlaSpectator->SetTransform(tmpTransform);
-                        drawCircle(carlaWorld.MakeDebugHelper(), tmpLocation, 2.5f, 32, 0.5f, 0.1f, 0.2f);
+                        //drawCircle(carlaWorld.MakeDebugHelper(), tmpLocation, 2.5f, 32, 0.5f, 0.1f, 0.2f);
 					}
                 }
             }
@@ -495,6 +556,12 @@ int main(int argc, const char* argv[]) {
             
 			msgHelper.clearRecvStorage();
             msgHelper.clearSendStorage();
+            const std::chrono::steady_clock::time_point loop_end_time = std::chrono::steady_clock::now();
+            std::chrono::milliseconds elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(loop_end_time - loop_start_time);
+            std::chrono::milliseconds sleep_duration = std::chrono::milliseconds(step_duration_ms) - elapsed;
+            if (sleep_duration.count() > 0) {
+                std::this_thread::sleep_for(sleep_duration);
+            }
         }
         
     }
