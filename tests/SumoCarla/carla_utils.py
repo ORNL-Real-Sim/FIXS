@@ -1,8 +1,14 @@
 from re import T
 import carla
+import os
+from CommonLib.ConfigHelper import ConfigHelper
 
-carla_server_ip = '127.0.0.1'
-carla_server_port = 422
+config_path = os.path.join(os.getcwd(), 'defaultConfig.yaml')
+config_helper = ConfigHelper()
+config_helper.getConfig(config_path)
+carla_server_ip = config_helper.Carla_setup["CarlaServerIP"]
+carla_server_port = config_helper.Carla_setup["CarlaServerPort"]
+
 
 carla_client = carla.Client(carla_server_ip, carla_server_port)
 

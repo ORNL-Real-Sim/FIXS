@@ -57,9 +57,4 @@
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
-  <ItemGroup>
-    <None Include="defaultConfig.yaml">
-      <Filter>Resource Files</Filter>
-    </None>
-  </ItemGroup>
 </Project>
