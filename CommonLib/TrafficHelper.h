@@ -40,7 +40,7 @@ public:
 	int recvFromTrafficSimulator(double* simTime, MsgHelper& Msg_c);
 
 	int addEgoVehicle(double simTime);
-
+	int addEgoVehicleFromXY(double simTime, std::string vehicleId, std::string vehicleType, double positionX, double positionY);
 	int checkIfEgoExist(double* simTime);
 
 	int getSimulationTime(double* simTime);

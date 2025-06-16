@@ -385,6 +385,33 @@ int TrafficHelper::addEgoVehicle(double simTime) {
 
 }
 
+int TrafficHelper::addEgoVehicleFromXY(double simTime, std::string vehicleId, std::string vehicleType, double positionX, double positionY) {
+
+	if (SUMO_OR_VISSIM.compare("SUMO") == 0) {
+		if (ENABLE_VEH_SIMULATOR) {
+			// Map the x y positon to an edge for spawing the ego vehicle
+			libsumo::TraCIRoadPosition edgePosition = traci.simulation.convertRoad(positionX, positionY, false);
+			// Create a dummy route for the ego vehicle
+			std::string dummyedgeID = edgePosition.edgeID;
+			double lanePos = edgePosition.pos; // position along the edge
+			int laneIndex = edgePosition.laneIndex;
+			std::string dummyRouteId = "route_" + vehicleId;
+			std::vector<std::string> dummyRoute;
+			dummyRoute.push_back(dummyedgeID);
+			traci.route.add(dummyRouteId, dummyRoute);
+
+			traci.vehicle.add(vehicleId, dummyRouteId, vehicleType);
+			traci.vehicle.setColor(vehicleId, libsumo::TraCIColor(255, 0, 0));
+		}
+
+		return 1;
+	}
+	else {
+		return 0;
+	}
+
+}
+
 
 int TrafficHelper::checkIfEgoExist(double* simTime) {
 
@@ -585,9 +612,20 @@ int TrafficHelper::sendToSUMO(double simTime, MsgHelper Msg_c) {
 
 				}
 			}
-			/*else if (ENABLE_CARLA) {
-
-			}*/
+			// if carla is enabled and the reveiced id is within the interested ids
+			else if (ENABLE_CARLA && find(Config_c->CarlaSetup.InterestedIds.begin(), Config_c->CarlaSetup.InterestedIds.end(), idStr) != Config_c->CarlaSetup.InterestedIds.end()) {
+				double positionX = (double)Msg_c.VehDataSend_um[0][iV].positionX;
+				double positionY = (double)Msg_c.VehDataSend_um[0][iV].positionY;
+				double positionZ = (double)Msg_c.VehDataSend_um[0][iV].positionZ;
+				double heading = (double)Msg_c.VehDataSend_um[0][iV].heading;
+				string vehicleType = Msg_c.VehDataSend_um[0][iV].type;
+				// If the Intertested Vehicle is not in sumo
+				if (!(find(VehIdInSimulator.begin(), VehIdInSimulator.end(), idStr) != VehIdInSimulator.end())) {
+					addEgoVehicleFromXY(simTime, idStr, vehicleType, positionX, positionY);
+				}
+				traci.vehicle.moveToXY(idStr, "", -1, positionX, positionY, heading, 6);
+				traci.vehicle.setPreviousSpeed(idStr, speed);
+			}
 			else {
 				if (1 && find(VehIdInSimulator.begin(), VehIdInSimulator.end(), idStr) != VehIdInSimulator.end()) {
 					if (ENABLE_EXT_DYN) {
