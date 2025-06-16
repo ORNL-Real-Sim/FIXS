@@ -29,7 +29,7 @@ class ConfigHelper:
         self.Xil_setup = defaultdict(lambda: None)
         self.CarMaker_setup = defaultdict(lambda: None)
         self.Sumo_setup = defaultdict(lambda: None)
-        
+        self.Carla_setup = defaultdict(lambda: None)
     def getConfig(self, configName):
         path = os.path.normpath(configName)
         with open(path, 'r') as file:
@@ -57,10 +57,21 @@ class ConfigHelper:
 
         # Xil Setup
         xil_node = config.get("XilSetup", {})
-        self.Xil_setup["EnableXil"] = xil_node.get("EnableXil", False)
+        self.Xil_setup["EnableXil"] = self.parserFlag(xil_node, "EnableXil", False)
         self.Xil_setup["VehicleSubscription"] = self.parseVehicleSubscription(xil_node, "VehicleSubscription", [])
 
-        return 0
+        # Carla Setup
+        carla_node = config.get("CarlaSetup", {})
+        self.Carla_setup["EnableVerboseLog"] = self.parserFlag(carla_node, "EnableVerboseLog", False)
+        self.Carla_setup["EnableCosimulation"] = self.parserFlag(carla_node, "EnableCosimulation", True)
+        self.Carla_setup["EnableEgoSimulink"] = self.parserFlag(carla_node, "EnableEgoSimulink", False)
+        self.Carla_setup["CarlaServerIP"] = self.parserString(carla_node, "CarlaServerIP", "127.0.0.1")
+        self.Carla_setup["CarlaServerPort"] = self.parserInteger(carla_node, "CarlaServerPort", 420)
+        self.Carla_setup["CarlaClientIP"] = self.parserString(carla_node, "CarlaClientIP", "127.0.0.1")
+        self.Carla_setup["CarlaClientPort"] = self.parserInteger(carla_node, "CarlaClientPort", 430)
+        self.Carla_setup["CarlaMapName"] = self.parserString(carla_node, "CarlaMapName", "Town01")
+        self.Carla_setup["TrafficRefreshRate"] = self.parserDouble(carla_node, "TrafficRefreshRate", 0.1)
+        self.Carla_setup["InterestedIds"] = self.parserStringVector(carla_node, "InterestedIds", ["ego"])
 
     def resetConfig(self):
         # Clear all config settings
@@ -105,5 +116,5 @@ class ConfigHelper:
 
 if __name__ == "__main__":
     config_helper = ConfigHelper()
-    CONFIG_PATH = r"C:\Users\hg25079\Documents\GitHub\FIXS\tests\Applications\Ecodriving\ecodrivingConfig.yaml"
-    config_helper.getConfig(CONFIG_PATH)
+    config_path = 'defaultConfig.yaml'
+    config_helper.getConfig(config_path)
