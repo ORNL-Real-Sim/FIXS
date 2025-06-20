@@ -2,3 +2,12 @@ vissim = 11.0
 sumo = 1.13.0
 carmaker = 10.0.1
 matlab = 9.7
+#packages required
+easydict
+numpy
+pyyaml
+ruamel.yamel
+pandas
+matplotlib
+traci
+sumolib
