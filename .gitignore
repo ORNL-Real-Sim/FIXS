@@ -40,7 +40,7 @@ CommonLib/libevent/out/build/*
 CommonLib/yaml-cpp/build/*
 CommonLib/yaml-cpp/out/build/*
 CommonLib/libsumo/out/build/*
-
+CommonLib/libcarla/*
 CommonLib/slprj/*
 
 ControlLayer/.vs/*
