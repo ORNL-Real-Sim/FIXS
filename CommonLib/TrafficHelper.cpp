@@ -524,7 +524,6 @@ int TrafficHelper::sendToSUMO(double simTime, MsgHelper Msg_c) {
 
 	try {
 		vector <string> VehIdInSimulator = traci.vehicle.getIDList();
-		
 		//uint32_t color = 4278190335;
 		//uint8_t r = (color >> 24) & 0xFF;
 		//uint8_t g = (color >> 16) & 0xFF;
@@ -620,11 +619,18 @@ int TrafficHelper::sendToSUMO(double simTime, MsgHelper Msg_c) {
 				double heading = (double)Msg_c.VehDataSend_um[0][iV].heading;
 				string vehicleType = Msg_c.VehDataSend_um[0][iV].type;
 				// If the Intertested Vehicle is not in sumo
-				if (!(find(VehIdInSimulator.begin(), VehIdInSimulator.end(), idStr) != VehIdInSimulator.end())) {
+				bool vehicleExist = false;
+				for (const std::string& vehId : VehIdInSimulator) {
+					if (vehId == idStr) {
+						vehicleExist = true;
+					}
+				}
+				if (!vehicleExist) {
 					addEgoVehicleFromXY(simTime, idStr, vehicleType, positionX, positionY);
 				}
 				traci.vehicle.moveToXY(idStr, "", -1, positionX, positionY, heading, 6);
-				traci.vehicle.setPreviousSpeed(idStr, speed);
+				traci.vehicle.setSpeed(idStr, speed);
+				
 			}
 			else {
 				if (1 && find(VehIdInSimulator.begin(), VehIdInSimulator.end(), idStr) != VehIdInSimulator.end()) {

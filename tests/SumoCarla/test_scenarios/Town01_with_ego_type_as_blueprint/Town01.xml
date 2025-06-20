@@ -1,0 +1,1144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!-- generated on 2025-06-19 21:27:03 by Eclipse SUMO GUI Version 1.21.0
+<sumoConfiguration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/sumoConfiguration.xsd">
+
+    <input>
+        <net-file value="C:\Users\hg25079\Documents\GitHub\FIXS\tests\SumoCarla\test_scenarios\Town01_with_ego_type_as_blueprint\Town01.net.xml"/>
+        <route-files value="C:\Users\hg25079\Documents\GitHub\FIXS\tests\SumoCarla\test_scenarios\Town01_with_ego_type_as_blueprint\carlavtypes.rou.xml,C:\Users\hg25079\Documents\GitHub\FIXS\tests\SumoCarla\test_scenarios\Town01_with_ego_type_as_blueprint\Town01.rou.xml"/>
+    </input>
+
+    <output>
+        <netstate-dump value="C:\Users\hg25079\Documents\GitHub\FIXS\tests\SumoCarla\test_scenarios\Town01_with_ego_type_as_blueprint\Town01.xml"/>
+        <netstate-dump.precision value="10"/>
+    </output>
+
+    <time>
+        <begin value="0"/>
+        <end value="300"/>
+        <step-length value="0.1"/>
+    </time>
+
+    <processing>
+        <collision.action value="warn"/>
+    </processing>
+
+    <traci_server>
+        <remote-port value="1337"/>
+        <num-clients value="1"/>
+    </traci_server>
+
+    <gui_only>
+        <gui-settings-file value="C:\Users\hg25079\Documents\GitHub\FIXS\tests\SumoCarla\test_scenarios\Town01_with_ego_type_as_blueprint\viewsettings.xml"/>
+        <start value="t"/>
+    </gui_only>
+
+</sumoConfiguration>
+-->
+
+<netstate xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/netstate_file.xsd">
+    <timestep time="0.00">
+        <edge id="-16.0.00">
+            <lane id="-16.0.00_0"/>
+            <lane id="-16.0.00_1"/>
+            <lane id="-16.0.00_2">
+                <vehicle id="0" pos="1.7562436819" speed="0.0000000000"/>
+            </lane>
+        </edge>
+        <edge id="12.0.00">
+            <lane id="12.0.00_0"/>
+            <lane id="12.0.00_1"/>
+            <lane id="12.0.00_2">
+                <vehicle id="ego" pos="5.1109763145" speed="0.0000000000"/>
+            </lane>
+        </edge>
+    </timestep>
+    <timestep time="0.10">
+        <edge id="-16.0.00">
+            <lane id="-16.0.00_0"/>
+            <lane id="-16.0.00_1"/>
+            <lane id="-16.0.00_2">
+                <vehicle id="0" pos="1.7678348170" speed="0.1159113512"/>
+            </lane>
+        </edge>
+        <edge id="12.0.00">
+            <lane id="12.0.00_0"/>
+            <lane id="12.0.00_1"/>
+            <lane id="12.0.00_2">
+                <vehicle id="ego" pos="5.1109763145" speed="0.0000000000"/>
+            </lane>
+        </edge>
+    </timestep>
+    <timestep time="0.20">
+        <edge id="-16.0.00">
+            <lane id="-16.0.00_0"/>
+            <lane id="-16.0.00_1"/>
+            <lane id="-16.0.00_2">
+                <vehicle id="0" pos="1.7913553285" speed="0.2352051144"/>
+            </lane>
+        </edge>
+        <edge id="12.0.00">
+            <lane id="12.0.00_0"/>
+            <lane id="12.0.00_1"/>
+            <lane id="12.0.00_2">
+                <vehicle id="ego" pos="5.1140589811" speed="0.0308266655"/>
+            </lane>
+        </edge>
+    </timestep>
+    <timestep time="0.30">
+        <edge id="-16.0.00">
+            <lane id="-16.0.00_0"/>
+            <lane id="-16.0.00_1"/>
+            <lane id="-16.0.00_2">
+                <vehicle id="0" pos="1.8260890599" speed="0.3473373145"/>
+            </lane>
+        </edge>
+        <edge id="12.0.00">
+            <lane id="12.0.00_0"/>
+            <lane id="12.0.00_1"/>
+            <lane id="12.0.00_2">
+                <vehicle id="ego" pos="5.1263706416" speed="0.1231166050"/>
+            </lane>
+        </edge>
+    </timestep>
+    <timestep time="0.40">
+        <edge id="-16.0.00">
+            <lane id="-16.0.00_0"/>
+            <lane id="-16.0.00_1"/>
+            <lane id="-16.0.00_2">
+                <vehicle id="0" pos="1.8704905718" speed="0.4440151185"/>
+            </lane>
+        </edge>
+        <edge id="12.0.00">
+            <lane id="12.0.00_0"/>
+            <lane id="12.0.00_1"/>
+            <lane id="12.0.00_2">
+                <vehicle id="ego" pos="5.1540007263" speed="0.2763008475"/>
+            </lane>
+        </edge>
+    </timestep>
+    <timestep time="0.50">
+        <edge id="-16.0.00">
+            <lane id="-16.0.00_0"/>
+            <lane id="-16.0.00_1"/>
+            <lane id="-16.0.00_2">
+                <vehicle id="0" pos="1.9247146017" speed="0.5422402994"/>
+            </lane>
+        </edge>
+        <edge id="12.0.00">
+            <lane id="12.0.00_0"/>
+            <lane id="12.0.00_1"/>
+            <lane id="12.0.00_2">
+                <vehicle id="ego" pos="5.2029442132" speed="0.4894348681"/>
+            </lane>
+        </edge>
+    </timestep>
+    <timestep time="0.60">
+        <edge id="-16.0.00">
+            <lane id="-16.0.00_0"/>
+            <lane id="-16.0.00_1"/>
+            <lane id="-16.0.00_2">
+                <vehicle id="0" pos="1.9877113896" speed="0.6299678784"/>
+            </lane>
+        </edge>
+        <edge id="12.0.00">
+            <lane id="12.0.00_0"/>
+            <lane id="12.0.00_1"/>
+            <lane id="12.0.00_2">
+                <vehicle id="ego" pos="5.2778877000" speed="0.7494348681"/>
+            </lane>
+        </edge>
+    </timestep>
+    <timestep time="0.70">
+        <edge id="-16.0.00">
+            <lane id="-16.0.00_0"/>
+            <lane id="-16.0.00_1"/>
+            <lane id="-16.0.00_2">
+                <vehicle id="0" pos="2.0597797668" speed="0.7206837725"/>
+            </lane>
+        </edge>
+        <edge id="12.0.00">
+            <lane id="12.0.00_0"/>
+            <lane id="12.0.00_1"/>
+            <lane id="12.0.00_2">
+                <vehicle id="ego" pos="5.3788311868" speed="1.0094348681"/>
+            </lane>
+        </edge>
+    </timestep>
+    <timestep time="0.80">
+        <edge id="-16.0.00">
+            <lane id="-16.0.00_0"/>
+            <lane id="-16.0.00_1"/>
+            <lane id="-16.0.00_2">
+                <vehicle id="0" pos="2.1402807356" speed="0.8050096877"/>
+            </lane>
+        </edge>
+        <edge id="12.0.00">
+            <lane id="12.0.00_0"/>
+            <lane id="12.0.00_1"/>
+            <lane id="12.0.00_2">
+                <vehicle id="ego" pos="5.5057746736" speed="1.2694348681"/>
+            </lane>
+        </edge>
+    </timestep>
+    <timestep time="0.90">
+        <edge id="-16.0.00">
+            <lane id="-16.0.00_0"/>
+            <lane id="-16.0.00_1"/>
+            <lane id="-16.0.00_2">
+                <vehicle id="0" pos="2.2283077175" speed="0.8802698194"/>
+            </lane>
+        </edge>
+        <edge id="12.0.00">
+            <lane id="12.0.00_0"/>
+            <lane id="12.0.00_1"/>
+            <lane id="12.0.00_2">
+                <vehicle id="ego" pos="5.6587181604" speed="1.5294348681"/>
+            </lane>
+        </edge>
+    </timestep>
+    <timestep time="1.00">
+        <edge id="-16.0.00">
+            <lane id="-16.0.00_0"/>
+            <lane id="-16.0.00_1"/>
+            <lane id="-16.0.00_2">
+                <vehicle id="0" pos="2.3278832728" speed="0.9957555532"/>
+            </lane>
+        </edge>
+        <edge id="-4.0.00">
+            <lane id="-4.0.00_0"/>
+            <lane id="-4.0.00_1"/>
+            <lane id="-4.0.00_2">
+                <vehicle id="1" pos="2.2907684803" speed="0.0000000000"/>
+            </lane>
+        </edge>
+        <edge id="12.0.00">
+            <lane id="12.0.00_0"/>
+            <lane id="12.0.00_1"/>
+            <lane id="12.0.00_2">
+                <vehicle id="ego" pos="5.8376616472" speed="1.7894348681"/>
+            </lane>
+        </edge>
+    </timestep>
+    <timestep time="1.10">
+        <edge id="-16.0.00">
+            <lane id="-16.0.00_0"/>
+            <lane id="-16.0.00_1"/>
+            <lane id="-16.0.00_2">
+                <vehicle id="0" pos="2.4381110727" speed="1.1022779981"/>
+            </lane>
+        </edge>
+        <edge id="-4.0.00">
+            <lane id="-4.0.00_0"/>
+            <lane id="-4.0.00_1"/>
+            <lane id="-4.0.00_2">
+                <vehicle id="1" pos="2.3492897358" speed="0.5852125546"/>
+            </lane>
+        </edge>
+        <edge id="12.0.00">
+            <lane id="12.0.00_0"/>
+            <lane id="12.0.00_1"/>
+            <lane id="12.0.00_2">
+                <vehicle id="ego" pos="6.0426051340" speed="2.0494348681"/>
+            </lane>
+        </edge>
+    </timestep>
+    <timestep time="1.20">
+        <edge id="-16.0.00">
+            <lane id="-16.0.00_0"/>
+            <lane id="-16.0.00_1"/>
+            <lane id="-16.0.00_2">
+                <vehicle id="0" pos="2.5550582172" speed="1.1694714454"/>
+            </lane>
+        </edge>
+        <edge id="-4.0.00">
+            <lane id="-4.0.00_0"/>
+            <lane id="-4.0.00_1"/>
+            <lane id="-4.0.00_2">
+                <vehicle id="1" pos="2.4672834940" speed="1.1799375820"/>
+            </lane>
+        </edge>
+        <edge id="12.0.00">
+            <lane id="12.0.00_0"/>
+            <lane id="12.0.00_1"/>
+            <lane id="12.0.00_2">
+                <vehicle id="ego" pos="6.2735486208" speed="2.3094348681"/>
+            </lane>
+        </edge>
+    </timestep>
+    <timestep time="1.30">
+        <edge id="-16.0.00">
+            <lane id="-16.0.00_0"/>
+            <lane id="-16.0.00_1"/>
+            <lane id="-16.0.00_2">
+                <vehicle id="0" pos="2.6819607313" speed="1.2690251409"/>
+            </lane>
+        </edge>
+        <edge id="-4.0.00">
+            <lane id="-4.0.00_0"/>
+            <lane id="-4.0.00_1"/>
+            <lane id="-4.0.00_2">
+                <vehicle id="1" pos="2.6369379385" speed="1.6965444457"/>
+            </lane>
+        </edge>
+        <edge id="12.0.00">
+            <lane id="12.0.00_0"/>
+            <lane id="12.0.00_1"/>
+            <lane id="12.0.00_2">
+                <vehicle id="ego" pos="6.5304921076" speed="2.5694348681"/>
+            </lane>
+        </edge>
+    </timestep>
+    <timestep time="1.40">
+        <edge id="-16.0.00">
+            <lane id="-16.0.00_0"/>
+            <lane id="-16.0.00_1"/>
+            <lane id="-16.0.00_2">
+                <vehicle id="0" pos="2.8197882816" speed="1.3782755034"/>
+            </lane>
+        </edge>
+        <edge id="-4.0.00">
+            <lane id="-4.0.00_0"/>
+            <lane id="-4.0.00_1"/>
+            <lane id="-4.0.00_2">
+                <vehicle id="1" pos="2.8646857429" speed="2.2774780436"/>
+            </lane>
+        </edge>
+        <edge id="12.0.00">
+            <lane id="12.0.00_0"/>
+            <lane id="12.0.00_1"/>
+            <lane id="12.0.00_2">
+                <vehicle id="ego" pos="6.8134355944" speed="2.8294348681"/>
+            </lane>
+        </edge>
+    </timestep>
+    <timestep time="1.50">
+        <edge id="-16.0.00">
+            <lane id="-16.0.00_0"/>
+            <lane id="-16.0.00_1"/>
+            <lane id="-16.0.00_2">
+                <vehicle id="0" pos="2.9691026389" speed="1.4931435727"/>
+            </lane>
+        </edge>
+        <edge id="-4.0.00">
+            <lane id="-4.0.00_0"/>
+            <lane id="-4.0.00_1"/>
+            <lane id="-4.0.00_2">
+                <vehicle id="1" pos="3.1396088785" speed="2.7492313564"/>
+            </lane>
+        </edge>
+        <edge id="12.0.00">
+            <lane id="12.0.00_0"/>
+            <lane id="12.0.00_1"/>
+            <lane id="12.0.00_2">
+                <vehicle id="ego" pos="7.1223790812" speed="3.0894348681"/>
+            </lane>
+        </edge>
+    </timestep>
+    <timestep time="1.60">
+        <edge id="-16.0.00">
+            <lane id="-16.0.00_0"/>
+            <lane id="-16.0.00_1"/>
+            <lane id="-16.0.00_2">
+                <vehicle id="0" pos="3.1249899801" speed="1.5588734125"/>
+            </lane>
+        </edge>
+        <edge id="-4.0.00">
+            <lane id="-4.0.00_0"/>
+            <lane id="-4.0.00_1"/>
+            <lane id="-4.0.00_2">
+                <vehicle id="1" pos="3.4591403903" speed="3.1953151176"/>
+            </lane>
+        </edge>
+        <edge id="12.0.00">
+            <lane id="12.0.00_0"/>
+            <lane id="12.0.00_1"/>
+            <lane id="12.0.00_2">
+                <vehicle id="ego" pos="7.4573225681" speed="3.3494348681"/>
+            </lane>
+        </edge>
+    </timestep>
+    <timestep time="1.70">
+        <edge id="-16.0.00">
+            <lane id="-16.0.00_0"/>
+            <lane id="-16.0.00_1"/>
+            <lane id="-16.0.00_2">
+                <vehicle id="0" pos="3.2897023855" speed="1.6471240533"/>
+            </lane>
+        </edge>
+        <edge id="-4.0.00">
+            <lane id="-4.0.00_0"/>
+            <lane id="-4.0.00_1"/>
+            <lane id="-4.0.00_2">
+                <vehicle id="1" pos="3.8309044700" speed="3.7176407970"/>
+            </lane>
+        </edge>
+        <edge id="12.0.00">
+            <lane id="12.0.00_0"/>
+            <lane id="12.0.00_1"/>
+            <lane id="12.0.00_2">
+                <vehicle id="ego" pos="7.8182660549" speed="3.6094348681"/>
+            </lane>
+        </edge>
+    </timestep>
+    <timestep time="1.80">
+        <edge id="-16.0.00">
+            <lane id="-16.0.00_0"/>
+            <lane id="-16.0.00_1"/>
+            <lane id="-16.0.00_2">
+                <vehicle id="0" pos="3.4611247222" speed="1.7142233668"/>
+            </lane>
+        </edge>
+        <edge id="-4.0.00">
+            <lane id="-4.0.00_0"/>
+            <lane id="-4.0.00_1"/>
+            <lane id="-4.0.00_2">
+                <vehicle id="1" pos="4.2452255989" speed="4.1432112896"/>
+            </lane>
+        </edge>
+        <edge id="12.0.00">
+            <lane id="12.0.00_0"/>
+            <lane id="12.0.00_1"/>
+            <lane id="12.0.00_2">
+                <vehicle id="ego" pos="8.2052095417" speed="3.8694348681"/>
+            </lane>
+        </edge>
+    </timestep>
+    <timestep time="1.90">
+        <edge id="-16.0.00">
+            <lane id="-16.0.00_0"/>
+            <lane id="-16.0.00_1"/>
+            <lane id="-16.0.00_2">
+                <vehicle id="0" pos="3.6391278227" speed="1.7800310056"/>
+            </lane>
+        </edge>
+        <edge id="-4.0.00">
+            <lane id="-4.0.00_0"/>
+            <lane id="-4.0.00_1"/>
+            <lane id="-4.0.00_2">
+                <vehicle id="1" pos="4.7194487783" speed="4.7422317933"/>
+            </lane>
+        </edge>
+        <edge id="12.0.00">
+            <lane id="12.0.00_0"/>
+            <lane id="12.0.00_1"/>
+            <lane id="12.0.00_2">
+                <vehicle id="ego" pos="8.6181530285" speed="4.1294348681"/>
+            </lane>
+        </edge>
+    </timestep>
+    <timestep time="2.00">
+        <edge id="-16.0.00">
+            <lane id="-16.0.00_0"/>
+            <lane id="-16.0.00_1"/>
+            <lane id="-16.0.00_2">
+                <vehicle id="0" pos="3.8266789618" speed="1.8755113912"/>
+            </lane>
+        </edge>
+        <edge id="-24.0.00">
+            <lane id="-24.0.00_0"/>
+            <lane id="-24.0.00_1"/>
+            <lane id="-24.0.00_2">
+                <vehicle id="2" pos="1.6093227625" speed="0.0000000000"/>
+            </lane>
+        </edge>
+        <edge id="-4.0.00">
+            <lane id="-4.0.00_0"/>
+            <lane id="-4.0.00_1"/>
+            <lane id="-4.0.00_2">
+                <vehicle id="1" pos="5.2422234897" speed="5.2277471140"/>
+            </lane>
+        </edge>
+        <edge id="12.0.00">
+            <lane id="12.0.00_0"/>
+            <lane id="12.0.00_1"/>
+            <lane id="12.0.00_2">
+                <vehicle id="ego" pos="9.0570965153" speed="4.3894348681"/>
+            </lane>
+        </edge>
+    </timestep>
+    <timestep time="2.10">
+        <edge id="-16.0.00">
+            <lane id="-16.0.00_0"/>
+            <lane id="-16.0.00_1"/>
+            <lane id="-16.0.00_2">
+                <vehicle id="0" pos="4.0260853964" speed="1.9940643452"/>
+            </lane>
+        </edge>
+        <edge id="-24.0.00">
+            <lane id="-24.0.00_0"/>
+            <lane id="-24.0.00_1"/>
+            <lane id="-24.0.00_2">
+                <vehicle id="2" pos="1.6210551737" speed="0.1173241121"/>
+            </lane>
+        </edge>
+        <edge id="-4.0.00">
+            <lane id="-4.0.00_0"/>
+            <lane id="-4.0.00_1"/>
+            <lane id="-4.0.00_2">
+                <vehicle id="1" pos="5.7982870640" speed="5.5606357436"/>
+            </lane>
+        </edge>
+        <edge id="12.0.00">
+            <lane id="12.0.00_0"/>
+            <lane id="12.0.00_1"/>
+            <lane id="12.0.00_2">
+                <vehicle id="ego" pos="9.5220400021" speed="4.6494348681"/>
+            </lane>
+        </edge>
+    </timestep>
+    <timestep time="2.20">
+        <edge id="-16.0.00">
+            <lane id="-16.0.00_0"/>
+            <lane id="-16.0.00_1"/>
+            <lane id="-16.0.00_2">
+                <vehicle id="0" pos="4.2336504096" speed="2.0756501319"/>
+            </lane>
+        </edge>
+        <edge id="-24.0.00">
+            <lane id="-24.0.00_0"/>
+            <lane id="-24.0.00_1"/>
+            <lane id="-24.0.00_2">
+                <vehicle id="2" pos="1.6440874243" speed="0.2303225055"/>
+            </lane>
+        </edge>
+        <edge id="-4.0.00">
+            <lane id="-4.0.00_0"/>
+            <lane id="-4.0.00_1"/>
+            <lane id="-4.0.00_2">
+                <vehicle id="1" pos="6.3945795880" speed="5.9629252400"/>
+            </lane>
+        </edge>
+        <edge id="12.0.00">
+            <lane id="12.0.00_0"/>
+            <lane id="12.0.00_1"/>
+            <lane id="12.0.00_2">
+                <vehicle id="ego" pos="10.0129834889" speed="4.9094348681"/>
+            </lane>
+        </edge>
+    </timestep>
+    <timestep time="2.30">
+        <edge id="-16.0.00">
+            <lane id="-16.0.00_0"/>
+            <lane id="-16.0.00_1"/>
+            <lane id="-16.0.00_2">
+                <vehicle id="0" pos="4.4491979030" speed="2.1554749344"/>
+            </lane>
+        </edge>
+        <edge id="-24.0.00">
+            <lane id="-24.0.00_0"/>
+            <lane id="-24.0.00_1"/>
+            <lane id="-24.0.00_2">
+                <vehicle id="2" pos="1.6787687966" speed="0.3468137235"/>
+            </lane>
+        </edge>
+        <edge id="-4.0.00">
+            <lane id="-4.0.00_0"/>
+            <lane id="-4.0.00_1"/>
+            <lane id="-4.0.00_2">
+                <vehicle id="1" pos="7.0505696290" speed="6.5599004096"/>
+            </lane>
+        </edge>
+        <edge id="12.0.00">
+            <lane id="12.0.00_0"/>
+            <lane id="12.0.00_1"/>
+            <lane id="12.0.00_2">
+                <vehicle id="ego" pos="10.5299269757" speed="5.1694348681"/>
+            </lane>
+        </edge>
+    </timestep>
+    <timestep time="2.40">
+        <edge id="-16.0.00">
+            <lane id="-16.0.00_0"/>
+            <lane id="-16.0.00_1"/>
+            <lane id="-16.0.00_2">
+                <vehicle id="0" pos="4.6726069395" speed="2.2340903655"/>
+            </lane>
+        </edge>
+        <edge id="-24.0.00">
+            <lane id="-24.0.00_0"/>
+            <lane id="-24.0.00_1"/>
+            <lane id="-24.0.00_2">
+                <vehicle id="2" pos="1.7253028866" speed="0.4653408996"/>
+            </lane>
+        </edge>
+        <edge id="-4.0.00">
+            <lane id="-4.0.00_0"/>
+            <lane id="-4.0.00_1"/>
+            <lane id="-4.0.00_2">
+                <vehicle id="1" pos="7.7528374375" speed="7.0226780851"/>
+            </lane>
+        </edge>
+        <edge id="12.0.00">
+            <lane id="12.0.00_0"/>
+            <lane id="12.0.00_1"/>
+            <lane id="12.0.00_2">
+                <vehicle id="ego" pos="11.0728704625" speed="5.4294348681"/>
+            </lane>
+        </edge>
+    </timestep>
+    <timestep time="2.50">
+        <edge id="-16.0.00">
+            <lane id="-16.0.00_0"/>
+            <lane id="-16.0.00_1"/>
+            <lane id="-16.0.00_2">
+                <vehicle id="0" pos="4.9054840614" speed="2.3287712188"/>
+            </lane>
+        </edge>
+        <edge id="-24.0.00">
+            <lane id="-24.0.00_0"/>
+            <lane id="-24.0.00_1"/>
+            <lane id="-24.0.00_2">
+                <vehicle id="2" pos="1.7817776833" speed="0.5647479674"/>
+            </lane>
+        </edge>
+        <edge id="-4.0.00">
+            <lane id="-4.0.00_0"/>
+            <lane id="-4.0.00_1"/>
+            <lane id="-4.0.00_2">
+                <vehicle id="1" pos="8.5125627800" speed="7.5972534247"/>
+            </lane>
+        </edge>
+        <edge id="12.0.00">
+            <lane id="12.0.00_0"/>
+            <lane id="12.0.00_1"/>
+            <lane id="12.0.00_2">
+                <vehicle id="ego" pos="11.6418139493" speed="5.6894348681"/>
+            </lane>
+        </edge>
+    </timestep>
+    <timestep time="2.60">
+        <edge id="-16.0.00">
+            <lane id="-16.0.00_0"/>
+            <lane id="-16.0.00_1"/>
+            <lane id="-16.0.00_2">
+                <vehicle id="0" pos="5.1489442498" speed="2.4346018837"/>
+            </lane>
+        </edge>
+        <edge id="-24.0.00">
+            <lane id="-24.0.00_0"/>
+            <lane id="-24.0.00_1"/>
+            <lane id="-24.0.00_2">
+                <vehicle id="2" pos="1.8495883518" speed="0.6781066849"/>
+            </lane>
+        </edge>
+        <edge id="-4.0.00">
+            <lane id="-4.0.00_0"/>
+            <lane id="-4.0.00_1"/>
+            <lane id="-4.0.00_2">
+                <vehicle id="1" pos="9.3295024284" speed="8.1693964845"/>
+            </lane>
+        </edge>
+        <edge id="12.0.00">
+            <lane id="12.0.00_0"/>
+            <lane id="12.0.00_1"/>
+            <lane id="12.0.00_2">
+                <vehicle id="ego" pos="12.2367574362" speed="5.9494348681"/>
+            </lane>
+        </edge>
+    </timestep>
+    <timestep time="2.70">
+        <edge id="-16.0.00">
+            <lane id="-16.0.00_0"/>
+            <lane id="-16.0.00_1"/>
+            <lane id="-16.0.00_2">
+                <vehicle id="0" pos="5.3997441045" speed="2.5079985467"/>
+            </lane>
+        </edge>
+        <edge id="-24.0.00">
+            <lane id="-24.0.00_0"/>
+            <lane id="-24.0.00_1"/>
+            <lane id="-24.0.00_2">
+                <vehicle id="2" pos="1.9266936745" speed="0.7710532276"/>
+            </lane>
+        </edge>
+        <edge id="-4.0.00">
+            <lane id="-4.0.00_0"/>
+            <lane id="-4.0.00_1"/>
+            <lane id="-4.0.00_2">
+                <vehicle id="1" pos="10.1869409754" speed="8.5743854698"/>
+            </lane>
+        </edge>
+        <edge id="12.0.00">
+            <lane id="12.0.00_0"/>
+            <lane id="12.0.00_1"/>
+            <lane id="12.0.00_2">
+                <vehicle id="ego" pos="12.8577009230" speed="6.2094348681"/>
+            </lane>
+        </edge>
+    </timestep>
+    <timestep time="2.80">
+        <edge id="-16.0.00">
+            <lane id="-16.0.00_0"/>
+            <lane id="-16.0.00_1"/>
+            <lane id="-16.0.00_2">
+                <vehicle id="0" pos="5.6595583773" speed="2.5981427287"/>
+            </lane>
+        </edge>
+        <edge id="-24.0.00">
+            <lane id="-24.0.00_0"/>
+            <lane id="-24.0.00_1"/>
+            <lane id="-24.0.00_2">
+                <vehicle id="2" pos="2.0124599159" speed="0.8576624139"/>
+            </lane>
+        </edge>
+        <edge id="-4.0.00">
+            <lane id="-4.0.00_0"/>
+            <lane id="-4.0.00_1"/>
+            <lane id="-4.0.00_2">
+                <vehicle id="1" pos="11.0856707932" speed="8.9872981776"/>
+            </lane>
+        </edge>
+        <edge id="12.0.00">
+            <lane id="12.0.00_0"/>
+            <lane id="12.0.00_1"/>
+            <lane id="12.0.00_2">
+                <vehicle id="ego" pos="13.5046444098" speed="6.4694348681"/>
+            </lane>
+        </edge>
+    </timestep>
+    <timestep time="2.90">
+        <edge id="-16.0.00">
+            <lane id="-16.0.00_0"/>
+            <lane id="-16.0.00_1"/>
+            <lane id="-16.0.00_2">
+                <vehicle id="0" pos="5.9299020556" speed="2.7034367827"/>
+            </lane>
+        </edge>
+        <edge id="-24.0.00">
+            <lane id="-24.0.00_0"/>
+            <lane id="-24.0.00_1"/>
+            <lane id="-24.0.00_2">
+                <vehicle id="2" pos="2.1097483298" speed="0.9728841386"/>
+            </lane>
+        </edge>
+        <edge id="-4.0.00">
+            <lane id="-4.0.00_0"/>
+            <lane id="-4.0.00_1"/>
+            <lane id="-4.0.00_2">
+                <vehicle id="1" pos="12.0337650265" speed="9.4809423332"/>
+            </lane>
+        </edge>
+        <edge id="12.0.00">
+            <lane id="12.0.00_0"/>
+            <lane id="12.0.00_1"/>
+            <lane id="12.0.00_2">
+                <vehicle id="ego" pos="14.1775878966" speed="6.7294348681"/>
+            </lane>
+        </edge>
+    </timestep>
+    <timestep time="3.00">
+        <edge id="-16.0.00">
+            <lane id="-16.0.00_0"/>
+            <lane id="-16.0.00_1"/>
+            <lane id="-16.0.00_2">
+                <vehicle id="0" pos="6.2091116622" speed="2.7920960664"/>
+            </lane>
+        </edge>
+        <edge id="-24.0.00">
+            <lane id="-24.0.00_0"/>
+            <lane id="-24.0.00_1"/>
+            <lane id="-24.0.00_2">
+                <vehicle id="2" pos="2.2148283975" speed="1.0508006771"/>
+            </lane>
+        </edge>
+        <edge id="-4.0.00">
+            <lane id="-4.0.00_0"/>
+            <lane id="-4.0.00_1"/>
+            <lane id="-4.0.00_2">
+                <vehicle id="1" pos="13.0359075907" speed="10.0214256422"/>
+            </lane>
+        </edge>
+        <edge id="-8.0.00">
+            <lane id="-8.0.00_0"/>
+            <lane id="-8.0.00_1"/>
+            <lane id="-8.0.00_2">
+                <vehicle id="3" pos="5.0047012329" speed="0.0000000000"/>
+            </lane>
+        </edge>
+        <edge id="12.0.00">
+            <lane id="12.0.00_0"/>
+            <lane id="12.0.00_1"/>
+            <lane id="12.0.00_2">
+                <vehicle id="ego" pos="14.8765313834" speed="6.9894348681"/>
+            </lane>
+        </edge>
+    </timestep>
+    <timestep time="3.10">
+        <edge id="-16.0.00">
+            <lane id="-16.0.00_0"/>
+            <lane id="-16.0.00_1"/>
+            <lane id="-16.0.00_2">
+                <vehicle id="0" pos="6.4989205804" speed="2.8980891812"/>
+            </lane>
+        </edge>
+        <edge id="-24.0.00">
+            <lane id="-24.0.00_0"/>
+            <lane id="-24.0.00_1"/>
+            <lane id="-24.0.00_2">
+                <vehicle id="2" pos="2.3317660994" speed="1.1693770186"/>
+            </lane>
+        </edge>
+        <edge id="-4.0.00">
+            <lane id="-4.0.00_0"/>
+            <lane id="-4.0.00_1"/>
+            <lane id="-4.0.00_2">
+                <vehicle id="1" pos="14.0800432218" speed="10.4413563109"/>
+            </lane>
+        </edge>
+        <edge id="-8.0.00">
+            <lane id="-8.0.00_0"/>
+            <lane id="-8.0.00_1"/>
+            <lane id="-8.0.00_2">
+                <vehicle id="3" pos="5.0303168137" speed="0.2561558076"/>
+            </lane>
+        </edge>
+        <edge id="12.0.00">
+            <lane id="12.0.00_0"/>
+            <lane id="12.0.00_1"/>
+            <lane id="12.0.00_2">
+                <vehicle id="ego" pos="15.6014748702" speed="7.2494348681"/>
+            </lane>
+        </edge>
+    </timestep>
+    <timestep time="3.20">
+        <edge id="-16.0.00">
+            <lane id="-16.0.00_0"/>
+            <lane id="-16.0.00_1"/>
+            <lane id="-16.0.00_2">
+                <vehicle id="0" pos="6.7955179274" speed="2.9659734700"/>
+            </lane>
+        </edge>
+        <edge id="-24.0.00">
+            <lane id="-24.0.00_0"/>
+            <lane id="-24.0.00_1"/>
+            <lane id="-24.0.00_2">
+                <vehicle id="2" pos="2.4549518533" speed="1.2318575392"/>
+            </lane>
+        </edge>
+        <edge id="-4.0.00">
+            <lane id="-4.0.00_0"/>
+            <lane id="-4.0.00_1"/>
+            <lane id="-4.0.00_2">
+                <vehicle id="1" pos="15.1773078865" speed="10.9726466470"/>
+            </lane>
+        </edge>
+        <edge id="-8.0.00">
+            <lane id="-8.0.00_0"/>
+            <lane id="-8.0.00_1"/>
+            <lane id="-8.0.00_2">
+                <vehicle id="3" pos="5.0817625092" speed="0.5144569550"/>
+            </lane>
+        </edge>
+        <edge id="12.0.00">
+            <lane id="12.0.00_0"/>
+            <lane id="12.0.00_1"/>
+            <lane id="12.0.00_2">
+                <vehicle id="ego" pos="16.3524183570" speed="7.5094348681"/>
+            </lane>
+        </edge>
+    </timestep>
+    <timestep time="3.30">
+        <edge id="-16.0.00">
+            <lane id="-16.0.00_0"/>
+            <lane id="-16.0.00_1"/>
+            <lane id="-16.0.00_2">
+                <vehicle id="0" pos="7.1025226494" speed="3.0700472202"/>
+            </lane>
+        </edge>
+        <edge id="-24.0.00">
+            <lane id="-24.0.00_0"/>
+            <lane id="-24.0.00_1"/>
+            <lane id="-24.0.00_2">
+                <vehicle id="2" pos="2.5844080385" speed="1.2945618526"/>
+            </lane>
+        </edge>
+        <edge id="-4.0.00">
+            <lane id="-4.0.00_0"/>
+            <lane id="-4.0.00_1"/>
+            <lane id="-4.0.00_2">
+                <vehicle id="1" pos="16.3321183888" speed="11.5481050233"/>
+            </lane>
+        </edge>
+        <edge id="-8.0.00">
+            <lane id="-8.0.00_0"/>
+            <lane id="-8.0.00_1"/>
+            <lane id="-8.0.00_2">
+                <vehicle id="3" pos="5.1584324858" speed="0.7666997665"/>
+            </lane>
+        </edge>
+        <edge id="12.0.00">
+            <lane id="12.0.00_0"/>
+            <lane id="12.0.00_1"/>
+            <lane id="12.0.00_2">
+                <vehicle id="ego" pos="17.1293618438" speed="7.7694348681"/>
+            </lane>
+        </edge>
+    </timestep>
+    <timestep time="3.40">
+        <edge id="-16.0.00">
+            <lane id="-16.0.00_0"/>
+            <lane id="-16.0.00_1"/>
+            <lane id="-16.0.00_2">
+                <vehicle id="0" pos="7.4205097825" speed="3.1798713311"/>
+            </lane>
+        </edge>
+        <edge id="-24.0.00">
+            <lane id="-24.0.00_0"/>
+            <lane id="-24.0.00_1"/>
+            <lane id="-24.0.00_2">
+                <vehicle id="2" pos="2.7212408730" speed="1.3683283451"/>
+            </lane>
+        </edge>
+        <edge id="-4.0.00">
+            <lane id="-4.0.00_0"/>
+            <lane id="-4.0.00_1"/>
+            <lane id="-4.0.00_2">
+                <vehicle id="1" pos="17.5217054185" speed="11.8958702973"/>
+            </lane>
+        </edge>
+        <edge id="-8.0.00">
+            <lane id="-8.0.00_0"/>
+            <lane id="-8.0.00_1"/>
+            <lane id="-8.0.00_2">
+                <vehicle id="3" pos="5.2598645690" speed="1.0143208319"/>
+            </lane>
+        </edge>
+        <edge id="12.0.00">
+            <lane id="12.0.00_0"/>
+            <lane id="12.0.00_1"/>
+            <lane id="12.0.00_2">
+                <vehicle id="ego" pos="17.9323053306" speed="8.0294348681"/>
+            </lane>
+        </edge>
+    </timestep>
+    <timestep time="3.50">
+        <edge id="-16.0.00">
+            <lane id="-16.0.00_0"/>
+            <lane id="-16.0.00_1"/>
+            <lane id="-16.0.00_2">
+                <vehicle id="0" pos="7.7481434900" speed="3.2763370754"/>
+            </lane>
+        </edge>
+        <edge id="-24.0.00">
+            <lane id="-24.0.00_0"/>
+            <lane id="-24.0.00_1"/>
+            <lane id="-24.0.00_2">
+                <vehicle id="2" pos="2.8674134151" speed="1.4617254207"/>
+            </lane>
+        </edge>
+        <edge id="-4.0.00">
+            <lane id="-4.0.00_0"/>
+            <lane id="-4.0.00_1"/>
+            <lane id="-4.0.00_2">
+                <vehicle id="1" pos="18.7451758734" speed="12.2347045488"/>
+            </lane>
+        </edge>
+        <edge id="-8.0.00">
+            <lane id="-8.0.00_0"/>
+            <lane id="-8.0.00_1"/>
+            <lane id="-8.0.00_2">
+                <vehicle id="3" pos="5.3859830552" speed="1.2611848618"/>
+            </lane>
+        </edge>
+        <edge id="12.0.00">
+            <lane id="12.0.00_0"/>
+            <lane id="12.0.00_1"/>
+            <lane id="12.0.00_2">
+                <vehicle id="ego" pos="18.7612488174" speed="8.2894348681"/>
+            </lane>
+        </edge>
+    </timestep>
+    <timestep time="3.60">
+        <edge id="-16.0.00">
+            <lane id="-16.0.00_0"/>
+            <lane id="-16.0.00_1"/>
+            <lane id="-16.0.00_2">
+                <vehicle id="0" pos="8.0866990599" speed="3.3855556989"/>
+            </lane>
+        </edge>
+        <edge id="-24.0.00">
+            <lane id="-24.0.00_0"/>
+            <lane id="-24.0.00_1"/>
+            <lane id="-24.0.00_2">
+                <vehicle id="2" pos="3.0225038653" speed="1.5509045022"/>
+            </lane>
+        </edge>
+        <edge id="-4.0.00">
+            <lane id="-4.0.00_0"/>
+            <lane id="-4.0.00_1"/>
+            <lane id="-4.0.00_2">
+                <vehicle id="1" pos="19.9991740211" speed="12.5399814771"/>
+            </lane>
+        </edge>
+        <edge id="-8.0.00">
+            <lane id="-8.0.00_0"/>
+            <lane id="-8.0.00_1"/>
+            <lane id="-8.0.00_2">
+                <vehicle id="3" pos="5.5335076569" speed="1.4752460169"/>
+            </lane>
+        </edge>
+        <edge id="12.0.00">
+            <lane id="12.0.00_0"/>
+            <lane id="12.0.00_1"/>
+            <lane id="12.0.00_2">
+                <vehicle id="ego" pos="19.6161923043" speed="8.5494348681"/>
+            </lane>
+        </edge>
+    </timestep>
+    <timestep time="3.70">
+        <edge id="-16.0.00">
+            <lane id="-16.0.00_0"/>
+            <lane id="-16.0.00_1"/>
+            <lane id="-16.0.00_2">
+                <vehicle id="0" pos="8.4353180235" speed="3.4861896364"/>
+            </lane>
+        </edge>
+        <edge id="-24.0.00">
+            <lane id="-24.0.00_0"/>
+            <lane id="-24.0.00_1"/>
+            <lane id="-24.0.00_2">
+                <vehicle id="2" pos="3.1853155778" speed="1.6281171246"/>
+            </lane>
+        </edge>
+        <edge id="-4.0.00">
+            <lane id="-4.0.00_0"/>
+            <lane id="-4.0.00_1"/>
+            <lane id="-4.0.00_2">
+                <vehicle id="1" pos="21.2802700200" speed="12.8109599883"/>
+            </lane>
+        </edge>
+        <edge id="-8.0.00">
+            <lane id="-8.0.00_0"/>
+            <lane id="-8.0.00_1"/>
+            <lane id="-8.0.00_2">
+                <vehicle id="3" pos="5.6987516639" speed="1.6524400705"/>
+            </lane>
+        </edge>
+        <edge id="12.0.00">
+            <lane id="12.0.00_0"/>
+            <lane id="12.0.00_1"/>
+            <lane id="12.0.00_2">
+                <vehicle id="ego" pos="20.4971357911" speed="8.8094348681"/>
+            </lane>
+        </edge>
+    </timestep>
+    <timestep time="3.80">
+        <edge id="-16.0.00">
+            <lane id="-16.0.00_0"/>
+            <lane id="-16.0.00_1"/>
+            <lane id="-16.0.00_2">
+                <vehicle id="0" pos="8.7899783004" speed="3.5466027681"/>
+            </lane>
+        </edge>
+        <edge id="-24.0.00">
+            <lane id="-24.0.00_0"/>
+            <lane id="-24.0.00_1"/>
+            <lane id="-24.0.00_2">
+                <vehicle id="2" pos="3.3586620906" speed="1.7334651283"/>
+            </lane>
+        </edge>
+        <edge id="-4.0.00">
+            <lane id="-4.0.00_0"/>
+            <lane id="-4.0.00_1"/>
+            <lane id="-4.0.00_2">
+                <vehicle id="1" pos="22.5545711184" speed="12.7430109841"/>
+            </lane>
+        </edge>
+        <edge id="-8.0.00">
+            <lane id="-8.0.00_0"/>
+            <lane id="-8.0.00_1"/>
+            <lane id="-8.0.00_2">
+                <vehicle id="3" pos="5.8836910494" speed="1.8493938546"/>
+            </lane>
+        </edge>
+        <edge id="12.0.00">
+            <lane id="12.0.00_0"/>
+            <lane id="12.0.00_1"/>
+            <lane id="12.0.00_2">
+                <vehicle id="ego" pos="21.4040792779" speed="9.0694348681"/>
+            </lane>
+        </edge>
+    </timestep>
+    <timestep time="3.90">
+        <edge id="-16.0.00">
+            <lane id="-16.0.00_0"/>
+            <lane id="-16.0.00_1"/>
+            <lane id="-16.0.00_2">
+                <vehicle id="0" pos="9.1515206235" speed="3.6154232316"/>
+            </lane>
+        </edge>
+        <edge id="-24.0.00">
+            <lane id="-24.0.00_0"/>
+            <lane id="-24.0.00_1"/>
+            <lane id="-24.0.00_2">
+                <vehicle id="2" pos="3.5405489299" speed="1.8188683924"/>
+            </lane>
+        </edge>
+        <edge id="-4.0.00">
+            <lane id="-4.0.00_0"/>
+            <lane id="-4.0.00_1"/>
+            <lane id="-4.0.00_2">
+                <vehicle id="1" pos="23.8487162515" speed="12.9414513310"/>
+            </lane>
+        </edge>
+        <edge id="-8.0.00">
+            <lane id="-8.0.00_0"/>
+            <lane id="-8.0.00_1"/>
+            <lane id="-8.0.00_2">
+                <vehicle id="3" pos="6.0846866339" speed="2.0099558456"/>
+            </lane>
+        </edge>
+        <edge id="12.0.00">
+            <lane id="12.0.00_0"/>
+            <lane id="12.0.00_1"/>
+            <lane id="12.0.00_2">
+                <vehicle id="ego" pos="22.3370227647" speed="9.3294348681"/>
+            </lane>
+        </edge>
+    </timestep>
+    <timestep time="4.00">
+        <edge id="-16.0.00">
+            <lane id="-16.0.00_0"/>
+            <lane id="-16.0.00_1"/>
+            <lane id="-16.0.00_2">
+                <vehicle id="0" pos="9.5223703291" speed="3.7084970558"/>
+            </lane>
+        </edge>
+        <edge id="-24.0.00">
+            <lane id="-24.0.00_0"/>
+            <lane id="-24.0.00_1"/>
+            <lane id="-24.0.00_2">
+                <vehicle id="2" pos="3.7299891538" speed="1.8944022389"/>
+            </lane>
+        </edge>
+        <edge id="-4.0.00">
+            <lane id="-4.0.00_0"/>
+            <lane id="-4.0.00_1"/>
+            <lane id="-4.0.00_2">
+                <vehicle id="1" pos="25.1414468005" speed="12.9273054903"/>
+            </lane>
+        </edge>
+        <edge id="-8.0.00">
+            <lane id="-8.0.00_0"/>
+            <lane id="-8.0.00_1"/>
+            <lane id="-8.0.00_2">
+                <vehicle id="3" pos="6.3076265936" speed="2.2293995969"/>
+            </lane>
+        </edge>
+        <edge id="12.0.00">
+            <lane id="12.0.00_0"/>
+            <lane id="12.0.00_1"/>
+            <lane id="12.0.00_2">
+                <vehicle id="ego" pos="23.2959662515" speed="9.5894348681"/>
+            </lane>
+        </edge>
+        <edge id="22.0.00">
+            <lane id="22.0.00_0"/>
+            <lane id="22.0.00_1"/>
+            <lane id="22.0.00_2">
+                <vehicle id="4" pos="2.4501756191" speed="0.0000000000"/>
+            </lane>
+        </edge>
+    </timestep>
+</netstate>

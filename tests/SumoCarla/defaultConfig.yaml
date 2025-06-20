@@ -48,8 +48,14 @@ ApplicationSetup:
   - type: "ego"
     attribute: {id: ["ego"], radius: [100]}
     ip: ["127.0.0.1"]
-    port:
-    - 430
+    port: [430]
+
+  SignalSubscription:
+  - type: intersection
+    attribute: {name: ['167']}
+    ip: ['127.0.0.1']
+    port: [430]
+    
 XilSetup:
     # enable/disable XIL
   EnableXil: false
@@ -66,7 +72,7 @@ CarlaSetup:
     # Carla Server Ip and Port settings 
     CarlaServerIP: 127.0.0.1
     
-    CarlaServerPort: 421
+    CarlaServerPort: 2000
     # Carla Client Ip and Port settings 
     CarlaClientIP: 127.0.0.1
 
