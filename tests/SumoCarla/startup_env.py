@@ -17,7 +17,7 @@ def run_traffic_layer(traffic_layer_path, config_path):
 
 if __name__ == "__main__":
     config_path = os.path.join(os.getcwd(), 'defaultConfig.yaml')
-    simulation_folder = 'Town01_with_ego_type_as_blueprint'
+    simulation_folder = 'test_scenarios\Town01_with_ego_type_as_blueprint'
     simulation_folder_path = os.path.join(os.getcwd(), simulation_folder)
     simulation_net_file = 'Town01'
     
@@ -26,5 +26,5 @@ if __name__ == "__main__":
     sumo_port = config_helper.simulation_setup['TrafficSimulatorPort']
     traffic_layer_path = os.path.join(os.getcwd(), 'TrafficLayer.exe')
     run_sumo(simulation_folder_path, simulation_net_file, sumo_port, gui=True)
-    run_traffic_layer(traffic_layer_path, config_path)
+    # run_traffic_layer(traffic_layer_path, config_path)
     

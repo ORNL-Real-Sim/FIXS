@@ -81,7 +81,8 @@ int main(int argc, const char* argv[]) {
     MsgHelper msgHelper;
     ConfigHelper configHelper;
     SocketHelper socketHelper;
-    std::string configPath = ".\\defaultConfig.yaml";
+    std::string configPath = "";
+    std::string trafficLightMapPath = "";
     // ===========================================================================
 	// 			Parse Arguments
     // ===========================================================================
@@ -94,6 +95,15 @@ int main(int argc, const char* argv[]) {
         else if (arg == "-f" || arg == "--file") {
             if (i + 1 < argc) {
                 configPath = argv[++i];
+            }
+            else {
+                std::cerr << "--path option requires one argument." << std::endl;
+                return -1;
+            }
+        }
+        else if (arg == "-t" || arg == "--tls") {
+            if (i + 1 < argc) {
+                trafficLightMapPath = argv[++i];
             }
             else {
                 std::cerr << "--path option requires one argument." << std::endl;
@@ -132,7 +142,8 @@ int main(int argc, const char* argv[]) {
     const std::chrono::milliseconds step_duration_ms(static_cast<int>(trafficRefreshRate * 1000));
 	// If the vehicle type is used as the blueprint ID, set this to true
     bool USE_VEHICLE_TYPE_AS_BLUEPRINT = true;
-
+	// Enable external control for interested vehicles, if turned off, the interested vehicles will be controlled by the Sumo
+	bool ENABLE_EXT_CONTROL = false; 
     std::unordered_set<std::string> setInterestedIds;
     for (const std::string& id : carlaSetup.InterestedIds) {
         setInterestedIds.insert(id);
@@ -146,6 +157,15 @@ int main(int argc, const char* argv[]) {
     socketHelper.disableWaitClientTrigger();
     socketHelper.disableServerTrigger();
 	socketHelper.socketSetup(SERVERADDR_UserInput, SERVERPORT_UserInput);
+    // ===========================================================================
+    // 			READ Traffic Light Table
+    // ===========================================================================
+    std::unordered_map<std::string, std::unordered_map<std::string, TrafficLight>> trafficLightMap = BridgeHelper::readTrafficLightTable(trafficLightMapPath);
+
+    if (trafficLightMap.empty()) {
+		std::cerr << "No traffic light data found in the file: " << trafficLightMapPath << std::endl;
+		return -1;
+	}
 
     if (socketHelper.initConnection(CarlaClientLogFile) < 0) {
         printf("Connect to Traffic Layer failed!\n");
@@ -167,14 +187,14 @@ int main(int argc, const char* argv[]) {
         carla::SharedPtr<carla::client::Map> carlaMap = carlaWorld.GetMap();
         carla::SharedPtr<carla::client::Actor> carlaSpectator = carlaWorld.GetSpectator();
 
-        //// Define a high top-down transform (e.g., 100 meters above 0,0)
-        //carla::geom::Location top_down_location(150.0f, 150.0f, 550.0f);   // z = height
-        //carla::geom::Rotation top_down_rotation(-90.0f, -90.0f, 0.0f);   // pitch -90 looks straight down
+        // Define a high top-down transform (e.g., 100 meters above 0,0)
+        carla::geom::Location top_down_location(150.0f, 150.0f, 550.0f);   // z = height
+        carla::geom::Rotation top_down_rotation(-90.0f, -90.0f, 0.0f);   // pitch -90 looks straight down
 
-        //carla::geom::Transform top_down_view(top_down_location, top_down_rotation);
+        carla::geom::Transform top_down_view(top_down_location, top_down_rotation);
 
-        //// Apply the transform
-        //carlaSpectator->SetTransform(top_down_view);
+        // Apply the transform
+        carlaSpectator->SetTransform(top_down_view);
 
         // Enable synchronous mode
         carla::rpc::EpisodeSettings settings = carlaWorld.GetSettings();
@@ -198,6 +218,33 @@ int main(int argc, const char* argv[]) {
         std::vector<carla::rpc::Command> transformCommandBatch;
 
         
+
+        carla::SharedPtr <carla::client::ActorList> carlaTrafficLightActors = carlaWorld.GetActors()->Filter("traffic.traffic_light");
+
+        for (const auto& carlaActor : *carlaTrafficLightActors) {
+            std::string actorId = std::to_string(carlaActor->GetId());
+            // Convert Carla location to SUMO coordinate
+            carla::geom::Location carlaLocation = carlaActor->GetLocation();
+            carla::geom::Location sumoLocation = BridgeHelper::map_location_Carla_to_Sumo(carlaLocation);
+
+            // Find closest TLS from map
+            std::pair<std::string, std::string> trafficLightId = BridgeHelper::find_closest_trafficLight_id(
+                trafficLightMap,
+                sumoLocation.x,
+                sumoLocation.y
+            );
+            std::string junctionId = trafficLightId.first;
+            std::string linkId = trafficLightId.second;
+
+            if (junctionId == "") {
+                std::cerr << "No matching traffic light found for actor " << actorId << "\n";
+                continue;
+            }
+
+            // Assign actor ID
+            trafficLightMap[junctionId][linkId].carlaActorId = actorId;
+
+
         while (simTime < simEndTime) {
             std::chrono::steady_clock::time_point loop_start_time = std::chrono::steady_clock::now();
             ///***********************
@@ -254,6 +301,15 @@ int main(int argc, const char* argv[]) {
 				setCurrentSumoIds.insert(tmpVehData.id);
                 
             }
+            for (const std::pair<const std::string, TrafficLightData_t>& pair : msgHelper.TlsDataRecv_um) {
+                const std::string& tlsId = pair.first;
+            	const TrafficLightData_t& tmpTrafficLightData = pair.second;
+                std::cout << "Received Traffic Light Data for ID: " << tlsId << std::endl;
+                std::cout << "ID: " << tmpTrafficLightData.id << std::endl;
+                std::cout << "Name: " << tmpTrafficLightData.name << std::endl;
+                std::cout << "State: " << tmpTrafficLightData.state << std::endl;
+
+            }
 
 			// Check if the mapSumoActor contains vehicles that are not in the current step (vehicles have left the simulation)
 			// If so, remove them from the mapSumoActor and mapCarlaActor
@@ -281,7 +337,7 @@ int main(int argc, const char* argv[]) {
             }
 
 			// Get the Carla Actor Role Name Mapping
-            carla::SharedPtr <carla::client::ActorList >carlaActors = carlaWorld.GetActors()->Filter("vehicle.*");
+            carla::SharedPtr <carla::client::ActorList> carlaActors = carlaWorld.GetActors()->Filter("vehicle.*");
 			std::unordered_map<std::string, std::string> mapActorIdToRoleName;
             std::unordered_map<std::string, std::string> mapRoleNameToActorId;
             for (const carla::SharedPtr<carla::client::Actor>& carlaActor : *carlaActors) {
@@ -354,6 +410,7 @@ int main(int argc, const char* argv[]) {
 					// And their blueprint should be the same as its vehicle type
                     if (SET_CONTAINS_ID(setInterestedIds, sumoActorId) && MAP_CONTAINS_KEY(mapRoleNameToActorId, sumoActorId) && USE_VEHICLE_TYPE_AS_BLUEPRINT) {
                         carlaActor = carlaWorld.GetActor(std::stoul(mapRoleNameToActorId[sumoActorId]));
+						carlaActor->SetTransform(carlaTransform); // Update the transform of the existing actor to the sumo position
                         if (enableVerboseLog) std::cout << "Found Intertested Vehicle with Carla Type ID: " << carlaActorTypeId << " SUMO ID:" << sumoActorId << std::endl;
                     }
                     else {
@@ -411,14 +468,15 @@ int main(int argc, const char* argv[]) {
 					carla::rpc::ActorId carlaActorId = static_cast<uint32_t>(std::stoul(mapSumoToCarla[sumoActorId]));
 					
                     if (sumoActor.spawnedInCarla && sumoActor.carlaActor!=nullptr) {
-                        //if (SET_CONTAINS_ID(setInterestedIds, sumoActorId)) {
-                        if (false){
-							carla::SharedPtr<carla::client::Actor> carlaActor = carlaWorld.GetActor(carlaActorId);
-                            carla::geom::Transform carlaTransform = carlaActor->GetTransform();
-                            std::cout << "Carla Transform:" << std::endl;
-                            std::cout << "  Location -> x: " << carlaTransform.location.x
-                                << ", y: " << carlaTransform.location.y
-                                << ", z: " << carlaTransform.location.z << std::endl;
+                        if (SET_CONTAINS_ID(setInterestedIds, sumoActorId) && ENABLE_EXT_CONTROL) {
+                            if (enableVerboseLog) {
+                                carla::SharedPtr<carla::client::Actor> carlaActor = mapSumoActor[mapSumoToCarla[sumoActorId]].carlaActor;
+                                carla::geom::Transform carlaTransform = carlaActor->GetTransform();
+                                std::cout << "Carla Transform:" << std::endl;
+                                std::cout << "  Location -> x: " << carlaTransform.location.x
+                                    << ", y: " << carlaTransform.location.y
+                                    << ", z: " << carlaTransform.location.z << std::endl;
+                            }
                         }  
                         else {
                             // If not interested, update its position according to the sumo actor
@@ -441,7 +499,6 @@ int main(int argc, const char* argv[]) {
                             // update the actor's transform
                             carla::rpc::Command::ApplyTransform applyTransformCommand(carlaActorId, carlaTransform);
                             transformCommandBatch.push_back(applyTransformCommand);
-                            carlaActor->SetTransform(carlaTransform);
                             if (enableVerboseLog) std::cout << "Updating actor with ID: " << carlaActorId << " SUMO ID:" << sumoActorId << std::endl;
                             if (enableVerboseLog && sumoActorId == "ego") {
                                 std::cout << "Sumo Transform:" << std::endl;
@@ -487,41 +544,52 @@ int main(int argc, const char* argv[]) {
             //of the interested actors
             for (const auto& sumoId : setInterestedIds) {
 				SumoActor& sumoActor = mapSumoActor[sumoId];
-                if (MAP_CONTAINS_KEY(mapSumoToCarla, sumoId) && sumoActor.spawnedInCarla && sumoActor.carlaActor != nullptr) {
-                    std::string carlaActorId = mapSumoToCarla[sumoId];
+                if (sumoActor.spawnedInCarla && sumoActor.carlaActor != nullptr) {
                     carla::SharedPtr<carla::client::Actor>& carlaActor = sumoActor.carlaActor;
                     carla::geom::Transform carlaTransform = carlaActor->GetTransform();
                     carla::geom::Vector3D carlaExtent = carlaActor->GetBoundingBox().extent;
+                    carla::geom::Vector3D carlaVelocity = carlaActor->GetVelocity(); // This will update the velocity of the actor
                     carla::geom::Transform sumoTransform = BridgeHelper::map_transfrom_Carla_to_Sumo(carlaTransform, carlaExtent);
+					double carlaSpeed = std::sqrt(carlaVelocity.x * carlaVelocity.x + carlaVelocity.y * carlaVelocity.y);
+					
 					// Update the Sumo actor's transform
-					if (MAP_CONTAINS_KEY(mapSumoActor, sumoId)) {
-						mapSumoActor[sumoId].sumoTransform = sumoTransform;
-                        carla::geom::Location sumoLocation = sumoTransform.location;
-                        carla::geom::Rotation sumoRotation = sumoTransform.rotation;
-                        VehFullData_t tmpVehData;
-						tmpVehData.id = sumoId;
-						tmpVehData.type = mapSumoActor[sumoId].vClass;
-                        double simulatedSpeed = periodicCosineSpeed(simTime, 8.0f, 20.0f);
-						tmpVehData.speedDesired = simulatedSpeed;
-						tmpVehData.positionX = sumoLocation.x;
-						tmpVehData.positionY = sumoLocation.y;
-						tmpVehData.positionZ = sumoLocation.z;
-						tmpVehData.heading = sumoRotation.yaw;
-						tmpVehData.grade = sumoRotation.pitch * M_PI / 180.0; // Convert to radians
-						
-						tmpVehData.length = carlaExtent.x * 2; // The extent is half the length, so multiply by 2
-						tmpVehData.width = carlaExtent.y * 2; // The extent is half the width, so multiply by 2
-						tmpVehData.height = carlaExtent.z * 2; // The extent is half the height, so multiply by 2
-						msgHelper.VehDataSend_um[socketHelper.serverSock[sockId]].push_back(tmpVehData);
-                        // Apply the transform
-						carla::geom::Location tmpLocation = carlaTransform.location;
-                        tmpLocation.z = 150.0; // Set height to 50 meters above the ground
-                        //pitch = -90.0, yaw = 0.0, roll = 0.0
-						carla::geom::Rotation tmpRotation(-90.0f, 0.0f, 0.0f);
-                        carla::geom::Transform tmpTransform(tmpLocation, tmpRotation);
-                        carlaSpectator->SetTransform(tmpTransform);
-                        //drawCircle(carlaWorld.MakeDebugHelper(), tmpLocation, 2.5f, 32, 0.5f, 0.1f, 0.2f);
-					}
+					
+					mapSumoActor[sumoId].sumoTransform = sumoTransform;
+                    carla::geom::Location sumoLocation = sumoTransform.location;
+                    carla::geom::Rotation sumoRotation = sumoTransform.rotation;
+                    VehFullData_t tmpVehData;
+					tmpVehData.id = sumoId;
+					tmpVehData.type = mapSumoActor[sumoId].vClass;
+                    double simulatedSpeed = periodicCosineSpeed(simTime, 8.0f, 20.0f);
+                    double speedDesired;
+                    if (ENABLE_EXT_CONTROL) {
+                        // If the vehicle is controlled by the external script, use the speed from the script
+                        speedDesired = carlaSpeed; // Use the speed from the Carla actor
+                    }
+                    else {
+						speedDesired = simulatedSpeed; // Use the simulated speed
+                    }
+                    if (enableVerboseLog) std::cout << "Speed of the Sumo actor with ID: " << sumoId << " is: " << speedDesired << std::endl;
+					tmpVehData.speedDesired = speedDesired;
+					tmpVehData.positionX = sumoLocation.x;
+					tmpVehData.positionY = sumoLocation.y;
+					tmpVehData.positionZ = sumoLocation.z;
+					tmpVehData.heading = sumoRotation.yaw;
+					tmpVehData.grade = sumoRotation.pitch * M_PI / 180.0; // Convert to radians
+					
+					tmpVehData.length = carlaExtent.x * 2; // The extent is half the length, so multiply by 2
+					tmpVehData.width = carlaExtent.y * 2; // The extent is half the width, so multiply by 2
+					tmpVehData.height = carlaExtent.z * 2; // The extent is half the height, so multiply by 2
+					msgHelper.VehDataSend_um[socketHelper.serverSock[sockId]].push_back(tmpVehData);
+                    // Apply the transform
+					carla::geom::Location tmpLocation = carlaTransform.location;
+                    tmpLocation.z = 100.0; // Set height to 100 meters above the ground
+                    //pitch = -90.0, yaw = 0.0, roll = 0.0
+					carla::geom::Rotation tmpRotation(-90.0f, -90.0f, 0.0f);
+                    carla::geom::Transform tmpTransform(tmpLocation, tmpRotation);
+                    carlaSpectator->SetTransform(tmpTransform);
+                    //drawCircle(carlaWorld.MakeDebugHelper(), tmpLocation, 2.5f, 32, 0.5f, 0.1f, 0.2f);
+					
                 }
             }
             

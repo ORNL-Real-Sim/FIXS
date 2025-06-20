@@ -57,7 +57,7 @@
     <vehicle id="17" type="vehicle.toyota.prius" depart="17.00">
         <route edges="4.0.00 22.0.00 -9.0.00 -10.0.00 16.0.00"/>
     </vehicle>
-    <vehicle id="18" type="vehicle.dodge.charger_police" depart="18.00">
+    <vehicle id="18" type="vehicle.ford.mustang" depart="18.00">
         <route edges="21.0.00 -3.0.00 -6.0.00"/>
     </vehicle>
     <vehicle id="19" type="vehicle.mercedes.coupe" depart="19.00">
@@ -69,7 +69,7 @@
     <vehicle id="21" type="vehicle.bmw.grandtourer" depart="21.00">
         <route edges="-17.0.00 -18.0.00 -19.0.00 -7.0.00"/>
     </vehicle>
-    <vehicle id="22" type="vehicle.dodge.charger_police" depart="22.00">
+    <vehicle id="22" type="vehicle.ford.mustang" depart="22.00">
         <route edges="-25.0.00 9.0.00"/>
     </vehicle>
     <vehicle id="23" type="vehicle.diamondback.century" depart="23.00">
@@ -105,7 +105,7 @@
     <vehicle id="33" type="vehicle.diamondback.century" depart="33.00">
         <route edges="-4.0.00 17.0.00 16.0.00 0.0.00"/>
     </vehicle>
-    <vehicle id="34" type="vehicle.dodge.charger_police" depart="34.00">
+    <vehicle id="34" type="vehicle.ford.mustang" depart="34.00">
         <route edges="14.0.00 -8.0.00 -16.0.00 10.0.00 25.0.00 1.0.00 0.0.00 -14.0.00 7.0.00"/>
     </vehicle>
     <vehicle id="35" type="vehicle.carlamotors.carlacola" depart="35.00">
@@ -129,7 +129,7 @@
     <vehicle id="41" type="vehicle.audi.tt" depart="41.00">
         <route edges="-3.0.00 24.0.00 -12.0.00 -19.0.00 6.0.00"/>
     </vehicle>
-    <vehicle id="42" type="vehicle.dodge.charger_police" depart="42.00">
+    <vehicle id="42" type="vehicle.ford.mustang" depart="42.00">
         <route edges="-8.0.00 -16.0.00 10.0.00 25.0.00 1.0.00"/>
     </vehicle>
     <vehicle id="43" type="vehicle.micro.microlino" depart="43.00">

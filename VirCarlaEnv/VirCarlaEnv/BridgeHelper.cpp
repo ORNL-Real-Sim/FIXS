@@ -50,6 +50,22 @@ carla::geom::Transform BridgeHelper::map_transfrom_Carla_to_Sumo(const carla::ge
     return carla::geom::Transform(out_location, out_rotation);
 }
 
+carla::geom::Location BridgeHelper::map_location_Carla_to_Sumo(const carla::geom::Location& in_carla_location) {
+
+    carla::geom::Location in_location = in_carla_location;
+
+    float x = in_location.x;
+    float y = in_location.y;
+    float z = in_location.z;
+
+    x += offset.x;
+    y -= offset.y;
+
+    carla::geom::Location out_location{ x, -y, z };
+
+    return out_location;
+}
+
 std::string BridgeHelper::map_Sumo_vClass_to_Carla_blueprintId(const std::string& vClass)
 {
     static const std::unordered_set<std::string> carlaCarsBlueprints = {
@@ -154,24 +170,47 @@ std::string BridgeHelper::map_Sumo_vClass_to_Carla_blueprintId(const std::string
 	return carlaBlueprintId;
 }
 
-SumoTrafficLightState map_Carla_traffic_light_state_to_Sumo(carla::rpc::TrafficLightState carlaTrafficLightState) {
-    using namespace carla::rpc;
+SumoTrafficLightState BridgeHelper::map_Carla_traffic_light_state_to_Sumo(carla::rpc::TrafficLightState carlaTrafficLightState) {
+
     switch (carlaTrafficLightState) {
-    case TrafficLightState::Red:
+    case carla::rpc::TrafficLightState::Red:
         return SumoTrafficLightState::RED;
-    case TrafficLightState::Yellow:
+    case carla::rpc::TrafficLightState::Yellow:
         return SumoTrafficLightState::YELLOW;
-    case TrafficLightState::Green:
+    case carla::rpc::TrafficLightState::Green:
         return SumoTrafficLightState::GREEN;
-    case TrafficLightState::Off:
+    case carla::rpc::TrafficLightState::Off:
         return SumoTrafficLightState::OFF;
-    case TrafficLightState::Unknown:
+    case carla::rpc::TrafficLightState::Unknown:
     default:
         return SumoTrafficLightState::OFF;
     }
 }
 
-SumoTrafficLightState get_Sumo_traffic_light_state_from_char(char c) {
+
+carla::rpc::TrafficLightState BridgeHelper::map_Sumo_traffic_light_state_to_Carla(SumoTrafficLightState sumoTrafficLightState) {
+    // Map SumoTrafficLightState to carla::rpc::TrafficLightState
+    if (sumoTrafficLightState == SumoTrafficLightState::RED ||
+        sumoTrafficLightState == SumoTrafficLightState::RED_YELLOW) {
+		return carla::rpc::TrafficLightState::Red;
+	}
+    else if (sumoTrafficLightState == SumoTrafficLightState::YELLOW) {
+		return carla::rpc::TrafficLightState::Yellow;
+	}
+    else if (sumoTrafficLightState == SumoTrafficLightState::GREEN ||
+        sumoTrafficLightState == SumoTrafficLightState::GREEN_WITHOUT_PRIORITY) {
+		return carla::rpc::TrafficLightState::Green;
+	}
+    else if (sumoTrafficLightState == SumoTrafficLightState::OFF) {
+		return carla::rpc::TrafficLightState::Off;
+	}
+	else { // SumoTrafficLightState::GREEN_RIGHT_TURN and SumoTrafficLightState::OFF_BLINKING
+    		return carla::rpc::TrafficLightState::Unknown;
+    	}
+}
+
+
+SumoTrafficLightState BridgeHelper::get_Sumo_traffic_light_state_from_char(char c) {
     switch (c) {
     case 'r': return SumoTrafficLightState::RED;
     case 'y': return SumoTrafficLightState::YELLOW;
@@ -186,48 +225,66 @@ SumoTrafficLightState get_Sumo_traffic_light_state_from_char(char c) {
     }
 }
 
-char Sumo_traffic_light_state_to_char(SumoTrafficLightState state) {
+char BridgeHelper::Sumo_traffic_light_state_to_char(SumoTrafficLightState state) {
     return static_cast<char>(state);
 }
-//tempDoublePtr = static_pointer_cast<libsumo::TraCIDouble> (VehDataSubscribeTraciResults[libsumo::VAR_ANGLE]);
-//CurVehData.heading = tempDoublePtr->value;
 
-//tempDoublePtr = static_pointer_cast<libsumo::TraCIDouble> (VehDataSubscribeTraciResults[libsumo::VAR_SLOPE]);
-//CurVehData.grade = tempDoublePtr->value * M_PI / 180;
+std::unordered_map<std::string, std::unordered_map<std::string, TrafficLight>> BridgeHelper::readTrafficLightTable(const std::string& filename) {
+    std::unordered_map<std::string, std::unordered_map<std::string, TrafficLight>> trafficLightMap;
+    std::ifstream file(filename);
+    std::string line;
+
+    if (!file.is_open()) {
+        std::cerr << "Failed to open file: " << filename << std::endl;
+        return trafficLightMap;
+    }
+
+    // Skip the header
+    std::getline(file, line);
+
+    // Parse each line
+    while (std::getline(file, line)) {
+        std::stringstream ss(line);
+        TrafficLight trafficLight;
+        char comma;
+
+        ss >> trafficLight.junctionId >> comma
+            >> trafficLight.linkId >> comma
+            >> trafficLight.x >> comma
+            >> trafficLight.y >> comma
+            >> trafficLight.z >> comma
+            >> trafficLight.heading;
+
+        trafficLightMap[trafficLight.junctionId][trafficLight.linkId] = trafficLight;
+    }
+
+    return trafficLightMap;
+}
 
 
-//SumoActor GetActor(TraCIAPI& traci, const std::string& actor_id) {
-//    // Get subscription results
-//    auto results = traci.vehicle.getSubscriptionResults(actor_id);
-//
-//    // Extract attributes from subscription result
-//    std::string type_id = results.at(traci::constants::VAR_TYPE).asString();
-//    std::string vclass = results.at(traci::constants::VAR_VEHICLECLASS).asString();
-//    std::vector<std::string> signals;  // Adapt if signal structure known
-//
-//    // Color is a 4-element tuple in SUMO: (r, g, b, a)
-//    auto color_vec = results.at(traci::constants::VAR_COLOR).asColor();
-//    carla::rpc::Color color(color_vec.r, color_vec.g, color_vec.b);
-//
-//    // Dimensions
-//    float length = results.at(traci::constants::VAR_LENGTH).asFloat();
-//    float width = results.at(traci::constants::VAR_WIDTH).asFloat();
-//    float height = results.at(traci::constants::VAR_HEIGHT).asFloat();
-//    carla::geom::Vector3D extent(length / 2.0f, width / 2.0f, height / 2.0f);
-//
-//    // Location (x, y, z)
-//    auto pos3d = results.at(traci::constants::VAR_POSITION3D).asPosition3D();
-//    float x = pos3d.x, y = pos3d.y, z = pos3d.z;
-//
-//    // Rotation: pitch = slope, yaw = angle, roll = 0.0
-//    float pitch = results.at(traci::constants::VAR_SLOPE).asFloat();
-//    float yaw = results.at(traci::constants::VAR_ANGLE).asFloat();
-//    float roll = 0.0f;
-//
-//    carla::geom::Location location(x, y, z);
-//    carla::geom::Rotation rotation(pitch, yaw, roll);
-//    carla::geom::Transform transform(location, rotation);
-//
-//    // Construct and return the actor
-//    return SumoActor(type_id, vclass, transform, signals, extent, color);
-//}
+std::pair<std::string, std::string> BridgeHelper::find_closest_trafficLight_id(
+    std::unordered_map<std::string, std::unordered_map<std::string, TrafficLight>>& trafficLightMap,
+    double x, double y
+) {
+    double min_dist = std::numeric_limits<double>::max();
+    std::pair<std::string, std::string> closest_ids = { "", "" };
+
+    for (const std::pair<std::string, std::unordered_map<std::string, TrafficLight>>& pair : trafficLightMap) {
+        const std::string& junctionId = pair.first;
+        const std::unordered_map<std::string, TrafficLight>& linkMap = pair.second;
+        for (const std::pair<std::string, TrafficLight>& pair : linkMap) {
+            const std::string& linkId = pair.first;
+            const TrafficLight& trafficLight = pair.second;
+            double dx = trafficLight.x - x;
+            double dy = trafficLight.y - y;
+            double dist_sq = dx * dx + dy * dy;
+
+            if (dist_sq < min_dist) {
+                min_dist = dist_sq;
+                closest_ids = { junctionId, linkId };
+            }
+        }
+    }
+
+    return closest_ids;
+}

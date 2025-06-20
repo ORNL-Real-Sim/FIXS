@@ -1,7 +1,7 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="Current" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <LocalDebuggerCommandArguments>-f ..\..\tests\SumoCarla\defaultConfig.yaml</LocalDebuggerCommandArguments>
+    <LocalDebuggerCommandArguments>-f ..\..\tests\SumoCarla\defaultConfig.yaml -t ..\..\tests\SumoCarla\test_scenarios\Town01_with_ego_type_as_blueprint\traffic_light_table.csv</LocalDebuggerCommandArguments>
     <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
   </PropertyGroup>
 </Project>

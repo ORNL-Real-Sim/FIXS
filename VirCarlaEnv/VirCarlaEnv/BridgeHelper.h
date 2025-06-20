@@ -1,5 +1,7 @@
 ﻿#pragma once
-
+#include <iostream>
+#include <fstream>
+#include <sstream>
 #include <unordered_map>
 #include <string>
 #include <tuple>
@@ -29,7 +31,24 @@ public:
     static carla::geom::Transform map_transfrom_Carla_to_Sumo(const carla::geom::Transform& in_carla_transform,
         const carla::geom::Vector3D& extent);
 
+    static carla::geom::Location map_location_Carla_to_Sumo(const carla::geom::Location& in_carla_location);
+
     static std::string map_Sumo_vClass_to_Carla_blueprintId(const std::string& vclass);
+
+    static std::unordered_map<std::string, std::unordered_map<std::string, TrafficLight>> readTrafficLightTable(const std::string& filename);
+
+    static char Sumo_traffic_light_state_to_char(SumoTrafficLightState state);
+
+    static SumoTrafficLightState get_Sumo_traffic_light_state_from_char(char c);
+
+    static SumoTrafficLightState map_Carla_traffic_light_state_to_Sumo(carla::rpc::TrafficLightState carlaTrafficLightState);
+
+    static carla::rpc::TrafficLightState map_Sumo_traffic_light_state_to_Carla(SumoTrafficLightState sumoTrafficLightState);
+
+    static std::pair<std::string, std::string> find_closest_trafficLight_id(
+        std::unordered_map<std::string, std::unordered_map<std::string, TrafficLight>>& trafficLightMap,
+        double x, double y);
+
 };
 
 
@@ -77,8 +96,18 @@ enum class SumoTrafficLightState : char {
     OFF = 'O'
 };
 
-char Sumo_traffic_light_state_to_char(SumoTrafficLightState state);
+struct TrafficLight {
+    std::string junctionId;
+    std::string linkId;
+    double x, y, z;
+    double heading;
+    std::string carlaActorId = "";
+    // Current state of the traffic light
+    SumoTrafficLightState state = SumoTrafficLightState::OFF;
 
-SumoTrafficLightState get_Sumo_traffic_light_state_from_char(char c);
+    TrafficLight() = default;
+    TrafficLight(int _junctionId, int _linkId, double _x, double _y, double _z, double _heading)
+        : junctionId(_junctionId), linkId(_linkId), x(_x), y(_y), z(_z), heading(_heading) {}
+};
 
-SumoTrafficLightState map_Carla_traffic_light_state_to_Sumo(carla::rpc::TrafficLightState carlaTrafficLightState);
+
