@@ -114,8 +114,6 @@ def run_settings(config):
         run_one_setting(output_dir, source_dir, experiment_setting)
         os.chdir(working_dir)
         break
-        
-        
 # main function
 if __name__ == '__main__':
     config_file = './Experiments_Vissim/experiment_config_Vissim.yaml'

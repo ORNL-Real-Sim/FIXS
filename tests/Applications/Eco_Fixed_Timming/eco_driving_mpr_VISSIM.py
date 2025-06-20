@@ -169,7 +169,7 @@ class VissimEnvMultiAgent:
                  use_simulink_for_energy_evaluation=False,
                  eco_driving=False,
                  step_length=0.1,
-                 verbose=False):
+                 verbose=True):
         # sumo startup utils
         # remember to enable the Evaluation --> Configuration -->Direct Output --> Signal changes
         self.with_ego_veh = with_ego_veh
@@ -444,7 +444,8 @@ class VissimEnvMultiAgent:
                 C = 0.000278
                 M = 1.6443
                 # update the desire speed for controllable vehicles on EB and WB
-                CAV_curr_control_eb = gen_desire_speed_dir_r_(CAV_curr, simsec, LOOKAHEAD_STEP, self.lsa, A, B, C, M, self.example_coasting_profile, self.static_routes_eb_wb_th)
+                # CAV_curr_control_eb = gen_desire_speed_dir_r_(CAV_curr, simsec, LOOKAHEAD_STEP, self.lsa, A, B, C, M, self.example_coasting_profile, self.static_routes_eb_wb_th)
+                CAV_curr_control_eb = gen_desire_speed_dir_r_(CAV_curr, simsec, self.step_length, self.lsa, A, B, C, M, self.example_coasting_profile, self.static_routes_eb_wb_th)
                 
                 # vihicles controllable by Vissim (CAV)
                 CAV_VISSIM = CAV_curr[CAV_curr['VehType'] == '10001']
@@ -583,7 +584,7 @@ if __name__ == '__main__':
     parser.add_argument("--vehicleDynamics", action="store_true", help="use the vehicle dynamis", default=False)
     parser.add_argument("--penetrationRate", type=float, help="the penetration rate of cav", default=0.1)
     parser.add_argument("--pathToNet", type=str, help="the path to the net file", default=r'C:\Users\hg25079\Documents\GitHub\FIXS\tests\Applications\Eco_Fixed_Timming\Experiments_Vissim\banMinorLeftTurnFixedTimingV2_WithEgo')
-    parser.add_argument("--verbose", action="store_true", help="print verbose output", default=False)
+    parser.add_argument("--verbose", action="store_true", help="print verbose output", default=True)
     
     args = parser.parse_args()
     traffic_layer_config = args.config
@@ -617,5 +618,5 @@ if __name__ == '__main__':
     
     vissim_env.init_simulation_environment(cavpr=penetration_rate)
     vissim_env.warmup_vissim()
-    vissim_env.start_subscription(control_ego_only=True)
+    vissim_env.start_subscription(control_ego_only=False)
     
