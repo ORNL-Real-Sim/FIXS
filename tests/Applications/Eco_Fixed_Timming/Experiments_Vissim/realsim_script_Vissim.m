@@ -7,14 +7,14 @@ function realsim_script(settingDir, simModelName)
     clearvars -except settingDir simModelName; % Keep input variables
     clc;
     format compact;
-    addpath(genpath('.\\VehicleDynamicsModels'))
+    addpath(genpath('..\\..\\..\\VehicleDynamicsModels'))
     % addpath(genpath('..\\..\\..\\ICV'))
     % Initializations
-    RealSimPath = '..\\..\\..\\CommonLib';
+    RealSimPath = '..\\..\\..\\..\\..\\..\\CommonLib';
     % Add path of RealSim tools
     addpath(genpath(RealSimPath));
     % Initialize RealSim for Simulink, Read yaml file
-    configPath = [settingDir '\ecodrivingConfig_VISSIM.yaml'];
+    configPath = [settingDir '\ecodriving_config_Vissim.yaml'];
     %print configPath
     fprintf('Configuration path: %s\n', configPath);
     [VehicleMessageFieldDefInputVec, VehDataBus, TrafficLayerIP, TrafficLayerPort] = RealSimInitSimulink(configPath);
@@ -22,11 +22,11 @@ function realsim_script(settingDir, simModelName)
     % Define RealSim parameters
     RealSimPara = struct;
     RealSimPara.warmupTime = 20;
-    RealSimPara.speedInit = 50; % Initial speed of the ego vehicle when entering SUMO network
+    RealSimPara.speedInit = 0; % Initial speed of the ego vehicle when entering SUMO network
     RealSimPara.tLookahead = 0.1; % Use 0.1 for external control, recommend tLookahead >= 0.2 for SUMO driver
     RealSimPara.smoothWindow = 1; % Number of moving average data points, 1 means no moving average
-    % RealSimPara.speedSource = 3; % Use speedSource = 3 for dummy vehicle dynamics (simple transfer function)
-    RealSimPara.speedSource = 2; % Use speedSource = 2 for real vehicle dynamics (simple transfer function)
+    RealSimPara.speedSource = 3; % Use speedSource = 3 for dummy vehicle dynamics (simple transfer function)
+
     % Start RealSim Procedure
     fprintf('Starting RealSim procedure...\n');
     %tic;

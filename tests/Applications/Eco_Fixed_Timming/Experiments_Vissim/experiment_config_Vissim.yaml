@@ -1,0 +1,50 @@
+root_dir: 'C:\Users\hg25079\Documents\GitHub\FIXS\tests\Applications\Eco_Fixed_Timming\'
+Experiments:
+  Experiment1:
+    source_dir: 'Experiments_Vissim\'
+    config_file: 'ecodriving_config_Vissim.yaml'
+    working_dir: 'Experiments_Vissim\ACV2_VISSIM\'
+    eco_driving: True
+    vehicle_dynamics: False
+    step_length: 1
+    penetration_rate: 0.1
+    Vissim:
+      src_path: 'banMinorLeftTurnFixedTimingV2_WithEgo\'
+      port: 1337
+    Simulink:
+      model_name: 'EV_longitude'
+      port: 420
+    FIXS:
+      port: 430
+  # Experiment2:
+  #   source_dir: 'Experiments_Vissim\'
+  #   config_file: 'ecodriving_config_Vissim.yaml'
+  #   working_dir: 'Experiments_Vissim\ACV2_VISSIM\'
+  #   eco_driving: True
+  #   vehicle_dynamics: True
+  #   step_length: 1
+  #   penetration_rate: 0.5
+  #   Vissim:
+  #     src_path: 'banMinorLeftTurnFixedTimingV2_WithEgo\'
+  #     port: 1338
+  #   Simulink:
+  #     model_name: 'EV_longitude'
+  #     port: 421
+  #   FIXS:
+  #     port: 431
+  # Experiment3:
+  #   source_dir: 'Experiments_Vissim\'
+  #   config_file: 'ecodriving_config_Vissim.yaml'
+  #   working_dir: 'Experiments_Vissim\ACV2_VISSIM\'
+  #   eco_driving: True
+  #   vehicle_dynamics: True
+  #   step_length: 1
+  #   penetration_rate: 1.0
+  #   Vissim:
+  #     src_path: 'banMinorLeftTurnFixedTimingV2_WithEgo\'
+  #     port: 1339
+  #   Simulink:
+  #     model_name: 'EV_longitude'
+  #     port: 422
+  #   FIXS:
+  #     port: 432

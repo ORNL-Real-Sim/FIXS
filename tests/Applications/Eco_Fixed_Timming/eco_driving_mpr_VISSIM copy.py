@@ -598,7 +598,7 @@ if __name__ == '__main__':
     vehicle_dynamics = args.vehicleDynamics
     eco_driving = args.ecoDriving
     verbose = args.verbose
-    # run_traffic_layer('TrafficLayer.exe',traffic_layer_config)
+    run_traffic_layer('TrafficLayer.exe',traffic_layer_config)
     vissim_env = VissimEnvMultiAgent(driver_model_path=r"C:\Users\hg25079\Documents\GitHub\FIXS\tests\Applications\Eco_Fixed_Timming\DriverModel_RealSim_v2021.dll",
                                     vissim_port=vissim_port,
                                     traffic_layer_ip=traffic_layer_ip,
