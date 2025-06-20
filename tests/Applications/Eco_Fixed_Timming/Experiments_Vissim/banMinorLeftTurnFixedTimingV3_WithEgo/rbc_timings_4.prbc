@@ -1,0 +1,358 @@
+{
+  "Controller": {
+    "ExecutionFrequency": 10,
+    "OffsetReference": "LeadingStartOfGreen",
+    "PatternSchedule": {
+      "PatternScheduleItems": [
+        {
+          "Pattern": 1,
+          "StartTime": 0
+        }
+      ]
+    },
+    "Patterns": [
+      {
+        "CycleLength": 1000,
+        "ID": 1,
+        "MaxGreenMode": "InhibitMaxGreen",
+        "Offset": 160,
+        "PedestrianSignalGroupsInPattern": [],
+        "PermissiveMode": "SingleBand",
+        "UseExplicitForceOffs": false,
+        "UseExplicitPermissivePeriods": false,
+        "VehicleSignalGroupsInPattern": [
+          {
+            "Coordinated": false,
+            "ForceOff": 0,
+            "InhibitMaxGreen": true,
+            "Lead": false,
+            "MaxRecall": true,
+            "MinRecall": false,
+            "OverridingMaxGreen": 0,
+            "OverridingMinGreen": 0,
+            "OverridingVehExtension": 0,
+            "PermissivePeriodEnd": 0,
+            "PermissivePeriodStart": 0,
+            "Split": 80,
+            "UseMaxGreen2": false,
+            "UseMaxGreen3": false,
+            "VehicleSignalGroup": 1
+          },
+          {
+            "Coordinated": true,
+            "ForceOff": 0,
+            "InhibitMaxGreen": true,
+            "Lead": false,
+            "MaxRecall": true,
+            "MinRecall": true,
+            "OverridingMaxGreen": 0,
+            "OverridingMinGreen": 0,
+            "OverridingVehExtension": 0,
+            "PermissivePeriodEnd": 0,
+            "PermissivePeriodStart": 0,
+            "Split": 790,
+            "UseMaxGreen2": false,
+            "UseMaxGreen3": false,
+            "VehicleSignalGroup": 2
+          },
+          {
+            "Coordinated": false,
+            "ForceOff": 0,
+            "InhibitMaxGreen": true,
+            "Lead": false,
+            "MaxRecall": true,
+            "MinRecall": false,
+            "OverridingMaxGreen": 0,
+            "OverridingMinGreen": 0,
+            "OverridingVehExtension": 0,
+            "PermissivePeriodEnd": 0,
+            "PermissivePeriodStart": 0,
+            "Split": 130,
+            "UseMaxGreen2": false,
+            "UseMaxGreen3": false,
+            "VehicleSignalGroup": 4
+          },
+          {
+            "Coordinated": false,
+            "ForceOff": 0,
+            "InhibitMaxGreen": true,
+            "Lead": false,
+            "MaxRecall": true,
+            "MinRecall": false,
+            "OverridingMaxGreen": 0,
+            "OverridingMinGreen": 0,
+            "OverridingVehExtension": 0,
+            "PermissivePeriodEnd": 0,
+            "PermissivePeriodStart": 0,
+            "Split": 170,
+            "UseMaxGreen2": false,
+            "UseMaxGreen3": false,
+            "VehicleSignalGroup": 5
+          },
+          {
+            "Coordinated": true,
+            "ForceOff": 0,
+            "InhibitMaxGreen": true,
+            "Lead": false,
+            "MaxRecall": true,
+            "MinRecall": true,
+            "OverridingMaxGreen": 0,
+            "OverridingMinGreen": 0,
+            "OverridingVehExtension": 0,
+            "PermissivePeriodEnd": 0,
+            "PermissivePeriodStart": 0,
+            "Split": 700,
+            "UseMaxGreen2": false,
+            "UseMaxGreen3": false,
+            "VehicleSignalGroup": 6
+          },
+          {
+            "Coordinated": false,
+            "ForceOff": 0,
+            "InhibitMaxGreen": true,
+            "Lead": false,
+            "MaxRecall": true,
+            "MinRecall": false,
+            "OverridingMaxGreen": 0,
+            "OverridingMinGreen": 0,
+            "OverridingVehExtension": 0,
+            "PermissivePeriodEnd": 0,
+            "PermissivePeriodStart": 0,
+            "Split": 130,
+            "UseMaxGreen2": false,
+            "UseMaxGreen3": false,
+            "VehicleSignalGroup": 8
+          }
+        ]
+      }
+    ],
+    "PedestrianDetectors": [],
+    "PedestrianSignalGroups": [],
+    "Sequence": {
+      "BarrierGroups": [
+        {
+          "RingGroups": [
+            {
+              "VehicleSignalGroups": [
+                1,
+                2
+              ]
+            },
+            {
+              "VehicleSignalGroups": [
+                5,
+                6
+              ]
+            }
+          ]
+        },
+        {
+          "RingGroups": [
+            {
+              "VehicleSignalGroups": [
+                4
+              ]
+            },
+            {
+              "VehicleSignalGroups": [
+                8
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "VehicleDetectors": [
+      {
+        "CalledSGs": [
+          1
+        ],
+        "ExtendedSGs": [
+          1
+        ],
+        "ID": 1
+      },
+      {
+        "CalledSGs": [
+          2
+        ],
+        "ExtendedSGs": [
+          2
+        ],
+        "ID": 2
+      },
+      {
+        "CalledSGs": [
+          4
+        ],
+        "ExtendedSGs": [
+          4
+        ],
+        "ID": 4
+      },
+      {
+        "CalledSGs": [
+          5
+        ],
+        "ExtendedSGs": [
+          5
+        ],
+        "ID": 5
+      },
+      {
+        "CalledSGs": [
+          6
+        ],
+        "ExtendedSGs": [
+          6
+        ],
+        "ID": 6
+      },
+      {
+        "CalledSGs": [
+          8
+        ],
+        "ExtendedSGs": [
+          8
+        ],
+        "ID": 8
+      }
+    ],
+    "VehicleOverlapSignalGroups": [],
+    "VehicleSignalGroups": [
+      {
+        "DualEntry": false,
+        "ID": 1,
+        "MaxGreen1": 40,
+        "MaxGreen2": 0,
+        "MaxGreen3": 0,
+        "MaxRecall": true,
+        "MinGreen": 40,
+        "MinRecall": false,
+        "Name": "1",
+        "RedClearance": 0,
+        "StartUp": false,
+        "VehExtension": 10,
+        "Yellow": 40
+      },
+      {
+        "DualEntry": true,
+        "ID": 2,
+        "MaxGreen1": 740,
+        "MaxGreen2": 0,
+        "MaxGreen3": 0,
+        "MaxRecall": true,
+        "MinGreen": 150,
+        "MinRecall": true,
+        "Name": "2",
+        "RedClearance": 10,
+        "StartUp": true,
+        "VehExtension": 20,
+        "Yellow": 40
+      },
+      {
+        "DualEntry": true,
+        "ID": 4,
+        "MaxGreen1": 80,
+        "MaxGreen2": 0,
+        "MaxGreen3": 0,
+        "MaxRecall": true,
+        "MinGreen": 80,
+        "MinRecall": false,
+        "Name": "4",
+        "RedClearance": 10,
+        "StartUp": false,
+        "VehExtension": 20,
+        "Yellow": 40
+      },
+      {
+        "DualEntry": false,
+        "ID": 5,
+        "MaxGreen1": 130,
+        "MaxGreen2": 0,
+        "MaxGreen3": 0,
+        "MaxRecall": true,
+        "MinGreen": 40,
+        "MinRecall": false,
+        "Name": "5",
+        "RedClearance": 0,
+        "StartUp": false,
+        "VehExtension": 10,
+        "Yellow": 40
+      },
+      {
+        "DualEntry": true,
+        "ID": 6,
+        "MaxGreen1": 650,
+        "MaxGreen2": 0,
+        "MaxGreen3": 0,
+        "MaxRecall": true,
+        "MinGreen": 150,
+        "MinRecall": true,
+        "Name": "6",
+        "RedClearance": 10,
+        "StartUp": true,
+        "VehExtension": 20,
+        "Yellow": 40
+      },
+      {
+        "DualEntry": true,
+        "ID": 8,
+        "MaxGreen1": 80,
+        "MaxGreen2": 0,
+        "MaxGreen3": 0,
+        "MaxRecall": true,
+        "MinGreen": 80,
+        "MinRecall": false,
+        "Name": "8 ",
+        "RedClearance": 10,
+        "StartUp": false,
+        "VehExtension": 20,
+        "Yellow": 40
+      }
+    ]
+  },
+  "FormatVersion": [
+    1,
+    1
+  ],
+  "GUI": {
+    "Notes": "",
+    "SequencePresentation": {
+      "BarrierGroupPresentations": [
+        {
+          "RightMargin": 0,
+          "RingGroupPresentations": [
+            {
+              "SignalGroupOffsets": [
+                0,
+                0
+              ]
+            },
+            {
+              "SignalGroupOffsets": [
+                0,
+                0
+              ]
+            }
+          ]
+        },
+        {
+          "RightMargin": 0,
+          "RingGroupPresentations": [
+            {
+              "SignalGroupOffsets": [
+                1
+              ]
+            },
+            {
+              "SignalGroupOffsets": [
+                1
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
