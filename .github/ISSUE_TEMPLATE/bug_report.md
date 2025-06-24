@@ -36,7 +36,7 @@ Please list only the tools related to this issue:
 - SUMO version:
 - VISSIM version:
 - Carmaker version:
-- Space version:
+- dSPACE version:
 
 **Additional context**  
 Any other relevant information or system configuration.

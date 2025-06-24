@@ -24,7 +24,7 @@ Only fill in relevant tools:
 - SUMO version:
 - VISSIM version:
 - Carmaker version:
-- Space version:
+- dSPACE version:
 
 **Additional context**  
 Any examples, pseudocode, or notes that help explain the feature.

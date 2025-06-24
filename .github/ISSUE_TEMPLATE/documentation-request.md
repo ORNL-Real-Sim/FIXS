@@ -25,7 +25,7 @@ Only fill in relevant versions mentioned in the docs:
 - SUMO version:
 - VISSIM version:
 - Carmaker version:
-- Space version:
+- dSPACE version:
 
 **Additional context**  
 Any references, examples, or discussion points.
