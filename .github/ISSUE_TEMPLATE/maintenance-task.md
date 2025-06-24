@@ -22,12 +22,12 @@ e.g., `vissim_bridge.cpp`, `trajectory_planner.m`, `controller_config.yaml`
 **Environment (if version-specific)**  
 Only include the tools that are relevant:
 - Python version:
-- C++ compiler/toolchain:
-- MATLAB/Simulink version:
+- C++ compiler/version:
+- MATLAB/Simulink/dSPACE version:
+- CARLA version:
 - SUMO version:
 - VISSIM version:
-- Carmaker version:
-- dSPACE version:
+- IPG Carmaker version:
 
 **Risks or Dependencies**  
 List any known blockers or tasks that must be completed beforehand.  

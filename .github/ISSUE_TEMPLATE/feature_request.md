@@ -19,12 +19,12 @@ What other approaches or workarounds have you tried?
 **Environment (if feature is environment-specific)**  
 Only fill in relevant tools:
 - Python version:
-- MATLAB/Simulink version:
+- C++ compiler/version:
+- MATLAB/Simulink/dSPACE version:
 - CARLA version:
 - SUMO version:
 - VISSIM version:
-- Carmaker version:
-- dSPACE version:
+- IPG Carmaker version:
 
 **Additional context**  
 Any examples, pseudocode, or notes that help explain the feature.
