@@ -30,13 +30,12 @@ Add screenshots or error logs to help explain the problem.
 **Environment**  
 Please list only the tools related to this issue:
 - Python version:
-- C++ compiler/version (if relevant):
-- MATLAB/Simulink version:
+- C++ compiler/version:
+- MATLAB/Simulink/dSPACE version:
 - CARLA version:
 - SUMO version:
 - VISSIM version:
-- Carmaker version:
-- dSPACE version:
+- IPG Carmaker version:
 
 **Additional context**  
 Any other relevant information or system configuration.
