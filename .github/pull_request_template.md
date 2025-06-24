@@ -22,11 +22,10 @@ What test cases were run? Add command-line examples, test IDs, or links to simul
 ## Environment  
 Only fill in the tools used for testing this PR:  
 - Python version:
-- MATLAB/Simulink version:
+- MATLAB/Simulink/dSPACE version:
 - SUMO version:
 - VISSIM version:
-- Carmaker version:
-- dSPACE version:
+- IPG CarMaker version:
 
 ## Checklist  
 - [ ] Code compiles/runs as expected  
