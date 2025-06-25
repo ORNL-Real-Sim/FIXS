@@ -29,6 +29,10 @@ This README contains general information of the interface. For specific document
 * ### [SUMO Interface](doc/SUMOdoc.md)
 * ### [CarMaker](doc/CarMakerDoc.md)
 
+Current software versions used in FIXS development
+CM13.1.2, Carla 0.9.15, VISSIM 2022, SUMO 1.21, dSPACE/Matlab 2024a
+
+
 # Table of Contents
 * [Preface](#preface)
 * [Build](#build)
