@@ -4,8 +4,10 @@ import sys
 import os
 import urllib.request
 
+#check if command is in PATH
 def is_on_path(command):
     return shutil.which(command) is not None
+
 
 def run_command(command):
     try:
@@ -16,6 +18,8 @@ def run_command(command):
         print(f" Command failed:\n{e.stderr}")
         return False
 
+#downloads miniconda installer if not present
+#will prompt for download
 def download_miniconda():
     url = "https://repo.anaconda.com/miniconda/Miniconda3-latest-Windows-x86_64.exe"
     output = "MinicondaInstaller.exe"
@@ -29,6 +33,7 @@ def download_miniconda():
         print(f" Failed to download Miniconda: {e}")
         return None
 
+
 def install_miniconda(installer_path):
     print(" Launching Miniconda installer...")
     try:
@@ -37,28 +42,35 @@ def install_miniconda(installer_path):
     except Exception as e:
         print(f" Failed to launch installer: {e}")
 
+#checks conda is installed
 def ensure_conda():
     print("Checking if Conda is available...")
     if not is_on_path("conda"):
         print("Conda is not found in PATH.")
+        #select yes when prompted to download
         choice = input("Do you want to download and install Miniconda now? (y/n): ").strip().lower()
         if choice == 'y':
             installer = download_miniconda()
             if installer:
                 install_miniconda(installer)
+                #close IDE and reopen to ensure PATH was changed
                 print("\n After installing Miniconda, please restart your terminal and IDE, then run this script again.")
         else:
+            #check troubleshooting in setupGuide.md
             print(" Skipping Conda installation. Cannot proceed without Conda.")
         return False
     else:
         print(" Conda is available.")
         return True
 
+#checks python installed in Conda
 def ensure_python():
     print("\n Checking if Python is installed in Conda...")
     command = "conda list python"
     return run_command(command)
 
+#checks SUMO installed 
+#prompts to install if not present
 def ensure_sumo():
     print("\n Checking if SUMO is installed...")
     if is_on_path("sumo"):
@@ -73,21 +85,33 @@ def ensure_sumo():
             print(" SUMO installation skipped.")
             return False
 
+#checks and installed python packages
 def install_python_packages(packages, use_conda=True):
-    print("\nChecking and installing required Python packages...")
-    for pkg in packages:
+    package_map = {
+        "easydict": "easydict",
+        "numpy": "numpy",
+        "yaml": "pyyaml",
+        "ruamel.yaml": "ruamel_yaml",
+        "pandas": "pandas",
+        "matplotlib": "matplotlib",
+        "traci": "traci",
+        "sumolib": "sumo"
+    }
+
+    for import_name, install_name in package_map.items():
         try:
-            __import__(pkg)
-            print(f"{pkg} is already installed.")
+            __import__(import_name)
+            print(f"{import_name} is already installed.")
         except ImportError:
-            print(f"{pkg} is missing. Installing...")
+            print(f"{import_name} is missing. Installing...")
             if use_conda:
-                command = f"conda install -y -c conda-forge {pkg}"
+                command = f"conda install -y -c conda-forge {install_name}"
             else:
-                command = f"pip install {pkg}"
+                command = f"pip install {install_name}"
             success = run_command(command)
             if not success:
-                print(f"Failed to install {pkg}.")
+                #check troubleshooting in setupGuide.md
+                print(f"Failed to install {install_name}. Please install it manually.")
 
 def main():
     print("Environment Setup Script (Windows + Conda)\n")
