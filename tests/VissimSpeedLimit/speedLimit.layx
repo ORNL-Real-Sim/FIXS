@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<layout version="800" vissimVersion="2021.00 - 07 [95499]">
+<layout version="1001" vissimVersion="2022.00-06 [246413]">
 	<chartLayouts>
 		<chartLayout chartType="BASIC" name="Chart layout 1" no="1">
 			<basicChartLayout dataMapXAxis="ATTRIBUTES">
@@ -29,7 +29,7 @@
 				</basicChartGPars>
 				<dataSelection netObjTypeID="VEHICLE" showAllClasses="false" showAllNetObjs="false" showAllSimRuns="false" showAllTmInts="false" sync="true">
 					<attributes>
-						<attrRef attrID="SPEED" labelXAxis=""/>
+						<attrRef attrID="SPEED" labelXAxis="" netObjectTypeID="VEHICLE"/>
 					</attributes>
 					<networkObjectRefs>
 						<netObjRef key="6" labelXAxis=""/>
@@ -41,9 +41,9 @@
 	<currentWindowLayouts>
 		<windowLayoutCurrent no="1">
 			<dockAreaPanes>
-				<dockableAreaPane childPaneStyle="1" dockedLocation="1" floating="false" floatingLocationX="-1" floatingLocationY="-1" keyText="" no="1" paneType="AREA" sizeHeight="738" sizeWidth="169" tag="" text="" textTabResolved="" visible="true">
+				<dockableAreaPane childPaneStyle="1" dockedLocation="1" floating="false" floatingLocationX="-1" floatingLocationY="-1" keyText="" no="1" paneType="AREA" sizeHeight="747" sizeWidth="166" tag="" text="" textTabResolved="" visible="true">
 					<dockChildPanes>
-						<dockableChildPane childPaneStyle="2" flyoutSizeHeight="0" flyoutSizeWidth="0" isDirectAreaChild="true" isSelectedTab="false" keyText="" no="1" paneLayoutNo="0" paneType="GROUP" pinned="false" sizeHeight="525" sizeWidth="169" subType="" tag="" text="" textTabResolved="" type="" visible="true">
+						<dockableChildPane childPaneStyle="2" flyoutSizeHeight="0" flyoutSizeWidth="0" isDirectAreaChild="true" isSelectedTab="false" keyText="" no="1" paneLayoutNo="0" paneType="GROUP" pinned="false" sizeHeight="534" sizeWidth="166" subType="" tag="" text="" textTabResolved="" type="" visible="true">
 							<dockableChildPanes>
 								<objectRef key="1 1 2"/>
 								<objectRef key="1 1 3"/>
@@ -51,33 +51,33 @@
 								<objectRef key="1 1 5"/>
 							</dockableChildPanes>
 						</dockableChildPane>
-						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="-1" flyoutSizeWidth="-1" isDirectAreaChild="false" isSelectedTab="true" keyText="Network Objects1" no="2" paneLayoutNo="0" paneType="CONTROL" pinned="true" sizeHeight="503" sizeWidth="169" subType="" tag="" text="Network Objects" textTabResolved="Network Objects" type="PTV.Vision.Controls.MainWindowNetObjSelectionControl, Controls, Version=2021.0.7.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
-						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="-1" flyoutSizeWidth="-1" isDirectAreaChild="false" isSelectedTab="false" keyText="Levels1" no="3" paneLayoutNo="0" paneType="CONTROL" pinned="true" sizeHeight="0" sizeWidth="0" subType="" tag="" text="Levels" textTabResolved="Levels" type="PTV.Vision.Controls.LevelSelectionControl, Controls, Version=2021.0.7.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
-						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="-1" flyoutSizeWidth="-1" isDirectAreaChild="false" isSelectedTab="false" keyText="Backgrounds1" no="4" paneLayoutNo="0" paneType="CONTROL" pinned="true" sizeHeight="0" sizeWidth="0" subType="" tag="" text="Backgrounds" textTabResolved="Backgrounds" type="PTV.Vision.Controls.BackgroundSelectionControl, Controls, Version=2021.0.7.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
-						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="-1" flyoutSizeWidth="-1" isDirectAreaChild="false" isSelectedTab="false" keyText="3D-Info-Tafeln1" no="5" paneLayoutNo="0" paneType="CONTROL" pinned="true" sizeHeight="0" sizeWidth="0" subType="" tag="" text="3D information signs" textTabResolved="3D information signs" type="PTV.Vision.Controls.InformationSignSelectionControl, Controls, Version=2021.0.7.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
-						<dockableChildPane childPaneStyle="2" flyoutSizeHeight="0" flyoutSizeWidth="0" isDirectAreaChild="true" isSelectedTab="false" keyText="" no="6" paneLayoutNo="0" paneType="GROUP" pinned="false" sizeHeight="208" sizeWidth="169" subType="" tag="" text="" textTabResolved="" type="" visible="true">
+						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="0" flyoutSizeWidth="0" isDirectAreaChild="false" isSelectedTab="true" keyText="Network Objects1" no="2" paneLayoutNo="0" paneType="CONTROL" pinned="true" sizeHeight="514" sizeWidth="166" subType="" tag="" text="Network Objects" textTabResolved="Network Objects" type="PTV.Vision.Controls.MainWindowNetObjSelectionControl, Controls, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
+						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="0" flyoutSizeWidth="0" isDirectAreaChild="false" isSelectedTab="false" keyText="Levels1" no="3" paneLayoutNo="0" paneType="CONTROL" pinned="true" sizeHeight="0" sizeWidth="0" subType="" tag="" text="Levels" textTabResolved="Levels" type="PTV.Vision.Controls.LevelSelectionControl, Controls, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
+						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="0" flyoutSizeWidth="0" isDirectAreaChild="false" isSelectedTab="false" keyText="Backgrounds1" no="4" paneLayoutNo="0" paneType="CONTROL" pinned="true" sizeHeight="0" sizeWidth="0" subType="" tag="" text="Backgrounds" textTabResolved="Backgrounds" type="PTV.Vision.Controls.BackgroundSelectionControl, Controls, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
+						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="0" flyoutSizeWidth="0" isDirectAreaChild="false" isSelectedTab="false" keyText="3D-Info-Tafeln1" no="5" paneLayoutNo="0" paneType="CONTROL" pinned="true" sizeHeight="0" sizeWidth="0" subType="" tag="" text="3D information signs" textTabResolved="3D information signs" type="PTV.Vision.Controls.InformationSignSelectionControl, Controls, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
+						<dockableChildPane childPaneStyle="2" flyoutSizeHeight="0" flyoutSizeWidth="0" isDirectAreaChild="true" isSelectedTab="false" keyText="" no="6" paneLayoutNo="0" paneType="GROUP" pinned="false" sizeHeight="211" sizeWidth="166" subType="" tag="" text="" textTabResolved="" type="" visible="true">
 							<dockableChildPanes>
 								<objectRef key="1 1 7"/>
 								<objectRef key="1 1 8"/>
 							</dockableChildPanes>
 						</dockableChildPane>
-						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="-1" flyoutSizeWidth="-1" isDirectAreaChild="false" isSelectedTab="true" keyText="Quick View1" no="7" paneLayoutNo="0" paneType="CONTROL" pinned="true" sizeHeight="186" sizeWidth="169" subType="" tag="" text="Quick View" textTabResolved="Quick View" type="PTV.Vision.Controls.ObjectPropertiesWindow, Controls, Version=2021.0.7.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
-						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="-1" flyoutSizeWidth="-1" isDirectAreaChild="false" isSelectedTab="false" keyText="Smart Map1" no="8" paneLayoutNo="2" paneType="CONTROL" pinned="true" sizeHeight="0" sizeWidth="0" subType="" tag="" text="Smart Map" textTabResolved="Smart Map" type="PTV.Vision.Controls.SmartMapControl, ControlUtils, Version=2021.0.7.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
+						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="0" flyoutSizeWidth="0" isDirectAreaChild="false" isSelectedTab="true" keyText="Quick View1" no="7" paneLayoutNo="0" paneType="CONTROL" pinned="true" sizeHeight="191" sizeWidth="166" subType="" tag="" text="Quick View" textTabResolved="Quick View" type="PTV.Vision.Controls.ObjectPropertiesWindow, Controls, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
+						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="0" flyoutSizeWidth="0" isDirectAreaChild="false" isSelectedTab="false" keyText="Smart Map1" no="8" paneLayoutNo="2" paneType="CONTROL" pinned="true" sizeHeight="0" sizeWidth="0" subType="" tag="" text="Smart Map" textTabResolved="Smart Map" type="PTV.Vision.Controls.SmartMapControl, ControlUtils, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
 					</dockChildPanes>
 				</dockableAreaPane>
-				<dockableAreaPane childPaneStyle="1" dockedLocation="4" floating="false" floatingLocationX="-1" floatingLocationY="-1" keyText="" no="2" paneType="AREA" sizeHeight="738" sizeWidth="1357" tag="" text="" textTabResolved="" visible="true">
+				<dockableAreaPane childPaneStyle="1" dockedLocation="4" floating="false" floatingLocationX="-1" floatingLocationY="-1" keyText="" no="2" paneType="AREA" sizeHeight="747" sizeWidth="1365" tag="" text="" textTabResolved="" visible="true">
 					<dockChildPanes>
-						<dockableChildPane childPaneStyle="2" flyoutSizeHeight="0" flyoutSizeWidth="0" isDirectAreaChild="true" isSelectedTab="false" keyText="" no="1" paneLayoutNo="0" paneType="GROUP" pinned="false" sizeHeight="445" sizeWidth="1357" subType="" tag="" text="" textTabResolved="" type="" visible="true">
+						<dockableChildPane childPaneStyle="2" flyoutSizeHeight="0" flyoutSizeWidth="0" isDirectAreaChild="true" isSelectedTab="false" keyText="" no="1" paneLayoutNo="0" paneType="GROUP" pinned="false" sizeHeight="452" sizeWidth="1365" subType="" tag="" text="" textTabResolved="" type="" visible="true">
 							<dockableChildPanes>
 								<objectRef key="1 2 2"/>
 								<objectRef key="1 2 3"/>
 								<objectRef key="1 2 4"/>
 							</dockableChildPanes>
 						</dockableChildPane>
-						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="-1" flyoutSizeWidth="-1" isDirectAreaChild="false" isSelectedTab="false" keyText="Start page1" no="2" paneLayoutNo="0" paneType="CONTROL" pinned="true" sizeHeight="0" sizeWidth="0" subType="" tag="" text="Start Page" textTabResolved="Start Page" type="PTV.Vision.Controls.StartPageWindow, ControlUtils, Version=2021.0.7.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
-						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="-1" flyoutSizeWidth="-1" isDirectAreaChild="false" isSelectedTab="true" keyText="Network Editor1" no="3" paneLayoutNo="3" paneType="CONTROL" pinned="true" sizeHeight="423" sizeWidth="1357" subType="" tag="" text="Network Editor" textTabResolved="Network Editor" type="PTV.Vision.Controls.NetEditorControl, ControlUtils, Version=2021.0.7.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
-						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="-1" flyoutSizeWidth="-1" isDirectAreaChild="false" isSelectedTab="false" keyText="Network Editor2" no="4" paneLayoutNo="4" paneType="CONTROL" pinned="true" sizeHeight="0" sizeWidth="0" subType="" tag="" text="Network Editor (2)" textTabResolved="Network Editor (2)" type="PTV.Vision.Controls.NetEditorControl, ControlUtils, Version=2021.0.7.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
-						<dockableChildPane childPaneStyle="2" flyoutSizeHeight="0" flyoutSizeWidth="0" isDirectAreaChild="true" isSelectedTab="false" keyText="" no="5" paneLayoutNo="0" paneType="GROUP" pinned="false" sizeHeight="288" sizeWidth="1357" subType="" tag="" text="" textTabResolved="" type="" visible="true">
+						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="0" flyoutSizeWidth="0" isDirectAreaChild="false" isSelectedTab="false" keyText="Start page1" no="2" paneLayoutNo="0" paneType="CONTROL" pinned="true" sizeHeight="0" sizeWidth="0" subType="" tag="" text="Start Page" textTabResolved="Start Page" type="PTV.Vision.Controls.StartPageWindow, ControlUtils, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
+						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="0" flyoutSizeWidth="0" isDirectAreaChild="false" isSelectedTab="true" keyText="Network Editor1" no="3" paneLayoutNo="3" paneType="CONTROL" pinned="true" sizeHeight="432" sizeWidth="1365" subType="" tag="" text="Network Editor" textTabResolved="Network Editor" type="PTV.Vision.Controls.NetEditorControl, ControlUtils, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
+						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="0" flyoutSizeWidth="0" isDirectAreaChild="false" isSelectedTab="false" keyText="Network Editor2" no="4" paneLayoutNo="4" paneType="CONTROL" pinned="true" sizeHeight="0" sizeWidth="0" subType="" tag="" text="Network Editor (2)" textTabResolved="Network Editor (2)" type="PTV.Vision.Controls.NetEditorControl, ControlUtils, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
+						<dockableChildPane childPaneStyle="2" flyoutSizeHeight="0" flyoutSizeWidth="0" isDirectAreaChild="true" isSelectedTab="false" keyText="" no="5" paneLayoutNo="0" paneType="GROUP" pinned="false" sizeHeight="292" sizeWidth="1365" subType="" tag="" text="" textTabResolved="" type="" visible="true">
 							<dockableChildPanes>
 								<objectRef key="1 2 6"/>
 								<objectRef key="1 2 7"/>
@@ -97,26 +97,26 @@
 								<objectRef key="1 2 21"/>
 							</dockableChildPanes>
 						</dockableChildPane>
-						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="-1" flyoutSizeWidth="-1" isDirectAreaChild="false" isSelectedTab="false" keyText="Vehicle Inputs1" no="6" paneLayoutNo="1" paneType="CONTROL" pinned="true" sizeHeight="0" sizeWidth="0" subType="Parent VEHICLEINPUT" tag="" text="Vehicle Inputs / Vehicle volumes by time interval" textTabResolved="Vehicle Inputs / Vehicle volumes by time interval" type="PTV.Vision.Controls.CoupledListWindow, Controls, Version=2021.0.7.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
-						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="-1" flyoutSizeWidth="-1" isDirectAreaChild="false" isSelectedTab="false" keyText="Desired Speed Decisions1" no="7" paneLayoutNo="2" paneType="CONTROL" pinned="true" sizeHeight="0" sizeWidth="0" subType="Parent DESSPEEDDECISION" tag="" text="Desired Speed Decisions / Desired speed distributions" textTabResolved="Desired Speed Decisions / Desired speed distributions" type="PTV.Vision.Controls.CoupledListWindow, Controls, Version=2021.0.7.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
-						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="-1" flyoutSizeWidth="-1" isDirectAreaChild="false" isSelectedTab="false" keyText="Reduced Speed Areas1" no="8" paneLayoutNo="3" paneType="CONTROL" pinned="true" sizeHeight="0" sizeWidth="0" subType="Parent REDUCEDSPEEDAREA" tag="" text="Reduced Speed Areas / Speed reductions" textTabResolved="Reduced Speed Areas / Speed reductions" type="PTV.Vision.Controls.CoupledListWindow, Controls, Version=2021.0.7.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
-						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="-1" flyoutSizeWidth="-1" isDirectAreaChild="false" isSelectedTab="false" keyText="Vehicles In Network1" no="9" paneLayoutNo="4" paneType="CONTROL" pinned="true" sizeHeight="0" sizeWidth="0" subType="Parent VEHICLE" tag="" text="Vehicles In Network" textTabResolved="Vehicles In Network" type="PTV.Vision.Controls.CoupledListWindow, Controls, Version=2021.0.7.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
-						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="-1" flyoutSizeWidth="-1" isDirectAreaChild="false" isSelectedTab="true" keyText="Vehicle Types1" no="10" paneLayoutNo="5" paneType="CONTROL" pinned="true" sizeHeight="266" sizeWidth="1357" subType="Parent VEHICLETYPE" tag="" text="Vehicle Types" textTabResolved="Vehicle Types" type="PTV.Vision.Controls.CoupledListWindow, Controls, Version=2021.0.7.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
-						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="-1" flyoutSizeWidth="-1" isDirectAreaChild="false" isSelectedTab="false" keyText="Vehicle Compositions1" no="11" paneLayoutNo="6" paneType="CONTROL" pinned="true" sizeHeight="0" sizeWidth="0" subType="Parent VEHICLECOMPOSITION" tag="" text="Vehicle Compositions / Relative flows" textTabResolved="Vehicle Compositions / Relative flows" type="PTV.Vision.Controls.CoupledListWindow, Controls, Version=2021.0.7.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
-						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="-1" flyoutSizeWidth="-1" isDirectAreaChild="false" isSelectedTab="false" keyText="Desired Speed Distributions1" no="12" paneLayoutNo="7" paneType="CONTROL" pinned="true" sizeHeight="0" sizeWidth="0" subType="Parent DESSPEEDDISTRIBUTION" tag="" text="Desired Speed Distributions / Data Points" textTabResolved="Desired Speed Distributions / Data Points" type="PTV.Vision.Controls.CoupledListWindow, Controls, Version=2021.0.7.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
-						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="-1" flyoutSizeWidth="-1" isDirectAreaChild="false" isSelectedTab="false" keyText="Signal Controllers1" no="13" paneLayoutNo="9" paneType="CONTROL" pinned="true" sizeHeight="0" sizeWidth="0" subType="Parent SIGNALCONTROLLER" tag="" text="Signal Controllers / Signal groups" textTabResolved="Signal Controllers / Signal groups" type="PTV.Vision.Controls.CoupledListWindow, Controls, Version=2021.0.7.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
-						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="-1" flyoutSizeWidth="-1" isDirectAreaChild="false" isSelectedTab="false" keyText="Links1" no="14" paneLayoutNo="8" paneType="CONTROL" pinned="true" sizeHeight="0" sizeWidth="0" subType="Parent LINK" tag="" text="Links / Lanes" textTabResolved="Links / Lanes" type="PTV.Vision.Controls.CoupledListWindow, Controls, Version=2021.0.7.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
-						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="-1" flyoutSizeWidth="-1" isDirectAreaChild="false" isSelectedTab="false" keyText="Static Vehicle Routing Decisions1" no="15" paneLayoutNo="10" paneType="CONTROL" pinned="true" sizeHeight="0" sizeWidth="0" subType="Parent VEHICLEROUTINGDECISIONSTATIC" tag="" text="Static Vehicle Routing Decisions / Static vehicle routes" textTabResolved="Static Vehicle Routing Decisions / Static vehicle routes" type="PTV.Vision.Controls.CoupledListWindow, Controls, Version=2021.0.7.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
-						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="-1" flyoutSizeWidth="-1" isDirectAreaChild="false" isSelectedTab="false" keyText="Static Vehicle Routes1" no="16" paneLayoutNo="11" paneType="CONTROL" pinned="true" sizeHeight="0" sizeWidth="0" subType="Parent VEHICLEROUTESTATIC" tag="" text="Static Vehicle Routes / Link sequence" textTabResolved="Static Vehicle Routes / Link sequence" type="PTV.Vision.Controls.CoupledListWindow, Controls, Version=2021.0.7.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
-						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="-1" flyoutSizeWidth="-1" isDirectAreaChild="false" isSelectedTab="false" keyText="Conflict Areas1" no="17" paneLayoutNo="12" paneType="CONTROL" pinned="true" sizeHeight="0" sizeWidth="0" subType="Parent CONFLICTAREA" tag="" text="Conflict Areas" textTabResolved="Conflict Areas" type="PTV.Vision.Controls.CoupledListWindow, Controls, Version=2021.0.7.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
-						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="-1" flyoutSizeWidth="-1" isDirectAreaChild="false" isSelectedTab="false" keyText="User-Defined Attributes1" no="18" paneLayoutNo="13" paneType="CONTROL" pinned="true" sizeHeight="0" sizeWidth="0" subType="Parent USERDEFINEDATTRIBUTE" tag="" text="User-Defined Attributes" textTabResolved="User-Defined Attributes" type="PTV.Vision.Controls.CoupledListWindow, Controls, Version=2021.0.7.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
-						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="-1" flyoutSizeWidth="-1" isDirectAreaChild="false" isSelectedTab="false" keyText="Weight Distributions1" no="19" paneLayoutNo="14" paneType="CONTROL" pinned="true" sizeHeight="0" sizeWidth="0" subType="Parent WEIGHTDISTRIBUTION" tag="" text="Weight Distributions / Data Points" textTabResolved="Weight Distributions / Data Points" type="PTV.Vision.Controls.CoupledListWindow, Controls, Version=2021.0.7.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
-						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="-1" flyoutSizeWidth="-1" isDirectAreaChild="false" isSelectedTab="false" keyText="Maximum Acceleration Functions1" no="20" paneLayoutNo="15" paneType="CONTROL" pinned="true" sizeHeight="0" sizeWidth="0" subType="Parent MAXACCELERATIONFUNCTION" tag="" text="Maximum Acceleration Functions / Data Points" textTabResolved="Maximum Acceleration Functions / Data Points" type="PTV.Vision.Controls.CoupledListWindow, Controls, Version=2021.0.7.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
-						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="-1" flyoutSizeWidth="-1" isDirectAreaChild="false" isSelectedTab="false" keyText="Vehicle Classes1" no="21" paneLayoutNo="16" paneType="CONTROL" pinned="true" sizeHeight="0" sizeWidth="0" subType="Parent VEHICLECLASS" tag="" text="Vehicle Classes / Vehicle types" textTabResolved="Vehicle Classes / Vehicle types" type="PTV.Vision.Controls.CoupledListWindow, Controls, Version=2021.0.7.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
+						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="0" flyoutSizeWidth="0" isDirectAreaChild="false" isSelectedTab="false" keyText="Vehicle Inputs1" no="6" paneLayoutNo="1" paneType="CONTROL" pinned="true" sizeHeight="0" sizeWidth="0" subType="Parent VEHICLEINPUT" tag="" text="Vehicle Inputs / Vehicle volumes by time interval" textTabResolved="Vehicle Inputs / Vehicle volumes by time interval" type="PTV.Vision.Controls.CoupledListWindow, Controls, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
+						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="0" flyoutSizeWidth="0" isDirectAreaChild="false" isSelectedTab="false" keyText="Desired Speed Decisions1" no="7" paneLayoutNo="2" paneType="CONTROL" pinned="true" sizeHeight="0" sizeWidth="0" subType="Parent DESSPEEDDECISION" tag="" text="Desired Speed Decisions / Desired speed distributions" textTabResolved="Desired Speed Decisions / Desired speed distributions" type="PTV.Vision.Controls.CoupledListWindow, Controls, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
+						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="0" flyoutSizeWidth="0" isDirectAreaChild="false" isSelectedTab="false" keyText="Reduced Speed Areas1" no="8" paneLayoutNo="3" paneType="CONTROL" pinned="true" sizeHeight="0" sizeWidth="0" subType="Parent REDUCEDSPEEDAREA" tag="" text="Reduced Speed Areas / Speed reductions" textTabResolved="Reduced Speed Areas / Speed reductions" type="PTV.Vision.Controls.CoupledListWindow, Controls, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
+						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="0" flyoutSizeWidth="0" isDirectAreaChild="false" isSelectedTab="true" keyText="Vehicles In Network1" no="9" paneLayoutNo="4" paneType="CONTROL" pinned="true" sizeHeight="272" sizeWidth="1365" subType="Parent VEHICLE" tag="" text="Vehicles In Network" textTabResolved="Vehicles In Network" type="PTV.Vision.Controls.CoupledListWindow, Controls, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
+						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="0" flyoutSizeWidth="0" isDirectAreaChild="false" isSelectedTab="false" keyText="Vehicle Types1" no="10" paneLayoutNo="5" paneType="CONTROL" pinned="true" sizeHeight="272" sizeWidth="1365" subType="Parent VEHICLETYPE" tag="" text="Vehicle Types" textTabResolved="Vehicle Types" type="PTV.Vision.Controls.CoupledListWindow, Controls, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
+						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="0" flyoutSizeWidth="0" isDirectAreaChild="false" isSelectedTab="false" keyText="Vehicle Compositions1" no="11" paneLayoutNo="6" paneType="CONTROL" pinned="true" sizeHeight="0" sizeWidth="0" subType="Parent VEHICLECOMPOSITION" tag="" text="Vehicle Compositions / Relative flows" textTabResolved="Vehicle Compositions / Relative flows" type="PTV.Vision.Controls.CoupledListWindow, Controls, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
+						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="0" flyoutSizeWidth="0" isDirectAreaChild="false" isSelectedTab="false" keyText="Desired Speed Distributions1" no="12" paneLayoutNo="7" paneType="CONTROL" pinned="true" sizeHeight="0" sizeWidth="0" subType="Parent DESSPEEDDISTRIBUTION" tag="" text="Desired Speed Distributions / Data Points" textTabResolved="Desired Speed Distributions / Data Points" type="PTV.Vision.Controls.CoupledListWindow, Controls, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
+						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="0" flyoutSizeWidth="0" isDirectAreaChild="false" isSelectedTab="false" keyText="Signal Controllers1" no="13" paneLayoutNo="9" paneType="CONTROL" pinned="true" sizeHeight="0" sizeWidth="0" subType="Parent SIGNALCONTROLLER" tag="" text="Signal Controllers / Signal groups" textTabResolved="Signal Controllers / Signal groups" type="PTV.Vision.Controls.CoupledListWindow, Controls, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
+						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="0" flyoutSizeWidth="0" isDirectAreaChild="false" isSelectedTab="false" keyText="Links1" no="14" paneLayoutNo="8" paneType="CONTROL" pinned="true" sizeHeight="0" sizeWidth="0" subType="Parent LINK" tag="" text="Links / Lanes" textTabResolved="Links / Lanes" type="PTV.Vision.Controls.CoupledListWindow, Controls, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
+						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="0" flyoutSizeWidth="0" isDirectAreaChild="false" isSelectedTab="false" keyText="Static Vehicle Routing Decisions1" no="15" paneLayoutNo="10" paneType="CONTROL" pinned="true" sizeHeight="0" sizeWidth="0" subType="Parent VEHICLEROUTINGDECISIONSTATIC" tag="" text="Static Vehicle Routing Decisions / Static vehicle routes" textTabResolved="Static Vehicle Routing Decisions / Static vehicle routes" type="PTV.Vision.Controls.CoupledListWindow, Controls, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
+						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="0" flyoutSizeWidth="0" isDirectAreaChild="false" isSelectedTab="false" keyText="Static Vehicle Routes1" no="16" paneLayoutNo="11" paneType="CONTROL" pinned="true" sizeHeight="0" sizeWidth="0" subType="Parent VEHICLEROUTESTATIC" tag="" text="Static Vehicle Routes / Link sequence" textTabResolved="Static Vehicle Routes / Link sequence" type="PTV.Vision.Controls.CoupledListWindow, Controls, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
+						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="0" flyoutSizeWidth="0" isDirectAreaChild="false" isSelectedTab="false" keyText="Conflict Areas1" no="17" paneLayoutNo="12" paneType="CONTROL" pinned="true" sizeHeight="0" sizeWidth="0" subType="Parent CONFLICTAREA" tag="" text="Conflict Areas" textTabResolved="Conflict Areas" type="PTV.Vision.Controls.CoupledListWindow, Controls, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
+						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="0" flyoutSizeWidth="0" isDirectAreaChild="false" isSelectedTab="false" keyText="User-Defined Attributes1" no="18" paneLayoutNo="13" paneType="CONTROL" pinned="true" sizeHeight="0" sizeWidth="0" subType="Parent USERDEFINEDATTRIBUTE" tag="" text="User-Defined Attributes" textTabResolved="User-Defined Attributes" type="PTV.Vision.Controls.CoupledListWindow, Controls, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
+						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="0" flyoutSizeWidth="0" isDirectAreaChild="false" isSelectedTab="false" keyText="Weight Distributions1" no="19" paneLayoutNo="14" paneType="CONTROL" pinned="true" sizeHeight="0" sizeWidth="0" subType="Parent WEIGHTDISTRIBUTION" tag="" text="Weight Distributions / Data Points" textTabResolved="Weight Distributions / Data Points" type="PTV.Vision.Controls.CoupledListWindow, Controls, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
+						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="0" flyoutSizeWidth="0" isDirectAreaChild="false" isSelectedTab="false" keyText="Maximum Acceleration Functions1" no="20" paneLayoutNo="15" paneType="CONTROL" pinned="true" sizeHeight="0" sizeWidth="0" subType="Parent MAXACCELERATIONFUNCTION" tag="" text="Maximum Acceleration Functions / Data Points" textTabResolved="Maximum Acceleration Functions / Data Points" type="PTV.Vision.Controls.CoupledListWindow, Controls, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
+						<dockableChildPane childPaneStyle="0" flyoutSizeHeight="0" flyoutSizeWidth="0" isDirectAreaChild="false" isSelectedTab="false" keyText="Vehicle Classes1" no="21" paneLayoutNo="16" paneType="CONTROL" pinned="true" sizeHeight="0" sizeWidth="0" subType="Parent VEHICLECLASS" tag="" text="Vehicle Classes / Vehicle types" textTabResolved="Vehicle Classes / Vehicle types" type="PTV.Vision.Controls.CoupledListWindow, Controls, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null" visible="true"/>
 					</dockChildPanes>
 				</dockableAreaPane>
 			</dockAreaPanes>
-			<mainWindow height="846" maximized="false" positionX="2000" positionY="75" width="1547"/>
+			<mainWindow height="846" maximized="false" positionX="166" positionY="201" width="1547"/>
 		</windowLayoutCurrent>
 	</currentWindowLayouts>
 	<defaultWindowLayouts>
@@ -124,27 +124,29 @@
 		<windowLayoutDefault floating="false" height="221" no="2" positionX="2119" positionY="1121" subType="" type="ChartWindow" width="1721"/>
 	</defaultWindowLayouts>
 	<listLayouts>
-		<listLayout childRelation="TIMEINTVEHVOLS" exportListWhenSimulationFinished="false" name="" no="1" synchronization="true" verticalSplitterPosition="0.46586345381526106">
-			<childNetObjectLParSet filtered="false" headerHeight="0" netObjectTypeID="TIMEINTERVALVEHVOLUME" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
-				<attributeLPars>
-					<attributeListLayoutParameters alignment="CENTER" attributeID="CONT" columnWidth="39" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-					<attributeListLayoutParameters alignment="LEFT" attributeID="TIMEINT" columnWidth="53" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-					<attributeListLayoutParameters alignment="RIGHT" attributeID="VOLUME" columnWidth="53" decimals="1" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-					<attributeListLayoutParameters alignment="LEFT" attributeID="VEHCOMP" columnWidth="65" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-					<attributeListLayoutParameters alignment="LEFT" attributeID="VOLTYPE" columnWidth="53" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-				</attributeLPars>
-			</childNetObjectLParSet>
-			<netObjectLParSet filtered="false" headerHeight="0" netObjectTypeID="VEHICLEINPUT" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
+		<listLayout childRelation="TIMEINTVEHVOLS" exportListWhenSimulationFinished="false" name="" no="1" synchronization="true" verticalSplitterPosition="0.46440306681270538">
+			<childNetObjectLParSets>
+				<netObjectListLayoutParameters autoSizeChildColumnWidthsToContent="true" filtered="false" headerHeight="0" netObjectTypeID="TIMEINTERVALVEHVOLUME" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
+					<attributeLPars>
+						<attributeListLayoutParameters alignment="CENTER" attributeID="CONT" columnWidth="36" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+						<attributeListLayoutParameters alignment="LEFT" attributeID="TIMEINT" columnWidth="51" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+						<attributeListLayoutParameters alignment="RIGHT" attributeID="VOLUME" columnWidth="51" decimals="1" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+						<attributeListLayoutParameters alignment="LEFT" attributeID="VEHCOMP" columnWidth="63" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+						<attributeListLayoutParameters alignment="LEFT" attributeID="VOLTYPE" columnWidth="52" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+					</attributeLPars>
+				</netObjectListLayoutParameters>
+			</childNetObjectLParSets>
+			<netObjectLParSet autoSizeChildColumnWidthsToContent="true" filtered="false" headerHeight="0" netObjectTypeID="VEHICLEINPUT" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
 				<attributeLPars>
 					<attributeListLayoutParameters alignment="RIGHT" attributeID="NO" columnWidth="29" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
 						<filter>
@@ -175,17 +177,19 @@
 			</netObjectLParSet>
 		</listLayout>
 		<listLayout childRelation="VEHCLASSDESSPEEDDISTR" exportListWhenSimulationFinished="false" name="" no="2" synchronization="true" verticalSplitterPosition="0.68674698795180722">
-			<childNetObjectLParSet filtered="false" headerHeight="0" netObjectTypeID="VEHCLASSDESSPEEDDISTRIBUTION" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
-				<attributeLPars>
-					<attributeListLayoutParameters alignment="LEFT" attributeID="VEHCLASS" columnWidth="59" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-					<attributeListLayoutParameters alignment="LEFT" attributeID="DESSPEEDDISTR" columnWidth="88" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-				</attributeLPars>
-			</childNetObjectLParSet>
-			<netObjectLParSet filtered="false" headerHeight="0" netObjectTypeID="DESSPEEDDECISION" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
+			<childNetObjectLParSets>
+				<netObjectListLayoutParameters autoSizeChildColumnWidthsToContent="true" filtered="false" headerHeight="0" netObjectTypeID="VEHCLASSDESSPEEDDISTRIBUTION" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
+					<attributeLPars>
+						<attributeListLayoutParameters alignment="LEFT" attributeID="VEHCLASS" columnWidth="58" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+						<attributeListLayoutParameters alignment="LEFT" attributeID="DESSPEEDDISTR" columnWidth="88" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+					</attributeLPars>
+				</netObjectListLayoutParameters>
+			</childNetObjectLParSets>
+			<netObjectLParSet autoSizeChildColumnWidthsToContent="true" filtered="false" headerHeight="0" netObjectTypeID="DESSPEEDDECISION" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
 				<attributeLPars>
 					<attributeListLayoutParameters alignment="RIGHT" attributeID="NO" columnWidth="29" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
 						<filter>
@@ -256,23 +260,25 @@
 			</netObjectLParSet>
 		</listLayout>
 		<listLayout childRelation="VEHCLASSSPEEDRED" exportListWhenSimulationFinished="false" name="" no="3" synchronization="true" verticalSplitterPosition="0.49397590361445781">
-			<childNetObjectLParSet filtered="false" headerHeight="0" netObjectTypeID="VEHCLASSSPEEDREDUCTION" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
-				<attributeLPars>
-					<attributeListLayoutParameters alignment="LEFT" attributeID="REDSPEEDAREA" columnWidth="89" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-					<attributeListLayoutParameters alignment="LEFT" attributeID="VEHCLASS" columnWidth="59" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-					<attributeListLayoutParameters alignment="LEFT" attributeID="DESSPEEDDISTR" columnWidth="88" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-					<attributeListLayoutParameters alignment="RIGHT" attributeID="DECEL" columnWidth="42" decimals="2" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-				</attributeLPars>
-			</childNetObjectLParSet>
-			<netObjectLParSet filtered="false" headerHeight="0" netObjectTypeID="REDUCEDSPEEDAREA" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
+			<childNetObjectLParSets>
+				<netObjectListLayoutParameters autoSizeChildColumnWidthsToContent="true" filtered="false" headerHeight="0" netObjectTypeID="VEHCLASSSPEEDREDUCTION" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
+					<attributeLPars>
+						<attributeListLayoutParameters alignment="LEFT" attributeID="REDSPEEDAREA" columnWidth="88" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+						<attributeListLayoutParameters alignment="LEFT" attributeID="VEHCLASS" columnWidth="58" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+						<attributeListLayoutParameters alignment="LEFT" attributeID="DESSPEEDDISTR" columnWidth="88" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+						<attributeListLayoutParameters alignment="RIGHT" attributeID="DECEL" columnWidth="41" decimals="2" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+					</attributeLPars>
+				</netObjectListLayoutParameters>
+			</childNetObjectLParSets>
+			<netObjectLParSet autoSizeChildColumnWidthsToContent="true" filtered="false" headerHeight="0" netObjectTypeID="REDUCEDSPEEDAREA" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
 				<attributeLPars>
 					<attributeListLayoutParameters alignment="RIGHT" attributeID="NO" columnWidth="29" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
 						<filter>
@@ -373,11 +379,11 @@
 			</netObjectLParSet>
 		</listLayout>
 		<listLayout childRelation="" exportListWhenSimulationFinished="false" name="" no="4" synchronization="true" verticalSplitterPosition="0.5">
-			<netObjectLParSet filtered="false" headerHeight="0" netObjectTypeID="VEHICLE" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
+			<netObjectLParSet autoSizeChildColumnWidthsToContent="true" filtered="false" headerHeight="0" netObjectTypeID="VEHICLE" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
 				<attributeLPars>
 					<attributeListLayoutParameters alignment="RIGHT" attributeID="NO" columnWidth="29" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
 						<filter>
-							<filterCriterionUnsignedInt active="false" criterionType="EQUALS" filterValue="35" filterValueAdditional="0" filterValueTopBottom="1"/>
+							<filterCriterionUnsignedInt active="true" criterionType="EQUALS" filterValue="6" filterValueAdditional="0" filterValueTopBottom="1"/>
 						</filter>
 					</attributeListLayoutParameters>
 					<attributeListLayoutParameters alignment="LEFT" attributeID="VEHTYPE" columnWidth="56" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
@@ -534,7 +540,7 @@
 			</netObjectLParSet>
 		</listLayout>
 		<listLayout childRelation="" exportListWhenSimulationFinished="false" name="" no="5" synchronization="false" verticalSplitterPosition="0.5">
-			<netObjectLParSet filtered="false" headerHeight="0" netObjectTypeID="VEHICLETYPE" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
+			<netObjectLParSet autoSizeChildColumnWidthsToContent="true" filtered="false" headerHeight="0" netObjectTypeID="VEHICLETYPE" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
 				<attributeLPars>
 					<attributeListLayoutParameters alignment="RIGHT" attributeID="NO" columnWidth="54" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
 						<filter>
@@ -583,27 +589,29 @@
 					</attributeListLayoutParameters>
 					<attributeListLayoutParameters alignment="CENTER" attributeID="EXTDRIVER" columnWidth="100" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
 						<filter>
-							<filterCriterionBool active="false" filterValue="false"/>
+							<filterCriterionBool active="false" criterionType="EQUALS" filterValue="false"/>
 						</filter>
 					</attributeListLayoutParameters>
 				</attributeLPars>
 			</netObjectLParSet>
 		</listLayout>
 		<listLayout childRelation="VEHCOMPRELFLOWS" exportListWhenSimulationFinished="false" name="" no="6" synchronization="false" verticalSplitterPosition="0.46987951807228917">
-			<childNetObjectLParSet filtered="false" headerHeight="0" netObjectTypeID="VEHICLECOMPOSITIONRELATIVEFLOW" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
-				<attributeLPars>
-					<attributeListLayoutParameters alignment="LEFT" attributeID="VEHTYPE" columnWidth="56" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-					<attributeListLayoutParameters alignment="LEFT" attributeID="DESSPEEDDISTR" columnWidth="88" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-					<attributeListLayoutParameters alignment="RIGHT" attributeID="RELFLOW" columnWidth="54" decimals="3" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-				</attributeLPars>
-			</childNetObjectLParSet>
-			<netObjectLParSet filtered="false" headerHeight="0" netObjectTypeID="VEHICLECOMPOSITION" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
+			<childNetObjectLParSets>
+				<netObjectListLayoutParameters autoSizeChildColumnWidthsToContent="true" filtered="false" headerHeight="0" netObjectTypeID="VEHICLECOMPOSITIONRELATIVEFLOW" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
+					<attributeLPars>
+						<attributeListLayoutParameters alignment="LEFT" attributeID="VEHTYPE" columnWidth="56" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+						<attributeListLayoutParameters alignment="LEFT" attributeID="DESSPEEDDISTR" columnWidth="88" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+						<attributeListLayoutParameters alignment="RIGHT" attributeID="RELFLOW" columnWidth="51" decimals="3" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+					</attributeLPars>
+				</netObjectListLayoutParameters>
+			</childNetObjectLParSets>
+			<netObjectLParSet autoSizeChildColumnWidthsToContent="true" filtered="false" headerHeight="0" netObjectTypeID="VEHICLECOMPOSITION" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
 				<attributeLPars>
 					<attributeListLayoutParameters alignment="RIGHT" attributeID="NO" columnWidth="29" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
 						<filter>
@@ -618,18 +626,20 @@
 				</attributeLPars>
 			</netObjectLParSet>
 		</listLayout>
-		<listLayout childRelation="SPEEDDISTRDATPTS" exportListWhenSimulationFinished="false" name="" no="7" synchronization="false" verticalSplitterPosition="0.47791164658634538">
-			<childNetObjectLParSet filtered="false" headerHeight="0" netObjectTypeID="SPEEDDISTRIBUTIONDATAPOINT" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
-				<attributeLPars>
-					<attributeListLayoutParameters alignment="RIGHT" attributeID="X" columnWidth="20" decimals="2" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-					<attributeListLayoutParameters alignment="RIGHT" attributeID="FX" columnWidth="26" decimals="2" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-				</attributeLPars>
-			</childNetObjectLParSet>
-			<netObjectLParSet filtered="false" headerHeight="0" netObjectTypeID="DESSPEEDDISTRIBUTION" rowHeaderWidth="64" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
+		<listLayout childRelation="SPEEDDISTRDATPTS" exportListWhenSimulationFinished="false" name="" no="7" synchronization="false" verticalSplitterPosition="0.47754654983570644">
+			<childNetObjectLParSets>
+				<netObjectListLayoutParameters autoSizeChildColumnWidthsToContent="true" filtered="false" headerHeight="0" netObjectTypeID="SPEEDDISTRIBUTIONDATAPOINT" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
+					<attributeLPars>
+						<attributeListLayoutParameters alignment="RIGHT" attributeID="X" columnWidth="18" decimals="2" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+						<attributeListLayoutParameters alignment="RIGHT" attributeID="FX" columnWidth="24" decimals="2" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+					</attributeLPars>
+				</netObjectListLayoutParameters>
+			</childNetObjectLParSets>
+			<netObjectLParSet autoSizeChildColumnWidthsToContent="true" filtered="false" headerHeight="0" netObjectTypeID="DESSPEEDDISTRIBUTION" rowHeaderWidth="64" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
 				<attributeLPars>
 					<attributeListLayoutParameters alignment="RIGHT" attributeID="NO" columnWidth="34" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
 						<filter>
@@ -654,27 +664,29 @@
 				</attributeLPars>
 			</netObjectLParSet>
 		</listLayout>
-		<listLayout childRelation="LANES" exportListWhenSimulationFinished="false" name="" no="8" synchronization="true" verticalSplitterPosition="0.70281124497991965">
-			<childNetObjectLParSet filtered="false" headerHeight="0" netObjectTypeID="LANE" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
-				<attributeLPars>
-					<attributeListLayoutParameters alignment="LEFT" attributeID="LINK" columnWidth="35" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-					<attributeListLayoutParameters alignment="RIGHT" attributeID="INDEX" columnWidth="42" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-					<attributeListLayoutParameters alignment="LEFT" attributeID="LINKBEHAVTYPE" columnWidth="91" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-					<attributeListLayoutParameters alignment="RIGHT" attributeID="WIDTH" columnWidth="45" decimals="2" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-					<attributeListLayoutParameters alignment="LEFT" attributeID="BLOCKEDVEHCLASSES" columnWidth="112" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-				</attributeLPars>
-			</childNetObjectLParSet>
-			<netObjectLParSet filtered="false" headerHeight="0" netObjectTypeID="LINK" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
+		<listLayout childRelation="LANES" exportListWhenSimulationFinished="false" name="" no="8" synchronization="true" verticalSplitterPosition="0.70208105147864186">
+			<childNetObjectLParSets>
+				<netObjectListLayoutParameters autoSizeChildColumnWidthsToContent="true" filtered="false" headerHeight="0" netObjectTypeID="LANE" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
+					<attributeLPars>
+						<attributeListLayoutParameters alignment="LEFT" attributeID="LINK" columnWidth="32" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+						<attributeListLayoutParameters alignment="RIGHT" attributeID="INDEX" columnWidth="40" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+						<attributeListLayoutParameters alignment="LEFT" attributeID="LINKBEHAVTYPE" columnWidth="89" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+						<attributeListLayoutParameters alignment="RIGHT" attributeID="WIDTH" columnWidth="43" decimals="2" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+						<attributeListLayoutParameters alignment="LEFT" attributeID="BLOCKEDVEHCLASSES" columnWidth="111" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+					</attributeLPars>
+				</netObjectListLayoutParameters>
+			</childNetObjectLParSets>
+			<netObjectLParSet autoSizeChildColumnWidthsToContent="true" filtered="false" headerHeight="0" netObjectTypeID="LINK" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
 				<attributeLPars>
 					<attributeListLayoutParameters alignment="RIGHT" attributeID="NO" columnWidth="40" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
 						<filter>
@@ -713,7 +725,7 @@
 					</attributeListLayoutParameters>
 					<attributeListLayoutParameters alignment="CENTER" attributeID="ISCONN" columnWidth="50" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
 						<filter>
-							<filterCriterionBool active="false" filterValue="false"/>
+							<filterCriterionBool active="false" criterionType="EQUALS" filterValue="false"/>
 						</filter>
 					</attributeListLayoutParameters>
 					<attributeListLayoutParameters alignment="LEFT" attributeID="FROMLINK" columnWidth="63" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
@@ -733,7 +745,7 @@
 					</attributeListLayoutParameters>
 					<attributeListLayoutParameters alignment="CENTER" attributeID="HASOVTLN" columnWidth="65" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
 						<filter>
-							<filterCriterionBool active="false" filterValue="false"/>
+							<filterCriterionBool active="false" criterionType="EQUALS" filterValue="false"/>
 						</filter>
 					</attributeListLayoutParameters>
 					<attributeListLayoutParameters alignment="RIGHT" attributeID="LENGTH3D" columnWidth="0" decimals="3" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
@@ -769,21 +781,23 @@
 				</attributeLPars>
 			</netObjectLParSet>
 		</listLayout>
-		<listLayout childRelation="SGS" exportListWhenSimulationFinished="false" name="" no="9" synchronization="false" verticalSplitterPosition="0.48995983935742971">
-			<childNetObjectLParSet filtered="false" headerHeight="0" netObjectTypeID="SIGNALGROUP" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
-				<attributeLPars>
-					<attributeListLayoutParameters alignment="RIGHT" attributeID="NO" columnWidth="29" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-					<attributeListLayoutParameters alignment="LEFT" attributeID="NAME" columnWidth="45" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-					<attributeListLayoutParameters alignment="LEFT" attributeID="TYPE" columnWidth="37" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-				</attributeLPars>
-			</childNetObjectLParSet>
-			<netObjectLParSet filtered="false" headerHeight="0" netObjectTypeID="SIGNALCONTROLLER" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
+		<listLayout childRelation="SGS" exportListWhenSimulationFinished="false" name="" no="9" synchronization="false" verticalSplitterPosition="0.48849945235487402">
+			<childNetObjectLParSets>
+				<netObjectListLayoutParameters autoSizeChildColumnWidthsToContent="true" filtered="false" headerHeight="0" netObjectTypeID="SIGNALGROUP" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
+					<attributeLPars>
+						<attributeListLayoutParameters alignment="RIGHT" attributeID="NO" columnWidth="27" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+						<attributeListLayoutParameters alignment="LEFT" attributeID="NAME" columnWidth="43" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+						<attributeListLayoutParameters alignment="LEFT" attributeID="TYPE" columnWidth="36" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+					</attributeLPars>
+				</netObjectListLayoutParameters>
+			</childNetObjectLParSets>
+			<netObjectLParSet autoSizeChildColumnWidthsToContent="true" filtered="false" headerHeight="0" netObjectTypeID="SIGNALCONTROLLER" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
 				<attributeLPars>
 					<attributeListLayoutParameters alignment="RIGHT" attributeID="NO" columnWidth="29" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
 						<filter>
@@ -807,7 +821,7 @@
 					</attributeListLayoutParameters>
 					<attributeListLayoutParameters alignment="CENTER" attributeID="CYCTMISVAR" columnWidth="73" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
 						<filter>
-							<filterCriterionBool active="false" filterValue="false"/>
+							<filterCriterionBool active="false" criterionType="EQUALS" filterValue="false"/>
 						</filter>
 					</attributeListLayoutParameters>
 					<attributeListLayoutParameters alignment="LEFT" attributeID="SUPPLYFILE1" columnWidth="73" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
@@ -828,33 +842,35 @@
 				</attributeLPars>
 			</netObjectLParSet>
 		</listLayout>
-		<listLayout childRelation="VEHROUTSTA" exportListWhenSimulationFinished="false" name="" no="10" synchronization="true" verticalSplitterPosition="0.47991967871485941">
-			<childNetObjectLParSet filtered="false" headerHeight="0" netObjectTypeID="VEHICLEROUTESTATIC" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
-				<attributeLPars>
-					<attributeListLayoutParameters alignment="LEFT" attributeID="VEHROUTDEC" columnWidth="77" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-					<attributeListLayoutParameters alignment="RIGHT" attributeID="NO" columnWidth="29" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-					<attributeListLayoutParameters alignment="LEFT" attributeID="NAME" columnWidth="45" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-					<attributeListLayoutParameters alignment="LEFT" attributeID="FORMULA" columnWidth="57" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-					<attributeListLayoutParameters alignment="LEFT" attributeID="DESTLINK" columnWidth="58" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-					<attributeListLayoutParameters alignment="RIGHT" attributeID="DESTPOS" columnWidth="55" decimals="3" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-					<attributeListLayoutParameters alignment="RIGHT" attributeID="RELFLOW(1)" columnWidth="68" decimals="3" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-				</attributeLPars>
-			</childNetObjectLParSet>
-			<netObjectLParSet filtered="false" headerHeight="24" netObjectTypeID="VEHICLEROUTINGDECISIONSTATIC" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
+		<listLayout childRelation="VEHROUTSTA" exportListWhenSimulationFinished="false" name="" no="10" synchronization="true" verticalSplitterPosition="0.47973713033953996">
+			<childNetObjectLParSets>
+				<netObjectListLayoutParameters autoSizeChildColumnWidthsToContent="true" filtered="false" headerHeight="0" netObjectTypeID="VEHICLEROUTESTATIC" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
+					<attributeLPars>
+						<attributeListLayoutParameters alignment="LEFT" attributeID="VEHROUTDEC" columnWidth="76" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+						<attributeListLayoutParameters alignment="RIGHT" attributeID="NO" columnWidth="27" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+						<attributeListLayoutParameters alignment="LEFT" attributeID="NAME" columnWidth="43" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+						<attributeListLayoutParameters alignment="LEFT" attributeID="FORMULA" columnWidth="54" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+						<attributeListLayoutParameters alignment="LEFT" attributeID="DESTLINK" columnWidth="56" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+						<attributeListLayoutParameters alignment="RIGHT" attributeID="DESTPOS" columnWidth="54" decimals="3" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+						<attributeListLayoutParameters alignment="RIGHT" attributeID="RELFLOW(1)" columnWidth="95" decimals="3" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+					</attributeLPars>
+				</netObjectListLayoutParameters>
+			</childNetObjectLParSets>
+			<netObjectLParSet autoSizeChildColumnWidthsToContent="true" filtered="false" headerHeight="24" netObjectTypeID="VEHICLEROUTINGDECISIONSTATIC" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
 				<attributeLPars>
 					<attributeListLayoutParameters alignment="RIGHT" attributeID="NO" columnWidth="29" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
 						<filter>
@@ -878,7 +894,7 @@
 					</attributeListLayoutParameters>
 					<attributeListLayoutParameters alignment="CENTER" attributeID="ALLVEHTYPES" columnWidth="75" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
 						<filter>
-							<filterCriterionBool active="false" filterValue="false"/>
+							<filterCriterionBool active="false" criterionType="EQUALS" filterValue="false"/>
 						</filter>
 					</attributeListLayoutParameters>
 					<attributeListLayoutParameters alignment="LEFT" attributeID="VEHCLASSES" columnWidth="70" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
@@ -893,54 +909,56 @@
 					</attributeListLayoutParameters>
 					<attributeListLayoutParameters alignment="CENTER" attributeID="COMBINESTAROUTDEC" columnWidth="0" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
 						<filter>
-							<filterCriterionBool active="false" filterValue="false"/>
+							<filterCriterionBool active="false" criterionType="EQUALS" filterValue="false"/>
 						</filter>
 					</attributeListLayoutParameters>
 				</attributeLPars>
 			</netObjectLParSet>
 		</listLayout>
-		<listLayout childRelation="LINKSEQ" exportListWhenSimulationFinished="false" name="" no="11" synchronization="true" verticalSplitterPosition="0.49196787148594379">
-			<childNetObjectLParSet filtered="false" headerHeight="0" netObjectTypeID="LINK" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
-				<attributeLPars>
-					<attributeListLayoutParameters alignment="RIGHT" attributeID="NO" columnWidth="29" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-					<attributeListLayoutParameters alignment="LEFT" attributeID="NAME" columnWidth="45" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-					<attributeListLayoutParameters alignment="LEFT" attributeID="LINKBEHAVTYPE" columnWidth="91" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-					<attributeListLayoutParameters alignment="LEFT" attributeID="DISPLAYTYPE" columnWidth="75" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-					<attributeListLayoutParameters alignment="LEFT" attributeID="LEVEL" columnWidth="40" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-					<attributeListLayoutParameters alignment="RIGHT" attributeID="NUMLANES" columnWidth="70" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-					<attributeListLayoutParameters alignment="RIGHT" attributeID="LENGTH2D" columnWidth="64" decimals="3" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-					<attributeListLayoutParameters alignment="CENTER" attributeID="ISCONN" columnWidth="50" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-					<attributeListLayoutParameters alignment="LEFT" attributeID="FROMLINK" columnWidth="63" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-					<attributeListLayoutParameters alignment="LEFT" attributeID="TOLINK" columnWidth="47" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-					<attributeListLayoutParameters alignment="LEFT" attributeID="LNCHGDISTDISTRDEF" columnWidth="110" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-					<attributeListLayoutParameters alignment="CENTER" attributeID="HASOVTLN" columnWidth="65" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-				</attributeLPars>
-			</childNetObjectLParSet>
-			<netObjectLParSet filtered="false" headerHeight="0" netObjectTypeID="VEHICLEROUTESTATIC" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
+		<listLayout childRelation="LINKSEQ" exportListWhenSimulationFinished="false" name="" no="11" synchronization="true" verticalSplitterPosition="0.49178532311062434">
+			<childNetObjectLParSets>
+				<netObjectListLayoutParameters autoSizeChildColumnWidthsToContent="true" filtered="false" headerHeight="0" netObjectTypeID="LINK" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
+					<attributeLPars>
+						<attributeListLayoutParameters alignment="RIGHT" attributeID="NO" columnWidth="27" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+						<attributeListLayoutParameters alignment="LEFT" attributeID="NAME" columnWidth="43" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+						<attributeListLayoutParameters alignment="LEFT" attributeID="LINKBEHAVTYPE" columnWidth="89" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+						<attributeListLayoutParameters alignment="LEFT" attributeID="DISPLAYTYPE" columnWidth="74" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+						<attributeListLayoutParameters alignment="LEFT" attributeID="LEVEL" columnWidth="38" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+						<attributeListLayoutParameters alignment="RIGHT" attributeID="NUMLANES" columnWidth="68" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+						<attributeListLayoutParameters alignment="RIGHT" attributeID="LENGTH2D" columnWidth="63" decimals="3" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+						<attributeListLayoutParameters alignment="CENTER" attributeID="ISCONN" columnWidth="48" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+						<attributeListLayoutParameters alignment="LEFT" attributeID="FROMLINK" columnWidth="59" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+						<attributeListLayoutParameters alignment="LEFT" attributeID="TOLINK" columnWidth="44" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+						<attributeListLayoutParameters alignment="LEFT" attributeID="LNCHGDISTDISTRDEF" columnWidth="109" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+						<attributeListLayoutParameters alignment="CENTER" attributeID="HASOVTLN" columnWidth="63" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+					</attributeLPars>
+				</netObjectListLayoutParameters>
+			</childNetObjectLParSets>
+			<netObjectLParSet autoSizeChildColumnWidthsToContent="true" filtered="false" headerHeight="0" netObjectTypeID="VEHICLEROUTESTATIC" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
 				<attributeLPars>
 					<attributeListLayoutParameters alignment="LEFT" attributeID="VEHROUTDEC" columnWidth="77" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
 						<filter>
@@ -981,7 +999,7 @@
 			</netObjectLParSet>
 		</listLayout>
 		<listLayout childRelation="" exportListWhenSimulationFinished="false" name="" no="12" synchronization="true" verticalSplitterPosition="0.5">
-			<netObjectLParSet filtered="false" headerHeight="0" netObjectTypeID="CONFLICTAREA" rowHeaderWidth="64" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
+			<netObjectLParSet autoSizeChildColumnWidthsToContent="true" filtered="false" headerHeight="0" netObjectTypeID="CONFLICTAREA" rowHeaderWidth="64" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
 				<attributeLPars>
 					<attributeListLayoutParameters alignment="LEFT" attributeID="LINK1" columnWidth="41" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
 						<filter>
@@ -1040,7 +1058,7 @@
 					</attributeListLayoutParameters>
 					<attributeListLayoutParameters alignment="CENTER" attributeID="OBSADJLNS" columnWidth="70" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
 						<filter>
-							<filterCriterionBool active="false" filterValue="false"/>
+							<filterCriterionBool active="false" criterionType="EQUALS" filterValue="false"/>
 						</filter>
 					</attributeListLayoutParameters>
 					<attributeListLayoutParameters alignment="RIGHT" attributeID="ANTICIPROUT" columnWidth="76" decimals="1" format="PERCENT" quickViewRowHeight="0" showUnits="true">
@@ -1057,7 +1075,7 @@
 			</netObjectLParSet>
 		</listLayout>
 		<listLayout childRelation="" exportListWhenSimulationFinished="false" name="" no="13" synchronization="false" verticalSplitterPosition="0.5">
-			<netObjectLParSet filtered="false" headerHeight="0" netObjectTypeID="USERDEFINEDATTRIBUTE" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
+			<netObjectLParSet autoSizeChildColumnWidthsToContent="true" filtered="false" headerHeight="0" netObjectTypeID="USERDEFINEDATTRIBUTE" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
 				<attributeLPars>
 					<attributeListLayoutParameters alignment="RIGHT" attributeID="NO" columnWidth="29" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
 						<filter>
@@ -1081,7 +1099,7 @@
 					</attributeListLayoutParameters>
 					<attributeListLayoutParameters alignment="CENTER" attributeID="CANBEEMPTY" columnWidth="81" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
 						<filter>
-							<filterCriterionBool active="false" filterValue="false"/>
+							<filterCriterionBool active="false" criterionType="EQUALS" filterValue="false"/>
 						</filter>
 					</attributeListLayoutParameters>
 					<attributeListLayoutParameters alignment="LEFT" attributeID="DATATYPE" columnWidth="61" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
@@ -1118,17 +1136,19 @@
 			</netObjectLParSet>
 		</listLayout>
 		<listLayout childRelation="DISTRDATAPTS" exportListWhenSimulationFinished="false" name="" no="14" synchronization="false" verticalSplitterPosition="0.49397590361445781">
-			<childNetObjectLParSet filtered="false" headerHeight="0" netObjectTypeID="DISTRIBUTIONDATAPOINT" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
-				<attributeLPars>
-					<attributeListLayoutParameters alignment="RIGHT" attributeID="X" columnWidth="20" decimals="2" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-					<attributeListLayoutParameters alignment="RIGHT" attributeID="FX" columnWidth="26" decimals="2" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-				</attributeLPars>
-			</childNetObjectLParSet>
-			<netObjectLParSet filtered="false" headerHeight="0" netObjectTypeID="WEIGHTDISTRIBUTION" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
+			<childNetObjectLParSets>
+				<netObjectListLayoutParameters autoSizeChildColumnWidthsToContent="true" filtered="false" headerHeight="0" netObjectTypeID="DISTRIBUTIONDATAPOINT" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
+					<attributeLPars>
+						<attributeListLayoutParameters alignment="RIGHT" attributeID="X" columnWidth="18" decimals="2" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+						<attributeListLayoutParameters alignment="RIGHT" attributeID="FX" columnWidth="24" decimals="2" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+					</attributeLPars>
+				</netObjectListLayoutParameters>
+			</childNetObjectLParSets>
+			<netObjectLParSet autoSizeChildColumnWidthsToContent="true" filtered="false" headerHeight="0" netObjectTypeID="WEIGHTDISTRIBUTION" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
 				<attributeLPars>
 					<attributeListLayoutParameters alignment="RIGHT" attributeID="NO" columnWidth="29" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
 						<filter>
@@ -1154,23 +1174,25 @@
 			</netObjectLParSet>
 		</listLayout>
 		<listLayout childRelation="ACCELFUNCDATAPTS" exportListWhenSimulationFinished="false" name="" no="15" synchronization="false" verticalSplitterPosition="0.49397590361445781">
-			<childNetObjectLParSet filtered="false" headerHeight="0" netObjectTypeID="ACCELERATIONFUNCTIONDATAPOINT" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
-				<attributeLPars>
-					<attributeListLayoutParameters alignment="RIGHT" attributeID="X" columnWidth="20" decimals="2" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-					<attributeListLayoutParameters alignment="RIGHT" attributeID="Y" columnWidth="20" decimals="2" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-					<attributeListLayoutParameters alignment="RIGHT" attributeID="YMIN" columnWidth="40" decimals="2" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-					<attributeListLayoutParameters alignment="RIGHT" attributeID="YMAX" columnWidth="42" decimals="2" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-				</attributeLPars>
-			</childNetObjectLParSet>
-			<netObjectLParSet filtered="false" headerHeight="0" netObjectTypeID="MAXACCELERATIONFUNCTION" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
+			<childNetObjectLParSets>
+				<netObjectListLayoutParameters autoSizeChildColumnWidthsToContent="true" filtered="false" headerHeight="0" netObjectTypeID="ACCELERATIONFUNCTIONDATAPOINT" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
+					<attributeLPars>
+						<attributeListLayoutParameters alignment="RIGHT" attributeID="X" columnWidth="18" decimals="2" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+						<attributeListLayoutParameters alignment="RIGHT" attributeID="Y" columnWidth="18" decimals="2" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+						<attributeListLayoutParameters alignment="RIGHT" attributeID="YMIN" columnWidth="38" decimals="2" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+						<attributeListLayoutParameters alignment="RIGHT" attributeID="YMAX" columnWidth="40" decimals="2" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+					</attributeLPars>
+				</netObjectListLayoutParameters>
+			</childNetObjectLParSets>
+			<netObjectLParSet autoSizeChildColumnWidthsToContent="true" filtered="false" headerHeight="0" netObjectTypeID="MAXACCELERATIONFUNCTION" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
 				<attributeLPars>
 					<attributeListLayoutParameters alignment="RIGHT" attributeID="NO" columnWidth="29" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
 						<filter>
@@ -1186,32 +1208,34 @@
 			</netObjectLParSet>
 		</listLayout>
 		<listLayout childRelation="VEHTYPES" exportListWhenSimulationFinished="false" name="" no="16" synchronization="false" verticalSplitterPosition="0.49397590361445781">
-			<childNetObjectLParSet filtered="false" headerHeight="0" netObjectTypeID="VEHICLETYPE" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
-				<attributeLPars>
-					<attributeListLayoutParameters alignment="RIGHT" attributeID="NO" columnWidth="29" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-					<attributeListLayoutParameters alignment="LEFT" attributeID="NAME" columnWidth="45" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-					<attributeListLayoutParameters alignment="LEFT" attributeID="CATEGORY" columnWidth="61" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-					<attributeListLayoutParameters alignment="LEFT" attributeID="MODEL2D3DDISTR" columnWidth="99" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-					<attributeListLayoutParameters alignment="LEFT" attributeID="COLORDISTR1" columnWidth="72" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-					<attributeListLayoutParameters alignment="LEFT" attributeID="OCCUPDISTR" columnWidth="72" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-					<attributeListLayoutParameters alignment="RIGHT" attributeID="CAPACITY" columnWidth="59" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
-						<filter/>
-					</attributeListLayoutParameters>
-				</attributeLPars>
-			</childNetObjectLParSet>
-			<netObjectLParSet filtered="false" headerHeight="0" netObjectTypeID="VEHICLECLASS" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
+			<childNetObjectLParSets>
+				<netObjectListLayoutParameters autoSizeChildColumnWidthsToContent="true" filtered="false" headerHeight="0" netObjectTypeID="VEHICLETYPE" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
+					<attributeLPars>
+						<attributeListLayoutParameters alignment="RIGHT" attributeID="NO" columnWidth="27" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+						<attributeListLayoutParameters alignment="LEFT" attributeID="NAME" columnWidth="43" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+						<attributeListLayoutParameters alignment="LEFT" attributeID="CATEGORY" columnWidth="59" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+						<attributeListLayoutParameters alignment="LEFT" attributeID="MODEL2D3DDISTR" columnWidth="99" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+						<attributeListLayoutParameters alignment="LEFT" attributeID="COLORDISTR1" columnWidth="70" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+						<attributeListLayoutParameters alignment="LEFT" attributeID="OCCUPDISTR" columnWidth="70" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+						<attributeListLayoutParameters alignment="RIGHT" attributeID="CAPACITY" columnWidth="56" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
+							<filter/>
+						</attributeListLayoutParameters>
+					</attributeLPars>
+				</netObjectListLayoutParameters>
+			</childNetObjectLParSets>
+			<netObjectLParSet autoSizeChildColumnWidthsToContent="true" filtered="false" headerHeight="0" netObjectTypeID="VEHICLECLASS" rowHeaderWidth="57" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
 				<attributeLPars>
 					<attributeListLayoutParameters alignment="RIGHT" attributeID="NO" columnWidth="29" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
 						<filter>
@@ -1230,7 +1254,7 @@
 					</attributeListLayoutParameters>
 					<attributeListLayoutParameters alignment="CENTER" attributeID="USEVEHTYPECOLOR" columnWidth="104" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
 						<filter>
-							<filterCriterionBool active="false" filterValue="false"/>
+							<filterCriterionBool active="false" criterionType="EQUALS" filterValue="false"/>
 						</filter>
 					</attributeListLayoutParameters>
 					<attributeListLayoutParameters alignment="LEFT" attributeID="COLOR" columnWidth="92" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
@@ -1247,7 +1271,7 @@
 			<camera coord2DX="0" coord2DY="0" coord3DX="0" coord3DY="0" coord3DZ="125.7107" foV="45" pitchAngle="1.5707963267948966" rollAngle="0" yawAngle="1.5707963267948966" zoom2D="0"/>
 			<gParSet>
 				<backgroundGPars borderColor="ff000000" borderLineStyle="NOLINE" labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" objectVisibility="true" useLabelColorScheme="false"/>
-				<baseGPars autoLvlTransp="true" backgroundColor="ffc0c0c0" compassPos="BOTTOMRIGHT" legdOffset="10 10" legdPos="BOTTOMRIGHT" legdScale="1" logoFilename="" logoOffset="20 20" logoPos="TOPLEFT" mapGrayScale="false" mapIntensity="100" mapType="DEFAULTMAPPROVIDER" mode3D="false" rubberbandColor="fff0f000" selectionColor="fff0f000" showCompass="false" showGrid="true" showLegd="false" showLogo="false" showMap="true" showScale="true" showSimTmLabel="false" simTmLabelColor="ff000000" simTmLabelFontSize="20" simTmLabelOffset="15 30" simTmLabelPos="BOTTOMLEFT" wireframeMode="false">
+				<baseGPars autoLvlTransp="true" backgroundColor="ffc0c0c0" compassPos="BOTTOMRIGHT" legdOffset="10 10" legdPos="BOTTOMRIGHT" legdScale="1" logoFilename="" logoOffset="20 20" logoPos="TOPLEFT" mapGrayScale="false" mapIntensity="100" mapProviderName="" mapType="DEFAULTMAPPROVIDER" mode3D="false" rubberbandColor="fff0f000" selectionColor="fff0f000" showCompass="false" showGrid="true" showLegd="false" showLogo="false" showMap="true" showScale="true" showSimTmLabel="false" simTmLabelColor="ff000000" simTmLabelFontSize="20" simTmLabelOffset="15 30" simTmLabelPos="BOTTOMLEFT" wireframeMode="false">
 					<compassOffsetInternal x="0" y="0"/>
 					<legendOffsetInternal x="10" y="10"/>
 					<logoOffsetInternal x="20" y="20"/>
@@ -1264,9 +1288,9 @@
 				</flowBundleGPars>
 				<gPars3D buildingColor="ffe0e0e0" fogExpDensity="6" fogLinEnd="250" fogLinStart="0" fogMode="OFF" landColor="ffc0c0c0" landTexture="" landTextureHorizontalLength="1" shadColor="50000000" showBuildings="false" showLand="true" showMap="true" showShad="false" skyColor="ff00aafa" skyTexture="" undergroundColor="ff291e19" undergroundTexture=""/>
 				<informationSign3DGPars labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" objectVisibility="true" useLabelColorScheme="false"/>
-				<linkGPars borderColor="ff606060" borderLineStyle="NOLINE" colorSchemeDisplayBase="LANEBASED" connectorBorderColor="ff606060" connectorBorderLineStyle="NOLINE" connectorFillColor="ff808080" connectorFillStyle="SOLIDFILL" connectorWireframeColor="ff800080" drawingMode="DISPLAYTYPE" fillColor="ff808080" fillStyle="SOLIDFILL" labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" laneMarkingColor="fff0f0f0" laneMarkingWidth="0.12" legdInclLabColor="false" legdInclLinkBarColor="false" legdInclLinkColor="false" linkBarDrawingMode="NOLINKBARS" linkWireFrameColor="ff000080" objectVisibility="true" ovtLnDrawingMode="LINKSANDOVERTAKINGLANES" useLabelColorScheme="false"/>
+				<linkGPars borderColor="ff606060" borderLineStyle="NOLINE" colorSchemeDisplayBase="LANEBASED" connectorBorderColor="ff606060" connectorBorderLineStyle="NOLINE" connectorFillColor="ff808080" connectorFillStyle="SOLIDFILL" connectorRvsWireframeColor="ffffd800" connectorWireframeColor="ff800080" drawingMode="DISPLAYTYPE" fillColor="ff808080" fillStyle="SOLIDFILL" labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" laneMarkingColor="fff0f0f0" laneMarkingWidth="0.12" legdInclLabColor="false" legdInclLinkBarColor="false" legdInclLinkColor="false" linkBarDrawingMode="NOLINKBARS" linkWireFrameColor="ff000080" objectVisibility="true" ovtLnDrawingMode="LINKSANDOVERTAKINGLANES" useLabelColorScheme="false"/>
 				<nodeGPars borderColor="ff000080" borderLineStyle="SOLIDLINE" drawingMode="CONSTCOLORS" fillColor="ff808080" fillStyle="NOFILL" labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" legdInclNodeColor="false" legdInclTurnValColor="false" objectVisibility="true" qLenAttr="" qLenColor="96000000" segmentBorderColor="ff000080" segmentBorderLineStyle="SOLIDLINE" segmentFillColor="99000080" segmentFillStyle="NOFILL" showQLen="false" showQLenLabel="true" showTurnValVisual="false" useLabelColorScheme="false"/>
-				<ptLineGPars activeStopColor="ffff0000" endLineColor="ff008000" fillStyle="SOLIDFILL" inactiveStopColor="ff008000" labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" objectVisibility="true" ptLineFillColor="ff808000" startLineColor="ff800000" useLabelColorScheme="false"/>
+				<ptLineGPars activeDirectionChangeStopColor="ffffc019" activeStopColor="ffff0000" endLineColor="ff008000" fillStyle="SOLIDFILL" inactiveStopColor="ff008000" labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" objectVisibility="true" ptLineFillColor="ff808000" startLineColor="ff800000" useLabelColorScheme="false"/>
 				<ptStopGPars borderColor="ff000080" borderLineStyle="SOLIDLINE" fillColor="ff808080" fillStyle="NOFILL" labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" objectVisibility="true" useLabelColorScheme="false"/>
 				<parkingLotGPars borderColor="ff000080" borderLineStyle="SOLIDLINE" colorSchemeDisplayBase="PARKINGLOTBASED" drawingMode="CONSTCOLORS" fillColor="ff808080" fillStyle="NOFILL" labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" legdInclParkLotColor="false" objectVisibility="true" showColorSchemeLabel="false" useLabelColorScheme="false"/>
 				<pavementMarkingGPars labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" lineColor="ffffffff" objectVisibility="true" useLabelColorScheme="false"/>
@@ -1289,15 +1313,15 @@
 				<vehAttrDecGPars labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" lineColor="ff800000" objectVisibility="true" useLabelColorScheme="false"/>
 				<vehicleGPars drawingMode="COLORDISTRIBUTION" labelAttribute="NO" labelAutoRot="true" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" legdInclVehColor="false" objectVisibility="true" selectionColor="ffff7fff" shape2D="ROUNDED" useLabelColorScheme="false"/>
 				<vehicleInputGPars labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" lineColor="ff800000" objectVisibility="true" useLabelColorScheme="false"/>
-				<vehicleRoutingDecisionGPars activeStopColor="ffff0000" closureRouteColor="fff00000" endLineColor="ff008000" inactiveStopColor="ff800000" labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" managedLaneGeneralRouteColor="ff00a000" managedLaneManagedRouteColor="ffa00000" objectVisibility="true" parkingLotRouteColor="ff0000a0" partialPTRouteColor="fff0f000" partialRouteColor="fff0f000" startLineColor="ff800000" staticRouteColor="fff0f000" useLabelColorScheme="false"/>
+				<vehicleRoutingDecisionGPars activeDirectionChangeStopColor="ffffc019" activeStopColor="ffff0000" closureRouteColor="fff00000" endLineColor="ff008000" inactiveStopColor="ff800000" labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" managedLaneGeneralRouteColor="ff00a000" managedLaneManagedRouteColor="ffa00000" objectVisibility="true" parkingLotRouteColor="ff0000a0" partialPTRouteColor="fff0f000" partialRouteColor="fff0f000" startLineColor="ff800000" staticRouteColor="fff0f000" useLabelColorScheme="false"/>
 				<vehicleTravelTimeMeasurementsGPars endLineColor="ff008000" labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" objectVisibility="true" startLineColor="ff800000" useLabelColorScheme="false"/>
 			</gParSet>
 		</networkEditorLayout>
 		<networkEditorLayout name="" no="2" synchronization="NONE">
-			<camera coord2DX="-4178909.8437242713" coord2DY="-11482914.405714655" coord3DX="0" coord3DY="0" coord3DZ="1000" foV="45" pitchAngle="1.5707963267948966" rollAngle="0" yawAngle="1.5707963267948966" zoom2D="147993.58502094314"/>
+			<camera coord2DX="0" coord2DY="0" coord3DX="0" coord3DY="0" coord3DZ="1000" foV="45" pitchAngle="1.5707963267948966" rollAngle="0" yawAngle="1.5707963267948966" zoom2D="nan(ind)"/>
 			<gParSet>
 				<backgroundGPars borderColor="ff000000" borderLineStyle="NOLINE" labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" objectVisibility="true" useLabelColorScheme="false"/>
-				<baseGPars autoLvlTransp="true" backgroundColor="ffc0c0c0" compassPos="BOTTOMRIGHT" legdOffset="10 10" legdPos="BOTTOMRIGHT" legdScale="1" logoFilename="" logoOffset="20 20" logoPos="TOPLEFT" mapGrayScale="false" mapIntensity="100" mapType="DEFAULTMAPPROVIDER" mode3D="false" rubberbandColor="fff0f000" selectionColor="fff0f000" showCompass="false" showGrid="false" showLegd="false" showLogo="false" showMap="false" showScale="true" showSimTmLabel="false" simTmLabelColor="ff000000" simTmLabelFontSize="20" simTmLabelOffset="15 30" simTmLabelPos="BOTTOMLEFT" wireframeMode="false">
+				<baseGPars autoLvlTransp="true" backgroundColor="ffc0c0c0" compassPos="BOTTOMRIGHT" legdOffset="10 10" legdPos="BOTTOMRIGHT" legdScale="1" logoFilename="" logoOffset="20 20" logoPos="TOPLEFT" mapGrayScale="false" mapIntensity="100" mapProviderName="" mapType="DEFAULTMAPPROVIDER" mode3D="false" rubberbandColor="fff0f000" selectionColor="fff0f000" showCompass="false" showGrid="false" showLegd="false" showLogo="false" showMap="false" showScale="true" showSimTmLabel="false" simTmLabelColor="ff000000" simTmLabelFontSize="20" simTmLabelOffset="15 30" simTmLabelPos="BOTTOMLEFT" wireframeMode="false">
 					<compassOffsetInternal x="0" y="0"/>
 					<legendOffsetInternal x="10" y="10"/>
 					<logoOffsetInternal x="20" y="20"/>
@@ -1314,9 +1338,9 @@
 				</flowBundleGPars>
 				<gPars3D buildingColor="ffe0e0e0" fogExpDensity="6" fogLinEnd="250" fogLinStart="0" fogMode="OFF" landColor="ffc0c0c0" landTexture="" landTextureHorizontalLength="1" shadColor="50000000" showBuildings="false" showLand="true" showMap="true" showShad="false" skyColor="ff00aafa" skyTexture="" undergroundColor="ff291e19" undergroundTexture=""/>
 				<informationSign3DGPars labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" objectVisibility="true" useLabelColorScheme="false"/>
-				<linkGPars borderColor="ff606060" borderLineStyle="NOLINE" colorSchemeDisplayBase="LANEBASED" connectorBorderColor="ff606060" connectorBorderLineStyle="NOLINE" connectorFillColor="ff808080" connectorFillStyle="SOLIDFILL" connectorWireframeColor="ff800080" drawingMode="DISPLAYTYPE" fillColor="ff808080" fillStyle="SOLIDFILL" labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" laneMarkingColor="fff0f0f0" laneMarkingWidth="0.12" legdInclLabColor="false" legdInclLinkBarColor="false" legdInclLinkColor="false" linkBarDrawingMode="NOLINKBARS" linkWireFrameColor="ff000080" objectVisibility="true" ovtLnDrawingMode="LINKSONLY" useLabelColorScheme="false"/>
+				<linkGPars borderColor="ff606060" borderLineStyle="NOLINE" colorSchemeDisplayBase="LANEBASED" connectorBorderColor="ff606060" connectorBorderLineStyle="NOLINE" connectorFillColor="ff808080" connectorFillStyle="SOLIDFILL" connectorRvsWireframeColor="ffffd800" connectorWireframeColor="ff800080" drawingMode="DISPLAYTYPE" fillColor="ff808080" fillStyle="SOLIDFILL" labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" laneMarkingColor="fff0f0f0" laneMarkingWidth="0.12" legdInclLabColor="false" legdInclLinkBarColor="false" legdInclLinkColor="false" linkBarDrawingMode="NOLINKBARS" linkWireFrameColor="ff000080" objectVisibility="true" ovtLnDrawingMode="LINKSONLY" useLabelColorScheme="false"/>
 				<nodeGPars borderColor="ff000080" borderLineStyle="SOLIDLINE" drawingMode="CONSTCOLORS" fillColor="ff808080" fillStyle="NOFILL" labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" legdInclNodeColor="false" legdInclTurnValColor="false" objectVisibility="true" qLenAttr="" qLenColor="96000000" segmentBorderColor="ff000080" segmentBorderLineStyle="SOLIDLINE" segmentFillColor="99000080" segmentFillStyle="NOFILL" showQLen="false" showQLenLabel="true" showTurnValVisual="false" useLabelColorScheme="false"/>
-				<ptLineGPars activeStopColor="ffff0000" endLineColor="ff008000" fillStyle="SOLIDFILL" inactiveStopColor="ff008000" labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" objectVisibility="true" ptLineFillColor="ff808000" startLineColor="ff800000" useLabelColorScheme="false"/>
+				<ptLineGPars activeDirectionChangeStopColor="ffffc019" activeStopColor="ffff0000" endLineColor="ff008000" fillStyle="SOLIDFILL" inactiveStopColor="ff008000" labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" objectVisibility="true" ptLineFillColor="ff808000" startLineColor="ff800000" useLabelColorScheme="false"/>
 				<ptStopGPars borderColor="ff000080" borderLineStyle="SOLIDLINE" fillColor="ff808080" fillStyle="NOFILL" labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" objectVisibility="true" useLabelColorScheme="false"/>
 				<parkingLotGPars borderColor="ff000080" borderLineStyle="SOLIDLINE" colorSchemeDisplayBase="PARKINGLOTBASED" drawingMode="CONSTCOLORS" fillColor="ff808080" fillStyle="NOFILL" labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" legdInclParkLotColor="false" objectVisibility="true" showColorSchemeLabel="false" useLabelColorScheme="false"/>
 				<pavementMarkingGPars labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" lineColor="ffffffff" objectVisibility="true" useLabelColorScheme="false"/>
@@ -1339,7 +1363,7 @@
 				<vehAttrDecGPars labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" lineColor="ff800000" objectVisibility="true" useLabelColorScheme="false"/>
 				<vehicleGPars drawingMode="COLORDISTRIBUTION" labelAttribute="NO" labelAutoRot="true" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" legdInclVehColor="false" objectVisibility="true" selectionColor="ffff7fff" shape2D="ROUNDED" useLabelColorScheme="false"/>
 				<vehicleInputGPars labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" lineColor="ff800000" objectVisibility="true" useLabelColorScheme="false"/>
-				<vehicleRoutingDecisionGPars activeStopColor="ffff0000" closureRouteColor="fff00000" endLineColor="ff008000" inactiveStopColor="ff800000" labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" managedLaneGeneralRouteColor="ff00a000" managedLaneManagedRouteColor="ffa00000" objectVisibility="true" parkingLotRouteColor="ff0000a0" partialPTRouteColor="fff0f000" partialRouteColor="fff0f000" startLineColor="ff800000" staticRouteColor="fff0f000" useLabelColorScheme="false"/>
+				<vehicleRoutingDecisionGPars activeDirectionChangeStopColor="ffffc019" activeStopColor="ffff0000" closureRouteColor="fff00000" endLineColor="ff008000" inactiveStopColor="ff800000" labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" managedLaneGeneralRouteColor="ff00a000" managedLaneManagedRouteColor="ffa00000" objectVisibility="true" parkingLotRouteColor="ff0000a0" partialPTRouteColor="fff0f000" partialRouteColor="fff0f000" startLineColor="ff800000" staticRouteColor="fff0f000" useLabelColorScheme="false"/>
 				<vehicleTravelTimeMeasurementsGPars endLineColor="ff008000" labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" objectVisibility="true" startLineColor="ff800000" useLabelColorScheme="false"/>
 			</gParSet>
 		</networkEditorLayout>
@@ -1347,7 +1371,7 @@
 			<camera coord2DX="-247.88360189280127" coord2DY="-182.68365854497213" coord3DX="449.31280640553507" coord3DY="-216.88902331076815" coord3DZ="605.22227889910027" foV="45" pitchAngle="1.0407963267948954" rollAngle="0" yawAngle="1.5807963267948963" zoom2D="3.4651817441183455"/>
 			<gParSet>
 				<backgroundGPars borderColor="ff000000" borderLineStyle="NOLINE" labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" objectVisibility="true" useLabelColorScheme="false"/>
-				<baseGPars autoLvlTransp="true" backgroundColor="ffc0c0c0" compassPos="BOTTOMRIGHT" legdOffset="10 10" legdPos="BOTTOMRIGHT" legdScale="1" logoFilename="" logoOffset="20 20" logoPos="TOPLEFT" mapGrayScale="false" mapIntensity="100" mapType="DEFAULTMAPPROVIDER" mode3D="false" rubberbandColor="fff0f000" selectionColor="fff0f000" showCompass="false" showGrid="true" showLegd="false" showLogo="false" showMap="false" showScale="true" showSimTmLabel="false" simTmLabelColor="ff000000" simTmLabelFontSize="20" simTmLabelOffset="15 30" simTmLabelPos="BOTTOMLEFT" wireframeMode="false">
+				<baseGPars autoLvlTransp="true" backgroundColor="ffc0c0c0" compassPos="BOTTOMRIGHT" legdOffset="10 10" legdPos="BOTTOMRIGHT" legdScale="1" logoFilename="" logoOffset="20 20" logoPos="TOPLEFT" mapGrayScale="false" mapIntensity="100" mapProviderName="" mapType="DEFAULTMAPPROVIDER" mode3D="false" rubberbandColor="fff0f000" selectionColor="fff0f000" showCompass="false" showGrid="true" showLegd="false" showLogo="false" showMap="false" showScale="true" showSimTmLabel="false" simTmLabelColor="ff000000" simTmLabelFontSize="20" simTmLabelOffset="15 30" simTmLabelPos="BOTTOMLEFT" wireframeMode="false">
 					<compassOffsetInternal x="0" y="0"/>
 					<legendOffsetInternal x="10" y="10"/>
 					<logoOffsetInternal x="20" y="20"/>
@@ -1364,7 +1388,7 @@
 				</flowBundleGPars>
 				<gPars3D buildingColor="ffe0e0e0" fogExpDensity="6" fogLinEnd="250" fogLinStart="0" fogMode="OFF" landColor="ffc0c0c0" landTexture="" landTextureHorizontalLength="1" shadColor="50000000" showBuildings="false" showLand="true" showMap="false" showShad="false" skyColor="ff00aafa" skyTexture="#3dmodels#Textures\Sky_bright01.bmp" undergroundColor="ff291e19" undergroundTexture=""/>
 				<informationSign3DGPars labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" objectVisibility="true" useLabelColorScheme="false"/>
-				<linkGPars borderColor="ff606060" borderLineStyle="NOLINE" colorSchemeDisplayBase="LANEBASED" connectorBorderColor="ff606060" connectorBorderLineStyle="NOLINE" connectorFillColor="ff808080" connectorFillStyle="SOLIDFILL" connectorWireframeColor="ffc000c0" drawingMode="DISPLAYTYPE" fillColor="ff808080" fillStyle="SOLIDFILL" labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" laneMarkingColor="fff0f0f0" laneMarkingWidth="0.12" legdInclLabColor="false" legdInclLinkBarColor="false" legdInclLinkColor="false" linkBarDrawingMode="NOLINKBARS" linkWireFrameColor="ff000080" objectVisibility="true" ovtLnDrawingMode="LINKSANDOVERTAKINGLANES" useLabelColorScheme="false">
+				<linkGPars borderColor="ff606060" borderLineStyle="NOLINE" colorSchemeDisplayBase="LANEBASED" connectorBorderColor="ff606060" connectorBorderLineStyle="NOLINE" connectorFillColor="ff808080" connectorFillStyle="SOLIDFILL" connectorRvsWireframeColor="ffffd800" connectorWireframeColor="ffc000c0" drawingMode="DISPLAYTYPE" fillColor="ff808080" fillStyle="SOLIDFILL" labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" laneMarkingColor="fff0f0f0" laneMarkingWidth="0.12" legdInclLabColor="false" legdInclLinkBarColor="false" legdInclLinkColor="false" linkBarDrawingMode="NOLINKBARS" linkWireFrameColor="ff000080" objectVisibility="true" ovtLnDrawingMode="LINKSANDOVERTAKINGLANES" useLabelColorScheme="false">
 					<linkBarGPars autoScaleAct="true" colorClsfActive="false" dispBas="LINKSEGMENTBASED" latOffset="0" scaleClassfNo="VOLUME(CURRENT,LAST,ALL)" scaleMax="20000" scaleMin="0" scaleWidthMax="0.004">
 						<colorScheme classificID="VOLUME(CURRENT,LAST,ALL)" undefValueColor="ffbe0000">
 							<colorSchemeElements>
@@ -1402,7 +1426,7 @@
 						</colorScheme>
 					</turnValVisualScheme>
 				</nodeGPars>
-				<ptLineGPars activeStopColor="ffff0000" endLineColor="ff00c0c0" fillStyle="SOLIDFILL" inactiveStopColor="ff008000" labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" objectVisibility="true" ptLineFillColor="99ff8000" startLineColor="ff0000ff" useLabelColorScheme="false"/>
+				<ptLineGPars activeDirectionChangeStopColor="ffffc019" activeStopColor="ffff0000" endLineColor="ff00c0c0" fillStyle="SOLIDFILL" inactiveStopColor="ff008000" labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" objectVisibility="true" ptLineFillColor="99ff8000" startLineColor="ff0000ff" useLabelColorScheme="false"/>
 				<ptStopGPars borderColor="ff800000" borderLineStyle="SOLIDLINE" fillColor="ff808080" fillStyle="NOFILL" labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" objectVisibility="true" useLabelColorScheme="false"/>
 				<parkingLotGPars borderColor="ff0000ff" borderLineStyle="SOLIDLINE" colorSchemeDisplayBase="PARKINGLOTBASED" drawingMode="CONSTCOLORS" fillColor="ff808080" fillStyle="NOFILL" labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" legdInclParkLotColor="false" objectVisibility="true" showColorSchemeLabel="false" useLabelColorScheme="false"/>
 				<pavementMarkingGPars labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" lineColor="ffffffff" objectVisibility="true" useLabelColorScheme="false"/>
@@ -1425,7 +1449,7 @@
 				<vehAttrDecGPars labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" lineColor="ff800000" objectVisibility="true" useLabelColorScheme="false"/>
 				<vehicleGPars drawingMode="COLORDISTRIBUTION" labelAttribute="NO" labelAutoRot="true" labelBackgrColor="80ebf2f6" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" legdInclVehColor="false" objectVisibility="true" selectionColor="ffff7fff" shape2D="ROUNDED" useLabelColorScheme="false"/>
 				<vehicleInputGPars labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" lineColor="ff000000" objectVisibility="true" useLabelColorScheme="false"/>
-				<vehicleRoutingDecisionGPars activeStopColor="ffff0000" closureRouteColor="99f00000" endLineColor="ff00c0c0" inactiveStopColor="ff008000" labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" managedLaneGeneralRouteColor="9900a000" managedLaneManagedRouteColor="99a00000" objectVisibility="true" parkingLotRouteColor="990000a0" partialPTRouteColor="99f0f000" partialRouteColor="99f0f000" startLineColor="ffc000c0" staticRouteColor="99f0f000" useLabelColorScheme="false"/>
+				<vehicleRoutingDecisionGPars activeDirectionChangeStopColor="ffffc019" activeStopColor="ffff0000" closureRouteColor="99f00000" endLineColor="ff00c0c0" inactiveStopColor="ff008000" labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" managedLaneGeneralRouteColor="9900a000" managedLaneManagedRouteColor="99a00000" objectVisibility="true" parkingLotRouteColor="990000a0" partialPTRouteColor="99f0f000" partialRouteColor="99f0f000" startLineColor="ffc000c0" staticRouteColor="99f0f000" useLabelColorScheme="false"/>
 				<vehicleTravelTimeMeasurementsGPars endLineColor="ffc0ffc0" labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" objectVisibility="true" startLineColor="ffffc0c0" useLabelColorScheme="false"/>
 			</gParSet>
 		</networkEditorLayout>
@@ -1433,7 +1457,7 @@
 			<camera coord2DX="112.56364211335384" coord2DY="-7.5016674417165357" coord3DX="465.79569728675403" coord3DY="-254.25216648793179" coord3DZ="605.22227889910027" foV="45" pitchAngle="1.0407963267948954" rollAngle="0" yawAngle="1.5807963267948963" zoom2D="0.18850511516484381"/>
 			<gParSet>
 				<backgroundGPars borderColor="ff000000" borderLineStyle="NOLINE" labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" objectVisibility="true" useLabelColorScheme="false"/>
-				<baseGPars autoLvlTransp="true" backgroundColor="ffc0c0c0" compassPos="BOTTOMRIGHT" legdOffset="10 10" legdPos="BOTTOMRIGHT" legdScale="1" logoFilename="" logoOffset="20 20" logoPos="TOPLEFT" mapGrayScale="false" mapIntensity="100" mapType="DEFAULTMAPPROVIDER" mode3D="false" rubberbandColor="fff0f000" selectionColor="fff0f000" showCompass="false" showGrid="true" showLegd="false" showLogo="false" showMap="false" showScale="true" showSimTmLabel="false" simTmLabelColor="ff000000" simTmLabelFontSize="20" simTmLabelOffset="15 30" simTmLabelPos="BOTTOMLEFT" wireframeMode="false">
+				<baseGPars autoLvlTransp="true" backgroundColor="ffc0c0c0" compassPos="BOTTOMRIGHT" legdOffset="10 10" legdPos="BOTTOMRIGHT" legdScale="1" logoFilename="" logoOffset="20 20" logoPos="TOPLEFT" mapGrayScale="false" mapIntensity="100" mapProviderName="" mapType="DEFAULTMAPPROVIDER" mode3D="false" rubberbandColor="fff0f000" selectionColor="fff0f000" showCompass="false" showGrid="true" showLegd="false" showLogo="false" showMap="false" showScale="true" showSimTmLabel="false" simTmLabelColor="ff000000" simTmLabelFontSize="20" simTmLabelOffset="15 30" simTmLabelPos="BOTTOMLEFT" wireframeMode="false">
 					<compassOffsetInternal x="0" y="0"/>
 					<legendOffsetInternal x="10" y="10"/>
 					<logoOffsetInternal x="20" y="20"/>
@@ -1450,7 +1474,7 @@
 				</flowBundleGPars>
 				<gPars3D buildingColor="ffe0e0e0" fogExpDensity="6" fogLinEnd="250" fogLinStart="0" fogMode="OFF" landColor="ffc0c0c0" landTexture="" landTextureHorizontalLength="1" shadColor="50000000" showBuildings="false" showLand="true" showMap="false" showShad="false" skyColor="ff00aafa" skyTexture="#3dmodels#Textures\Sky_bright01.bmp" undergroundColor="ff291e19" undergroundTexture=""/>
 				<informationSign3DGPars labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" objectVisibility="true" useLabelColorScheme="false"/>
-				<linkGPars borderColor="ff606060" borderLineStyle="NOLINE" colorSchemeDisplayBase="LANEBASED" connectorBorderColor="ff606060" connectorBorderLineStyle="NOLINE" connectorFillColor="ff808080" connectorFillStyle="SOLIDFILL" connectorWireframeColor="ffc000c0" drawingMode="DISPLAYTYPE" fillColor="ff808080" fillStyle="SOLIDFILL" labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" laneMarkingColor="fff0f0f0" laneMarkingWidth="0.12" legdInclLabColor="false" legdInclLinkBarColor="false" legdInclLinkColor="false" linkBarDrawingMode="NOLINKBARS" linkWireFrameColor="ff000080" objectVisibility="true" ovtLnDrawingMode="LINKSANDOVERTAKINGLANES" useLabelColorScheme="false">
+				<linkGPars borderColor="ff606060" borderLineStyle="NOLINE" colorSchemeDisplayBase="LANEBASED" connectorBorderColor="ff606060" connectorBorderLineStyle="NOLINE" connectorFillColor="ff808080" connectorFillStyle="SOLIDFILL" connectorRvsWireframeColor="ffffd800" connectorWireframeColor="ffc000c0" drawingMode="DISPLAYTYPE" fillColor="ff808080" fillStyle="SOLIDFILL" labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" laneMarkingColor="fff0f0f0" laneMarkingWidth="0.12" legdInclLabColor="false" legdInclLinkBarColor="false" legdInclLinkColor="false" linkBarDrawingMode="NOLINKBARS" linkWireFrameColor="ff000080" objectVisibility="true" ovtLnDrawingMode="LINKSANDOVERTAKINGLANES" useLabelColorScheme="false">
 					<linkBarGPars autoScaleAct="true" colorClsfActive="false" dispBas="LINKSEGMENTBASED" latOffset="0" scaleClassfNo="VOLUME(CURRENT,LAST,ALL)" scaleMax="20000" scaleMin="0" scaleWidthMax="0.004">
 						<colorScheme classificID="VOLUME(CURRENT,LAST,ALL)" undefValueColor="ffbe0000">
 							<colorSchemeElements>
@@ -1488,7 +1512,7 @@
 						</colorScheme>
 					</turnValVisualScheme>
 				</nodeGPars>
-				<ptLineGPars activeStopColor="ffff0000" endLineColor="ff00c0c0" fillStyle="SOLIDFILL" inactiveStopColor="ff008000" labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" objectVisibility="true" ptLineFillColor="99ff8000" startLineColor="ff0000ff" useLabelColorScheme="false"/>
+				<ptLineGPars activeDirectionChangeStopColor="ffffc019" activeStopColor="ffff0000" endLineColor="ff00c0c0" fillStyle="SOLIDFILL" inactiveStopColor="ff008000" labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" objectVisibility="true" ptLineFillColor="99ff8000" startLineColor="ff0000ff" useLabelColorScheme="false"/>
 				<ptStopGPars borderColor="ff800000" borderLineStyle="SOLIDLINE" fillColor="ff808080" fillStyle="NOFILL" labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" objectVisibility="true" useLabelColorScheme="false"/>
 				<parkingLotGPars borderColor="ff0000ff" borderLineStyle="SOLIDLINE" colorSchemeDisplayBase="PARKINGLOTBASED" drawingMode="CONSTCOLORS" fillColor="ff808080" fillStyle="NOFILL" labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" legdInclParkLotColor="false" objectVisibility="true" showColorSchemeLabel="false" useLabelColorScheme="false"/>
 				<pavementMarkingGPars labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" lineColor="ffffffff" objectVisibility="true" useLabelColorScheme="false"/>
@@ -1511,14 +1535,14 @@
 				<vehAttrDecGPars labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" lineColor="ff800000" objectVisibility="true" useLabelColorScheme="false"/>
 				<vehicleGPars drawingMode="COLORDISTRIBUTION" labelAttribute="NO" labelAutoRot="true" labelBackgrColor="80ebf2f6" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" legdInclVehColor="false" objectVisibility="true" selectionColor="ffff7fff" shape2D="ROUNDED" useLabelColorScheme="false"/>
 				<vehicleInputGPars labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" lineColor="ff000000" objectVisibility="true" useLabelColorScheme="false"/>
-				<vehicleRoutingDecisionGPars activeStopColor="ffff0000" closureRouteColor="99f00000" endLineColor="ff00c0c0" inactiveStopColor="ff008000" labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" managedLaneGeneralRouteColor="9900a000" managedLaneManagedRouteColor="99a00000" objectVisibility="true" parkingLotRouteColor="990000a0" partialPTRouteColor="99f0f000" partialRouteColor="99f0f000" startLineColor="ffc000c0" staticRouteColor="99f0f000" useLabelColorScheme="false"/>
+				<vehicleRoutingDecisionGPars activeDirectionChangeStopColor="ffffc019" activeStopColor="ffff0000" closureRouteColor="99f00000" endLineColor="ff00c0c0" inactiveStopColor="ff008000" labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" managedLaneGeneralRouteColor="9900a000" managedLaneManagedRouteColor="99a00000" objectVisibility="true" parkingLotRouteColor="990000a0" partialPTRouteColor="99f0f000" partialRouteColor="99f0f000" startLineColor="ffc000c0" staticRouteColor="99f0f000" useLabelColorScheme="false"/>
 				<vehicleTravelTimeMeasurementsGPars endLineColor="ffc0ffc0" labelAttribute="NO" labelBackgrColor="00000000" labelColor="ff000000" labelDecimals="3" labelFontSize="3" labelVisibility="false" legdInclLabColor="false" objectVisibility="true" startLineColor="ffffc0c0" useLabelColorScheme="false"/>
 			</gParSet>
 		</networkEditorLayout>
 	</networkEditorLayouts>
 	<quickViewLayout>
 		<netObjectLPars>
-			<netObjectListLayoutParameters filtered="false" headerHeight="0" netObjectTypeID="CONFLICTAREA" rowHeaderWidth="0" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
+			<netObjectListLayoutParameters autoSizeChildColumnWidthsToContent="true" filtered="false" headerHeight="0" netObjectTypeID="CONFLICTAREA" rowHeaderWidth="0" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
 				<attributeLPars>
 					<attributeListLayoutParameters alignment="LEFT" attributeID="LINK1" columnWidth="0" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
 						<filter>
@@ -1577,7 +1601,7 @@
 					</attributeListLayoutParameters>
 					<attributeListLayoutParameters alignment="LEFT" attributeID="OBSADJLNS" columnWidth="0" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
 						<filter>
-							<filterCriterionBool active="false" filterValue="false"/>
+							<filterCriterionBool active="false" criterionType="EQUALS" filterValue="false"/>
 						</filter>
 					</attributeListLayoutParameters>
 					<attributeListLayoutParameters alignment="LEFT" attributeID="ANTICIPROUT" columnWidth="0" decimals="1" format="PERCENT" quickViewRowHeight="0" showUnits="true">
@@ -1592,7 +1616,7 @@
 					</attributeListLayoutParameters>
 				</attributeLPars>
 			</netObjectListLayoutParameters>
-			<netObjectListLayoutParameters filtered="false" headerHeight="0" netObjectTypeID="DESSPEEDDECISION" rowHeaderWidth="0" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
+			<netObjectListLayoutParameters autoSizeChildColumnWidthsToContent="true" filtered="false" headerHeight="0" netObjectTypeID="DESSPEEDDECISION" rowHeaderWidth="0" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
 				<attributeLPars>
 					<attributeListLayoutParameters alignment="LEFT" attributeID="NO" columnWidth="96" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
 						<filter>
@@ -1656,7 +1680,7 @@
 					</attributeListLayoutParameters>
 				</attributeLPars>
 			</netObjectListLayoutParameters>
-			<netObjectListLayoutParameters filtered="false" headerHeight="0" netObjectTypeID="DESSPEEDDISTRIBUTION" rowHeaderWidth="0" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
+			<netObjectListLayoutParameters autoSizeChildColumnWidthsToContent="true" filtered="false" headerHeight="0" netObjectTypeID="DESSPEEDDISTRIBUTION" rowHeaderWidth="0" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
 				<attributeLPars>
 					<attributeListLayoutParameters alignment="LEFT" attributeID="NO" columnWidth="0" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
 						<filter>
@@ -1680,7 +1704,7 @@
 					</attributeListLayoutParameters>
 				</attributeLPars>
 			</netObjectListLayoutParameters>
-			<netObjectListLayoutParameters filtered="false" headerHeight="0" netObjectTypeID="LANE" rowHeaderWidth="0" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
+			<netObjectListLayoutParameters autoSizeChildColumnWidthsToContent="true" filtered="false" headerHeight="0" netObjectTypeID="LANE" rowHeaderWidth="0" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
 				<attributeLPars>
 					<attributeListLayoutParameters alignment="LEFT" attributeID="LINK" columnWidth="0" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
 						<filter>
@@ -1709,7 +1733,7 @@
 					</attributeListLayoutParameters>
 				</attributeLPars>
 			</netObjectListLayoutParameters>
-			<netObjectListLayoutParameters filtered="false" headerHeight="0" netObjectTypeID="LINK" rowHeaderWidth="0" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
+			<netObjectListLayoutParameters autoSizeChildColumnWidthsToContent="true" filtered="false" headerHeight="0" netObjectTypeID="LINK" rowHeaderWidth="0" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
 				<attributeLPars>
 					<attributeListLayoutParameters alignment="LEFT" attributeID="NO" columnWidth="0" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
 						<filter>
@@ -1748,7 +1772,7 @@
 					</attributeListLayoutParameters>
 					<attributeListLayoutParameters alignment="LEFT" attributeID="ISCONN" columnWidth="0" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
 						<filter>
-							<filterCriterionBool active="false" filterValue="false"/>
+							<filterCriterionBool active="false" criterionType="EQUALS" filterValue="false"/>
 						</filter>
 					</attributeListLayoutParameters>
 					<attributeListLayoutParameters alignment="LEFT" attributeID="FROMLINK" columnWidth="0" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
@@ -1768,12 +1792,12 @@
 					</attributeListLayoutParameters>
 					<attributeListLayoutParameters alignment="LEFT" attributeID="HASOVTLN" columnWidth="0" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
 						<filter>
-							<filterCriterionBool active="false" filterValue="false"/>
+							<filterCriterionBool active="false" criterionType="EQUALS" filterValue="false"/>
 						</filter>
 					</attributeListLayoutParameters>
 				</attributeLPars>
 			</netObjectListLayoutParameters>
-			<netObjectListLayoutParameters filtered="false" headerHeight="0" netObjectTypeID="MAXACCELERATIONFUNCTION" rowHeaderWidth="0" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
+			<netObjectListLayoutParameters autoSizeChildColumnWidthsToContent="true" filtered="false" headerHeight="0" netObjectTypeID="MAXACCELERATIONFUNCTION" rowHeaderWidth="0" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
 				<attributeLPars>
 					<attributeListLayoutParameters alignment="LEFT" attributeID="NO" columnWidth="0" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
 						<filter>
@@ -1787,7 +1811,7 @@
 					</attributeListLayoutParameters>
 				</attributeLPars>
 			</netObjectListLayoutParameters>
-			<netObjectListLayoutParameters filtered="false" headerHeight="0" netObjectTypeID="MODEL2D3D" rowHeaderWidth="0" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
+			<netObjectListLayoutParameters autoSizeChildColumnWidthsToContent="true" filtered="false" headerHeight="0" netObjectTypeID="MODEL2D3D" rowHeaderWidth="0" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
 				<attributeLPars>
 					<attributeListLayoutParameters alignment="LEFT" attributeID="NO" columnWidth="0" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
 						<filter/>
@@ -1797,7 +1821,7 @@
 					</attributeListLayoutParameters>
 				</attributeLPars>
 			</netObjectListLayoutParameters>
-			<netObjectListLayoutParameters filtered="false" headerHeight="0" netObjectTypeID="REDUCEDSPEEDAREA" rowHeaderWidth="0" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
+			<netObjectListLayoutParameters autoSizeChildColumnWidthsToContent="true" filtered="false" headerHeight="0" netObjectTypeID="REDUCEDSPEEDAREA" rowHeaderWidth="0" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
 				<attributeLPars>
 					<attributeListLayoutParameters alignment="LEFT" attributeID="NO" columnWidth="0" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
 						<filter>
@@ -1896,7 +1920,7 @@
 					</attributeListLayoutParameters>
 				</attributeLPars>
 			</netObjectListLayoutParameters>
-			<netObjectListLayoutParameters filtered="false" headerHeight="0" netObjectTypeID="SIGNALHEAD" rowHeaderWidth="0" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
+			<netObjectListLayoutParameters autoSizeChildColumnWidthsToContent="true" filtered="false" headerHeight="0" netObjectTypeID="SIGNALHEAD" rowHeaderWidth="0" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
 				<attributeLPars>
 					<attributeListLayoutParameters alignment="LEFT" attributeID="NO" columnWidth="0" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
 						<filter>
@@ -1930,11 +1954,11 @@
 					</attributeListLayoutParameters>
 				</attributeLPars>
 			</netObjectListLayoutParameters>
-			<netObjectListLayoutParameters filtered="false" headerHeight="0" netObjectTypeID="TIMEINTERVALVEHVOLUME" rowHeaderWidth="0" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
+			<netObjectListLayoutParameters autoSizeChildColumnWidthsToContent="true" filtered="false" headerHeight="0" netObjectTypeID="TIMEINTERVALVEHVOLUME" rowHeaderWidth="0" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
 				<attributeLPars>
 					<attributeListLayoutParameters alignment="LEFT" attributeID="CONT" columnWidth="0" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
 						<filter>
-							<filterCriterionBool active="false" filterValue="false"/>
+							<filterCriterionBool active="false" criterionType="EQUALS" filterValue="false"/>
 						</filter>
 					</attributeListLayoutParameters>
 					<attributeListLayoutParameters alignment="LEFT" attributeID="TIMEINT" columnWidth="0" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
@@ -1959,7 +1983,7 @@
 					</attributeListLayoutParameters>
 				</attributeLPars>
 			</netObjectListLayoutParameters>
-			<netObjectListLayoutParameters filtered="false" headerHeight="0" netObjectTypeID="VEHICLE" rowHeaderWidth="0" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
+			<netObjectListLayoutParameters autoSizeChildColumnWidthsToContent="true" filtered="false" headerHeight="0" netObjectTypeID="VEHICLE" rowHeaderWidth="0" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
 				<attributeLPars>
 					<attributeListLayoutParameters alignment="LEFT" attributeID="NO" columnWidth="122" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
 						<filter>
@@ -2018,7 +2042,7 @@
 					</attributeListLayoutParameters>
 				</attributeLPars>
 			</netObjectListLayoutParameters>
-			<netObjectListLayoutParameters filtered="false" headerHeight="0" netObjectTypeID="VEHICLECLASS" rowHeaderWidth="0" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
+			<netObjectListLayoutParameters autoSizeChildColumnWidthsToContent="true" filtered="false" headerHeight="0" netObjectTypeID="VEHICLECLASS" rowHeaderWidth="0" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
 				<attributeLPars>
 					<attributeListLayoutParameters alignment="LEFT" attributeID="NO" columnWidth="0" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
 						<filter>
@@ -2037,7 +2061,7 @@
 					</attributeListLayoutParameters>
 					<attributeListLayoutParameters alignment="LEFT" attributeID="USEVEHTYPECOLOR" columnWidth="0" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
 						<filter>
-							<filterCriterionBool active="false" filterValue="false"/>
+							<filterCriterionBool active="false" criterionType="EQUALS" filterValue="false"/>
 						</filter>
 					</attributeListLayoutParameters>
 					<attributeListLayoutParameters alignment="LEFT" attributeID="COLOR" columnWidth="0" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
@@ -2047,7 +2071,7 @@
 					</attributeListLayoutParameters>
 				</attributeLPars>
 			</netObjectListLayoutParameters>
-			<netObjectListLayoutParameters filtered="false" headerHeight="0" netObjectTypeID="VEHICLECOMPOSITION" rowHeaderWidth="0" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
+			<netObjectListLayoutParameters autoSizeChildColumnWidthsToContent="true" filtered="false" headerHeight="0" netObjectTypeID="VEHICLECOMPOSITION" rowHeaderWidth="0" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
 				<attributeLPars>
 					<attributeListLayoutParameters alignment="LEFT" attributeID="NO" columnWidth="0" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
 						<filter>
@@ -2061,7 +2085,7 @@
 					</attributeListLayoutParameters>
 				</attributeLPars>
 			</netObjectListLayoutParameters>
-			<netObjectListLayoutParameters filtered="false" headerHeight="0" netObjectTypeID="VEHICLEINPUT" rowHeaderWidth="0" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
+			<netObjectListLayoutParameters autoSizeChildColumnWidthsToContent="true" filtered="false" headerHeight="0" netObjectTypeID="VEHICLEINPUT" rowHeaderWidth="0" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
 				<attributeLPars>
 					<attributeListLayoutParameters alignment="LEFT" attributeID="NO" columnWidth="0" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
 						<filter>
@@ -2090,7 +2114,7 @@
 					</attributeListLayoutParameters>
 				</attributeLPars>
 			</netObjectListLayoutParameters>
-			<netObjectListLayoutParameters filtered="false" headerHeight="0" netObjectTypeID="VEHICLEROUTESTATIC" rowHeaderWidth="0" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
+			<netObjectListLayoutParameters autoSizeChildColumnWidthsToContent="true" filtered="false" headerHeight="0" netObjectTypeID="VEHICLEROUTESTATIC" rowHeaderWidth="0" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
 				<attributeLPars>
 					<attributeListLayoutParameters alignment="LEFT" attributeID="VEHROUTDEC" columnWidth="0" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
 						<filter>
@@ -2129,7 +2153,7 @@
 					</attributeListLayoutParameters>
 				</attributeLPars>
 			</netObjectListLayoutParameters>
-			<netObjectListLayoutParameters filtered="false" headerHeight="0" netObjectTypeID="VEHICLEROUTINGDECISIONSTATIC" rowHeaderWidth="0" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
+			<netObjectListLayoutParameters autoSizeChildColumnWidthsToContent="true" filtered="false" headerHeight="0" netObjectTypeID="VEHICLEROUTINGDECISIONSTATIC" rowHeaderWidth="0" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
 				<attributeLPars>
 					<attributeListLayoutParameters alignment="LEFT" attributeID="NO" columnWidth="0" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
 						<filter>
@@ -2153,7 +2177,7 @@
 					</attributeListLayoutParameters>
 					<attributeListLayoutParameters alignment="LEFT" attributeID="ALLVEHTYPES" columnWidth="0" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
 						<filter>
-							<filterCriterionBool active="false" filterValue="false"/>
+							<filterCriterionBool active="false" criterionType="EQUALS" filterValue="false"/>
 						</filter>
 					</attributeListLayoutParameters>
 					<attributeListLayoutParameters alignment="LEFT" attributeID="VEHCLASSES" columnWidth="0" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
@@ -2168,7 +2192,7 @@
 					</attributeListLayoutParameters>
 				</attributeLPars>
 			</netObjectListLayoutParameters>
-			<netObjectListLayoutParameters filtered="false" headerHeight="0" netObjectTypeID="WEIGHTDISTRIBUTION" rowHeaderWidth="0" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
+			<netObjectListLayoutParameters autoSizeChildColumnWidthsToContent="true" filtered="false" headerHeight="0" netObjectTypeID="WEIGHTDISTRIBUTION" rowHeaderWidth="0" rowHeight="0" showSimulationRunAggregates="true" showTimeIntervalAggregates="false">
 				<attributeLPars>
 					<attributeListLayoutParameters alignment="LEFT" attributeID="NO" columnWidth="0" decimals="0" format="DEFAULT" quickViewRowHeight="0" showUnits="false">
 						<filter>
