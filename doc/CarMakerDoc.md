@@ -75,7 +75,7 @@ Name new filter as "Source", make sure it include the followings source files an
 <br>[VehDataMsgDefs.h](../CommonLib/VehDataMsgDefs.h),
 <br>[VirEnvHelper.h](../CommonLib/VirEnvHelper.h),
 <br>[VirEnvHelper.cpp](../CommonLib/VirEnvHelper.cpp)
-- The project source files should look like this:
+- The project source files should look like this:<br>
 ![Add_srclib.png](img/Add_srclib.png)
 - Define the dependencies folders
     ![](img/CM_VS_IncludeDependencies.png)  
