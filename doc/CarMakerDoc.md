@@ -37,38 +37,68 @@ Table of Contents
 # Simulation Setups
 
 ## Setup CM Office or Simulink
-
+Note: this tutorial is based on CM13.1.2 and Matlab/Simulink 2024a.
 ### Obtain CarMaker Executables
 RealSim contained compiled CarMaker executables, i.e., CarMaker.win64.exe for Office version, and libcarmaker4sl.mexw64 for Simulink version. Three different versions are supported, CarMaker 11, 10 and 9. Users can directly use these executables without need to recompile source codes. The executables are inside the corresponding folders ```CM11```, ```CM10```, ```CM9```.
 
 Another option is that users can modify the CarMaker User.cpp by themselves and include necessary source codes of RealSim. Corresponding Visual Studio project files are provided and users can use their own IDE as well. 
 
+If using another version of CarMaker/TruckMaker (e.g., 13 or higher), do the following.
+
+If you want to set up a project outside the cloned FIXS repo, you first need to create a **parent folder**. Copy the [CarMaker](../CarMaker)
+[CommonLib](../CommonLib) [tests](../tests) folders into the **parent folder**.
+Next, create a project folder in the **parent folder** (File -> Project Folder -> Create Project).
+![CM_create_proj.png](img/CM_create_proj.png)
+
+**If want your project to be inside the FIXS repo, just create a project right under the FIXS folder.
+
+After creating the project folder, there will be a **src** folder and **src_cm4sl/src_tm4sl** folder: edit src folder if only for office version (no need Simulink or HIL), otherwise use src_cm4sl folder.
+In the selected folder, use **Microsoft Visual Studio 2022** to open a .sln file. Upon opening a project, proceed to source code compilation.
+
 ### Compile Source Codes
-For both Office and Simulink, need to make sure compiler/IDE include the followings:
-- source files (in \CommonLib folder)
-    
-    ![](img/CM_VS_Sources.png)
-- dependencies folders
-    
+There is **app_tmp.c, CM_Main.c, CM_Vehicle.c, IO.c, and USer.C** files in the created project.
+
+Create a source folder by right-clicking 'CarMaker for Simulink' (or 'CarMaker' for office version) and "Add -> New Filter". 
+Name new filter as "Source", make sure it include the followings source files and headers from FIXS CommonLib folder:
+<br>[ConfigHelper.cpp](../CommonLib/ConfigHelper.cpp)
+<br>[ConfigHelper.h](../CommonLib/ConfigHelper.h),
+<br>[MsgHelper.cpp](../CommonLib/MsgHelper.cpp),
+<br>[MsgHelper.h](../CommonLib/MsgHelper.h),
+<br>[SocketHelper.cpp](../CommonLib/SocketHelper.cpp),
+<br>[SocketHelper.h](../CommonLib/SocketHelper.h),
+<br>[VirEnv_Wrapper.cpp](../CommonLib/VirEnv_Wrapper.cpp),
+<br>[VirEnv_Wrapper.h](../CommonLib/VirEnv_Wrapper.h),
+<br>[VehDataMsgDefs.h](../CommonLib/VehDataMsgDefs.h),
+<br>[VirEnvHelper.h](../CommonLib/VirEnvHelper.h),
+<br>[VirEnvHelper.cpp](../CommonLib/VirEnvHelper.cpp)
+- The project source files should look like this:
+![Add_srclib.png](img/Add_srclib.png)
+- Define the dependencies folders
     ![](img/CM_VS_IncludeDependencies.png)  
-- libraries
-    
+- Define libraries 
     ![](img/CM_VS_Inputs.png)
 
-Then, modify the User.cpp to include the following codes
-- at beginning of the file, add the followings, ``need to make sure RealSimCmHelper.h is included before including the windows.h!``
-```cpp
+Next, modify the User.cpp to include the following codes
+- At beginning of the file, add the followings, ``need to make sure RealSimCmHelper.h is included before including the windows.h!``
+```c++
 ...
-#include <Global.h>
+#define REALSIM
 
+#ifdef REALSIM 
 // ===========================================================================
 // 			 RealSim 
 // ===========================================================================
-#include "RealSimCmHelper.h"
+#include "VirEnv_Wrapper.h"
 
-RealSimCmHelper RealSimCm_c;
+struct VirEnvHelper* VirEnv_c;
+
+char* RS_configFile;
+char* RS_signalTable;
 // ===========================================================================
 // ===========================================================================
+#endif
+
+#include <Global.h>
 
 #if defined(WIN32)
 # include <windows.h>
@@ -76,8 +106,8 @@ RealSimCmHelper RealSimCm_c;
 ...
 ```
 
-- modify the User_ScanCmdLine
-```cpp
+- Modify User_ScanCmdLine
+```c++
 char **
 User_ScanCmdLine (int argc, char **argv)
 {
@@ -100,9 +130,12 @@ User_ScanCmdLine (int argc, char **argv)
     // ===========================================================================
     // 			 RealSim 
     // ===========================================================================
-    else if (strcmp(*argv, "-f") == 0 || strcmp(*argv, "--file") == 0) {
-        RealSimCm_c.configPath = *++argv;
-    } 
+    else if (strcmp(*argv, "-f") == 0) {
+		RS_configFile = *++argv;
+	}
+	else if (strcmp(*argv, "-s") == 0) {
+		RS_signalTable = *++argv;
+	}
     // ===========================================================================
     // ===========================================================================
     else if ((*argv)[0] == '-') {
@@ -116,9 +149,48 @@ User_ScanCmdLine (int argc, char **argv)
     return argv;
 }
 ```
+- Modify User_Init
+```c++
+int
+User_Init (void)
+{
+#ifdef REALSIM
+    // ===========================================================================
+    // 			 RealSim 
+    // ===========================================================================
+    VirEnv_c = newVirEnvHelper();
+    // ===========================================================================
+    // ===========================================================================
+#endif
+    return 0;
+}
+```
+- Modify User_TestRun_Start_atEnd
+```c++
+int
+User_TestRun_Start_atEnd (void)
+{
+#if defined(XENO)
+    IOConf_DeclQuants();
+#endif
 
-- modify the User_Calc
-```cpp
+#ifdef REALSIM
+    // ===========================================================================
+    // 			 RealSim 
+    // ===========================================================================	   
+    if (VirEnv_isVeryFirstStep && SimCore.State >= SCState_StartWait) {
+        VirEnv_initialization(VirEnv_c, RS_configFile, RS_signalTable);
+    }
+    // ===========================================================================
+    // ===========================================================================
+#endif
+
+    return 0;
+}
+```
+
+- Modify User_Calc
+```c++
 int
 User_Calc (double dt)
 {
@@ -126,40 +198,60 @@ User_Calc (double dt)
        state. Uncomment the following line in order to restore the behaviour
        of CM 5.1 and earlier. */
     /*if (!UserCalcCalledByAppTestRunCalc) return 0;*/
-     
+
+#ifdef REALSIM
     // ===========================================================================
     // 			 RealSim 
     // ===========================================================================
-    if (SimCore.State == SCState_End) {
-        RealSimCm_c.shutdown();
-        return 0;
-    }
-
     if (SimCore.State != SCState_Simulate) {
         return 0;
     }
-        
-    if (RealSimCm_c.veryFirstStep) {
-        // pop error if return negative
-        std::string errorMsg = "";
-        if (RealSimCm_c.initialization(errorMsg) < 0) {
-            LogErrF(EC_General, errorMsg.c_str());
-        }
-        RealSimCm_c.veryFirstStep = false;
-    }
-    // pop error if return negative
-    std::string errorMsg = "";
-    if (RealSimCm_c.runStep(SimCore.Time, errorMsg) < 0) {
-        LogErrF(EC_General, errorMsg.c_str());
-    }
+	
+    VirEnv_runStep(VirEnv_c, SimCore.Time);
+	
     // ===========================================================================
     // ===========================================================================
+#endif
+
+    return 0;
+}
+```
+- Modify User_TestRun_End
+```c++
+int
+User_TestRun_End (void)
+{
+#ifdef REALSIM
+	// ===========================================================================
+    // 			 RealSim 
+    // ===========================================================================
+	VirEnv_shutdown(VirEnv_c);
+    // ===========================================================================
+    // ===========================================================================
+#endif 
 
     return 0;
 }
 ```
 
-Then, should be ready to compile your own executables for CarMaker simulation. 
+Before compiling, right-click 'CarMaker for Simulink' -> Property -> C++ -> General -> Set "Treat warnings as errors" to "No".
+
+Build CarMaker for Simulink: CTRL + B
+
+After compiling, the executable should be in **src** or **src_cm4sl** folder. In **src**, it should be **CarMaker.win64.exe**; in **src_cm4sl**, it should be **libcarmaker4sl.mexw64**.
+
+## Run CarMaker office
+Make sure select the compiled ```CarMaker.win64.exe``` and specify command line options to the desired config.yaml file
+
+![](img/CM_GUI_Config.png)
+
+## Run CarMaker-Simulink
+
+Make sure the compiled libcarmaker4sl.mexw64 is in the search directory, which can be checked by ```which libcarmaker4sl.mexw64``` in Matlab. Then, specify command line options to the desired config.yaml file
+
+![](img/CM_Simulink_Config.png)
+
+```CM11_proj\src_cm4sl\RealSimGeneric.mdl```  is a good example simulink model to develop user applications
 
 ## Setup CM dSPACE
 
@@ -378,20 +470,7 @@ CarMakerSetup:
 
     TrafficSignalPort: 2444    
 ```
-Note, in dSPACE implementation, CarMakerIP should be the IP of the host PC. 
-
-## Office
-Make sure select the compiled ```CarMaker.win64.exe``` and specify command line options to the desired config.yaml file 
-
-![](img/CM_GUI_Config.png)
-
-## Simulink
-
-Make sure compiled libcarmaker4sl.mexw64 is in the search directory, which can be checked by ```which libcarmaker4sl.mexw64``` in Matlab. Then, specify command line options to the desired config.yaml file 
-
-![](img/CM_Simulink_Config.png)
-
-```CM11_proj\src_cm4sl\RealSimGeneric.mdl```  is a good example simulink model to develop user applications
+Note, in dSPACE implementation, CarMakerIP should be the IP of the host PC.
 
 
 ## dSPACE
