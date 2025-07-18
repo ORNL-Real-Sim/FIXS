@@ -1,3 +1,9 @@
+
 [submodule "cav_casestudy"]
     path = tests/Applications/Eco_Fixed_Timming/cav_casestudy
     url = https://code.ornl.gov/real-twin/cav_casestudy.git
+
+[submodule "ProprietaryFiles"]
+	path = ProprietaryFiles
+	url = https://github.com/Real-Sim-XIL/ProprietaryFiles.git
+
