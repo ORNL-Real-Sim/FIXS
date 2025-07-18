@@ -5,7 +5,11 @@ Please start with reading through the documentation, and playwith included Examp
 Contacts
 =======================
 Yunli Shao\
-realsimxil@gmail.com
+realsimxil@gmail.com\
+Max Chen\
+chenm@ornl.gov\
+Anye Zhou\
+zhoua@ornl.gov
 
 Table of Contents
 =======================
