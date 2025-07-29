@@ -1,0 +1,42 @@
+<add>  
+    <tlLogic id="63082002" programID="63082002_NEMA_Controlled" type="NEMA">
+        <!-- <param key="detector-length" value="1"/> -->
+        <!-- <param key="detector-length-leftTurnLane" value="1"/> -->
+        <param key="ring1" value="0,2,0,4"/>
+        <param key="ring2" value="5,6,0,4"/>
+        <param key="barrierPhases" value="4,4"/>
+        <param key="coordinatePhases" value="2,6"/>
+        <param key="show-detectors" value="true"/>
+        <param key="ignore-errors" value="true"/>
+
+        <!-- Coordinated Parameters -->
+        <param key="coordinate-mode" value="false"/>
+        <!-- <param key="coordinatePhases" value="2,6"/>
+        <param key="total-cycle-length" value="150"/> -->
+        <param key="cabinetType" value="TS2"/>
+
+        <!-- Phase Skipping Parameters -->
+        <param key="fixForceOff" value="false"/>
+        <param key="minRecall" value="0,0"/>
+        
+        <!-- Cross Phase Switching -->
+        <!-- <param key="crossPhaseSwitching:2" value="5"/>
+        <param key="crossPhaseSwitching:6" value="1"/> -->
+
+        <!-- This is fixed. Don't mess with this 
+             key is the name of the lane and value is the detector id 
+        -->
+        <param key="gneE11.68_0" value="63082002_2_0"/>
+        <param key="gneE11.68_0" value="63082002_2_1"/>
+        <param key="gneE31_0" value="63082002_5_0"/>
+        <param key="gneE0.12_0" value="63082002_4_0"/>
+        <param key="834845345#2_0" value="63082002_6_0"/>
+        <param key="834845345#2_1" value="63082002_6_1"/>
+
+        <!-- the Dual Ring States -->
+        <phase name="2" duration="99" state="GGrrrr" minDur="15.5" maxDur="15.5"  vehext="0"  yellow="4.5" red="1"/>
+        <phase name="4" duration="99" state="rrrGrr" minDur="5" maxDur="5"  vehext="0"  yellow="4.5" red="1"/>
+        <phase name="5" duration="99" state="rrGrrr" minDur="5" maxDur="5"  vehext="0"  yellow="4.5" red="1"/>
+        <phase name="6" duration="99" state="rrgrGG" minDur="5" maxDur="5"  vehext="0"  yellow="4.5" red="1"/>
+    </tlLogic>
+</add>

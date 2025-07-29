@@ -1,0 +1,55 @@
+<add>
+    <tlLogic id="63082004" offset="10" programID="63082004_12" type="NEMA">
+
+        <param key="ring1" value="1,2,3,4"/>
+        <param key="ring2" value="5,6,7,8"/>
+        <param key="barrierPhases" value="4,8"/>
+        <param key="barrier2Phases" value="2,6"/>
+        <param key="show-detectors" value="true"/>
+        <param key="ignore-errors" value="true"/>
+
+        <!-- Coordinated Parameters -->
+        <param key="coordinate-mode" value="true"/>
+        <param key="coordinatePhases" value="2,6"/>
+        <param key="total-cycle-length" value="150"/>
+        <param key="cabinetType" value="TS2"/>
+
+        <!-- Phase Skipping Parameters -->
+        <param key="fixForceOff" value="false"/>
+        <param key="minRecall" value="2,6"/>
+        <!-- <param key="minRecall" value="0"/> -->
+        <!-- This is fixed. Don't mess with this 
+             key is the name of the lane and value is the detector id 
+        -->
+        <param key="gneE22.27_0" value="63082004_2_0"/>
+        <param key="gneE22.27_1" value="63082004_2_1"/>
+        <param key="gneE22.27_2" value="63082004_5_0"/>
+
+        <param key="gneE20_1" value="63082004_7_0"/>
+        <param key="gneE20_0" value="63082004_4_0"/>
+
+        <param key="834845345#8.108_0" value="63082004_6_0"/>
+        <param key="834845345#8.108_1" value="63082004_6_1"/>
+        <param key="834845345#8.108_2" value="63082004_1_0"/>
+
+        <param key="gneE18_0" value="63082004_8_0"/>
+        <param key="gneE18_1" value="63082004_3_0"/>
+
+        <!-- Cross Phase Switching -->
+        <param key="crossPhaseSwitching:2" value="5"/>
+        <param key="crossPhaseSwitching:6" value="1"/>
+        <param key="crossPhaseSwitching:8" value="3"/>
+        <param key="crossPhaseSwitching:4" value="7"/>
+
+        <!-- the Dual Ring States -->
+        <phase name="1" duration="99" state="rrrsrrrrGsrr" minDur="6" maxDur="10.5" vehext="4" yellow="3.5" red="1"/>
+        <phase name="2" duration="99" state="GGgsrrrrrsrr" minDur="25" maxDur="63.5" vehext="5" yellow="4.5" red="2"/>
+        <phase name="3" duration="99" state="rrrsrrrrrsrG" minDur="10" maxDur="35.5" vehext="4" yellow="3.5" red="1"/>
+        <phase name="4" duration="99" state="rrrGGgrrrsrr" minDur="10" maxDur="20.5" vehext="4" yellow="3.5" red="1"/>
+        <phase name="5" duration="99" state="rrGsrrrrrsrr" minDur="6" maxDur="10.5" vehext="4" yellow="3.5" red="1"/>
+        <phase name="6" duration="99" state="rrrsrrGGgsrr" minDur="25" maxDur="63.5" vehext="5" yellow="4.5" red="2"/>
+        <phase name="7" duration="99" state="rrrsrGrrrsrr" minDur="10" maxDur="20.5" vehext="4" yellow="3.5" red="1"/>
+        <phase name="8" duration="99" state="rrrsrrrrrGGg" minDur="10" maxDur="35.5" vehext="3" yellow="3.5" red="1"/>
+    </tlLogic>
+
+</add>
