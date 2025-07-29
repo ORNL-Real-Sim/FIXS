@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!-- generated on 2023-11-16 11:42:30 by Eclipse SUMO netedit Version v1_19_0+0022-4c0a3df81e3
+-->
+
+<routes xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/routes_file.xsd">
+    <!-- VType -->
+    <vType id="egoVehicle" vClass="passenger" carFollowModel="IDM"/>
+    <!-- Routes -->
+    <route id="Airport2WBT" edges="8868160#0.7 Airport_to_US69 834845345#4-AddedOnRampEdge 834845345#4 834845345#5.74 834845345#5.74.43 834845345#6 834845345#6.23 834845345#7 834845345#8.20 834845345#8.108 834845345#9 834845345#9.4 gneE14"/>
+    <route id="Airport2Walmart" edges="8868160#0.7 Airport_to_US69 834845345#4-AddedOnRampEdge 834845345#4 834845345#5.74 834845345#5.74.43 -660891910#1 -660891910#1.13"/>
+    <route id="EBT" edges="834845345#1 834845345#2 834845345#3.0 834845345#4-AddedOnRampEdge 834845345#4 834845345#5.74 834845345#5.74.43 834845345#6 834845345#6.23 834845345#7 834845345#8.20 834845345#8.108 834845345#9 834845345#9.4 gneE14"/>
+    <route id="Harper2Airport" edges="gneE13 gneE18 gneE23 115872656#8 115872656#9 115872656#10 115872656#10.14 115872656#11 115872656#11.5 gneE11 gneE1 -8868160#0"/>
+    <route id="Harper2WBT" edges="gneE20.1956 gneE20 gneE23 115872656#8 115872656#9 115872656#10 115872656#10.14 115872656#11 115872656#11.5 gneE11 115872656#13.8"/>
+    <route id="Lowes2Airport" edges="gneE17 -638636924#1.9 115872656#11 115872656#11.5 gneE11 gneE1 -8868160#0"/>
+    <route id="WBT" edges="115872656#4 115872656#5 gneE22 gneE22.27 gneE23 115872656#8 115872656#9 115872656#10 115872656#10.14 115872656#11 115872656#11.5 gneE11 115872656#13.8"/>
+    <route id="WBT2Lowes" edges="115872656#4 115872656#5 gneE22 gneE22.27 gneE23 115872656#8 115872656#9 115872656#10 115872656#10.14 638636924#1 638636924#1.8"/>
+    <route id="WBT2Walmart" edges="115872656#4 115872656#5 gneE22 gneE22.27 gneE23 115872656#8 115872656#9 115872656#10 gneE5 -660891910#1.13"/>
+    <!-- Vehicles, persons and containers (sorted by depart) -->
+    <!-- times are semi-random -->
+    <vehicle id="egoVehicle_0" depart="1810.00" route="Harper2Airport" type="egoVehicle" departSpeed="avg"/>
+    <vehicle id="egoVehicle_1" depart="1975.00" route="WBT" type="egoVehicle" departSpeed="avg"/>
+    <vehicle id="egoVehicle_2" depart="2137.00" route="Airport2WBT" type="egoVehicle" departSpeed="avg"/>
+    <vehicle id="egoVehicle_3" depart="2300.00" route="EBT" type="egoVehicle" departSpeed="avg"/>
+    <vehicle id="egoVehicle_4" depart="2462.00" route="Harper2WBT" type="egoVehicle" departSpeed="avg"/>
+    <vehicle id="egoVehicle_5" depart="2625.00" route="WBT2Lowes" type="egoVehicle" departSpeed="avg"/>
+    <vehicle id="egoVehicle_6" depart="2787.00" route="Lowes2Airport" type="egoVehicle" departSpeed="avg"/>
+    <vehicle id="egoVehicle_7" depart="2950.00" route="WBT2Walmart" type="egoVehicle" departSpeed="avg"/>
+</routes>

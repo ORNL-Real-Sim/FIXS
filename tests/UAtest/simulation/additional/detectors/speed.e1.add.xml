@@ -1,0 +1,18 @@
+<additional>
+    <e1Detector id="airport_ebl1" lane="834845345#1_0" pos="232.18429377332376" freq="60" file="speed.e1.out.xml"/>
+    <e1Detector id="airport_ebl2" lane="834845345#1_1" pos="230.64165962139026" freq="60" file="speed.e1.out.xml"/>
+    <e1Detector id="airport_lowes_ebl1" lane="834845345#4_0" pos="20.530018867763125" freq="60" file="speed.e1.out.xml"/>
+    <e1Detector id="airport_lowes_ebl2" lane="834845345#4_1" pos="19.011162675611672" freq="60" file="speed.e1.out.xml"/>
+    <e1Detector id="airport_lowes_wbl1" lane="115872656#11.5_0" pos="145.45491776239456" freq="60" file="speed.e1.out.xml"/>
+    <e1Detector id="airport_lowes_wbl2" lane="115872656#11.5_1" pos="143.30072664411801" freq="60" file="speed.e1.out.xml"/>
+    <e1Detector id="airport_wbl1" lane="115872656#13.8_0" pos="171.39208103538604" freq="60" file="speed.e1.out.xml"/>
+    <e1Detector id="airport_wbl2" lane="115872656#13.8_1" pos="170.10927717166354" freq="60" file="speed.e1.out.xml"/>
+    <e1Detector id="harper_ebl1" lane="834845345#9.4_0" pos="110.36483253994699" freq="60" file="speed.e1.out.xml"/>
+    <e1Detector id="harper_ebl2" lane="834845345#9.4_1" pos="109.84028679155132" freq="60" file="speed.e1.out.xml"/>
+    <e1Detector id="harper_wbl1" lane="115872656#5_1" pos="42.24395077784019" freq="60" file="speed.e1.out.xml"/>
+    <e1Detector id="harper_wbl2" lane="115872656#5_2" pos="41.04294487633491" freq="60" file="speed.e1.out.xml"/>
+    <e1Detector id="lowes_harper_ebl1" lane="834845345#7_0" pos="49.66851935562159" freq="60" file="speed.e1.out.xml"/>
+    <e1Detector id="lowes_harper_ebl2" lane="834845345#7_1" pos="49.40305280167068" freq="60" file="speed.e1.out.xml"/>
+    <e1Detector id="lowes_harper_wbl1" lane="115872656#9_1" pos="26.314630909594694" freq="60" file="speed.e1.out.xml"/>
+    <e1Detector id="lowes_harper_wbl2" lane="115872656#9_2" pos="24.134207154287008" freq="60" file="speed.e1.out.xml"/>
+</additional>

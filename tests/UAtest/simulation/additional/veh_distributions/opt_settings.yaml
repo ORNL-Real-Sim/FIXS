@@ -1,0 +1,135 @@
+# SampledSimpleCFConfig:
+vehicle_distribution_name: 'vehDist'
+cf_params:
+  lcKeepRight:
+    distribution: "uniform"
+    params: 
+      a: ${..bounds[0]}
+      b: ${..bounds[1]}
+    bounds: [4.7, 4.8] 
+  lcSpeedGain: 
+    distribution: "uniform"
+    bounds: [1, 2]
+    params: 
+      a: ${..bounds[0]}
+      b: ${..bounds[1]}
+  lcAssertive: 
+    distribution: "uniform"
+    bounds: [0.9, 1.1]
+    params: 
+      a: ${..bounds[0]}
+      b: ${..bounds[1]}
+  lcOvertakeRight: 
+    distribution: "uniform"
+    bounds: [0.3, 0.4]
+    params: 
+      a: ${..bounds[0]}
+      b: ${..bounds[1]}
+  lcStrategic:
+    distribution: "uniform"
+    bounds: [6, 11]
+    params: 
+      a: ${..bounds[0]}
+      b: ${..bounds[1]}
+  lcImpatience:
+    distribution: "uniform"
+    bounds: [0.1, 0.3]
+    params: 
+      a: ${..bounds[0]}
+      b: ${..bounds[1]}
+
+  speedFactor: 
+    distribution: "normal"
+    bounds: [0.8, 1.35]  
+    params: 
+      mu: 1.14
+      sd: 0.29
+
+  minGap:
+    distribution: "normal"
+    bounds: [1.745753, 6.362827]
+    params: 
+      mu: 4.629724
+      sd: 0.489382
+  length:
+    distribution: "uniform"
+    bounds: [4, 6]
+    params: 
+      a: ${..bounds[0]}
+      b: ${..bounds[1]}
+
+  jmTimegapMinor:
+    distribution: "uniform"
+    bounds: [3, 6]
+    params: 
+      a: ${..bounds[0]}
+      b: ${..bounds[1]}
+
+  impatience:
+    distribution: "uniform"
+    bounds: [0, 0.2]
+    params: 
+      a: ${..bounds[0]}
+      b: ${..bounds[1]}
+
+  actionStepLength:
+    distribution: "uniform"
+    bounds: [0.2, 0.8]
+    params: 
+      a: ${..bounds[0]}
+      b: ${..bounds[1]}
+
+  accel:
+    distribution: "uniform"
+    bounds: [2, 4]
+    params: 
+      a: ${..bounds[0]}
+      b: ${..bounds[1]}
+
+  decel:
+    distribution: "uniform"
+    bounds: [4, 6]
+    params: 
+      a: ${..bounds[0]}
+      b: ${..bounds[1]}
+  
+  vClass:
+    val: passenger
+    is_attr: true
+  emissionClass:
+    val: PHEMlight/PC_G_EU4
+    is_attr: true
+  carFollowModel:
+    val: IDM
+    is_attr: true
+    
+    
+
+
+
+# vClass;passenger
+# carFollowModel;IDM
+# emissionClass;PHEMlight/PC_G_EU4
+# lcPushy;uniform(0, 0.2)
+# actionStepLength;0.2
+# jmTimegapMinor;uniform(3, 6)
+# impatience;uniform(0, 0.2)
+# lcKeepRight;uniform(0.3, 0.7)
+  
+    
+    
+    
+#     u; normal(1.2, 0.39); [0.5, 3]
+# accel; uniform(1, 2.5)
+# decel; uniform(2.5, 3.5)
+# minGap; normal(4.629724, 0.489382); [1.745753, 6.362827] 
+# carFollowModel;IDM
+# length;uniform(19,23)
+# speedFactor;uniform(0.7,1.1)
+# param; mass; normal(24522,7142); [7000, 43000]
+# vClass;trailer
+# emissionClass;PHEMlight/HDV_TT_D_EU6
+# actionStepLength;0.2
+# jmTimegapMinor;6.5
+# lcPushy;uniform(0, 0.05)
+# lcKeepRight;uniform(0.9, 1.2)

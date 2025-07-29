@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!-- generated on 2023-10-03 08:16:57 by Eclipse SUMO netedit Version v1_18_0+1055-b2640852fcd
+-->
+
+<additional xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/additional_file.xsd">
+    <!-- Detectors -->
+        <entryExitDetector id="e3_63082002_2" pos="0.00,0.00" period="60.00" file="NUL">
+        <detExit lane="gneE11_0" pos="-0.10" friendlyPos="1"/>
+        <detExit lane="gneE11_1" pos="-0.10" friendlyPos="1"/>
+        <detEntry lane="115872656#11.5_0" pos="3.13"/>
+        <detEntry lane="115872656#11.5_1" pos="2.02"/>
+        <detExit lane="gneE11_2" pos="0.26"/>
+    </entryExitDetector>
+    <entryExitDetector id="e3_63082002_4" pos="0.00,0.00" period="60.00" file="NUL">
+        <detEntry lane="8868160#0.7_1" pos="10.00" friendlyPos="1"/>
+        <detEntry lane="8868160#0.7_0" pos="10.00" friendlyPos="1"/>
+        <detEntry lane="8868160#0.7_0" pos="-5.00" friendlyPos="1"/>
+        
+        <detExit lane="gneE0.12_0" pos="-0.10" friendlyPos="1"/>
+        <detExit lane="Airport_to_US69_0" pos="0.13"/>
+    </entryExitDetector>
+    <entryExitDetector id="e3_63082002_5" pos="0.00,0.00" period="60.00" file="NUL">
+        <detEntry lane="gneE11_2" pos="0.10" friendlyPos="1"/>
+        <detExit lane="gneE11_2" pos="-0.10" friendlyPos="1"/>
+    </entryExitDetector>
+    <entryExitDetector id="e3_63082002_6" pos="0.00,0.00" period="60.00" file="NUL">
+        <detEntry lane="834845345#1_0" pos="115.00" friendlyPos="1"/>
+        <detExit lane="834845345#2_0" pos="-0.10" friendlyPos="1"/>
+        <detEntry lane="834845345#1_1" pos="115.00" friendlyPos="1"/>
+        <detExit lane="834845345#2_1" pos="-0.10" friendlyPos="1"/>
+        <detExit lane="8884863_0" pos="1.48" friendlyPos="1"/>
+    </entryExitDetector>
+
+
+
+    <entryExitDetector id="e3_63082003_1" pos="1334.58,899.19" period="60.00" file="NUL">
+        <detEntry lane="834845345#5.74.43_2" pos="0" friendlyPos="1"/>
+        <detExit lane="834845345#5.74.43_2" pos="-0.10" friendlyPos="1"/>
+    </entryExitDetector>
+    
+    <entryExitDetector id="e3_63082003_2" pos="1334.58,899.19" period="60.00" file="NUL">
+        <detEntry lane="115872656#8_1" pos="0.10" friendlyPos="1"/>
+        <detEntry lane="115872656#8_2" pos="0.10" friendlyPos="1"/>
+        <detEntry lane="E1_0" pos="-0.10" friendlyPos="1"/>
+        <detEntry lane="E0_0" pos="-1" friendlyPos="1"/>
+        
+        <detExit lane="115872656#9_0" pos="-0.10" friendlyPos="1"/>
+        <detExit lane="115872656#10.14_0" pos="-0.10" friendlyPos="1"/>
+        <detExit lane="115872656#9_3" pos="-0.10" friendlyPos="1"/>
+        
+        <detExit lane="115872656#10.14_1" pos="-0.10" friendlyPos="1"/>
+        <detExit lane="gneE5_0" pos="0.95" friendlyPos="1"/>
+        <detExit lane="115872656#10.14_2" pos="1.37" friendlyPos="1"/>
+    </entryExitDetector>
+    
+    <entryExitDetector id="e3_63082003_3" pos="1334.58,899.19" period="60.00" file="NUL">
+        <detEntry lane="660891910#1_1" pos="10" friendlyPos="1"/>
+        <detEntry lane="660891910#1.19_1" pos="1" friendlyPos="1"/>
+        <detExit lane="660891910#1.19_1" pos="-0.10" friendlyPos="1"/>
+    </entryExitDetector>
+    
+    <entryExitDetector id="e3_63082003_4" pos="1334.58,899.19" period="60.00" file="NUL">
+        <detEntry lane="-638636924#1.9_0" pos="0" friendlyPos="1"/>
+        <detExit lane="-638636924#1.9_0" pos="-0.10" friendlyPos="1"/>
+    </entryExitDetector>
+    
+    <entryExitDetector id="e3_63082003_5" pos="1334.58,899.19" period="60.00" file="NUL">
+        <detEntry lane="115872656#10.14_2" pos="0.5" friendlyPos="1"/>
+        <detExit lane="115872656#10.14_2" pos="-0.10" friendlyPos="1"/>
+    </entryExitDetector>
+
+    <entryExitDetector id="e3_63082003_6" pos="1334.58,899.19" period="60.00" file="NUL">
+        <detExit lane="834845345#5.74.43_0" pos="-0.10" friendlyPos="1"/>
+        <detExit lane="834845345#5.74.43_1" pos="-0.10" friendlyPos="1"/>
+        <detExit lane="gneE2_0" pos="0.92" friendlyPos="1"/>
+        <detExit lane="834845345#5.74_3" pos="0.00" friendlyPos="1"/>
+        <detEntry lane="834845345#4-AddedOnRampEdge_0" pos="0" friendlyPos="1"/>
+        <detEntry lane="834845345#4-AddedOnRampEdge_1" pos="0" friendlyPos="1"/>
+        <detEntry lane="834845345#4-AddedOnRampEdge_2" pos="0" friendlyPos="1"/>
+    </entryExitDetector>
+    <entryExitDetector id="e3_63082003_7" pos="1334.58,899.19" period="60.00" file="NUL">
+        <detEntry lane="-638636924#1.9_1" pos="0" friendlyPos="1"/>
+        <detExit lane="-638636924#1.9_1" pos="-0.10" friendlyPos="1"/>
+    </entryExitDetector>
+    <entryExitDetector id="e3_63082003_8" pos="1334.58,899.19" period="60.00" file="NUL">
+        <detEntry lane="660891910#1_0" pos="10" friendlyPos="1"/>
+        <detEntry lane="660891910#1_0" pos="-2" friendlyPos="1"/>
+        
+        <detEntry lane="660891910#1.19_0" pos="1" friendlyPos="1"/>
+        <detExit lane="660891910#1.19_0" pos="-0.10" friendlyPos="1"/>
+        <detExit lane="gneE4_0" pos="0.79" friendlyPos="1"/>
+        <detExit lane="gneE4_0" pos="0.79" friendlyPos="1"/>
+    </entryExitDetector>
+
+
+    <entryExitDetector id="e3_63082004_1" pos="1707.32,1000.84" period="60.00" file="NUL">
+        <detEntry lane="834845345#8.108_2" pos="1" friendlyPos="1"/>
+        <detExit lane="834845345#8.108_2" pos="-0.10" friendlyPos="1"/>
+    </entryExitDetector>
+
+    <entryExitDetector id="e3_63082004_2" pos="1707.32,1000.84" period="60.00" file="NUL">
+        <detEntry lane="115872656#4_0" pos="55" friendlyPos="1"/>
+        <detEntry lane="115872656#4_1" pos="55" friendlyPos="1"/>
+
+        <detExit lane="gneE10_0" pos="0.10" friendlyPos="1"/>
+        <detExit lane="gneE22.27_0" pos="-0.10" friendlyPos="1"/>
+        <detExit lane="gneE22.27_1" pos="-0.10" friendlyPos="1"/>
+        <detExit lane="gneE22.27_2" pos="0.78" friendlyPos="1"/>
+    </entryExitDetector>
+    
+    <entryExitDetector id="e3_63082004_3" pos="1707.32,1000.84" period="60.00" file="NUL">
+        <detExit lane="gneE18_1" pos="-0.10" friendlyPos="1"/>
+        <detEntry lane="gneE18_1" pos="2.90"/>
+    </entryExitDetector>
+    
+    <entryExitDetector id="e3_63082004_4" pos="1707.32,1000.84" period="60.00" file="NUL">
+        <detEntry lane="gneE20.1956_0" pos="39.51" friendlyPos="1"/>
+        <detEntry lane="gneE20_0" pos="0.10" friendlyPos="1"/>
+        <detExit lane="gneE20_0" pos="-0.10" friendlyPos="1"/>
+    </entryExitDetector>
+    
+    <entryExitDetector id="e3_63082004_5" pos="1707.32,1000.84" period="60.00" file="NUL">
+        <detEntry lane="gneE22.27_2" pos="0.1" friendlyPos="1"/>
+        <detExit lane="gneE22.27_2" pos="-0.10" friendlyPos="1"/>
+    </entryExitDetector>
+    
+    <entryExitDetector id="e3_63082004_6" pos="1707.32,1000.84" period="60.00" file="NUL"> 
+        <detEntry lane="834845345#7tmp_0" pos="2" friendlyPos="1"/>
+        <detEntry lane="834845345#7tmp_1" pos="2" friendlyPos="1"/>
+        <detEntry lane="834845345#8.20_1" pos="2" friendlyPos="1"/>
+        <detEntry lane="834845345#8.20_0" pos="2" friendlyPos="1"/>
+        
+        <!-- <detEntry lane="834845345#7_1" pos="1" friendlyPos="1"/>
+        <detEntry lane="834845345#7_0" pos="1" friendlyPos="1"/> -->
+
+        <detExit lane="834845345#8.108_0" pos="-0.10" friendlyPos="1"/>
+        <detExit lane="834845345#8.108_1" pos="-0.10" friendlyPos="1"/>
+        <detExit lane="gneE8_0" pos="1.48" friendlyPos="1"/>
+        <detExit lane="834845345#8.108_2" pos="1.12" friendlyPos="1"/>
+        <detExit lane="834845345#7_2" pos="-1" friendlyPos="1"/>
+    </entryExitDetector>
+    
+    <entryExitDetector id="e3_63082004_7" pos="1707.32,1000.84" period="60.00" file="NUL">
+        <detEntry lane="gneE20.1956_1" pos="39.51" friendlyPos="1"/>
+        <detExit lane="gneE20_1" pos="-0.10" friendlyPos="1"/>
+    </entryExitDetector>
+    
+    <entryExitDetector id="e3_63082004_8" pos="1707.32,1000.84" period="60.00" file="NUL">
+        <detEntry lane="gneE13_0" pos="10.0" friendlyPos="1"/>
+        <detExit lane="gneE18_0" pos="-0.10" friendlyPos="1"/>
+        <detExit lane="gneE18_1" pos="1.22" friendlyPos="1"/>
+    </entryExitDetector>
+
+</additional>
