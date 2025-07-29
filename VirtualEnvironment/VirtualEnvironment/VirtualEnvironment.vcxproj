@@ -133,7 +133,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>WIN64;_CRT_NONSTDC_NO_WARNINGS;_CRT_SECURE_NO_WARNINGS;_WINSOCK_DEPRECATED_NO_WARNINGS;WIN32;_DEBUG;_LIB;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>C:\IPG\carmaker\win64-13.1.1\include\Car;C:\IPG\carmaker\win64-11.0.1\include;..\..\CommonLib;..\..\CommonLib\yaml-cpp\include;..\..\CommonLib\yaml-cpp\build\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\IPG\carmaker\win64-11.0.1\include\Car;C:\IPG\carmaker\win64-11.0.1\include;..\..\CommonLib;..\..\CommonLib\yaml-cpp\include;..\..\CommonLib\yaml-cpp\build\include</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>
@@ -156,7 +156,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>WIN64;_CRT_NONSTDC_NO_WARNINGS;_CRT_SECURE_NO_WARNINGS;_WINSOCK_DEPRECATED_NO_WARNINGS;WIN32;NDEBUG;_LIB;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>C:\IPG\carmaker\win64-13.1.1\include\Car;C:\IPG\carmaker\win64-11.0.1\include;..\..\CommonLib;..\..\CommonLib\yaml-cpp\include;..\..\CommonLib\yaml-cpp\build\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\IPG\carmaker\win64-11.0.1\include\Car;C:\IPG\carmaker\win64-11.0.1\include;..\..\CommonLib;..\..\CommonLib\yaml-cpp\include;..\..\CommonLib\yaml-cpp\build\include</AdditionalIncludeDirectories>
       <WholeProgramOptimization>false</WholeProgramOptimization>
     </ClCompile>
     <Link>
