@@ -57,8 +57,8 @@ XilSetup:
     # ip and port of the TrafficLayer/Server
     VehicleSubscription: 
     -   type: ego
-        attribute: {id: ['egoCm'], radius: [500]} 
-        ip: ["127.0.0.1"] # ip of Xil
+        attribute: {id: ['egoCm'], radius: [100]} 
+        ip: ["160.91.113.184"] # ip of Xil
         port: [7895]
 
 

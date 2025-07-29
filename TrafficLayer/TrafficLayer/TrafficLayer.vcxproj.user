@@ -10,7 +10,7 @@
     <LocalDebuggerEnvironment>PATH=%PATH%;..\..\CommonLib\libsumo;</LocalDebuggerEnvironment>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <LocalDebuggerCommandArguments>-f ..\..\tests\SumoIpg\config_RS_noSimulinkRS.yaml</LocalDebuggerCommandArguments>
+    <LocalDebuggerCommandArguments>-f ..\..\tests\SumoCarla\defaultConfig.yaml</LocalDebuggerCommandArguments>
     <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
   </PropertyGroup>
 </Project>
