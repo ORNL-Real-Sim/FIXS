@@ -83,31 +83,35 @@ SimulationModeParamter is a double variable that currently only used for mode bi
 This section is about how to build the source code, and then how to dispatch a released executable version.
 
 ### Prerequisite
-Several libraries need to be compiled first. You can use the ```compileExternalLibraries.bat``` to do the following steps automatically or manually execute the following steps.
 
-Build libevent 
-https://github.com/libevent/libevent/blob/master/Documentation/Building.md#building-on-windows
+#### 1. Download and install Visual Studio 17 2022 community version. 
 
+#### 2. Several libraries need to be compiled first. You can use the ```compileExternalLibraries.bat``` to do the following steps automatically or manually execute the following steps.
+
+* Build libevent\
+reference: https://github.com/libevent/libevent/blob/master/Documentation/Building.md#building-on-windows \
+Note: libevent source is already included in the CommonLib folder. Using the following command to build
+or "start libevent.sln" and build with menu in Visual Studio. 
 ```
 cd .\CommonLib\libevent
 md build && cd build
-cmake -G "Visual Studio 16 2019" -DEVENT__DISABLE_MBEDTLS=ON ..   # Or use any generator you want to use. Run cmake --help for a list
-cmake --build . --config Release # Or "start libevent.sln" and build with menu in Visual Studio.
+cmake -G "Visual Studio 17 2022" -DEVENT__DISABLE_MBEDTLS=ON ..   # Or use any generator you want to use. Run cmake --help for a list
+cmake --build . --config Release 
 ```
+**Note: Build in Release version if also compiling Release version of TrafficLayer.exe, CoordMerge.exe, etc. build in Debug if compiling Debug version of TrafficLayer.exe, CoordMerge.exe, etc.**
 
-Note: build in Release version if also compiling Release version of TrafficLayer.exe, CoordMerge.exe, etc. build in Debug if compiling Debug version of TrafficLayer.exe, CoordMerge.exe, etc.
-
-Build yaml-cpp
+* Build yaml-cpp
 https://github.com/jbeder/yaml-cpp
 ```
 cd .\CommonLib\yaml-cpp
 md build && cd build
-cmake -G "Visual Studio 16 2019" ..   # Or use any generator you want to use. Run cmake --help for a list
+cmake -G "Visual Studio 17 2022" ..   # Or use any generator you want to use. Run cmake --help for a list
 cmake --build . --config Release # Or "start libevent.sln" and build with menu in Visual Studio.
 ```
+**Note: Build in Release version if also compiling Release version of `VirtualEnvironment.lib` and CarMaker executable. Build in Debug if compiling Debug version of `VirtualEnvironment.lib` and CarMaker executable**
 
 ### Dispatch a release
-The source code uses ```msbuild``` as the default compiler, command ```msbuild``` must be known in the environmental variable before dispatching. The path to be added is ```%ProgramFiles(x86)%\Microsoft Visual Studio\2019\<YOUR_VS_EDITION>\MSBuild\Current\Bin```.
+The source code uses ```msbuild``` as the default compiler, command ```msbuild``` must be known in the environmental variable before dispatching. The path to be added is ```%ProgramFiles(x86)%\Microsoft Visual Studio\2022\<YOUR_VS_EDITION>\MSBuild\Current\Bin```.
 
 Additionally, python >= 3.8 is required. It is recommended to create a dedicated conda environment and name it as ```realsimdev```.
 
