@@ -51,7 +51,8 @@ Before testing the Real-Sim interface, please
 - read through this README
 - check comments in config.yaml which specifies how to properly write/modify the configuration file
 - check annotations in the Simulink template which specifies how to properly use each block
-- RealSimPack.m and RealSimDepack.m files are currently open-source. check the comments before modifying.  
+- RealSimPack.m and RealSimDepack.m files are currently open-source. check the comments before modifying.
+
 
 ## General Setups
 The interface runs the connections to different software, simulators by itself to provide plug-in-and-play experience for the users. A config.yaml file is critical to setup the interface parameters and configure different scenarios. 
@@ -86,9 +87,9 @@ This section is about how to build the source code, and then how to dispatch a r
 
 #### 1. Download and install Visual Studio 17 2022 community version. 
 
-#### 2. Several libraries need to be compiled first. You can use the ```compileExternalLibraries.bat``` to do the following steps automatically or manually execute the following steps.
+#### 2. Several libraries need to be compiled first. You can use the ```compileExternalLibraries.bat``` to do the following steps automatically or manually execute the following steps. Make sure you have CMake installed and added to PATH
 
-* Build libevent\
+* Build libevent (Currently this lib is not used, you can skip)\
 reference: https://github.com/libevent/libevent/blob/master/Documentation/Building.md#building-on-windows \
 Note: libevent source is already included in the CommonLib folder. Using the following command to build
 or "start libevent.sln" and build with menu in Visual Studio. 
@@ -98,17 +99,17 @@ md build && cd build
 cmake -G "Visual Studio 17 2022" -DEVENT__DISABLE_MBEDTLS=ON ..   # Or use any generator you want to use. Run cmake --help for a list
 cmake --build . --config Release 
 ```
-**Note: Build in Release version if also compiling Release version of TrafficLayer.exe, CoordMerge.exe, etc. build in Debug if compiling Debug version of TrafficLayer.exe, CoordMerge.exe, etc.**
 
-* Build yaml-cpp
-https://github.com/jbeder/yaml-cpp
+* Build yaml-cpp\
+reference: https://github.com/jbeder/yaml-cpp \
+  Note: Build in Release version if also compiling Release version of `VirtualEnvironment.lib` and CarMaker executable. Build in Debug if compiling Debug version of `VirtualEnvironment.lib` and CarMaker executable**
 ```
 cd .\CommonLib\yaml-cpp
 md build && cd build
 cmake -G "Visual Studio 17 2022" ..   # Or use any generator you want to use. Run cmake --help for a list
-cmake --build . --config Release # Or "start libevent.sln" and build with menu in Visual Studio.
+cmake --build . --config Release 
 ```
-**Note: Build in Release version if also compiling Release version of `VirtualEnvironment.lib` and CarMaker executable. Build in Debug if compiling Debug version of `VirtualEnvironment.lib` and CarMaker executable**
+
 
 ### Dispatch a release
 The source code uses ```msbuild``` as the default compiler, command ```msbuild``` must be known in the environmental variable before dispatching. The path to be added is ```%ProgramFiles(x86)%\Microsoft Visual Studio\2022\<YOUR_VS_EDITION>\MSBuild\Current\Bin```.
