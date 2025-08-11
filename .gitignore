@@ -28,6 +28,9 @@
 
 **/.vscode/*
 
+# Ignore Sphinx and documentation build output
+**/_build/*
+
 **/__pycache__/*
 
 **/x64/*
@@ -171,3 +174,11 @@ CM*_proj/**/Release/*
 **/.vs/*
 tests/DelayedConnection/coordMerge.xml
 CM11_proj/tmp.obj
+
+**/build/**
+
+# Ignore CommonLib under tests/Applications/Eco_Fixed_Timming
+/tests/Applications/Eco_Fixed_Timming/CommonLib/
+
+# Ignore Experiments folder under tests/Applications/Eco_Fixed_Timming
+/tests/Applications/Eco_Fixed_Timming/Experiments/

@@ -16,4 +16,3 @@ sphinx_rtd_theme>=1.0.0
 # SUMO Python libraries
 traci
 sumolib
-pip install myst-parser #sphinx parser for md files
