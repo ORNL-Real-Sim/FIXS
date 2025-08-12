@@ -25,7 +25,7 @@ function realsim_script(settingDir, simModelName)
     RealSimPara.speedInit = 0; % Initial speed of the ego vehicle when entering SUMO network
     RealSimPara.tLookahead = 0.1; % Use 0.1 for external control, recommend tLookahead >= 0.2 for SUMO driver
     RealSimPara.smoothWindow = 1; % Number of moving average data points, 1 means no moving average
-    RealSimPara.speedSource = 3; % Use speedSource = 3 for dummy vehicle dynamics (simple transfer function)
+    RealSimPara.speedSource = 3; % Use speedSource = 4 for dummy vehicle dynamics (simple transfer function)
 
     % Start RealSim Procedure
     fprintf('Starting RealSim procedure...\n');

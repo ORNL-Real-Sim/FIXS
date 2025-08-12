@@ -16,8 +16,9 @@
     <time>
         <begin value="28800"/>
         <end value="32400"/>
-        <step-length value="1"/>
+        <step-length value="0.1"/>
     </time>
+
     <gui_only>
         <start value="t"/>
         <quit-on-end value="true"/>

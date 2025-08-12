@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<network version="901" vissimVersion="2022.00-13 [265778]">
+<network version="901" vissimVersion="2022.00-06 [246413]">
 	<anmDefaults colorDistr="1" crosswalkDisplayType="1" hgvPowerDistr="2" hgvWeightDistr="2" level="1" linkDisplayType="1" panmFilename="" panmRoutesFilename="" pedestrianVehicleType="510" zoneConnectorDisplayType="1">
 		<anmDefaultDrivingBehavior>
 			<anmDefaultDrivingBehavior anmDrivBehavDefType="NONE" drivBehav="1"/>
@@ -25426,7 +25426,7 @@
 		<signalHead allPedTypes="true" allVehTypes="true" anmFlag="false" complRate="1" dischRecAct="false" isBlockSig="false" lane="10055 2" localNo="0" name="" no="119" orSG="19 2" pos="0.40665292104188933" sg="19 2" slowDownDist="3" type="CIRCULAR" vAmberBlock="0"/>
 		<signalHead allPedTypes="true" allVehTypes="true" anmFlag="false" complRate="1" dischRecAct="false" isBlockSig="false" lane="10055 1" localNo="0" name="" no="120" orSG="19 2" pos="0.36699645065149211" sg="19 2" slowDownDist="3" type="CIRCULAR" vAmberBlock="0"/>
 	</signalHeads>
-	<simulation comment="" numCores="1" numRuns="1" randSeed="21" randSeedIncr="5" retroSync="false" simMode="MICRO" simPeriod="3600" simRes="10" simSpeed="10" startTm="0" useAllCores="true" useMaxSimSpeed="true" volumeIncrDynAssign="0"/>
+	<simulation comment="" numCores="1" numRuns="1" randSeed="21" randSeedIncr="5" retroSync="false" simMode="MICRO" simPeriod="3600" simRes="10" simSpeed="10" startTm="0" useAllCores="false" useMaxSimSpeed="true" volumeIncrDynAssign="0"/>
 	<stopSigns>
 		<stopSign anmFlag="false" lane="115 1" name="" no="8" pos="3.0909553054258669" sg="22 4"/>
 		<stopSign anmFlag="false" lane="127 1" name="" no="11" pos="3.2393807753018411"/>

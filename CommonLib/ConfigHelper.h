@@ -135,7 +135,7 @@ struct CarlaSetup_t {
 struct SumoSetup_t {
 
 	int SpeedMode;
-
+	int ExecutionOrder;
 };
 
 typedef struct SubscriptionVehicleList_t {

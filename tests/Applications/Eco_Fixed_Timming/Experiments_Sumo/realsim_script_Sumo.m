@@ -1,10 +1,10 @@
 % File: realsim_script.m
 
-function realsim_script(settingDir, simModelName)
+function realsim_script(settingDir, simModelName, config_file_name)
     % Clear workspace and console
     disp(['Current folder: ', pwd]);
     close all;
-    clearvars -except settingDir simModelName; % Keep input variables
+    clearvars -except settingDir simModelName config_file_name; % Keep input variables
     clc;
     format compact;
     addpath(genpath('..\\..\\..\\VehicleDynamicsModels'))
@@ -14,7 +14,8 @@ function realsim_script(settingDir, simModelName)
     % Add path of RealSim tools
     addpath(genpath(RealSimPath));
     % Initialize RealSim for Simulink, Read yaml file
-    configPath = [settingDir '\ecodriving_config_Sumo.yaml'];
+    configPath = fullfile(settingDir, config_file_name);
+    disp(['configPath: ', configPath]);
     %print configPath
     fprintf('Configuration path: %s\n', configPath);
     [VehicleMessageFieldDefInputVec, VehDataBus, TrafficLayerIP, TrafficLayerPort] = RealSimInitSimulink(configPath);

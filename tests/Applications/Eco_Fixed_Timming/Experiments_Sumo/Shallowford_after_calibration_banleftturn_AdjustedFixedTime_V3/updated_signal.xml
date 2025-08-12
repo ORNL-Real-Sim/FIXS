@@ -1,5 +1,5 @@
 <add>
-    <tlLogic id="12" offset="0" programID="NEMA" type="NEMA"> <!--village-->
+    <tlLogic id="12" offset="16" programID="NEMA" type="NEMA"> <!--village-->
         <param key="detector-length" value="15.24"/>
         <param key="detector-length-leftTurnLane" value="6.096"/>
         <param key="total-cycle-length" value="100"/>
@@ -24,7 +24,7 @@
         <phase duration="99" minDur="8"  maxDur="8" vehext="2" yellow="4" red="1" name="8" state="srrrsrrrrgGGggsrrrr"/>
     </tlLogic>
 
-    <tlLogic id="9" offset="0" programID="NEMA" type="NEMA"> <!--I75 SB off ramp-->
+    <tlLogic id="9" offset="3" programID="NEMA" type="NEMA"> <!--I75 SB off ramp-->
         <param key="detector-length" value="15.24"/>
         <param key="detector-length-leftTurnLane" value="6.096"/>
         <param key="total-cycle-length" value="100"/>
@@ -46,7 +46,7 @@
         <phase duration="99" minDur="10"  maxDur="69" vehext="3" yellow="4" red="1" name="6" state="srrrrGGrrrsrrrr"/>
     </tlLogic>
 
-    <tlLogic id="8" offset="0" programID="NEMA" type="NEMA"> <!--I75 NB off ramp-->
+    <tlLogic id="8" offset="12" programID="NEMA" type="NEMA"> <!--I75 NB off ramp-->
         <param key="detector-length" value="15.24"/>
         <param key="detector-length-leftTurnLane" value="6.096"/>
         <param key="total-cycle-length" value="100"/>
@@ -68,7 +68,7 @@
         <phase duration="99" minDur="10"  maxDur="64" vehext="3" yellow="4" red="2" name="6" state="srrrrsssrrrGGgg"/>
     </tlLogic>
 
-    <tlLogic id="10" offset="0" programID="NEMA" type="NEMA"> <!--HamiltonPlace Blvd-->
+    <tlLogic id="10" offset="1" programID="NEMA" type="NEMA"> <!--HamiltonPlace Blvd-->
         <param key="detector-length" value="15.24"/>
         <param key="detector-length-leftTurnLane" value="6.096"/>
         <param key="total-cycle-length" value="100"/>
@@ -88,11 +88,11 @@
         <phase duration="99" minDur="10"  maxDur="60" vehext="3" yellow="4" red="2" name="2" state="srrrgGGGGrrsrrrrssrrrr"/>
         <phase duration="99" minDur="8"  maxDur="8" vehext="4" yellow="3" red="3" name="3" state="srrrsrrrrrrgGGGGGGrrrr"/>
         <phase duration="99" minDur="5"  maxDur="5" vehext="1" yellow="3" red="3" name="4" state="GGGGsrrrrrrsrrrrssrrrr"/>
-        <phase duration="99" minDur="4"  maxDur="7" vehext="1" yellow="3" red="3" name="5" state="srrrsrrrrGGsrrrrssrrrr"/>
-        <phase duration="99" minDur="10"  maxDur="56" vehext="3" yellow="4" red="2" name="6" state="srrrsrrrrrrsrrrrggGGgg"/>
+        <phase duration="99" minDur="4"  maxDur="4" vehext="1" yellow="3" red="3" name="5" state="srrrsrrrrGGsrrrrssrrrr"/>
+        <phase duration="99" minDur="10"  maxDur="59" vehext="3" yellow="4" red="2" name="6" state="srrrsrrrrrrsrrrrggGGgg"/>
     </tlLogic>
 
-    <tlLogic id="3" offset="0" programID="NEMA" type="NEMA"> <!--Lifestyle-->
+    <tlLogic id="3" offset="32" programID="NEMA" type="NEMA"> <!--Lifestyle-->
         <param key="detector-length" value="15.24"/>
         <param key="detector-length-leftTurnLane" value="6.096"/>
         <param key="total-cycle-length" value="100"/>
@@ -108,8 +108,8 @@
         <param key="whetherOutputState" value="true"/>
         <param key="show-detectors" value="true"/>
         <param key="controllerType" value="TS2"/>
-        <phase duration="99" minDur="3"  maxDur="8" vehext="1" yellow="3" red="2" name="1" state="srrrsrrrrrsrrrsrrGG"/>
-        <phase duration="99" minDur="15"  maxDur="70" vehext="3" yellow="4" red="2" name="2" state="srrrgGGGggsrrrsrrrr"/>
+        <phase duration="99" minDur="3"  maxDur="6" vehext="1" yellow="3" red="2" name="1" state="srrrsrrrrrsrrrsrrGG"/>
+        <phase duration="99" minDur="15"  maxDur="72" vehext="3" yellow="4" red="2" name="2" state="srrrgGGGggsrrrsrrrr"/>
         <phase duration="99" minDur="6"  maxDur="6" vehext="4" yellow="3" red="2" name="4" state="gGggsrrrrrsrrrsrrrr"/>
         <phase duration="99" minDur="5"  maxDur="5" vehext="1" yellow="3" red="2" name="5" state="srrrsrrrGGsrrrsrrrr"/>
         <phase duration="99" minDur="15"  maxDur="73" vehext="3" yellow="4" red="2" name="6" state="srrrsrrrrrsrrrgGGgg"/>

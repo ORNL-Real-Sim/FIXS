@@ -18,22 +18,25 @@ from CommonLib.SocketHelper import SocketHelper
 from CommonLib.ConfigHelper import ConfigHelper
 from CommonLib.MsgHelper import MsgHelper
 from CommonLib.VehDataMsgDefs import VehData
+from collections import defaultdict
 if 'SUMO_HOME' in os.environ:
     sys.path.append(os.path.join(os.environ['SUMO_HOME'], 'tools'))
 
 
 class SumoEnvMultiAgent:
-    def __init__(self, sumoSignalConfig, traffic_layer_config, sumo_port=1337, traffic_layer_port=430, simulink_port=420, path_to_net=''):
+    def __init__(self, sumoSignalConfig, traffic_layer_config, sumo_port=1337, traffic_layer_port=430, simulink_port=420, path_to_net='', step_length=0.1, use_simulink_for_energy_evaluation=False):
         # sumo startup utils
         self.sumoBinary = checkBinary('sumo-gui')  # or 'sumo-gui' for graphical interface
         self.sumo_config_file = os.path.join(path_to_net, 'chattCavMpr.sumocfg')
         self.sumo_net_file = os.path.join(path_to_net, 'chatt.net.xml')
         self.settings_dir = path_to_net
+        self.step_length = step_length
+        self.use_simulink_for_energy_evaluation = use_simulink_for_energy_evaluation
         self.sumoCmd = [self.sumoBinary, "-c", self.sumo_config_file]
         self.graph = sumolib.net.readNet(self.sumo_net_file, withInternal=True)  # internal edges are edges inside intersections or connections
         self.vertex = self.graph.getNodes()
         self.edge = self.graph.getEdges(withInternal=True)
-        self.edges = ['-2801', '-280', '-307', '-327', '-3271', '-281', '-315', '-3151', '-321', '-300', '-2851', '-285', '-290', '-298',
+        self.edges = ['-2801', '-280', '-307', '-327', '-3271', '-281', '-315', '-3151', '-321', '-300', '-2851', '-285', '-290', '-298', '-295', '-312',
                       '-293', '-297', '-288', '-2881', '-286', '-302', '-3221', '-322', '-313', '-284', '-2841', '-328', '-304', '-2801']
         self.wb = ['-2801', '-280', '-307', '-327', '-3271', '-281', '-315', '-3151', '-321', '-300', '-2851', '-285', '-290', '-298', '-295']
         self.eb = ['-312', '-293', '-297', '-288', '-2881', '-286', '-302', '-3221', '-322', '-313', '-284', '-2841', '-328', '-304']
@@ -47,10 +50,11 @@ class SumoEnvMultiAgent:
         self.spat_statuses = {}
         self.color_dict = {'green': 0, 'red': 1}
         self.cav_id_list = []
-        self.cav_object_dict = {}
+        self.cav_object_dict = defaultdict(lambda: EcoVehicle(None))
         # Subscribe to specific variables (e.g., position, speed)
         # self.subscription_vars = [tc.VAR_POSITION, tc.VAR_SPEED]
-        self.subscription_vars = [tc.VAR_SPEED, tc.VAR_POSITION, tc.VAR_TYPE, tc.VAR_ROAD_ID, tc.VAR_ACCELERATION, tc.VAR_ROUTE_INDEX]
+        self.subscription_vars = [tc.VAR_SPEED, tc.VAR_POSITION, tc.VAR_TYPE, tc.VAR_ROAD_ID, tc.VAR_ACCELERATION, 
+                                  tc.VAR_ROUTE_INDEX, tc.VAR_SPEED_WITHOUT_TRACI, tc.VAR_ALLOWED_SPEED]
         self.subscribed_vehicles = []
         self.speed_min = 0
         self.speed_max = 21
@@ -72,16 +76,17 @@ class SumoEnvMultiAgent:
         self.socket2FIXS.connect(('127.0.0.1', int(self.traffic_layer_port)))
         print('Connected to FIXS server')
 
-        socket2simulink = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        print('Waiting for Simulink client to connect...')
-        # bind the socket to the port and listen for incoming connections
-        print('Binding to port: ', self.simulink_port)
-        socket2simulink.bind(('127.0.0.1', int(self.simulink_port)))
-        socket2simulink.listen(1)
+        if self.use_simulink_for_energy_evaluation:
+            socket2simulink = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            print('Waiting for Simulink client to connect...')
+            # bind the socket to the port and listen for incoming connections
+            print('Binding to port: ', self.simulink_port)
+            socket2simulink.bind(('127.0.0.1', int(self.simulink_port)))
+            socket2simulink.listen(1)
 
-        # if a connection is established, accept it
-        self.socket2simulink, addr = socket2simulink.accept()
-        print('Connected by Simulink client')
+            # if a connection is established, accept it
+            self.socket2simulink, addr = socket2simulink.accept()
+            print('Connected by Simulink client')
 
 
     def get_phases(self, sumoSignalConfig):
@@ -190,20 +195,17 @@ class SumoEnvMultiAgent:
 
         return t1s, t1e, t2s, t2e, r1s, curr_status
 
-    def start_subscription(self, vehicle_dynamics=True, eco_driving=True):
-        """
-        What needs to be subscribed
-            1. speed, yes
-            2. acceleration, yes
-            3. getNextTLS
-            4. getRoadID, yes
-            5. getLeader, yes
-        :return:
+    def start_subscription(self, vehicle_dynamics=False, eco_driving=False):
         """
 
+        """
+        veh_ids_controlled_by_FIXS = ['ego']
         # traci.start(self.sumoCmd)
         traci.init(port=int(self.sumo_port), host='127.0.0.1')
         traci.setOrder(2)
+        traci.simulationStep()
+        self.apply_vehicle_control_FIXS({}, vehicle_dynamics=vehicle_dynamics, eco_driving=eco_driving)
+        
         traci.route.add(routeID='route1', edges=self.edges)
 
         self.get_phases(self.sumoSignalConfig)
@@ -217,18 +219,28 @@ class SumoEnvMultiAgent:
             self.phase_tracker()
             self.subscribe_departed_veh()
             if sim_time < 28985:
-                traci.simulationStep()
+                pass
+                
             elif sim_time == 28985:
                 self.reset()
-                traci.simulationStep()
-            self.apply_vehicle_control_FIXS({}, vehicle_dynamics=vehicle_dynamics, eco_driving=eco_driving)
+            traci.simulationStep()
+            self.apply_vehicle_control_FIXS({}, vehicle_dynamics=vehicle_dynamics, eco_driving=eco_driving, control_veh_ids=veh_ids_controlled_by_FIXS)
+            
         print('Total time spent for the first 28985: ', time.time() - start_time_1)
-        print('test')
-
-        print(self.cav_object_dict.keys())
+        is_very_first_step = True
         while sim_time <= 32400:
+            
+            traci.simulationStep()
+            if is_very_first_step:
+                is_very_first_step = False
+                self.apply_vehicle_control_FIXS({}, vehicle_dynamics=vehicle_dynamics, eco_driving=eco_driving, control_veh_ids=veh_ids_controlled_by_FIXS)
+
+            else:
+                self.apply_vehicle_control_FIXS(eco_speed_dic, vehicle_dynamics=vehicle_dynamics, eco_driving=eco_driving, control_veh_ids=veh_ids_controlled_by_FIXS)
+
             # try:
             sim_time = traci.simulation.getTime()
+            print('SUMO simulation time: ', sim_time)
             if sim_time % 100 == 0:
                 print(sim_time)
             # Phase trackers
@@ -241,12 +253,13 @@ class SumoEnvMultiAgent:
             results_df['veh_id'] = results_df.index.astype(str)
             # https://sumo.dlr.de/docs/TraCI/Vehicle_Value_Retrieval.html, https://www.rapidtables.com/convert/number/hex-to-decimal.html?x=70
             results_df = results_df.rename(columns={64: 'speed', 66: 'position', 79: 'veh_type', 80: 'road_id',
-                                                    114: 'acceleration', 112: 'next_tls'})
+                                                    114: 'acceleration', 112: 'next_tls', 177: 'speed_wo_traci', 183: 'allowed_speed'})
             results_df['edges'] = results_df['veh_id'].apply(lambda x: traci.vehicle.getRoute(x) if x is not None else None)
             results_df['route_index'] = results_df['veh_id'].apply(lambda x: traci.vehicle.getRouteIndex(x) if x is not None else None)
             results_df['next_tls'] = results_df['veh_id'].apply(lambda x: traci.vehicle.getNextTLS(x) if x is not None else None)
             results_df[['travel_direction', 'control']] = results_df.apply(lambda row: self.get_travel_direction(row['veh_id'], row['veh_type'],row['road_id'], row['route_index'], row['edges'], row['next_tls']), axis=1, result_type='expand')
             
+            results_df['orginal_desire_spd'] = results_df['allowed_speed'] * 2.23694
             # get lead vehicle's speed
             results_df['speed'] = results_df['speed'] * 2.23694
             results_df['leader'] = results_df['veh_id'].apply(lambda x: traci.vehicle.getLeader(x, dist=200.0) if x is not None else None)
@@ -272,13 +285,13 @@ class SumoEnvMultiAgent:
             if 'ego' in results_df.index.tolist():
                 if results_df.loc['ego', 'road_id'] == "-2801":
                     traci.vehicle.setRoute('ego', self.edges)
-            # print(list_cav_back_to_sumo + list_cav_control)
-            # print(self.cav_object_dict.keys())
+                    
             eco_speed_dic = {key: veh.get_eco_speed_subscribe(
                                                         self.phase_tracking_dict,
                                                         self.spat_statuses,
                                                         results_df.loc[key, 'next_tls'],
                                                         results_df.loc[key, 'travel_direction'],
+                                                        results_df.loc[key, 'orginal_desire_spd'],
                                                         results_df.loc[key, 'speed'],
                                                         results_df.loc[key, 'acceleration'],
                                                         results_df.loc[key, 'lead_dist'],
@@ -291,23 +304,19 @@ class SumoEnvMultiAgent:
                                                         results_df.loc[key, 't2e'],
                                                         results_df.loc[key, 'r1s'],
                                                         results_df.loc[key, 'curr_status']) for index, (key, veh) in enumerate(self.cav_object_dict.items()) if key in (list_cav_back_to_sumo + list_cav_control)}
-            self.apply_vehicle_control(eco_speed_dic, smooth=True)
-            # for index, (key, veh) in enumerate(self.cav_object_dict.items()):
-            #     if key in (list_cav_back_to_sumo):
-            #         veh.gain_back_sumo_control()
-            # print('eco_speed_dic: ', eco_speed_dic)
             
+            self.apply_vehicle_control(eco_speed_dic, smooth=True, exclude_veh_ids=veh_ids_controlled_by_FIXS)
+
             self.cav_object_dict = {key: value for key, value in self.cav_object_dict.items() if key in (list_cav_back_to_sumo + list_cav_control)}
 
-            traci.simulationStep()
-            self.apply_vehicle_control_FIXS(eco_speed_dic, vehicle_dynamics=vehicle_dynamics, eco_driving=eco_driving)
+            
             
 
 
         self.close()
 
     
-    def apply_vehicle_control_FIXS(self, eco_speed_dic, vehicle_dynamics=True, eco_driving=True):
+    def apply_vehicle_control_FIXS(self, eco_speed_dic, vehicle_dynamics=False, eco_driving=False, control_veh_ids = ['ego']):
         """
         Apply the vehicle control to the vehicles
         :param eco_speed_dic: dictionary of vehicle id and eco speed
@@ -316,24 +325,28 @@ class SumoEnvMultiAgent:
         :return:
         """
         sim_state, sim_time = self.socket_helper.recv_data(self.socket2FIXS)
+        print('FIXS simulation time: ', sim_time)
+        # print('FIXS simulation time: ', sim_time)
         ori_speed = {veh_data.id:veh_data.speed for veh_data in self.socket_helper.vehicle_data_receive_list}
         for veh_id, eco_speed in eco_speed_dic.items():
-            if eco_speed is not None and veh_id == 'ego':
+            if eco_speed is not None and veh_id in control_veh_ids:
                 if eco_driving:
+                    if eco_speed > self.speed_max:
+                        eco_speed = self.speed_max
                     veh_data = VehData(id=veh_id, speedDesired=eco_speed)
                 else:
                     veh_data = VehData(id=veh_id, speedDesired=ori_speed[veh_id])
                 self.socket_helper.vehicle_data_send_list.append(veh_data)
+        if self.use_simulink_for_energy_evaluation:
+            self.socket_helper.sendData(sim_state, sim_time, self.socket2simulink)
+            self.socket_helper.clear_data()
+            # receive data from the client (the actual vehicle data after the vehidle dynamics model)
+            self.socket_helper.recv_data(self.socket2simulink)
+            self.socket_helper.vehicle_data_send_list.extend(self.socket_helper.vehicle_data_receive_list)
         
-        self.socket_helper.sendData(sim_state, sim_time, self.socket2simulink)
-        self.socket_helper.clear_data()
-        # receive data from the client (the actual vehicle data after the vehidle dynamics model)
-        self.socket_helper.recv_data(self.socket2simulink)
-        
-        self.socket_helper.vehicle_data_send_list.extend(self.socket_helper.vehicle_data_receive_list)
         for idx in range(len(self.socket_helper.vehicle_data_send_list)):
             speed_desired_simulink = self.socket_helper.vehicle_data_receive_list[idx].speedDesired
-            if not vehicle_dynamics:
+            if not vehicle_dynamics or not self.use_simulink_for_energy_evaluation:
                 # if not applying vehicle dynamics, set the speedDesired to the eco_speed
                 veh_id = self.socket_helper.vehicle_data_receive_list[idx].id
                 if veh_id not in eco_speed_dic.keys():
@@ -345,20 +358,22 @@ class SumoEnvMultiAgent:
             else:
                 # if applying vehicle dynamics, set the speedDesired to the speedDesired from the simulink
                 self.socket_helper.vehicle_data_send_list[idx].speedDesired = speed_desired_simulink
-
+                
+        # self.socket_helper.clear_data() # remember to remove this
         if len(self.socket_helper.vehicle_data_send_list) == 0:
             veh_data = VehData()
             self.socket_helper.vehicle_data_send_list.append(veh_data)
+        
         self.socket_helper.sendData(sim_state, sim_time, self.socket2FIXS)
+        self.socket_helper.clear_data()
 
 
-
-    def apply_vehicle_control(self, eco_speed_dic, smooth=False):
+    def apply_vehicle_control(self, eco_speed_dic, smooth=False, exclude_veh_ids = ['ego']):
         # to handle the case of a single vehicle
-       for veh_id, eco_speed in eco_speed_dic.items():
-            if eco_speed is not None:
+        for veh_id, eco_speed in eco_speed_dic.items():
+            if eco_speed is not None and veh_id not in exclude_veh_ids:
                 if smooth:
-                    traci.vehicle.slowDown(veh_id, eco_speed, 1)
+                    traci.vehicle.slowDown(veh_id, eco_speed, self.step_length)
                 else:
                     traci.vehicle.setSpeed(veh_id, eco_speed)
 
@@ -388,22 +403,20 @@ class SumoEnvMultiAgent:
                 config[section][item] = data[section][item]
         return config
 
-
 if __name__ == "__main__":
     start_time = time.time()
     
-    
-    
     parser = argparse.ArgumentParser()
-    parser.add_argument("-c", "--config", type=str, help="Path to the Configuration file", default=None)
-    parser.add_argument("--sumoPort", type=str, help="Specify port of sumo", default=1333)
-    parser.add_argument("--trafficlayerPort", type=str, help="Specify port of traffic layer", default=433)
-    parser.add_argument("--simulinkPort", type=str, help="Specify port of simulink", default=423)
-    parser.add_argument("--ecoDriving", action="store_true", help="Use the eco driving controller", default=False)
+    parser.add_argument("-c", "--config", type=str, help="Path to the Configuration file", default='Experiments_Sumo\\ecodriving_config_Sumo_wo_dyno.yaml')
+    parser.add_argument("--sumoPort", type=str, help="Specify port of sumo", default=1341)
+    parser.add_argument("--trafficlayerPort", type=str, help="Specify port of traffic layer", default=451)
+    parser.add_argument("--simulinkPort", type=str, help="Specify port of simulink", default=441)
+    parser.add_argument("--ecoDriving", action="store_true", help="Use the eco driving controller", default=True)
     parser.add_argument("--vehicleDynamics", action="store_true", help="use the vehicle dynamis", default=False)
-    parser.add_argument("--penetrationRate", type=float, help="the penetration rate of cav", default=1.0)
-    parser.add_argument("--pathToNet", type=str, help="the path to the net file", default=None)
-    
+    parser.add_argument("--useSimulinkForEnergyEvaluation", action="store_true", help="use the simulink for energy evaluation", default=False)
+    parser.add_argument("--penetrationRate", type=float, help="the penetration rate of cav", default=0.0)
+    parser.add_argument("--pathToNet", type=str, help="the path to the net file", default='Experiments_Sumo\\Shallowford_after_calibration_banleftturn_AdjustedFixedTime_V3')
+    parser.add_argument("--stepLength", type=float, help="the step length of the simulation", default=0.1)
     args = parser.parse_args()
     traffic_layer_config = args.config
     sumo_port = args.sumoPort
@@ -413,13 +426,23 @@ if __name__ == "__main__":
     path_to_net = args.pathToNet
     vehicle_dynamics = args.vehicleDynamics
     eco_driving = args.ecoDriving
+    step_length = args.stepLength
+    use_simulink_for_energy_evaluation = args.useSimulinkForEnergyEvaluation
+
     # read sumoSignalConfig_26
     print('path_to_net: ', path_to_net)
     sumoSignalConfig = pd.read_csv(os.path.join(path_to_net, 'sumoSignalConfig_26.csv'), index_col=0)
     sumoSignalConfig['id'] = sumoSignalConfig['id'].astype(str)
     sumoSignalConfig['name'] = sumoSignalConfig['name'].astype(str)
     print(f'running with penetration rate: {penetration_rate}, vehicle dynamics: {vehicle_dynamics}, eco driving: {eco_driving}')
-    senv = SumoEnvMultiAgent(sumoSignalConfig, traffic_layer_config=traffic_layer_config, sumo_port=sumo_port, traffic_layer_port=traffic_layer_port, simulink_port=simulink_port, path_to_net=path_to_net)
-    senv.start_subscription(vehicle_dynamics=vehicle_dynamics, eco_driving=eco_driving)
+    senv = SumoEnvMultiAgent(sumoSignalConfig, 
+                             traffic_layer_config=traffic_layer_config, 
+                             sumo_port=sumo_port, 
+                             traffic_layer_port=traffic_layer_port, 
+                             simulink_port=simulink_port, 
+                             path_to_net=path_to_net,
+                             step_length=step_length,
+                             use_simulink_for_energy_evaluation=use_simulink_for_energy_evaluation)
+    senv.start_subscription(eco_driving=eco_driving, vehicle_dynamics=vehicle_dynamics)
     total_time = time.time() - start_time
     print('Total time spent: ', total_time)

@@ -385,6 +385,13 @@ int ConfigHelper::getConfig(string configName) {
 		SumoSetup.SpeedMode = 0;
 		//printf("\nXil not specified as server or client! Will set Xil as client!\n");
 	}
+	if (node["ExecutionOrder"]) {
+		SumoSetup.ExecutionOrder = parserInteger(node, "ExecutionOrder");
+	}
+	else {
+		SumoSetup.ExecutionOrder = 1;
+		printf("\nSumo Execution Order not specified! Will use 1 as default!\n");
+	}
 
 	// ===========================================================================
 	// 			READ Carla Setup section

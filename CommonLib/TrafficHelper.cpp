@@ -25,7 +25,7 @@ using namespace std;
 TrafficHelper::TrafficHelper(){
 }
 
-void TrafficHelper::connectionSetup(string trafficIp, int trafficPort, int nClientInput) {
+void TrafficHelper::connectionSetup(string trafficIp, int trafficPort, int nClientInput, int order) {
 
 	nClient = nClientInput;
 
@@ -39,7 +39,7 @@ void TrafficHelper::connectionSetup(string trafficIp, int trafficPort, int nClie
 
 	traci.connect(trafficIp, trafficPort);
 
-	traci.setOrder(1);
+	traci.setOrder(order);
 
 	/********************************************
 	* GET VEH SUBSCRIPTION
