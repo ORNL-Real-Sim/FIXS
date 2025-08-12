@@ -35,7 +35,7 @@ void VirEnvHelper::shutdown() {
 	catch (...) {
 		Log("Warning: RealSim shutdown failed\n");
 	}
-#else
+//#else
 	//try {
 	//	Sock_c.socketShutdown();
 	//	Sock_c.socketReset();
@@ -52,13 +52,15 @@ void VirEnvHelper::shutdown() {
 	//	Log("Warning: RealSim shutdown failed\n");
 	//}
 #endif
-	veryFirstStep = 1;
 
-	TrafficSimulatorId2CarMakerId.clear();
-	CmAvailableCarId_queue = queue<int>();
-	CmAvailableTruckId_queue = queue<int>();
-	CmAvailableBusId_queue = queue<int>();
-	TrafficSimulatorId2Remove.clear();
+		veryFirstStep = 1;
+
+		TrafficSimulatorId2CarMakerId.clear();
+		CmAvailableCarId_queue = queue<int>();
+		CmAvailableTruckId_queue = queue<int>();
+		CmAvailableBusId_queue = queue<int>();
+		TrafficSimulatorId2Remove.clear();
+
 }
 
 
@@ -461,6 +463,9 @@ int VirEnvHelper::runStep(double simTime, const char** errorMsg) {
 
 				}
 				else {
+					// ELSE means idTs exists in previous time step and continues to exist in this time step
+					// TrafficSimulatorId2Remove contains all mapped ids from previous synchronization step
+					// since this idTs is still in the simulation, we need to remove it from TrafficSimulatorId2Remove set
 					if (TrafficSimulatorId2Remove.find(idTs) != TrafficSimulatorId2Remove.end()) {
 						TrafficSimulatorId2Remove.erase(TrafficSimulatorId2Remove.find(idTs));
 					}
@@ -484,7 +489,7 @@ int VirEnvHelper::runStep(double simTime, const char** errorMsg) {
 		// ===========================================================================
 		try {
 			// remove those ids that not exists since last time step
-			for (auto &it : TrafficSimulatorId2Remove) {
+			for (auto& it : TrafficSimulatorId2Remove) {
 
 				string idTs = it;
 
@@ -535,7 +540,7 @@ int VirEnvHelper::runStep(double simTime, const char** errorMsg) {
 		// ===========================================================================
 		try {
 			// update state
-			TrafficSimulatorId2Remove.clear();
+			TrafficSimulatorId2Remove.clear(); // we would need to update vehicle in current simulation step
 			for (auto iter : TrafficSimulatorId2CarMakerId) {
 				string idTs = iter.first;
 				int idCm = iter.second;
@@ -602,39 +607,37 @@ int VirEnvHelper::runStep(double simTime, const char** errorMsg) {
 			return ERROR_STEP_UPDATE_STATE;
 		}
 
-	}
+		// ===========================================================================
+		// 			sync traffic signal light
+		// ===========================================================================
+		if (SYNCHRONIZE_TRAFFIC_SIGNAL) {
+			try {
+				// loop over each signal light
+				for (auto it : Msg_c.TlsDataRecv_um) {
+					string tlsId = it.second.name;
+					string tlsState = it.second.state;
 
-
-	// ===========================================================================
-	// 			sync traffic signal light
-	// ===========================================================================
-	if (SYNCHRONIZE_TRAFFIC_SIGNAL) {
-		try {
-			// loop over each signal light
-			for (auto it : Msg_c.TlsDataRecv_um) {
-				string tlsId = it.second.name;
-				string tlsState = it.second.state;
-
-				// if can find the tlsId, then synchronize it
-				if (SignalController2HeadIdTrfLightIndex.find(tlsId) != SignalController2HeadIdTrfLightIndex.end()) {
-					// the unordered_map contains a list of head id and TrfLight index pair, so loop over each to synchronize
-					for (auto it : SignalController2HeadIdTrfLightIndex[tlsId]) {
-						TrfLight.Objs[get<1>(it)].State = tlsChar2CmState(tlsState.at(get<0>(it)));
+					// if can find the tlsId, then synchronize it
+					if (SignalController2HeadIdTrfLightIndex.find(tlsId) != SignalController2HeadIdTrfLightIndex.end()) {
+						// the unordered_map contains a list of head id and TrfLight index pair, so loop over each to synchronize
+						for (auto it : SignalController2HeadIdTrfLightIndex[tlsId]) {
+							TrfLight.Objs[get<1>(it)].State = tlsChar2CmState(tlsState.at(get<0>(it)));
+						}
 					}
-				}
 
+				}
 			}
-		}
-		catch (const std::exception& e) {
-			std::cout << e.what();
-			errorMsgStr = "RealSim: Sync traffic signal light failed";
-			*errorMsg = errorMsgStr.c_str();
-			return ERROR_STEP_SYNC_TRAFFIC_SIGNAL;
-		}
-		catch (...) {
-			errorMsgStr = "RealSim: Sync traffic signal light failed";
-			*errorMsg = errorMsgStr.c_str();
-			return ERROR_STEP_SYNC_TRAFFIC_SIGNAL;
+			catch (const std::exception& e) {
+				std::cout << e.what();
+				errorMsgStr = "RealSim: Sync traffic signal light failed";
+				*errorMsg = errorMsgStr.c_str();
+				return ERROR_STEP_SYNC_TRAFFIC_SIGNAL;
+			}
+			catch (...) {
+				errorMsgStr = "RealSim: Sync traffic signal light failed";
+				*errorMsg = errorMsgStr.c_str();
+				return ERROR_STEP_SYNC_TRAFFIC_SIGNAL;
+			}
 		}
 	}
 

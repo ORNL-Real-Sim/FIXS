@@ -13,26 +13,31 @@ zhoua@ornl.gov
 
 Table of Contents
 =======================
+<!-- TOC -->
+* [RealSim CarMaker Documentation](#realsim-carmaker-documentation)
+* [Contacts](#contacts)
+* [Table of Contents](#table-of-contents)
 * [Simulation Setups](#simulation-setups)
-    * [Setup CM Office or Simulink](#setup-cm-office-or-simulink)
-        * [Obtain CarMaker Executables](#obtain-carmaker-executables)
-        * [Compile Source Codes ](#compile-source-codes)
-    * [Setup CM dSPACE](#setup-cm-dspace)
-        * [Obtain dSPACE library](#obtain-dspace-library)
-        * [Compile dSPACE library](#compile-dspace-library)
-        * [Prepare User.c](#prepare-userc)
-	* [Prepare for dSPACE build (configuration desk)](#prepare-for-dspace-build-configuration-desk)
- 		* [Additional instructions for RS Simulink libraries](#additional-instructions-for-rs-simulink-libraries) 
-
+  * [Setup CarMaker Office or CarMaker Simulink](#setup-carmaker-office-or-carmaker-simulink-)
+  * [Obtain CarMaker Executables](#obtain-carmaker-executables)
+    * [Pre required library](#pre-required-library)
+    * [Compile Source Codes](#compile-source-codes)
+  * [Run CarMaker office](#run-carmaker-office)
+  * [Run CarMaker-Simulink](#run-carmaker-simulink)
+  * [Setup CM dSPACE](#setup-cm-dspace)
+    * [Obtain dSPACE library](#obtain-dspace-library)
+    * [Compile dSPACE library](#compile-dspace-library)
+    * [Prepare User.c](#prepare-userc)
+    * [Prepare for dSPACE build (configuration desk)](#prepare-for-dspace-build-configuration-desk)
+      * [Additional instructions for RS Simulink libraries](#additional-instructions-for-rs-simulink-libraries)
 * [Setup Application](#setup-application)
-    * [SUMO](#sumo)
+  * [SUMO](#sumo)
 * [Run Simulations](#run-simulations)
-    * [General Setups](#general-setups)
-    * [Office](#office)
-    * [Simulink](#simulink)
-    * [dSPACE](#dspace)
-* [Examples](#examples)
-    * [dSPACE Simulation](#dspace-simulation)
+  * [General Setups](#general-setups)
+  * [dSPACE](#dspace)
+  * [Examples](#examples)
+  * [dSPACE Simulation](#dspace-simulation)
+<!-- TOC -->
 
 <!--    * [Office Simulation](#office-simulation)
     * [Simulink Simulation](#simulink-simulation)
@@ -40,50 +45,70 @@ Table of Contents
 
 # Simulation Setups
 
-## Setup CM Office or Simulink
-Note: this tutorial is based on CM13.1.2 and Matlab/Simulink 2024a.
-### Obtain CarMaker Executables
-RealSim contained compiled CarMaker executables, i.e., CarMaker.win64.exe for Office version, and libcarmaker4sl.mexw64 for Simulink version. Three different versions are supported, CarMaker 11, 10 and 9. Users can directly use these executables without need to recompile source codes. The executables are inside the corresponding folders ```CM11```, ```CM10```, ```CM9```.
+## Setup CarMaker Office or CarMaker Simulink 
+* Note: this tutorial is based on CM13.1.2 and Matlab/Simulink 2024a.\
+Make sure you followed the main page README.md, ensuring you have MS Visual Studio installed, and pre-required libs build. 
+* Note: make sure your pre-required libs build Release/Debug is constant with your `VirtualEnvironment.lib` build and CarMaker executable build Release/Debug.
 
-Another option is that users can modify the CarMaker User.cpp by themselves and include necessary source codes of RealSim. Corresponding Visual Studio project files are provided and users can use their own IDE as well. 
+## Obtain CarMaker Executables
+1. RealSim contained compiled CarMaker executables, i.e., CarMaker.win64.exe for Office version, and libcarmaker4sl.mexw64 for Simulink version. Three different versions are supported, CarMaker 11, 10 and 9. Users can directly use these executables without need to recompile source codes. The executables are inside the corresponding folders ```CM11```, ```CM10```, ```CM9```.
 
-If using another version of CarMaker/TruckMaker (e.g., 13 or higher), do the following.
 
-If you want to set up a project outside the cloned FIXS repo, you first need to create a **parent folder**. Copy the [CarMaker](../CarMaker)
+2. Another option is that users can modify the CarMaker User.c by themselves and include necessary source codes of RealSim. Corresponding Visual Studio project files are provided and users can use their own IDE as well.
+   Here we use CarMaker/TruckMaker 13 as example. If you choose this method, continue reading.
+### Pre required library
+
+- VirtrualEnvironment.lib
+
+To simplify CarMaker project build process, we will build a library called VirtrualEnvironment.lib that contains all the
+required helper functions. Open [VirtualEnvironment.sln](..%2FVirtualEnvironment%2FVirtualEnvironment.sln)
+inside the VirtualEnvironment folder using Visual Studio 2022. in Visual Studio 2022, find the solution explorer window on the right of the screen, right click the _VirtualEnvironment_, select _Properties_,
+Then in the Property Page, find C/C++ -> General -> Additional Include Directories. Edit the carmaker version if necessary. And make sure yaml-cpp are included: 
+![VirtualEvn_cppsetup.png](img%2FVirtualEvn_cppsetup.png)
+
+Now you can build.
+
+ You should get VirtualEnvironment.lib (Release ver)
+in the `./x64/Release/` folder. Note if you want to build Debug version, you need to change the linker pointed to `yaml-cpp.lib` (Release version)
+to `yaml-cppd.lib` (Debug version) that you build previously.
+
+Note: To build Debug version, in Visual Studio 2022, find the solution explorer window on the right of the screen, right click the _VirtualEnvironment_, select _Properties_, Then in the Property Page, find Librarian -> General -> Additional Dependencies.
+Type in the location of where you build the yaml-cppd.lib. Then under C/C++ -> Code Generation -> Runtime Library, set it to Multi-threaded Debug DLL (/MDd). And then build the solution in Debug version\
+![VS2022_changeDebug.png](img%2FVS2022_changeDebug.png)\
+![RuntimeLibsetup.png](img%2FRuntimeLibsetup.png)
+
+### Compile Source Codes
+
+- If you want to set up a project outside the cloned FIXS repo, you first need to create a **parent folder**. Copy the [CarMaker](../CarMaker)
 [CommonLib](../CommonLib) [tests](../tests) folders into the **parent folder**.
 Next, create a project folder in the **parent folder** (File -> Project Folder -> Create Project).
 ![CM_create_proj.png](img/CM_create_proj.png)
 
-**If want your project to be inside the FIXS repo, just create a project right under the FIXS folder.
+- If you want your project to be inside the FIXS repo, just create a project right under the FIXS folder.
 
 After creating the project folder, there will be a **src** folder and **src_cm4sl/src_tm4sl** folder: edit src folder if only for office version (no need Simulink or HIL), otherwise use src_cm4sl folder.
 In the selected folder, use **Microsoft Visual Studio 2022** to open a .sln file. Upon opening a project, proceed to source code compilation.
 
-### Compile Source Codes
+
+
+
 There is **app_tmp.c, CM_Main.c, CM_Vehicle.c, IO.c, and USer.C** files in the created project.
 
-Create a source folder by right-clicking 'CarMaker for Simulink' (or 'CarMaker' for office version) and "Add -> New Filter". 
-Name new filter as "Source", make sure it include the followings source files and headers from FIXS CommonLib folder:
-<br>[ConfigHelper.cpp](../CommonLib/ConfigHelper.cpp)
-<br>[ConfigHelper.h](../CommonLib/ConfigHelper.h),
-<br>[MsgHelper.cpp](../CommonLib/MsgHelper.cpp),
-<br>[MsgHelper.h](../CommonLib/MsgHelper.h),
-<br>[SocketHelper.cpp](../CommonLib/SocketHelper.cpp),
-<br>[SocketHelper.h](../CommonLib/SocketHelper.h),
-<br>[VirEnv_Wrapper.cpp](../CommonLib/VirEnv_Wrapper.cpp),
-<br>[VirEnv_Wrapper.h](../CommonLib/VirEnv_Wrapper.h),
-<br>[VehDataMsgDefs.h](../CommonLib/VehDataMsgDefs.h),
-<br>[VirEnvHelper.h](../CommonLib/VirEnvHelper.h),
-<br>[VirEnvHelper.cpp](../CommonLib/VirEnvHelper.cpp)
-- The project source files should look like this:<br>
-![Add_srclib.png](img/Add_srclib.png)
-- Define the dependencies folders
-    ![](img/CM_VS_IncludeDependencies.png)  
-- Define libraries 
-    ![](img/CM_VS_Inputs.png)
+
+- Define the dependencies folders\
+In C/C++ -> General -> Additional Include Directories, exam the Evaluated value, make sure the CarMaker verison and CarMaker support Matlab version are correct.
+
+    ![CM_VS_IncludeDependencies.png](img%2FCM_VS_IncludeDependencies.png)
+    - tips: Matlab version is inherited from (MATSUPP_DIR), this value can be modified from the `CarMaker.prop` file in `src` folder.
+        change the version in ```<MATSUPP_MATVER> xxx </MATSUPP_MATVER>``` accordingly.
+  
+
+- Define libraries\
+In Linker -> Input -> Additional Dependencies, add `VirtualEnvironment.lib`
+    ![CM_VS_Linker_AdditionalDependencies.png](img%2FCM_VS_Linker_AdditionalDependencies.png)
 
 Next, modify the User.cpp to include the following codes
-- At beginning of the file, add the followings, ``need to make sure RealSimCmHelper.h is included before including the windows.h!``
+- At beginning of the file, add the followings, ``need to make sure VirEnv_Wrapper.h is included before including the windows.h!``
 ```c++
 ...
 #define REALSIM
@@ -245,15 +270,25 @@ Build CarMaker for Simulink: CTRL + B
 After compiling, the executable should be in **src** or **src_cm4sl** folder. In **src**, it should be **CarMaker.win64.exe**; in **src_cm4sl**, it should be **libcarmaker4sl.mexw64**.
 
 ## Run CarMaker office
-Make sure select the compiled ```CarMaker.win64.exe``` and specify command line options to the desired config.yaml file
+Open CarMaker Office, chose Application -> Application Configuration\
+Make sure select the compiled ```CarMaker.win64.exe```  in the `Command (executable)` and specify `Command line options` 
+to the desired config.yaml file, and (optional) signal light sync table file
 
-![](img/CM_GUI_Config.png)
+Note:  `-f` to point to the yaml config file for SUMO, `-s` to point signal light sync table between SUMO and CarMaker.
+Using either relative path to the working directory or absolute path are OK
+
+![CM_GUI_Config1.png](img%2FCM_GUI_Config1.png)
 
 ## Run CarMaker-Simulink
+Open the CarMaker simulink model, double click `Edit Model Configuration`, if the compiled libcarmaker4sl.mexw64 is in the
+search directory (you can be checked by ```which libcarmaker4sl.mexw64``` inMatlab), you can leave the `Server application name` empty,
+otherwise you can type in the .mexw64 location manually. Then, specify command line options to the desired config.yaml file, and (optional) signal light sync table file
 
-Make sure the compiled libcarmaker4sl.mexw64 is in the search directory, which can be checked by ```which libcarmaker4sl.mexw64``` in Matlab. Then, specify command line options to the desired config.yaml file
+Note:  `-f` to point to the yaml config file for SUMO, `-s` to point signal light sync table between SUMO and CarMaker.
+Using either relative path to the working directory or absolute path are OK
 
 ![](img/CM_Simulink_Config.png)
+ 
 
 ```CM11_proj\src_cm4sl\RealSimGeneric.mdl```  is a good example simulink model to develop user applications
 
