@@ -1,6 +1,13 @@
 import unreal
 import sys
 import os
+# Add the script directories to sys.path
+script_dir = os.path.dirname(__file__)
+sys.path.append(script_dir)
+sys.path.append(os.path.join(script_dir, ".."))
+sys.path.append(os.path.join(script_dir, "..", "carla_scripts"))
+sys.path.append(os.path.join(script_dir, "..", "utils"))
+sys.path.append(os.path.join(script_dir, "..", "test_scenarios"))
 import pandas as pd
 import typing
 import importlib
@@ -9,20 +16,16 @@ importlib.reload(trafficlight_helper)
 
 TrafficLightHelper = trafficlight_helper.TrafficLightHelper
 TrafficLightHelper.set_offset((0.06, 328.61))
-# Add the script directories to sys.path
-script_dir = os.path.dirname(__file__)
-sys.path.append(script_dir)
-sys.path.append(os.path.join(script_dir, ".."))
-sys.path.append(os.path.join(script_dir, "..", "carla_scripts"))
-sys.path.append(os.path.join(script_dir, "..", "utils"))
+
+
 
 
 TRAFFICLIGHT_GROUP_BLUEPRINT_PATH = "/Game/Carla/Static/TrafficLight/Streetlights_01/BP_TrafficLightGroup"
 TRAFFICLIGHT_BLUEPRINT_PATH = "/Game/Carla/Static/TrafficLight/Streetlights_01/BP_TrafficLight"
 TRAFFICLIGHT_HEAD_ONLY_BLUEPRINT_PATH = "/Game/Carla/Static/TrafficLight/Streetlights_01/BP_TrafficLight_Head_Only"
 # load the tls table
-tls_table_path = 'test_scenarios/Town01_with_ego_type_as_blueprint/traffic_light_table.csv'
-tls_table = pd.read_csv(tls_table_path)
+TLS_TABLE_PATH = r'C:\Users\hg25079\Documents\GitHub\FIXS\tests\SumoCarla\test_scenarios\Town01_with_ego_type_as_blueprint\traffic_light_table.csv'
+tls_table = pd.read_csv(TLS_TABLE_PATH)
 # junction_id,link_id,x,y,z,heading
 
 # this stores the trafficlight groups, key is the junction_id, value is a list of trafficlight_unreal_transforms
@@ -49,7 +52,7 @@ for junction_id, trafficlight_transforms in trafficlight_groups.items():
                                                                                 trafficlight_group_rotation
                                                                                 )
     trafficlight_group_actor.set_actor_label(f"TrafficLightGroup{junction_id}", mark_dirty=True)
-    unreal.log(f"✅ Spawned TrafficLightGroup{junction_id} at {trafficlight_group_location}")
+    unreal.log(f"Spawned TrafficLightGroup{junction_id} at {trafficlight_group_location}")
     
     # spawn the trafficlights
     for (trafficlight_unreal_location, trafficlight_unreal_rotation) in trafficlight_transforms:
@@ -60,7 +63,7 @@ for junction_id, trafficlight_transforms in trafficlight_groups.items():
                                                                               trafficlight_unreal_rotation
                                                                               )
         trafficlight_actor.set_actor_label(f"TrafficLight{trafficlight_unreal_location.x}_{trafficlight_unreal_location.y}", mark_dirty=True)
-        unreal.log(f"✅ Spawned TrafficLight{trafficlight_unreal_location.x}_{trafficlight_unreal_location.y} at {trafficlight_unreal_location}")
+        unreal.log(f"Spawned TrafficLight{trafficlight_unreal_location.x}_{trafficlight_unreal_location.y} at {trafficlight_unreal_location}")
         # # attach the trafficlight to the trafficlight group
         # trafficlight_group_actor.attach_to_actor(trafficlight_actor)
         # add the trafficlight to the trafficlight group's trafficlights list

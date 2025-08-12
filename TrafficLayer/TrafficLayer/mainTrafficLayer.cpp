@@ -505,7 +505,7 @@ int main(int argc, char* argv[]) {
 		else {
 			string trafficIp = Config_c.SimulationSetup.TrafficSimulatorIP;
 			int trafficPort = Config_c.SimulationSetup.TrafficSimulatorPort;
-			Traffic_c.connectionSetup(trafficIp, trafficPort, Sock_c.NCLIENT);
+			Traffic_c.connectionSetup(trafficIp, trafficPort, Sock_c.NCLIENT, Config_c.SumoSetup.ExecutionOrder);
 			Traffic_c.selectSUMO();
 		}
 	}

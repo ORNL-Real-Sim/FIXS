@@ -17,8 +17,8 @@
 15,99,10,60,3,4,2,2,srrrgGGGGrrsrrrrssrrrr,10,0,NEMA,NEMA,"[5, 6, 7, 8]",5,8,638.53,531.78
 16,99,8,8,4,3,3,3,srrrsrrrrrrgGGGGGGrrrr,10,0,NEMA,NEMA,"[12, 13, 14, 15, 16, 17]",12,17,638.53,531.78
 17,99,5,5,1,3,3,4,GGGGsrrrrrrsrrrrssrrrr,10,0,NEMA,NEMA,"[0, 1, 2, 3]",0,3,638.53,531.78
-18,99,4,7,1,3,3,5,srrrsrrrrGGsrrrrssrrrr,10,0,NEMA,NEMA,"[9, 10]",9,10,638.53,531.78
-19,99,10,56,3,4,2,6,srrrsrrrrrrsrrrrggGGgg,10,0,NEMA,NEMA,"[18, 19]",18,19,638.53,531.78
+18,99,4,5,1,3,3,5,srrrsrrrrGGsrrrrssrrrr,10,0,NEMA,NEMA,"[9, 10]",9,10,638.53,531.78
+19,99,10,58,3,4,2,6,srrrsrrrrrrsrrrrggGGgg,10,0,NEMA,NEMA,"[18, 19]",18,19,638.53,531.78
 20,99,3,8,1,3,2,1,srrrsrrrrrsrrrsrrGG,3,0,NEMA,NEMA,"[17, 18]",17,18,867.66,436.43
 21,99,15,70,3,4,2,2,srrrgGGGggsrrrsrrrr,3,0,NEMA,NEMA,"[5, 6, 7]",5,7,867.66,436.43
 22,99,6,6,4,3,2,4,gGggsrrrrrsrrrsrrrr,3,0,NEMA,NEMA,[1],1,1,867.66,436.43

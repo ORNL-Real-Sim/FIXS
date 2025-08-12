@@ -26643,7 +26643,7 @@
 				<intObjectRef key="70"/>
 			</vehClasses>
 			<vehRoutSta>
-				<vehicleRouteStatic destLink="1" destPos="1.2220027011965482" formula="" name="" no="5" relFlow="">
+				<vehicleRouteStatic destLink="1" destPos="1.3759928877390284" formula="" name="" no="5" relFlow="">
 					<linkSeq>
 						<intObjectRef key="10001"/>
 						<intObjectRef key="136"/>
@@ -26729,6 +26729,8 @@
 						<intObjectRef key="144"/>
 						<intObjectRef key="10226"/>
 						<intObjectRef key="25"/>
+						<intObjectRef key="10077"/>
+						<intObjectRef key="148"/>
 						<intObjectRef key="10067"/>
 					</linkSeq>
 				</vehicleRouteStatic>

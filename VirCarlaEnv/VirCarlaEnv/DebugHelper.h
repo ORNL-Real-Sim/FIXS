@@ -2,7 +2,7 @@
 #include <carla/client/DebugHelper.h>
 #include <carla/geom/Location.h>
 
-#define M_PI 3.14159265358979323846f
+#define M_PI 3.14159265358979323846
 void drawCircle(carla::client::DebugHelper debug,
     const carla::geom::Location& center,
     float radius = 50.0f,

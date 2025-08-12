@@ -82,59 +82,76 @@ def change_config_directory(sumo_setting, penetration_rate, step_length, source_
     xmlTree.write(sumo_config_file)
     os.environ['PATH'] += os.pathsep + '..\\..\\..\\..\\CommonLib\\libsumo'
 
-def run_sumo(setting_dir, port, gui=False):
+def run_sumo(setting_dir, port, step_length, num_clients, gui=False):
     # start sumo-gui -c .\chattCavMpr.sumocfg --remote-port 1337 --step-length 1 --netstate-dump chatt.xml --netstate-dump.precision 10 --num-clients 2  --begin 28800 --end 33000
     # the files are in setting_dir
     if gui:
-        os.system(f'start sumo-gui -c {setting_dir}/chattCavMpr.sumocfg --remote-port {port} --step-length 1 --netstate-dump {setting_dir}/chatt.xml --netstate-dump.precision 10 --num-clients 2  --begin 28800 --end 33000')
+        os.system(f'start sumo-gui -c {setting_dir}/chattCavMpr.sumocfg --remote-port {port} --step-length {step_length} --netstate-dump {setting_dir}/chatt.xml --netstate-dump.precision 10 --num-clients {num_clients}  --begin 28800 --end 32400')
     else:
-        os.system(f'start sumo -c {setting_dir}/chattCavMpr.sumocfg --remote-port {port} --step-length 1 --netstate-dump {setting_dir}/chatt.xml --netstate-dump.precision 10 --num-clients 2  --begin 28800 --end 30000')
+        os.system(f'start sumo -c {setting_dir}/chattCavMpr.sumocfg --remote-port {port} --step-length {step_length} --netstate-dump {setting_dir}/chatt.xml --netstate-dump.precision 10 --num-clients {num_clients}  --begin 28800 --end 32400')
 
-def run_traffic_layer(setting_dir, port):
+def run_traffic_layer(setting_dir, config_file_name):
     # start cmd /k ..\..\Trafficlayer\x64\Debug\TrafficLayer.exe -f '.\ecodrivingConfig.yaml'\
+    
+    os.system(f'start cmd /k {setting_dir}\\TrafficLayer.exe -f {os.path.join(setting_dir, config_file_name)}')
 
-    os.system(f'start cmd /k {setting_dir}\\TrafficLayer.exe -f {setting_dir}\\ecodriving_config_Sumo.yaml')
-
-def run_controller(setting_dir, sumo_port, traffic_layer_port, simulink_port, penetration_rate, eco_driving=True, vehicle_dynamics=True):
-    command = f'start cmd /k python .\\eco_driving_mpr_test.py -c {setting_dir}\\ecodriving_config_Sumo.yaml --sumoPort {sumo_port} --trafficlayerPort {traffic_layer_port} --simulinkPort {simulink_port} --pathToNet {setting_dir} --penetrationRate {penetration_rate}'
+def run_controller(setting_dir, config_file_name, sumo_port, traffic_layer_port, simulink_port, penetration_rate, step_length, eco_driving=True, vehicle_dynamics=True, use_simulink_for_energy_evaluation=False, vanila=True):
+    controller_script = 'eco_driving_mpr_SUMO_vanila.py' if vanila else 'eco_driving_mpr_SUMO.py'
+    command = f'start cmd /k python .\\{controller_script} -c {os.path.join(setting_dir, config_file_name)} --sumoPort {sumo_port} --trafficlayerPort {traffic_layer_port} --simulinkPort {simulink_port} --pathToNet {setting_dir} --penetrationRate {penetration_rate} --stepLength {step_length}'
     if eco_driving:
         command += ' --ecoDriving'
     if vehicle_dynamics:
         command += ' --vehicleDynamics'
+    if use_simulink_for_energy_evaluation:
+        command += ' --useSimulinkForEnergyEvaluation'
     os.system(command)
 
-def run_simulink(setting_dir, model_name):
-    
+def run_simulink(setting_dir, model_name, config_file_name):
     # start cmd /c matlab -nodesktop -nosplash -r "configFilename = '.\config_SUMO.yaml'; simModelName= 'EV_longitude'; ecodrivingMain; "
-    matlab_command = f"cmd /c matlab -nodesktop -nosplash -r \"realsim_script('{setting_dir}', '{model_name}');\""
-
+    matlab_command = f"cmd /c matlab -nodesktop -nosplash -r \"realsim_script_Sumo('{setting_dir}', '{model_name}', '{config_file_name}');\""
+    print(matlab_command)
     # Execute the MATLAB command
     os.system(matlab_command)
 
 
-def run_one_setting(setting_dir, source_dir, experiment_setting):
+def run_one_setting(setting_dir, source_dir, experiment_setting, vanila=False):
 
     penetration_rate = experiment_setting['penetration_rate']
+    step_length = experiment_setting['step_length']
     sumo_port = experiment_setting['SUMO']['port']
     simulink_port = experiment_setting['Simulink']['port']
     model_name = experiment_setting['Simulink']['model_name']
     fixs_port = experiment_setting['FIXS']['port']
     ecodriving = experiment_setting['eco_driving']
     vehicle_dynamics = experiment_setting['vehicle_dynamics']
+    use_simulink_for_energy_evaluation = experiment_setting['use_simulink_for_energy_evaluation']
     os.chdir(setting_dir)
-    run_sumo(setting_dir, sumo_port, gui=False)
-    run_traffic_layer(setting_dir, fixs_port)
+    run_sumo(setting_dir, sumo_port, step_length, num_clients=2 if not vanila else 1, gui=True)
+    config_file_name = os.path.basename(experiment_setting['config_file'])
+    run_traffic_layer(setting_dir, config_file_name)
     # wait until initialization is done
-    time.sleep(5)
-    os.chdir('..\\..\\..\\')
-    run_controller(setting_dir, sumo_port, fixs_port, simulink_port, penetration_rate, ecodriving, vehicle_dynamics)
-    time.sleep(2)
-    os.chdir(setting_dir)
-    print('Running Simulink model...')
-    print(f'setting_dir: {setting_dir}')
-    run_simulink(setting_dir, model_name)
+    # if not vanila:
+    #     time.sleep(5)
+    #     os.chdir('..\\..\\..\\')
+    #     run_controller(setting_dir, 
+    #                    config_file_name, 
+    #                    sumo_port, 
+    #                    fixs_port, 
+    #                    simulink_port, 
+    #                    penetration_rate, 
+    #                    step_length, 
+    #                    ecodriving, 
+    #                    vehicle_dynamics, 
+    #                    use_simulink_for_energy_evaluation, 
+    #                    vanila=vanila)
+    #     time.sleep(2)
+    #     os.chdir(setting_dir)
+    #     if vehicle_dynamics or use_simulink_for_energy_evaluation:
+    #         print('Running Simulink model...')
+    #         print(f'setting_dir: {setting_dir}')
+    #         run_simulink(setting_dir, model_name, config_file_name)
 
-def run_settings(config):
+def run_settings(config, vanila=False):
     root_dir = config['root_dir']
     for experiment_idx, experiment_setting in config['Experiments'].items():
             
@@ -148,6 +165,7 @@ def run_settings(config):
         penetration_rate = experiment_setting['penetration_rate']
         ecodriving = experiment_setting['eco_driving']
         vehicle_dynamics = experiment_setting['vehicle_dynamics']
+        use_simulink_for_energy_evaluation = experiment_setting['use_simulink_for_energy_evaluation']
         model_name = experiment_setting['Simulink']['model_name']
         output_dir = os.path.join(working_dir, '{}%_{}Hz'.format(int(penetration_rate*100), int(1/step_length)))
         
@@ -176,7 +194,8 @@ def run_settings(config):
         sumo_port = sumo_setting['port']
         simulink_port = experiment_setting['Simulink']['port']
         fixs_port = experiment_setting['FIXS']['port']
-        config_file_path = os.path.join(source_dir, experiment_setting['config_file'])
+        config_file_name = os.path.basename(experiment_setting['config_file'])
+        config_file_path = os.path.join(source_dir, config_file_name)
 
         yaml = YAML()
         yaml.preserve_quotes = True  # Optional: Preserve quotes if present in the original YAML
@@ -189,18 +208,17 @@ def run_settings(config):
         config['XilSetup']['VehicleSubscription'][0]['port'] = [simulink_port]
 
         # Write back to the file while preserving the original format
-        with open(os.path.join(output_dir, os.path.basename(config_file_path)), 'w') as f:
+        with open(os.path.join(output_dir, config_file_name), 'w') as f:
             yaml.dump(config, f)
 
 
-        run_one_setting(output_dir, source_dir, experiment_setting)
+        run_one_setting(output_dir, source_dir, experiment_setting, vanila=vanila)
         os.chdir(working_dir)
         
-        
-# main function
 if __name__ == '__main__':
-    config_file = './Experiments_Sumo/experiment_config_Sumo.yaml'
+    VANILA = False
+    config_file = './Experiments_Sumo/experiment_config_Sumo_debug.yaml'
     with open(config_file, 'r') as f:
         config = yaml.load(f, Loader=yaml.FullLoader)
     
-    run_settings(config)
+    run_settings(config, vanila=VANILA)

@@ -279,7 +279,6 @@ class VissimEnvMultiAgent:
         # End_of_simulation = 3600   # run long enough to record any signal changes within a cycle after 1200 s
         self.vissim.Simulation.SetAttValue('SimPeriod', self.end_of_simulation)
         # Set up simulation to use all cores
-        # self.vissim.Simulation.SetAttValue('UseAllCores', True)
         self.vissim.Simulation.SetAttValue('NumCores', 1)
         # Set a random seed
         self.vissim.Simulation.SetAttValue('RandSeed', seed)
@@ -574,7 +573,7 @@ if __name__ == '__main__':
     experiment_config = {path_key:os.path.join(os.getcwd(), relative_path) for path_key, relative_path in experiment_config.items()}
     print(experiment_config)
     parser = argparse.ArgumentParser()
-    parser.add_argument("-c", "--config", type=str, help="Path to the Configuration file", default=r'C:\Users\hg25079\Documents\GitHub\FIXS\tests\Applications\Eco_Fixed_Timming\Experiments_Vissim\ecodriving_config_Vissim.yaml')
+    parser.add_argument("-c", "--config", type=str, help="Path to the Configuration file", default=r'C:\Users\hg25079\Documents\GitHub\FIXS\tests\Applications\Eco_Fixed_Timming\ecodrivingConfig_Vissim_speed.yaml')
     parser.add_argument("--vissimPort", type=str, help="Specify port of vissim", default=1337)
     parser.add_argument("--trafficLayerIP", type=str, help="Specify IP of traffic layer", default="127.0.0.1")
     parser.add_argument("--trafficlayerPort", type=str, help="Specify port of traffic layer", default=430)
@@ -582,6 +581,7 @@ if __name__ == '__main__':
     parser.add_argument("--simulinkPort", type=str, help="Specify port of simulink", default=420)
     parser.add_argument("--ecoDriving", action="store_true", help="Use the eco driving controller", default=True)
     parser.add_argument("--vehicleDynamics", action="store_true", help="use the vehicle dynamis", default=False)
+    parser.add_argument("--useSimulinkForEnergyEvaluation", action="store_true", help="use the simulink for energy evaluation", default=False)
     parser.add_argument("--penetrationRate", type=float, help="the penetration rate of cav", default=0.1)
     parser.add_argument("--pathToNet", type=str, help="the path to the net file", default=r'C:\Users\hg25079\Documents\GitHub\FIXS\tests\Applications\Eco_Fixed_Timming\Experiments_Vissim\banMinorLeftTurnFixedTimingV2_WithEgo')
     parser.add_argument("--verbose", action="store_true", help="print verbose output", default=True)
@@ -599,24 +599,25 @@ if __name__ == '__main__':
     vehicle_dynamics = args.vehicleDynamics
     eco_driving = args.ecoDriving
     verbose = args.verbose
-    # run_traffic_layer('TrafficLayer.exe',traffic_layer_config)
-    vissim_env = VissimEnvMultiAgent(driver_model_path=r"C:\Users\hg25079\Documents\GitHub\FIXS\tests\Applications\Eco_Fixed_Timming\DriverModel_RealSim_v2021.dll",
-                                    vissim_port=vissim_port,
-                                    traffic_layer_ip=traffic_layer_ip,
-                                    traffic_layer_port=traffic_layer_port,
-                                    simulink_ip=simulink_ip,
-                                    simulink_port=simulink_port,
-                                    simulation_file_path=path_to_net,
-                                    with_ego_veh=True,
-                                    with_ext_driver=True,
-                                    traffic_layer_config_path=traffic_layer_config, 
-                                    eco_driving=eco_driving,
-                                    with_vehicle_dynamics=vehicle_dynamics,
-                                    use_simulink_for_energy_evaluation=False,
-                                    step_length=0.1,
-                                    verbose=verbose)
+    # Driver model path should be full path instrad of the relative path
+    run_traffic_layer('TrafficLayer.exe',traffic_layer_config)
+    # vissim_env = VissimEnvMultiAgent(driver_model_path=r"C:\Users\hg25079\Documents\GitHub\FIXS\tests\Applications\Eco_Fixed_Timming\DriverModel_RealSim_v2021.dll",
+    #                                 vissim_port=vissim_port,
+    #                                 traffic_layer_ip=traffic_layer_ip,
+    #                                 traffic_layer_port=traffic_layer_port,
+    #                                 simulink_ip=simulink_ip,
+    #                                 simulink_port=simulink_port,
+    #                                 simulation_file_path=path_to_net,
+    #                                 with_ego_veh=True,
+    #                                 with_ext_driver=True,
+    #                                 traffic_layer_config_path=traffic_layer_config, 
+    #                                 eco_driving=eco_driving,
+    #                                 with_vehicle_dynamics=vehicle_dynamics,
+    #                                 use_simulink_for_energy_evaluation=False,
+    #                                 step_length=0.1,
+    #                                 verbose=verbose)
     
-    vissim_env.init_simulation_environment(cavpr=penetration_rate)
-    vissim_env.warmup_vissim()
-    vissim_env.start_subscription(control_ego_only=False)
+    # vissim_env.init_simulation_environment(cavpr=penetration_rate)
+    # vissim_env.warmup_vissim()
+    # vissim_env.start_subscription(control_ego_only=False)
     

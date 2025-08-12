@@ -46,13 +46,13 @@ ApplicationSetup:
     # 1. Receive data from FIXS LAYER
     # 2. Send data to XIL LAYER / Back to FIXS LAYER
   - type: "ego"
-    attribute: {id: ["ego"], radius: [100]}
+    attribute: {id: ["ego"], radius: [50]}
     ip: ["127.0.0.1"]
     port: [430]
 
   SignalSubscription:
   - type: intersection
-    attribute: {name: ['167']}
+    attribute: {name: ['111', '139', '156', '167', '184']}
     ip: ['127.0.0.1']
     port: [430]
     

@@ -188,7 +188,7 @@ SumoTrafficLightState BridgeHelper::map_Carla_traffic_light_state_to_Sumo(carla:
 }
 
 
-carla::rpc::TrafficLightState BridgeHelper::map_Sumo_traffic_light_state_to_Carla(SumoTrafficLightState sumoTrafficLightState) {
+carla::rpc::TrafficLightState BridgeHelper::map_Sumo_traffic_light_state_to_Carla(SumoTrafficLightState& sumoTrafficLightState) {
     // Map SumoTrafficLightState to carla::rpc::TrafficLightState
     if (sumoTrafficLightState == SumoTrafficLightState::RED ||
         sumoTrafficLightState == SumoTrafficLightState::RED_YELLOW) {
@@ -229,8 +229,8 @@ char BridgeHelper::Sumo_traffic_light_state_to_char(SumoTrafficLightState state)
     return static_cast<char>(state);
 }
 
-std::unordered_map<std::string, std::unordered_map<std::string, TrafficLight>> BridgeHelper::readTrafficLightTable(const std::string& filename) {
-    std::unordered_map<std::string, std::unordered_map<std::string, TrafficLight>> trafficLightMap;
+std::unordered_map<std::string, std::unordered_map<int, TrafficLight>> BridgeHelper::readTrafficLightTable(const std::string& filename) {
+    std::unordered_map<std::string, std::unordered_map<int, TrafficLight>> trafficLightMap;
     std::ifstream file(filename);
     std::string line;
 
@@ -239,41 +239,49 @@ std::unordered_map<std::string, std::unordered_map<std::string, TrafficLight>> B
         return trafficLightMap;
     }
 
-    // Skip the header
+    // Skip header
     std::getline(file, line);
 
-    // Parse each line
     while (std::getline(file, line)) {
         std::stringstream ss(line);
-        TrafficLight trafficLight;
-        char comma;
+        std::string token;
 
-        ss >> trafficLight.junctionId >> comma
-            >> trafficLight.linkId >> comma
-            >> trafficLight.x >> comma
-            >> trafficLight.y >> comma
-            >> trafficLight.z >> comma
-            >> trafficLight.heading;
+        std::string junctionId;
+        int linkId;
+        double x, y, z, heading;
 
-        trafficLightMap[trafficLight.junctionId][trafficLight.linkId] = trafficLight;
+        std::getline(ss, junctionId, ',');
+        std::getline(ss, token, ',');
+        linkId = std::stoi(token);
+        std::getline(ss, token, ',');
+        x = std::stod(token);
+        std::getline(ss, token, ',');
+        y = std::stod(token);
+        std::getline(ss, token, ',');
+        z = std::stod(token);
+        std::getline(ss, token, ',');
+        heading = std::stod(token);
+
+        TrafficLight trafficLight(junctionId, linkId, x, y, z, heading);
+        trafficLightMap[junctionId][linkId] = trafficLight;
     }
 
     return trafficLightMap;
 }
 
 
-std::pair<std::string, std::string> BridgeHelper::find_closest_trafficLight_id(
-    std::unordered_map<std::string, std::unordered_map<std::string, TrafficLight>>& trafficLightMap,
+std::pair<std::string, int> BridgeHelper::find_closest_trafficLight_id(
+    std::unordered_map<std::string, std::unordered_map<int, TrafficLight>>& trafficLightMap,
     double x, double y
 ) {
     double min_dist = std::numeric_limits<double>::max();
-    std::pair<std::string, std::string> closest_ids = { "", "" };
+    std::pair<std::string, int> closest_ids = { "", -1 };
 
-    for (const std::pair<std::string, std::unordered_map<std::string, TrafficLight>>& pair : trafficLightMap) {
+    for (const std::pair<std::string, std::unordered_map<int, TrafficLight>>& pair : trafficLightMap) {
         const std::string& junctionId = pair.first;
-        const std::unordered_map<std::string, TrafficLight>& linkMap = pair.second;
-        for (const std::pair<std::string, TrafficLight>& pair : linkMap) {
-            const std::string& linkId = pair.first;
+        const std::unordered_map<int, TrafficLight>& linkMap = pair.second;
+        for (const std::pair<int, TrafficLight>& pair : linkMap) {
+            const int& linkId = pair.first;
             const TrafficLight& trafficLight = pair.second;
             double dx = trafficLight.x - x;
             double dy = trafficLight.y - y;

@@ -23,7 +23,7 @@ public:
 	TrafficHelper();
 
 	void connectionSetup(int nClient);
-	void connectionSetup(std::string trafficIp, int trafficPort, int nClientInput);
+	void connectionSetup(std::string trafficIp, int trafficPort, int nClientInput, int order);
 
 	void enableVehSub();
 	void disableVehSub();

@@ -166,13 +166,13 @@ class World(object):
         self.world = carla_world
         self.actor_role_name = args.rolename
         self.vehicle_type = args.vehicle_type
-        try:
-            self.map = self.world.get_map()
-        except RuntimeError as error:
-            print('RuntimeError: {}'.format(error))
-            print('  The server could not send the OpenDRIVE (.xodr) file:')
-            print('  Make sure it exists, has the same name of your town, and is correct.')
-            sys.exit(1)
+        # try:
+        #     self.map = self.world.get_map()
+        # except RuntimeError as error:
+        #     print('RuntimeError: {}'.format(error))
+        #     print('  The server could not send the OpenDRIVE (.xodr) file:')
+        #     print('  Make sure it exists, has the same name of your town, and is correct.')
+        #     sys.exit(1)
         self.hud = hud
         self.player = None
         self.collision_sensor = None
@@ -194,19 +194,19 @@ class World(object):
         self.show_vehicle_telemetry = False
         self.doors_are_open = False
         self.current_map_layer = 0
-        self.map_layer_names = [
-            carla.MapLayer.NONE,
-            carla.MapLayer.Buildings,
-            carla.MapLayer.Decals,
-            carla.MapLayer.Foliage,
-            carla.MapLayer.Ground,
-            carla.MapLayer.ParkedVehicles,
-            carla.MapLayer.Particles,
-            carla.MapLayer.Props,
-            carla.MapLayer.StreetLights,
-            carla.MapLayer.Walls,
-            carla.MapLayer.All
-        ]
+        # self.map_layer_names = [
+        #     carla.MapLayer.NONE,
+        #     carla.MapLayer.Buildings,
+        #     carla.MapLayer.Decals,
+        #     carla.MapLayer.Foliage,
+        #     carla.MapLayer.Ground,
+        #     carla.MapLayer.ParkedVehicles,
+        #     carla.MapLayer.Particles,
+        #     carla.MapLayer.Props,
+        #     carla.MapLayer.StreetLights,
+        #     carla.MapLayer.Walls,
+        #     carla.MapLayer.All
+        # ]
 
     def restart(self):
         self.player_max_speed = 1.589
@@ -245,18 +245,23 @@ class World(object):
             # print the role name
             
         while self.player is None:
-            if not self.map.get_spawn_points():
-                print('There are no spawn points available in your map/town.')
-                print('Please add some Vehicle Spawn Point to your UE4 scene.')
-                sys.exit(1)
-            spawn_points = self.map.get_spawn_points()
-            spawn_point = random.choice(spawn_points) if spawn_points else carla.Transform()
+            # if not self.map.get_spawn_points():
+            #     print('There are no spawn points available in your map/town.')
+            #     print('Please add some Vehicle Spawn Point to your UE4 scene.')
+            #     sys.exit(1)
+            # spawn_points = self.map.get_spawn_points()
+            # spawn_point = random.choice(spawn_points) if spawn_points else carla.Transform()
+            # This is a hot fix
+            # Carla Transform:
+            # Location -> x: 323.065, y: 195.16, z: 0.5
+            # Rotation -> pitch: 0, yaw: 180.005, roll: 0
+            spawn_point = carla.Transform(carla.Location(323.065, 195.16, 0.5), carla.Rotation(pitch=0, yaw=180.005, roll=0))
             self.player = self.world.try_spawn_actor(blueprint, spawn_point)
             self.show_vehicle_telemetry = False
             self.modify_vehicle_physics(self.player)
         # Set up the sensors.
         self.collision_sensor = CollisionSensor(self.player, self.hud)
-        self.lane_invasion_sensor = LaneInvasionSensor(self.player, self.hud)
+        # self.lane_invasion_sensor = LaneInvasionSensor(self.player, self.hud)
         self.gnss_sensor = GnssSensor(self.player)
         self.imu_sensor = IMUSensor(self.player)
         self.camera_manager = CameraManager(self.player, self.hud, self._gamma)
@@ -279,20 +284,20 @@ class World(object):
         self.hud.notification('Weather: %s' % preset[1])
         self.player.get_world().set_weather(preset[0])
 
-    def next_map_layer(self, reverse=False):
-        self.current_map_layer += -1 if reverse else 1
-        self.current_map_layer %= len(self.map_layer_names)
-        selected = self.map_layer_names[self.current_map_layer]
-        self.hud.notification('LayerMap selected: %s' % selected)
+    # def next_map_layer(self, reverse=False):
+    #     self.current_map_layer += -1 if reverse else 1
+    #     self.current_map_layer %= len(self.map_layer_names)
+    #     selected = self.map_layer_names[self.current_map_layer]
+    #     self.hud.notification('LayerMap selected: %s' % selected)
 
-    def load_map_layer(self, unload=False):
-        selected = self.map_layer_names[self.current_map_layer]
-        if unload:
-            self.hud.notification('Unloading map layer: %s' % selected)
-            self.world.unload_map_layer(selected)
-        else:
-            self.hud.notification('Loading map layer: %s' % selected)
-            self.world.load_map_layer(selected)
+    # def load_map_layer(self, unload=False):
+    #     selected = self.map_layer_names[self.current_map_layer]
+    #     if unload:
+    #         self.hud.notification('Unloading map layer: %s' % selected)
+    #         self.world.unload_map_layer(selected)
+    #     else:
+    #         self.hud.notification('Loading map layer: %s' % selected)
+    #         self.world.load_map_layer(selected)
 
     def toggle_radar(self):
         if self.radar_sensor is None:
@@ -328,7 +333,7 @@ class World(object):
         sensors = [
             self.camera_manager.sensor,
             self.collision_sensor.sensor,
-            self.lane_invasion_sensor.sensor,
+            # self.lane_invasion_sensor.sensor,
             self.gnss_sensor.sensor,
             self.imu_sensor.sensor]
         for sensor in sensors:
@@ -354,7 +359,6 @@ class KeyboardControl(object):
             self._control = carla.VehicleControl()
             self._ackermann_control = carla.VehicleAckermannControl()
             self._lights = carla.VehicleLightState.NONE
-            world.player.set_autopilot(self._autopilot_enabled)
             world.player.set_light_state(self._lights)
         elif isinstance(world.player, carla.Walker):
             self._control = carla.WalkerControl()
@@ -683,7 +687,7 @@ class HUD(object):
             'Client:  % 16.0f FPS' % clock.get_fps(),
             '',
             'Vehicle: % 20s' % get_actor_display_name(world.player, truncate=20),
-            'Map:     % 20s' % world.map.name.split('/')[-1],
+            # 'Map:     % 20s' % world.map.name.split('/')[-1],
             'Simulation time: % 12s' % datetime.timedelta(seconds=int(self.simulation_time)),
             '',
             'Speed:   % 15.0f km/h' % (3.6 * math.sqrt(v.x**2 + v.y**2 + v.z**2)),

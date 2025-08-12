@@ -3,6 +3,9 @@
 *.~vsdx
 *.slx.autosave
 **/Work
+Experiments_Sumo/
+Experiments_Vissim/
+Results/
 *.slx.original
 __pycache__/
 *.pyc
