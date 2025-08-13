@@ -142,7 +142,7 @@ int main(int argc, const char* argv[]) {
     const std::chrono::milliseconds step_duration_ms(static_cast<int>(trafficRefreshRate * 1000));
 	// If the vehicle type is used as the blueprint ID, set this to true
     bool USE_VEHICLE_TYPE_AS_BLUEPRINT = true;
-	// Enable external control for interested vehicles, if turned off, the interested vehicles' position will be controlled by the Sumo
+	// Enable external control for interested vehicles, if turned off, the interested vehicles will be controlled by the Sumo
 	bool ENABLE_EXT_CONTROL = true;
     std::unordered_set<std::string> setInterestedIds;
     for (const std::string& id : carlaSetup.InterestedIds) {
@@ -415,7 +415,7 @@ int main(int argc, const char* argv[]) {
                     const carla::client::ActorBlueprint* vehicle_blueprint = blueprint_library->Find(carlaActorTypeId);
 					// C++ API does not allow modifying a blueprint after retrieval.
                     // To work around this in C++, we need to make a copy of the ActorBlueprint,
-                    // then modify the attributes on the copy — not the original const pointer returned by Find.
+                    // then modify the attributes on the copy ï¿½ not the original const pointer returned by Find.
                     carla::client::ActorBlueprint vehicle_blueprint_local = *vehicle_blueprint;
                     vehicle_blueprint_local.SetAttribute("role_name", sumoActorId); // Set the role name to the Sumo actor ID
                     
