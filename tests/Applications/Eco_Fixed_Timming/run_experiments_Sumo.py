@@ -130,26 +130,26 @@ def run_one_setting(setting_dir, source_dir, experiment_setting, vanila=False):
     config_file_name = os.path.basename(experiment_setting['config_file'])
     run_traffic_layer(setting_dir, config_file_name)
     # wait until initialization is done
-    # if not vanila:
-    #     time.sleep(5)
-    #     os.chdir('..\\..\\..\\')
-    #     run_controller(setting_dir, 
-    #                    config_file_name, 
-    #                    sumo_port, 
-    #                    fixs_port, 
-    #                    simulink_port, 
-    #                    penetration_rate, 
-    #                    step_length, 
-    #                    ecodriving, 
-    #                    vehicle_dynamics, 
-    #                    use_simulink_for_energy_evaluation, 
-    #                    vanila=vanila)
-    #     time.sleep(2)
-    #     os.chdir(setting_dir)
-    #     if vehicle_dynamics or use_simulink_for_energy_evaluation:
-    #         print('Running Simulink model...')
-    #         print(f'setting_dir: {setting_dir}')
-    #         run_simulink(setting_dir, model_name, config_file_name)
+    if not vanila:
+        time.sleep(5)
+        os.chdir('..\\..\\..\\')
+        run_controller(setting_dir, 
+                       config_file_name, 
+                       sumo_port, 
+                       fixs_port, 
+                       simulink_port, 
+                       penetration_rate, 
+                       step_length, 
+                       ecodriving, 
+                       vehicle_dynamics, 
+                       use_simulink_for_energy_evaluation, 
+                       vanila=vanila)
+        time.sleep(2)
+        os.chdir(setting_dir)
+        if vehicle_dynamics or use_simulink_for_energy_evaluation:
+            print('Running Simulink model...')
+            print(f'setting_dir: {setting_dir}')
+            run_simulink(setting_dir, model_name, config_file_name)
 
 def run_settings(config, vanila=False):
     root_dir = config['root_dir']

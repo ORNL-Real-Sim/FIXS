@@ -28,6 +28,7 @@ This README contains general information of the interface. For specific document
 * ### [VISSIM Interface](doc/VISSIMdoc.md)
 * ### [SUMO Interface](doc/SUMOdoc.md)
 * ### [CarMaker](doc/CarMakerDoc.md)
+* ### [CARLA](doc/CARLAdoc.md)
 
 Current software versions used in FIXS development
 CM13.1.2, Carla 0.9.15, VISSIM 2022, SUMO 1.21, dSPACE/Matlab 2024a
@@ -64,10 +65,10 @@ There are different mode of synchronization and opeartion of the Real-Sim interf
     - **binary 001, integer 1**: Application/Xil will connect with the Simulator and in wait mode until the ego vehicle enters the network then sync. 
 
         This is suitable for simulation environment where users want to run the SUMO simulation at fast pace without running a Simulink model until the ego vehicle enters. 
-<!--    - **binary 010, integer 2**: Application/Xil will connect with the Simulator and running steps but NOT sync with the Simulator until the ego vehicle enters the network
+    <!--    - **binary 010, integer 2**: Application/Xil will connect with the Simulator and running steps but NOT sync with the Simulator until the ego vehicle enters the network
 
         This is suitable for XIL environment where users want to run the VISSIM/SUMO simulation at fast pace before the ego vehicle enters the network, but the Simulink model needs to also starts at beginning. Before ego vehicle enters, Simulink and VISSIM/SUMO are both running without any message sharing. After ego vehicle enters, the ego vehicle in Simulink will then sync with the same one in VISSIM/SUMO. 
--->
+    -->
     - **binary 100, integer 4**: Application/Xil will connect with the Simulator and in wait mode until the specified initial simulation seconds (parameter **SimulationModeParamter**) then sync
 
         This is suitable for simulation environment where users want to run the SUMO simulation at fast pace without running a Simulink model until the a specific seconds later.
@@ -101,7 +102,7 @@ cmake --build . --config Release
 ```
 
 * Build yaml-cpp\
-reference: https://github.com/jbeder/yaml-cpp \
+  reference: https://github.com/jbeder/yaml-cpp \
   Note: Build in Release version if also compiling Release version of `VirtualEnvironment.lib` and CarMaker executable. Build in Debug if compiling Debug version of `VirtualEnvironment.lib` and CarMaker executable**
 ```
 cd .\CommonLib\yaml-cpp
