@@ -140,6 +140,7 @@ public:
 	bool ENABLE_VEH_SIMULATOR = false;
 
 	bool ENABLE_CARLA = false;
+	bool ENABLE_CARLA_EXTERNAL_CONTROL = false;
 
 	double tSimuEnd = 90000;
 

@@ -5,7 +5,7 @@
     <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <LocalDebuggerCommandArguments>-f ..\..\tests\Applications\Eco_Fixed_Timming\Experiments_Sumo\Debug\0%_1Hz_E\ecodriving_config_Sumo_wo_dyno.yaml</LocalDebuggerCommandArguments>
+    <LocalDebuggerCommandArguments>-f ..\..\tests\SumoCarla\defaultConfig.yaml</LocalDebuggerCommandArguments>
     <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
     <LocalDebuggerEnvironment>PATH=%PATH%;..\..\CommonLib\libsumo;</LocalDebuggerEnvironment>
   </PropertyGroup>

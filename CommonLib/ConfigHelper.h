@@ -114,7 +114,9 @@ struct CarlaSetup_t {
 
 	bool EnableCosimulation;
 
-	bool EnableEgoSimulink;
+	bool EnableExternalControl;
+
+	bool UseVehicleTypeAsBlueprint;
 
 	std::string CarlaServerIP;
 
@@ -125,6 +127,8 @@ struct CarlaSetup_t {
 	int CarlaClientPort;
 
 	std::string CarlaMapName;
+
+	std::string CenteredViewId;
 
 	double TrafficRefreshRate;
 

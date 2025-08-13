@@ -411,11 +411,31 @@ int ConfigHelper::getConfig(string configName) {
 		CarlaSetup.EnableCosimulation = false;
 	}
 
-	if (node["EnableEgoSimulink"]) {
-		CarlaSetup.EnableEgoSimulink = parserFlag(node, "EnableEgoSimulink");
+	//if (node["EnableEgoSimulink"]) {
+	//	CarlaSetup.EnableEgoSimulink = parserFlag(node, "EnableEgoSimulink");
+	//}
+	//else {
+	//	CarlaSetup.EnableEgoSimulink = false;
+	//}
+	if (node["EnableExternalControl"]) {
+		CarlaSetup.EnableExternalControl = parserFlag(node, "EnableExternalControl");
 	}
 	else {
-		CarlaSetup.EnableEgoSimulink = false;
+		CarlaSetup.EnableExternalControl = false;
+	}
+	if (node["UseVehicleTypeAsBlueprint"]) {
+		CarlaSetup.UseVehicleTypeAsBlueprint = parserFlag(node, "UseVehicleTypeAsBlueprint");
+	}
+	else {
+		CarlaSetup.UseVehicleTypeAsBlueprint = false;
+	}
+
+	if (node["CenteredViewId"]) {
+		CarlaSetup.CenteredViewId = parserString(node, "CenteredViewId");
+	}
+	else {
+		CarlaSetup.CenteredViewId = "ego";
+		printf("\nCentered View Id not specified! Will use ego as default!\n");
 	}
 
 	if (node["CarlaServerIP"]) {
