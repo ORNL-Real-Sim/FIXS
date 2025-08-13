@@ -141,9 +141,12 @@ int main(int argc, const char* argv[]) {
 	double trafficRefreshRate = carlaSetup.TrafficRefreshRate;
     const std::chrono::milliseconds step_duration_ms(static_cast<int>(trafficRefreshRate * 1000));
 	// If the vehicle type is used as the blueprint ID, set this to true
-    bool USE_VEHICLE_TYPE_AS_BLUEPRINT = true;
+    bool useVhicleTypeAsBlueprint = carlaSetup.UseVehicleTypeAsBlueprint;
 	// Enable external control for interested vehicles, if turned off, the interested vehicles will be controlled by the Sumo
-	bool ENABLE_EXT_CONTROL = true;
+    bool enableExternalControl = carlaSetup.EnableExternalControl;
+    // centeredViewId is the id of the camera that is used to render the view in Carla      
+    std::string centeredViewId = configHelper.CarlaSetup.CenteredViewId;
+
     std::unordered_set<std::string> setInterestedIds;
     for (const std::string& id : carlaSetup.InterestedIds) {
         setInterestedIds.insert(id);
@@ -178,31 +181,17 @@ int main(int argc, const char* argv[]) {
 		// initialize carla client and world
         std::cout << "Client API version : " << carlaClient.GetClientVersion() << '\n';
         std::cout << "Server API version : " << carlaClient.GetServerVersion() << '\n';
-        
-        // To be replaced with the actual Carla Map from configuration file
-        /*std::cout << "Loading world: " << carlaMapName << std::endl;
-        carla::client::World carlaWorld = carlaClient.LoadWorld(carlaMapName);*/
 		
 		carla::client::World carlaWorld = carlaClient.GetWorld();
-        //carla::SharedPtr<carla::client::Map> carlaMap = carlaWorld.GetMap();
         carla::SharedPtr<carla::client::Actor> carlaSpectator = carlaWorld.GetSpectator();
 
-        // Define a high top-down transform (e.g., 100 meters above 0,0)
-        //carla::geom::Location top_down_location(150.0f, 150.0f, 550.0f);   // z = height
-        //carla::geom::Rotation top_down_rotation(-90.0f, -90.0f, 0.0f);   // pitch -90 looks straight down
-
-        //carla::geom::Transform top_down_view(top_down_location, top_down_rotation);
-
-        //// Apply the transform
-        //carlaSpectator->SetTransform(top_down_view);
-
         // Enable synchronous mode
-        carla::rpc::EpisodeSettings settings = carlaWorld.GetSettings();
-        if (!settings.synchronous_mode) {
-            settings.synchronous_mode = true;            // Turn on synchronous mode
-			settings.fixed_delta_seconds = trafficRefreshRate;         // time step of 0.1 seconds
+        carla::rpc::EpisodeSettings carlaWorldSettings = carlaWorld.GetSettings();
+        if (!carlaWorldSettings.synchronous_mode) {
+            carlaWorldSettings.synchronous_mode = true;            // Turn on synchronous mode
+			carlaWorldSettings.fixed_delta_seconds = trafficRefreshRate;         // time step of 0.1 seconds
             //the time_out is of carla::time_duration
-            carlaWorld.ApplySettings(settings, timeout_1s);
+            carlaWorld.ApplySettings(carlaWorldSettings, timeout_1s);
             if (enableVerboseLog) std::cout << "Synchronous mode enabled.\n";
         }
         carla::SharedPtr<carla::client::BlueprintLibrary> blueprint_library = carlaWorld.GetBlueprintLibrary();
@@ -383,7 +372,7 @@ int main(int argc, const char* argv[]) {
                 //carla::SharedPtr<carla::client::Waypoint> carlaWaypoint = carlaMap->GetWaypoint(carlaTransform.location);
                 //carla::geom::Transform waypointTransform = carlaWaypoint->GetTransform();
                 // =======================================================
-                // Get the waypoint of the carla transform
+                // [Optianal] Get the waypoint of the carla transform
                 // This is to ensure that the carla transform is on the road
                 // =======================================================
                 //carlaTransform.location = waypointTransform.location;
@@ -392,7 +381,7 @@ int main(int argc, const char* argv[]) {
                 
                 //carlaTransform.location.z = carlaTransform.location.z + SPAWN_OFFSET_Z;
                 
-    //            // [Optianal] Use the waypoint's rotation to ensure the vehicle is aligned with the road
+                //Use the waypoint's rotation to ensure the vehicle is aligned with the road
 				//carlaTransform.rotation = waypointTransform.rotation; 
                 //print the sumo and carla transform
 
@@ -405,7 +394,7 @@ int main(int argc, const char* argv[]) {
 					
 
                     std::string carlaActorTypeId;
-                    if (USE_VEHICLE_TYPE_AS_BLUEPRINT) {
+                    if (useVhicleTypeAsBlueprint) {
                         carlaActorTypeId = sumoActor.vType;
                     }
                     else {
@@ -428,7 +417,7 @@ int main(int argc, const char* argv[]) {
                     // If the Intertested vehicle has been spawned in the Carla
                     // Note: For the interested vehicles spawned by the extrernal control script, its role_name should be set to the sumo id name
 					// And their blueprint should be the same as its vehicle type
-                    if (SET_CONTAINS_ID(setInterestedIds, sumoActorId) && MAP_CONTAINS_KEY(mapRoleNameToActorId, sumoActorId) && USE_VEHICLE_TYPE_AS_BLUEPRINT) {
+                    if (SET_CONTAINS_ID(setInterestedIds, sumoActorId) && MAP_CONTAINS_KEY(mapRoleNameToActorId, sumoActorId) && useVhicleTypeAsBlueprint) {
                         carlaVehicleActorPtr = boost::static_pointer_cast<carla::client::Vehicle>(carlaWorld.GetActor(std::stoul(mapRoleNameToActorId[sumoActorId])));
                         carlaVehicleActorPtr->SetTransform(carlaTransform); // Update the transform of the existing actor to the sumo position
                         if (enableVerboseLog) std::cout << "Found Intertested Vehicle with Carla Type ID: " << carlaActorTypeId << " SUMO ID:" << sumoActorId << std::endl;
@@ -476,7 +465,6 @@ int main(int argc, const char* argv[]) {
                     std::string carlaActorId = std::to_string(carlaVehicleActorPtr->GetId());
 					mapCarlaToSumo[carlaActorId] = sumoActorId;
 					mapSumoToCarla[sumoActorId] = carlaActorId;
-                    //carla::geom::Vector3D carlaActorExtent = carlaActor->GetBoundingBox().extent;
 					sumoActor.carlaTransform = carlaTransform; // Store the Carla transform in the SumoActor
                 }
                 else {
@@ -488,7 +476,7 @@ int main(int argc, const char* argv[]) {
 					carla::rpc::ActorId carlaActorId = static_cast<uint32_t>(std::stoul(mapSumoToCarla[sumoActorId]));
 					
                     if (sumoActor.spawnedInCarla && sumoActor.carlaVehicleActorPtr !=nullptr) {
-                        if (SET_CONTAINS_ID(setInterestedIds, sumoActorId) && ENABLE_EXT_CONTROL) {
+                        if (SET_CONTAINS_ID(setInterestedIds, sumoActorId) && enableExternalControl) {
                             if (enableVerboseLog) {
                                 carla::SharedPtr<carla::client::Vehicle> carlaActor = mapSumoActor[mapSumoToCarla[sumoActorId]].carlaVehicleActorPtr;
                                 carla::geom::Transform carlaTransform = carlaActor->GetTransform();
@@ -499,7 +487,7 @@ int main(int argc, const char* argv[]) {
                             }
                         }  
                         else {
-                            // If not interested, update its position according to the sumo actor
+                            // If not interested or the lateral control is not enabled, update its position according to the sumo actor
                             // convert the id back to uint32_t
                             //carla::SharedPtr<carla::client::Actor> carlaActor = carlaWorld.GetActor(std::stoul(carlaActorId));
 							carla::SharedPtr<carla::client::Vehicle>& carlaActor = sumoActor.carlaVehicleActorPtr;
@@ -581,14 +569,14 @@ int main(int argc, const char* argv[]) {
 					tmpVehData.id = sumoId;
 					tmpVehData.type = mapSumoActor[sumoId].vClass;
                     double simulatedSpeed = periodicCosineSpeed(simTime, 8.0f, 20.0f);
-                    double speedDesired;
-                    if (ENABLE_EXT_CONTROL) {
-                        // If the vehicle is controlled by the external script, use the speed from the script
-                        speedDesired = carlaSpeed; // Use the speed from the Carla actor
-                    }
-                    else {
-						speedDesired = simulatedSpeed; // Use the simulated speed
-                    }
+                    double speedDesired = carlaSpeed;
+      //              if (enableExternalControl) {
+      //                  // If the vehicle is controlled by the external script, use the speed from the script
+      //                  speedDesired = carlaSpeed; // Use the speed from the Carla actor
+      //              }
+      //              else {
+						//speedDesired = simulatedSpeed; // Use the simulated speed, this can be further changed with desired speed like from the Eco-Pilot
+      //              }
                     if (enableVerboseLog) std::cout << "Speed of the Sumo actor with ID: " << sumoId << " is: " << speedDesired << std::endl;
 					tmpVehData.speedDesired = speedDesired;
 					tmpVehData.positionX = sumoLocation.x;
@@ -601,15 +589,19 @@ int main(int argc, const char* argv[]) {
 					tmpVehData.width = carlaExtent.y * 2; // The extent is half the width, so multiply by 2
 					tmpVehData.height = carlaExtent.z * 2; // The extent is half the height, so multiply by 2
 					msgHelper.VehDataSend_um[socketHelper.serverSock[sockId]].push_back(tmpVehData);
-                    // Apply the transform
-					carla::geom::Location tmpLocation = carlaTransform.location;
-                    tmpLocation.z = 100.0; // Set height to 100 meters above the ground
-                    //pitch = -90.0, yaw = 0.0, roll = 0.0
-					carla::geom::Rotation tmpRotation(-90.0f, -90.0f, 0.0f);
-                    carla::geom::Transform tmpTransform(tmpLocation, tmpRotation);
-                    carlaSpectator->SetTransform(tmpTransform);
-                    //drawCircle(carlaWorld.MakeDebugHelper(), tmpLocation, 2.5f, 32, 0.5f, 0.1f, 0.2f);
-					
+
+                    if (sumoId == centeredViewId) {
+						// Set the spectator to follow the centered view actor
+						// Note: The spectator is a special camera that follows the actor
+						if (enableVerboseLog) std::cout << "Setting spectator to follow actor with ID: " << sumoId << std::endl;
+                        carla::geom::Location tmpLocation = carlaTransform.location;
+                        tmpLocation.z = 100.0; // Set height to 100 meters above the ground
+                        //pitch = -90.0, yaw = 0.0, roll = 0.0
+                        carla::geom::Rotation tmpRotation(-90.0f, -90.0f, 0.0f);
+                        carla::geom::Transform tmpTransform(tmpLocation, tmpRotation);
+                        carlaSpectator->SetTransform(tmpTransform);
+                        //drawCircle(carlaWorld.MakeDebugHelper(), tmpLocation, 2.5f, 32, 0.5f, 0.1f, 0.2f);
+					}
                 }
             }
             
@@ -652,6 +644,12 @@ int main(int argc, const char* argv[]) {
             }
         }
         
+        carlaWorldSettings = carlaWorld.GetSettings();
+        if (carlaWorldSettings.synchronous_mode) {
+            carlaWorldSettings.synchronous_mode = false;            // Turn off synchronous mode
+            carlaWorld.ApplySettings(carlaWorldSettings, timeout_1s);
+            if (enableVerboseLog) std::cout << "Synchronous mode disabled.\n";
+        }
     }
     catch (const carla::client::TimeoutException& e) {
         socketHelper.socketShutdown();

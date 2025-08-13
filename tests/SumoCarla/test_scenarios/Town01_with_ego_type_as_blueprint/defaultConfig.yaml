@@ -48,13 +48,14 @@ ApplicationSetup:
   - type: "ego"
     attribute: {id: ["ego"], radius: [50]}
     ip: ["127.0.0.1"]
-    port: [430]
+    port: [440]
+
 
   SignalSubscription:
   - type: intersection
     attribute: {name: ['111', '139', '156', '167', '184']}
     ip: ['127.0.0.1']
-    port: [430]
+    port: [440]
     
 XilSetup:
     # enable/disable XIL
@@ -64,24 +65,30 @@ CarlaSetup:
     EnableVerboseLog: false
     # whether or not enable Carla (default: false)
     EnableCosimulation: true
+
+    # whether or not enable external control
+    # if set to true, the sumo vehicles will be updated according to the carla vehicles' state
+    # if set to false, the carla will be only visualizing the sumo vehicles
+    EnableExternalControl: false
     
-    # if true, ego state is sent from Simulink.
-    # if false, ego state is sent from User.cpp 
-    EnableEgoSimulink: false
-    
+    # whether or not use vehicle type as blueprint  
+    # if set to true, the carla vehicles will be created according to the vehicle type
+    # if set to false, the carla vehicles will be spawned using random blueprint
+    UseVehicleTypeAsBlueprint: true
+
     # Carla Server Ip and Port settings 
     CarlaServerIP: 127.0.0.1
-    
     CarlaServerPort: 2000
+
     # Carla Client Ip and Port settings 
     CarlaClientIP: 127.0.0.1
-
-    CarlaClientPort: 430
-
-    CarlaMapName: "Town01"
+    CarlaClientPort: 440
 
     # default Traffic Objects updates every 0.1 seconds
     TrafficRefreshRate: 0.1
     
-    # ego ids should be a subset of the vehicleSubscription ids
+    # Interested ids should be a subset of the vehicleSubscription ids
     InterestedIds: ["ego"]
+
+    # center view at vehicle, the vehicle id should be a subset of the interested ids
+    CenteredViewId: ego

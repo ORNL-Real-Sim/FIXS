@@ -205,7 +205,7 @@ int main(int argc, char* argv[]) {
 	// ENABLE_CARLA: CARLA simulator
 	bool ENABLE_VEH_SIMULATOR = false;
 	bool ENABLE_CARLA = false;
-
+	bool ENABLE_CARLA_EXTERNAL_CONTROL = false;
 	vector <int> selfServerPortAll = {};
 	vector <string> serverAddr = {};
 	vector <int> serverPort = {};
@@ -262,7 +262,7 @@ int main(int argc, char* argv[]) {
 
 	ENABLE_VEH_SIMULATOR = Config_c.CarMakerSetup.EnableCosimulation;
 	ENABLE_CARLA = Config_c.CarlaSetup.EnableCosimulation;
-
+	ENABLE_CARLA_EXTERNAL_CONTROL = Config_c.CarlaSetup.EnableExternalControl;
 	if (ENABLE_VERBOSE) {
 		//FILE* f = fopen(MasterLogName.c_str(), "a");
 		//fprintf(f, "\n============================================");
@@ -528,6 +528,7 @@ int main(int argc, char* argv[]) {
 
 	Traffic_c.ENABLE_VEH_SIMULATOR = ENABLE_VEH_SIMULATOR;
 	Traffic_c.ENABLE_CARLA = ENABLE_CARLA;
+	Traffic_c.ENABLE_CARLA_EXTERNAL_CONTROL = ENABLE_CARLA_EXTERNAL_CONTROL;
 	/********************************************
 	* Message Setups
 	*********************************************/
