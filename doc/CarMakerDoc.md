@@ -45,9 +45,9 @@ Table of Contents
 
 # Simulation Setups
 
-## Setup CarMaker Office or CarMaker Simulink 
+## Setup CarMaker Office or CarMaker Simulink
 * Note: this tutorial is based on CM13.1.2 and Matlab/Simulink 2024a.\
-Make sure you followed the main page README.md, ensuring you have MS Visual Studio installed, and pre-required libs build. 
+  Make sure you followed the main page README.md, ensuring you have MS Visual Studio installed, and pre-required libs build.
 * Note: make sure your pre-required libs build Release/Debug is constant with your `VirtualEnvironment.lib` build and CarMaker executable build Release/Debug.
 
 ## Obtain CarMaker Executables
@@ -63,12 +63,12 @@ Make sure you followed the main page README.md, ensuring you have MS Visual Stud
 To simplify CarMaker project build process, we will build a library called VirtrualEnvironment.lib that contains all the
 required helper functions. Open [VirtualEnvironment.sln](..%2FVirtualEnvironment%2FVirtualEnvironment.sln)
 inside the VirtualEnvironment folder using Visual Studio 2022. in Visual Studio 2022, find the solution explorer window on the right of the screen, right click the _VirtualEnvironment_, select _Properties_,
-Then in the Property Page, find C/C++ -> General -> Additional Include Directories. Edit the carmaker version if necessary. And make sure yaml-cpp are included: 
+Then in the Property Page, find C/C++ -> General -> Additional Include Directories. Edit the carmaker version if necessary. And make sure yaml-cpp are included:
 ![VirtualEvn_cppsetup.png](img%2FVirtualEvn_cppsetup.png)
 
 Now you can build.
 
- You should get VirtualEnvironment.lib (Release ver)
+You should get VirtualEnvironment.lib (Release ver)
 in the `./x64/Release/` folder. Note if you want to build Debug version, you need to change the linker pointed to `yaml-cpp.lib` (Release version)
 to `yaml-cppd.lib` (Debug version) that you build previously.
 
@@ -80,9 +80,9 @@ Type in the location of where you build the yaml-cppd.lib. Then under C/C++ -> C
 ### Compile Source Codes
 
 - If you want to set up a project outside the cloned FIXS repo, you first need to create a **parent folder**. Copy the [CarMaker](../CarMaker)
-[CommonLib](../CommonLib) [tests](../tests) folders into the **parent folder**.
-Next, create a project folder in the **parent folder** (File -> Project Folder -> Create Project).
-![CM_create_proj.png](img/CM_create_proj.png)
+  [CommonLib](../CommonLib) [tests](../tests) folders into the **parent folder**.
+  Next, create a project folder in the **parent folder** (File -> Project Folder -> Create Project).
+  ![CM_create_proj.png](img/CM_create_proj.png)
 
 - If you want your project to be inside the FIXS repo, just create a project right under the FIXS folder.
 
@@ -96,16 +96,16 @@ There is **app_tmp.c, CM_Main.c, CM_Vehicle.c, IO.c, and USer.C** files in the c
 
 
 - Define the dependencies folders\
-In C/C++ -> General -> Additional Include Directories, exam the Evaluated value, make sure the CarMaker verison and CarMaker support Matlab version are correct.
+  In C/C++ -> General -> Additional Include Directories, exam the Evaluated value, make sure the CarMaker verison and CarMaker support Matlab version are correct.
 
-    ![CM_VS_IncludeDependencies.png](img%2FCM_VS_IncludeDependencies.png)
-    - tips: Matlab version is inherited from (MATSUPP_DIR), this value can be modified from the `CarMaker.prop` file in `src` folder.
-        change the version in ```<MATSUPP_MATVER> xxx </MATSUPP_MATVER>``` accordingly.
-  
+  ![CM_VS_IncludeDependencies.png](img%2FCM_VS_IncludeDependencies.png)
+  - tips: Matlab version is inherited from (MATSUPP_DIR), this value can be modified from the `CarMaker.prop` file in `src` folder.
+    change the version in ```<MATSUPP_MATVER> xxx </MATSUPP_MATVER>``` accordingly.
+
 
 - Define libraries\
-In Linker -> Input -> Additional Dependencies, add `VirtualEnvironment.lib`
-    ![CM_VS_Linker_AdditionalDependencies.png](img%2FCM_VS_Linker_AdditionalDependencies.png)
+  In Linker -> Input -> Additional Dependencies, add `VirtualEnvironment.lib`
+  ![CM_VS_Linker_AdditionalDependencies.png](img%2FCM_VS_Linker_AdditionalDependencies.png)
 
 Next, modify the User.cpp to include the following codes
 - At beginning of the file, add the followings, ``need to make sure VirEnv_Wrapper.h is included before including the windows.h!``
@@ -207,7 +207,7 @@ User_TestRun_Start_atEnd (void)
     // ===========================================================================
     // 			 RealSim 
     // ===========================================================================	   
-    if (VirEnv_isVeryFirstStep && SimCore.State >= SCState_StartWait) {
+    if (VirEnv_isVeryFirstStep && SimCore.State >= SCState_Start) {
         VirEnv_initialization(VirEnv_c, RS_configFile, RS_signalTable);
     }
     // ===========================================================================
@@ -271,7 +271,7 @@ After compiling, the executable should be in **src** or **src_cm4sl** folder. In
 
 ## Run CarMaker office
 Open CarMaker Office, chose Application -> Application Configuration\
-Make sure select the compiled ```CarMaker.win64.exe```  in the `Command (executable)` and specify `Command line options` 
+Make sure select the compiled ```CarMaker.win64.exe```  in the `Command (executable)` and specify `Command line options`
 to the desired config.yaml file, and (optional) signal light sync table file
 
 Note:  `-f` to point to the yaml config file for SUMO, `-s` to point signal light sync table between SUMO and CarMaker.
@@ -288,14 +288,14 @@ Note:  `-f` to point to the yaml config file for SUMO, `-s` to point signal ligh
 Using either relative path to the working directory or absolute path are OK
 
 ![](img/CM_Simulink_Config.png)
- 
+
 
 ```CM11_proj\src_cm4sl\RealSimGeneric.mdl```  is a good example simulink model to develop user applications
 
 ## Setup CM dSPACE
 
 ### Obtain dSPACE library
-RealSim comes with precompiled dSPACE library file that can be used directly under \CommonLib. If plan to use these libraries directly, can skip the next section  and go to [this section](#prepare-for-dspace-build-configuration-desk) directly. Otherwise, follow the next section to compile customized dSPACE library. 
+RealSim comes with precompiled dSPACE library file that can be used directly under \CommonLib. If plan to use these libraries directly, can skip the next section  and go to [this section](#prepare-for-dspace-build-configuration-desk) directly. Otherwise, follow the next section to compile customized dSPACE library.
 
 ### Compile dSPACE library
 
@@ -308,47 +308,40 @@ The ```DsBuildLibrary.mk``` file is under ```%DSPAE_ROOT%\SCALEXIO\``` Refer to 
 The \CommonLib folder contains two .bat file for compiling with dSPACE 2019b, 2021b and CM11. Please refer to those files and modify your own .bat file.
 
 ### Prepare User.c
-For dSPACE application, we need to modify the source code of User.c as the ConfigurationDesk will compile from Source Code for dSPACE to execute. There are few places that User.c needs to be modified:
+For dSPACE application, we also need to mofify the User.c in source folder similar to CM_Office or CM for SimuLink.
+The only difference is showed below. The rest code change in User.c, including `User_ScanCmdLine`, `User_Init`,
+`User_TestRun_Start_atEnd`, `User_TestRun_End`,`User_Calc` should use the same modification for CM_Office and CM for Simulink.
 
 - at beginning of the code to include libraries
-**Make sure change the ```RS_configFile``` path to the correct project path. This is with respect to the dSPACE Linux file system, so root path is ```/```. You can use the ```msys``` tool that comes with CarMaker installation to telnet to the scalexio machine to double check the path. 
+  **Make sure change the ```RS_configFile``` path to the correct project path. This is with respect to the dSPACE Linux file system, so root path is ```/```. You can use the ```msys``` tool that comes with CarMaker installation to telnet to the scalexio machine to double check the path.
 ```cpp
+#define REALSIM
+
+#ifdef REALSIM
+// ===========================================================================
+// 			 RealSim
+// ===========================================================================
 #include "VirEnv_Wrapper.h"
 
 struct VirEnvHelper* VirEnv_c;
 
-char* RS_configFile = "/CM_Projects/RS_FIXS_Ford/CM11_proj/RS_tmp/RealSimCarMakerConfig.txt";
+char* RS_configFile = "/CM_Projects/<your project>/CM13_proj/RS_tmp/RealSimCarMakerConfig.txt";  //Replace <your project> with your own project location
 char* RS_signalTable;
+
+// ===========================================================================
+// ===========================================================================
+#endif
+
+
 ```
-- at User_Init:
-```cpp
-VirEnv_c = newVirEnvHelper();
-```
-- at User_TestRun_Start_atEnd:
-```cpp
-    if (VirEnv_isVeryFirstStep && SimCore.State >= SCState_StartWait) {
-		VirEnv_initialization(VirEnv_c, RS_configFile, RS_signalTable);
-    }
-```
-- at User_TestRun_End:
-```cpp
-	VirEnv_shutdown(VirEnv_c);
-```
-- at User_Calc:
-```cpp
-    if (SimCore.State != SCState_Simulate) {
-        return 0;
-    }
-	
-    VirEnv_runStep(VirEnv_c, SimCore.Time);
-	
-```
+
+
 
 ### Prepare for dSPACE build (configuration desk)
 
-Note: currently, it is only for SCALEXIO and configuration desk dSPACE implementation. 
+Note: currently, it is only for SCALEXIO and configuration desk dSPACE implementation.
 
-1\. Make sure both ```VirEnv_Wrapper.h``` and ```libRealSimDsLib2021b.a``` are under the ##YOUR CM Project##\include folder.
+1\. Make sure both ```VirEnv_Wrapper.h``` and ```libRealSimDsLib2024a.a``` are under the ##YOUR CM Project##\include folder.
 
 3\. The dSPACE build process will be similar to typical CM dSPACE build, which will involve a CM_BuildConifg.py. This script needs to be updated for RealSim implementation. You can use the one inside \CarMaker folder. If want to modify your own:
 - define these macros
@@ -373,8 +366,8 @@ else:
 inside the Initialize(self) function in the CM_BuildConifg.py where it has the following:
 ```python
             self.CM_SEARCH_PATHS = JoinPaths(srch, "; ")
-            libs = [ "libdscandrv.so", "libRealSimDsLib_2021b.a"  ]
-            self.CM_LIBRARIES = JoinPaths(libs, "; ")
+libs = [ "libdscandrv.so", "libRealSimDsLib_2021b.a"  ]
+self.CM_LIBRARIES = JoinPaths(libs, "; ")
 ```
 - make sure the ```SRC_DIRS``` contains the folder where you put your simulink model and User.c
 ```python
@@ -385,7 +378,7 @@ You could also add these manually in the ConfigurationDesk
 ![](img/CM_DS_BuildConfig.png)
 
 - set number of accepted overruns to be -1 in ConfigurationDesk:
-![](img/DS_SCLX_NO_OVERRUN.png)
+  ![](img/DS_SCLX_NO_OVERRUN.png)
 
 #### Additional instructions for RS Simulink libraries
 **!!!The following steps are Optional and only needed if you are using RealSim Simulink blocks**
@@ -408,15 +401,15 @@ RealSimPara.tLookahead = 0.1; % use 0.1 for external control, recommend to use t
 RealSimPara.smoothWindow = 1; % number of moving average data point, 1 essentially mean no moving average
 ```
 
-Best practice is to call this function as ```InitFcn``` in your Simulink model 
+Best practice is to call this function as ```InitFcn``` in your Simulink model
 ![](img/SimulinkInitFcn.png)
 
-- if use RealSim Simulink blocks in the simulink, need to setup dSPACE TCP connetions as the following screenshots. Please refer to the dSPACE ConfigurationDesk project RS_DS_CM11_SimulinkRS and Simulink model RS_DS_CM11_SimulinkRS.slx to see how the dSPACE and RealSim are set up. 
-![](img/DS_SCLX_Eth_1.png)
-![](img/DS_SCLX_Eth_2.png)
-![](img/DS_SCLX_Eth_3.png)
-![](img/DS_SCLX_Eth_4.png)
-![](img/DS_SCLX_Eth_5.png)
+- if use RealSim Simulink blocks in the simulink, need to setup dSPACE TCP connetions as the following screenshots. Please refer to the dSPACE ConfigurationDesk project RS_DS_CM11_SimulinkRS and Simulink model RS_DS_CM11_SimulinkRS.slx to see how the dSPACE and RealSim are set up.
+  ![](img/DS_SCLX_Eth_1.png)
+  ![](img/DS_SCLX_Eth_2.png)
+  ![](img/DS_SCLX_Eth_3.png)
+  ![](img/DS_SCLX_Eth_4.png)
+  ![](img/DS_SCLX_Eth_5.png)
 
 # Setup Application
 
@@ -444,12 +437,12 @@ pause
 ## General Setups
 **Generate Traffic Objects**
 
-RealSimCarMakerSetup.py will modify an existing testrun file and add traffic objects to it. use ```RealSimCarMakerSetup.py --help``` to check all detailed arguments. Below is an example to read a "coordMerge_sumo" testrun and output a "coordMerge_sumo_rs_simulink" testrun with 10 cars and 10 trucks. Based on the version of testrun files, the script will search through CarMaker installation path and use existing vehicle .mobj files to create random traffic. ```RealSimCarMakerSetup.py --no-random-traffic``` can be set to disable random traffic, then all traffic objects will use the same vehicle. 
+RealSimCarMakerSetup.py will modify an existing testrun file and add traffic objects to it. use ```RealSimCarMakerSetup.py --help``` to check all detailed arguments. Below is an example to read a "coordMerge_sumo" testrun and output a "coordMerge_sumo_rs_simulink" testrun with 10 cars and 10 trucks. Based on the version of testrun files, the script will search through CarMaker installation path and use existing vehicle .mobj files to create random traffic. ```RealSimCarMakerSetup.py --no-random-traffic``` can be set to disable random traffic, then all traffic objects will use the same vehicle.
 ```
 RealSimCarMakerSetup.py --cm-project-path ../CM10_Proj --testrun coordMerge_sumo --cm-install-path C:\IPG --output-testrun coordMerge_sumo_rs_simulink --car 10 --truck 10
 ```
 
-After traffic objects are generated, **do not** modify their "Name" otherwise Real-Sim may not work properly. But feel free to modify the "Movie geometry" to another vehicle .mobj file. If SUMO vehicle is of vehicle class: "car", "passenger", "private", it will be rendered as a car in CarMaker. If SUMO vehicle is of class "truck", it will be rendered as a truck in CarMaker. All other vehicle classes are not currently supported. 
+After traffic objects are generated, **do not** modify their "Name" otherwise Real-Sim may not work properly. But feel free to modify the "Movie geometry" to another vehicle .mobj file. If SUMO vehicle is of vehicle class: "car", "passenger", "private", it will be rendered as a car in CarMaker. If SUMO vehicle is of class "truck", it will be rendered as a truck in CarMaker. All other vehicle classes are not currently supported.
 
 **Create lookup table to synchronize SUMO and IPG traffic signal lights**
 
@@ -466,7 +459,7 @@ Also, all timing of the traffic light controller should be set to ```0```, and i
 RealSimCarMakerSetup.py --cm-project-path ../CM10_Proj --testrun coordMerge_sumo --cm-install-path C:\IPG --output-testrun coordMerge_sumo_rs_simulink --car 10 --truck 10 --sumo-file-path .\\tests\\SignalIpg\\sumoFiles\\ShallowfordRd_RL.net.xml
 
 ```
-Then, a ```<SignalTable>.csv``` will be automatically created. By default, it will be in the ```CM11_proj\Data\Road``` folder. 
+Then, a ```<SignalTable>.csv``` will be automatically created. By default, it will be in the ```CM11_proj\Data\Road``` folder.
 
 
 **Setup config.yaml**
@@ -474,7 +467,7 @@ Then, a ```<SignalTable>.csv``` will be automatically created. By default, it wi
 All the settings are pretty much similar to other Real-Sim simulation setups. Here, the following "VehicleMessageField" are mandate, otherwise errors will pop up:
 ```id, speed, vehicleClass, heading, grade, speedDesired```.
 
-There is a new configuration section called ```CarMakerSetup```. Inside it, users can name the ```EgoId``` as any string of length < 50. This will be the id of the ego vehicle appears in SUMO so should be unique than other SUMO vehicles. By default, ego vehicle will have type "DEFAULT_VEHTYPE" in SUMO. If user set ego vehicle as a vehicle type belongs to truck, then it will appear as truck in SUMO. Make sure to select the same type/class of vehicle in both SUMO and CarMaker. 
+There is a new configuration section called ```CarMakerSetup```. Inside it, users can name the ```EgoId``` as any string of length < 50. This will be the id of the ego vehicle appears in SUMO so should be unique than other SUMO vehicles. By default, ego vehicle will have type "DEFAULT_VEHTYPE" in SUMO. If user set ego vehicle as a vehicle type belongs to truck, then it will appear as truck in SUMO. Make sure to select the same type/class of vehicle in both SUMO and CarMaker.
 
 Below is an example ```CarMakerSetup``` section:
 ```yaml
@@ -513,11 +506,11 @@ Note, in dSPACE implementation, CarMakerIP should be the IP of the host PC.
 
 
 ## dSPACE
-Following the previous setup steps, dSPACE should already be ready to run. 
+Following the previous setup steps, dSPACE should already be ready to run.
 
 
 ## Examples
-The release comes with a CM11_proj folder and example SUMO applications, and Visual Studio projects to compile executables. The SUMO files are inside ```tests``` folder. The testruns can potentially be transferred to previous CarMaker versions by manually changing testrun heading to the desired version, for example, 
+The release comes with a CM11_proj folder and example SUMO applications, and Visual Studio projects to compile executables. The SUMO files are inside ```tests``` folder. The testruns can potentially be transferred to previous CarMaker versions by manually changing testrun heading to the desired version, for example,
 ```FileIdent = CarMaker-TestRun 11``` ==> ```FileIdent = CarMaker-TestRun 9```
 
 
@@ -535,13 +528,13 @@ run SUMO and Real-Sim with ```runCoordMergeSUMO_simulink.bat```, use CarMaker te
 2. Open the ConfigurationDesk project ```RS_DS_CM11_noSimulinkRS_useManeuver``` which is inside the ```CM11_proj/ConfigDesk``` folder. The simulink file is ```RS_DS_CM11_noSimulinkRS_useManeuver.slx``` under ```CM11_proj\src_cm4sl_ds```. Compile the ConfigurationDesk project. See more details in [this section](#setup-cm-dspace)
 
 3. Start any of the SUMO applications that can be tested out of the box under ```tests``` folder.
-	- **SignalIpg** which will demonstrate how the signal light is synchronized between SUMO-IPG-dSPACE. Modify the ```runShallowfordRd_release.bat``` to the correct path of your environment and execute it. 
+  - **SignalIpg** which will demonstrate how the signal light is synchronized between SUMO-IPG-dSPACE. Modify the ```runShallowfordRd_release.bat``` to the correct path of your environment and execute it.
 
-	- **SumoIpg** will demonstrate how to setup CarMaker maneuvers to ramp up and ramp down for HIL applications, modify the ```runSumoIpg_release.bat``` to the correct path of your environment and execute it. 
+  - **SumoIpg** will demonstrate how to setup CarMaker maneuvers to ramp up and ramp down for HIL applications, modify the ```runSumoIpg_release.bat``` to the correct path of your environment and execute it.
 4. Start CarMaker and select project ```CM11_proj```
-	- **SignalIpg** selet testrun ```RS_Shallowford_sumo_signal```
-	
-	- **SumoIpg** selet testrun ```merge_RS_noSimulinkRS_useManeuver```
+  - **SignalIpg** selet testrun ```RS_Shallowford_sumo_signal```
+
+  - **SumoIpg** selet testrun ```merge_RS_noSimulinkRS_useManeuver```
 5. Start CarMaker simulation
 
 Note, after compiling a Simulink model, you should be able to switch to different SUMO applications or CarMaker testrun without the need to recompile the Simulink. However, after 
