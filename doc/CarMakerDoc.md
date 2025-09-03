@@ -341,44 +341,33 @@ char* RS_signalTable;
 
 Note: currently, it is only for SCALEXIO and configuration desk dSPACE implementation.
 
-1\. Make sure both ```VirEnv_Wrapper.h``` and ```libRealSimDsLib2024a.a``` are under the ##YOUR CM Project##\include folder.
+1. Make sure both ```VirEnv_Wrapper.h``` and ```libRealSimDsLib2024a.a``` are under the ##YOUR CM Project##\include folder.
 
-3\. The dSPACE build process will be similar to typical CM dSPACE build, which will involve a CM_BuildConifg.py. This script needs to be updated for RealSim implementation. You can use the one inside \CarMaker folder. If want to modify your own:
-- define these macros
-```
-"RS_CAVE", "RS_DSPACE"
-```
-where the CM_BuildConifg.py has the followings:
+2. The dSPACE build process will be similar to typical CM dSPACE build, which will involve a CM_BuildConifg.py. This script needs to be updated for RealSim implementation. 
+You can use the one inside \CarMaker folder. If want to modify your own:
+- Define macros `RS_DSPACE` and `RS_DEBUG` for dSPACE SACLEXIO build. To do this, you can add them in the CM_BuildConifg.py Archtecture part as follows:
 ```python
 if ARCH == 'dsrtlx':
-    CFLAGS  = ("-include", "ipgrt.h")
-    DEFINES = ("RS_CAVE", "RS_DEBUG", "RS_DSPACE", "DSPACE", "DSRTLX", "_DSRTLX", "CM_HIL",
-            "CM_NUMVER=%d" %(CARMAKER_NUMVER), "CM4SLDS")
+  CM_DEFINES = ["RS_DSPACE", "RS_DEBUG", "DSPACE", "DSRTLX", "_DSRTLX"]
+elif ARCH == 'dsrt64':
+  CM_DEFINES = ["RS_DSPACE", "RS_DEBUG", "DSPACE", "DSRT64", "_DSRT64"]
 else:
-    CFLAGS  = ("-include", "ipgrt.h")
-    DEFINES = ("RS_CAVE", "RS_DEBUG", "RS_DSPACE", "DSPACE", "DSRT", "_DSRT", "USE_IPGRT_FUNCS", "CM_HIL",
-            "CM_NUMVER=%d" %(CARMAKER_NUMVER), "CM4SLDS")
+  CM_DEFINES = ["RS_DSPACE", "RS_DEBUG", "DSPACE", "DSRT", "_DSRT"]
 ```
-- include the customized RealSim library
-```
-"libRealSimDsLib_2021b.a"
-```
-inside the Initialize(self) function in the CM_BuildConifg.py where it has the following:
+- Include the customized RealSim library `libRealSimDsLib_2024a.a`. To do this, add `libRealSimDsLib_2024a.a` to CM_BuildConifg.py, under `class CM_BuildConfig` follows:
 ```python
-            self.CM_SEARCH_PATHS = JoinPaths(srch, "; ")
-libs = [ "libdscandrv.so", "libRealSimDsLib_2021b.a"  ]
-self.CM_LIBRARIES = JoinPaths(libs, "; ")
+libs = [ "libdscandrv.so", "libRealSimDsLib_2024a.a" ]
 ```
-- make sure the ```SRC_DIRS``` contains the folder where you put your simulink model and User.c
+- make sure the ```CM_SRC_DIR``` point to source folder where you store your simulink model and User.c
 ```python
-SRC_DIRS = {"src_cm4sl_ds", "include"}
+CM_SRC_DIR          = "src_cm4dspace_realsim"
 ```
 
-You could also add these manually in the ConfigurationDesk
-![](img/CM_DS_BuildConfig.png)
+Alternatively, you could also skip the CM_BuildCOnfig.py modification, and manually edit them in the ConfigurationDesk->Build Configuration->Properties.
+![CM_DS_BuildConfig_24a.png](img%2FCM_DS_BuildConfig_24a.png)
 
-- set number of accepted overruns to be -1 in ConfigurationDesk:
-  ![](img/DS_SCLX_NO_OVERRUN.png)
+3. set number of accepted overruns to be -1 in ConfigurationDesk:
+![](img/DS_SCLX_NO_OVERRUN.png)
 
 #### Additional instructions for RS Simulink libraries
 **!!!The following steps are Optional and only needed if you are using RealSim Simulink blocks**
