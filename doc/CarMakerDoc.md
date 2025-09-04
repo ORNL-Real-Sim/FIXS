@@ -299,17 +299,25 @@ RealSim comes with precompiled dSPACE library file that can be used directly und
 
 ### Compile dSPACE library
 
-Create a .bat file for the specific dSPACE version with the following commands, make sure change the corresponding dSPACE version #:
-```batch
-start cmd /d /e:on /k ""C:\Program Files\dSPACE RCPHIL 2021-B\Exe\dSPACE_vars.bat " & ""dsmake -f DsBuildLibrary_2021b.mk output_filename=RealSimDsLib_2021b source_files="SocketHelper.cpp MsgHelper.cpp VirEnvHelper.cpp VirEnv_Wrapper.cpp" custom_cpp_options="-std=c++11 -IC:\IPG\carmaker\win64-11.0.1\include -DDSRT -DRS_DSPACE -DRS_CAVE -DRS_DEBUG" target=Dsx86_32"" " 
-```
-The ```DsBuildLibrary.mk``` file is under ```%DSPAE_ROOT%\SCALEXIO\``` Refer to the following dSPACE documentation https://www.dspace.com/en/inc/home/support/kb/faqs/faq012.cfm.
+Use the `buildRS_2024a.bat` in the `\CommonLib` folder as example to create your dspace/CM version specific build.
+For 2024a, The `DsBuildLibrary.mk` file is under `%dSPACE ConfigurationDesk 2024-A (24.1)%\SCALEXIO\`.
+Tips: You can copy the `DsBuildLibrary.mk` into the CommonLib Folder and rename it as `DsBuildLibrary_2024a.mk`\
+_Refer to the following dSPACE documentation https://www.dspace.com/en/inc/home/support/kb/faqs/faq012.cfm._
 
-The \CommonLib folder contains two .bat file for compiling with dSPACE 2019b, 2021b and CM11. Please refer to those files and modify your own .bat file.
+After successfully execute the `buildRS_XXXX.bat` file, you should have something appear on command line window like
+```commandline
+...
+C:\Program Files\Common Files\dSPACE\CFD Compiler 24.1\target\x86_64-linux-gnu\bin\x86_64-linux-gnu-ar.exe: creating libRealSimDsLib_2024a.a
+a - SocketHelper.o64
+a - MsgHelper.o64
+a - VirEnvHelper.o64
+a - VirEnv_Wrapper.o64
+library successfully built.
+```
 
 ### Prepare User.c
-For dSPACE application, we also need to mofify the User.c in source folder similar to CM_Office or CM for SimuLink.
-The only difference is showed below. The rest code change in User.c, including `User_ScanCmdLine`, `User_Init`,
+For dSPACE application, we also need to modify the User.c in source folder similar to CM_Office or CM for SimuLink.
+The only difference is shown below. The rest code change in User.c, including `User_ScanCmdLine`, `User_Init`,
 `User_TestRun_Start_atEnd`, `User_TestRun_End`,`User_Calc` should use the same modification for CM_Office and CM for Simulink.
 
 - at beginning of the code to include libraries
@@ -337,7 +345,7 @@ char* RS_signalTable;
 
 
 
-### Prepare for dSPACE build (configuration desk)
+### Prepare for dSPACE build (ConfigurationDesk)
 
 Note: currently, it is only for SCALEXIO and configuration desk dSPACE implementation.
 
