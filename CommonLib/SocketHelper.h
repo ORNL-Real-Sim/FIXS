@@ -147,10 +147,12 @@ public:
 
 	std::vector <struct sockaddr_in> selfServerAddr; /* Local a ddress */
 	std::vector <struct sockaddr_in> clientAddr; /* Client address */
-#ifndef WIN32
-	std::vector <size_t> clientAddrLen;            /* Length of client address data structure */
-#else
+#ifdef RS_DSPACE
+	std::vector <socklen_t> clientAddrLen;            /* Length of client address data structure */
+#elif WIN32
 	std::vector <int> clientAddrLen;            /* Length of client address data structure */
+#else
+	std::vector <size_t> clientAddrLen;            /* Length of client address data structure */
 #endif
 	std::vector <int> sendClientByte;
 	std::vector <int> recvClientMsgSize;                    /* Size of received message */
