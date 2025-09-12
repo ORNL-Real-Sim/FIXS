@@ -1,0 +1,3 @@
+# About
+
+Real-Sim develops a multi-resolution X-in-the-loop (XIL) simulation framework to support inclusive testing and evaluation of emerging technologies such as connected and automated vehicles. The Real-Sim framework connects different simulation components and integrates various traffic and vehicle simulation tools, virtual environments, and XIL systems through a Flexible Interface for XIL Simulation (FIXS). Connections among different tools are transparent to users and handled by the interface behind the scenes. Co-simulation of various vehicle and traffic simulation tools with different XIL systems can be easily achieved and become a transparent "plug-and-play" process to users.
