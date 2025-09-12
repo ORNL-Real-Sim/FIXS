@@ -6,7 +6,7 @@ sys.path.insert(0, os.path.abspath(".."))
 project = "Real-Sim"
 author = "Real-Twin Team " 
 release = "0.1"  # version string
-root_doc = "index" # ensure docs/index.md or docs/index.rst exists
+root_doc = "index" # ensure doc/index.md or doc/index.rst exists
 
 #General configuration
 extensions = [
@@ -33,6 +33,7 @@ myst_enable_extensions = [
 ]
 
 #Options for HTML output
+html_theme = "sphinx_rtd_theme"
 html_theme_options = {
     "collapse_navigation": False,
     "sticky_navigation": True,
