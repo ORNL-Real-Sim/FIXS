@@ -4,8 +4,8 @@ from datetime import datetime
 sys.path.insert(0, os.path.abspath(".."))
 # Project information
 project = "Real-Sim"
-author = "Real-Twin Team " 
-release = "0.1"  # version string
+author = "Real-Sim Team " 
+release = "0.10"  # version string
 root_doc = "index" # ensure doc/index.md or doc/index.rst exists
 
 #General configuration
