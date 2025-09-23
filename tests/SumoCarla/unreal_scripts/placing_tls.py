@@ -1,6 +1,7 @@
 import unreal
 import sys
 import os
+from dotenv import load_dotenv
 # Add the script directories to sys.path
 script_dir = os.path.dirname(__file__)
 sys.path.append(script_dir)
@@ -15,16 +16,16 @@ import utils.trafficlight_helper as trafficlight_helper
 importlib.reload(trafficlight_helper)
 
 TrafficLightHelper = trafficlight_helper.TrafficLightHelper
-TrafficLightHelper.set_offset((0.06, 328.61))
+# TrafficLightHelper.set_offset((0.06, 328.61)) # this is the offset for the CARLA town01
 
 
-
+load_dotenv(os.path.join(script_dir, "..", ".env"))
 
 TRAFFICLIGHT_GROUP_BLUEPRINT_PATH = "/Game/Carla/Static/TrafficLight/Streetlights_01/BP_TrafficLightGroup"
 TRAFFICLIGHT_BLUEPRINT_PATH = "/Game/Carla/Static/TrafficLight/Streetlights_01/BP_TrafficLight"
 TRAFFICLIGHT_HEAD_ONLY_BLUEPRINT_PATH = "/Game/Carla/Static/TrafficLight/Streetlights_01/BP_TrafficLight_Head_Only"
 # load the tls table
-TLS_TABLE_PATH = r'C:\Users\hg25079\Documents\GitHub\FIXS\tests\SumoCarla\test_scenarios\Town01_with_ego_type_as_blueprint\traffic_light_table.csv'
+TLS_TABLE_PATH = os.environ["SUMO_TLS_TABLE_PATH"]
 tls_table = pd.read_csv(TLS_TABLE_PATH)
 # junction_id,link_id,x,y,z,heading
 
@@ -64,8 +65,6 @@ for junction_id, trafficlight_transforms in trafficlight_groups.items():
                                                                               )
         trafficlight_actor.set_actor_label(f"TrafficLight{trafficlight_unreal_location.x}_{trafficlight_unreal_location.y}", mark_dirty=True)
         unreal.log(f"Spawned TrafficLight{trafficlight_unreal_location.x}_{trafficlight_unreal_location.y} at {trafficlight_unreal_location}")
-        # # attach the trafficlight to the trafficlight group
-        # trafficlight_group_actor.attach_to_actor(trafficlight_actor)
         # add the trafficlight to the trafficlight group's trafficlights list
         current_list = trafficlight_group_actor.get_editor_property("TrafficLights")
         current_list.append(trafficlight_actor)
@@ -89,27 +88,3 @@ for junction_id, trafficlight_transforms in trafficlight_groups.items():
 
 
 
-
-
-
-
-# Asset path (relative to /Game)
-# blueprint_path = "/Game/Carla/Static/TrafficLight/Streetlights_01/BP_TrafficLight"
-
-# # Load the Blueprint class
-# bp_class = unreal.EditorAssetLibrary.load_blueprint_class(blueprint_path)
-
-# if not bp_class:
-#     unreal.log_error(f"Failed to load blueprint class at: {blueprint_path}")
-# else:
-#     # Define spawn location and rotation
-#     location = unreal.Vector(-6209.930664, 12375.550781, 100.0)
-#     rotation = unreal.Rotator(0.0, 0.0, 0.0)
-
-#     # Spawn the actor in the level
-#     actor = unreal.EditorLevelLibrary.spawn_actor_from_class(bp_class, location, rotation)
-
-#     if actor:
-#         unreal.log(f"✅ Spawned {actor.get_name()} at {location}")
-#     else:
-#         unreal.log_error("❌ Failed to spawn actor.")

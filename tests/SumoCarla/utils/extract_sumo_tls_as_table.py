@@ -202,8 +202,8 @@ def tls_groups_to_df(traffic_light_groups):
 
 
 if __name__ == "__main__":
-    sumo_net_file = 'test_scenarios/Town01_with_ego_type_as_blueprint/Town01.net.xml'
-    output_path = 'test_scenarios/Town01_with_ego_type_as_blueprint'
+    sumo_net_file = 'test_scenarios\Shallowford_after_calibration_banleftturn_AdjustedFixedTime_V3\chatt.net.xml'
+    output_path = 'test_scenarios\Shallowford_after_calibration_banleftturn_AdjustedFixedTime_V3'
 
     traffic_light_groups, _ = parse_sumo_tls_from_netxml(
         sumo_net_file,

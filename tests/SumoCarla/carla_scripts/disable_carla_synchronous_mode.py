@@ -3,7 +3,7 @@ import os
 from CommonLib.ConfigHelper import ConfigHelper
 if __name__ == "__main__":
     
-    config_path = os.path.join(os.getcwd(), 'defaultConfig.yaml')
+    config_path = os.path.join(os.getcwd(), 'test_scenarios\Town01_with_ego_type_as_blueprint\defaultConfig.yaml')
     config_helper = ConfigHelper()
     config_helper.getConfig(config_path)
     

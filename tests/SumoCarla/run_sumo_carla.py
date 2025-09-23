@@ -5,9 +5,9 @@ from dotenv import load_dotenv
 def run_sumo(simulation_folder_path, simulation_net_file, port, gui=False):
     simulation_net_name = os.path.basename(simulation_net_file)
     if gui:
-        os.system(f'start sumo-gui -c {simulation_folder_path}\{simulation_net_name}.sumocfg --remote-port {port} --step-length 0.1 --netstate-dump {simulation_folder_path}\{simulation_net_name}.xml --netstate-dump.precision 10 --num-clients 1  --begin 0 --end 300 --collision.action warn')
+        os.system(f'start sumo-gui -c {simulation_folder_path}\{simulation_net_name} --remote-port {port} --step-length 0.1 --netstate-dump {simulation_folder_path}\{simulation_net_name}.xml --netstate-dump.precision 10 --num-clients 2')
     else:
-        os.system(f'start sumo -c {simulation_folder_path}\{simulation_net_name}.sumocfg --remote-port {port} --step-length 0.1 --netstate-dump {simulation_folder_path}\{simulation_net_name}.xml --netstate-dump.precision 10 --num-clients 1  --begin 0 --end 300 --collision.action warn')
+        os.system(f'start sumo -c {simulation_folder_path}\{simulation_net_name} --remote-port {port} --step-length 0.1 --netstate-dump {simulation_folder_path}\{simulation_net_name}.xml --netstate-dump.precision 10 --num-clients 2')
 
 def run_traffic_layer(traffic_layer_path, config_path):
     # start cmd /k ..\..\Trafficlayer\x64\Debug\TrafficLayer.exe -f '.\ecodrivingConfig.yaml'\

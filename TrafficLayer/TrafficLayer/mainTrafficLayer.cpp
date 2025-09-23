@@ -356,6 +356,7 @@ int main(int argc, char* argv[]) {
 				port_v = get<3>(Config_c.ApplicationSetup.SignalSubscription[i]);
 				for (int iP = 0; iP < port_v.size(); iP++) {
 					selfServerPortAll.push_back(port_v[iP]);
+					printf("\nTrafficLayer broadcast to client at port %d \n", port_v[iP]);
 				}
 			}
 			for (int i = 0; i < Config_c.ApplicationSetup.DetectorSubscription.size(); i++) {
@@ -372,6 +373,7 @@ int main(int argc, char* argv[]) {
 	// number of ports equal to size of Sock_c.clientSock
 	// map each port to an element of Sock_c.clientSock
 	selfServerPortUserInput = selfServerPortAll;
+	sort(selfServerPortUserInput.begin(), selfServerPortUserInput.end());
 	auto it = unique(selfServerPortUserInput.begin(), selfServerPortUserInput.end());
 	selfServerPortUserInput.resize(distance(selfServerPortUserInput.begin(), it));
 	for (int i = 0; i < selfServerPortUserInput.size(); i++) {

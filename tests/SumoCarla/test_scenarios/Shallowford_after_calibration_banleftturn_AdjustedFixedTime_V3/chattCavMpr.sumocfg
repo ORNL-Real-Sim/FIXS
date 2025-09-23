@@ -3,7 +3,6 @@
     <random>
         <seed value="101"/>
     </random>
-
     <input>
         <net-file value="chatt.net.xml"/>
         <route-files value="chattCavMpr.rou.xml"/>
@@ -11,22 +10,18 @@
     </input>
 
     <output>
-	<edgedata-output value="EdgeData.xml"/>
-	<fcd-output value="fcd.xml" samplingRate="1"/>
+        <edgedata-output value="EdgeData.xml"/>
+        <fcd-output value="fcd.xml" samplingRate="1"/>
     </output>
-
     <time>
         <begin value="28800"/>
         <end value="32400"/>
-        <step-length value="1"/>
+        <step-length value="0.1"/>
     </time>
-
-    <processing>
-        <lateral-resolution value="0.8"/>
-    </processing>
 
     <gui_only>
         <start value="t"/>
+        <quit-on-end value="true"/>
     </gui_only>
     <report>
         <no-warnings value="true"/>

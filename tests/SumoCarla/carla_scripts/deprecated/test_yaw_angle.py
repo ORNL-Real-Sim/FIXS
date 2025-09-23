@@ -1,13 +1,21 @@
 import math
 import carla
 
-# helper to compute bearing from (lat1,lon1) → (lat2,lon2)
-def geo_bearing(lat1, lon1, lat2, lon2):
-    φ1, φ2 = math.radians(lat1), math.radians(lat2)
-    Δλ = math.radians(lon2 - lon1)
-    x = math.sin(Δλ) * math.cos(φ2)
-    y = math.cos(φ1)*math.sin(φ2) - math.sin(φ1)*math.cos(φ2)*math.cos(Δλ)
-    return (math.degrees(math.atan2(x, y)) + 360) % 360
+# Calculate compass bearing between two geographic coordinates (lat/lon pairs)
+def calculate_geographic_bearing(start_lat, start_lon, end_lat, end_lon):
+    lat1_rad = math.radians(start_lat)
+    lat2_rad = math.radians(end_lat)
+    delta_lon_rad = math.radians(end_lon - start_lon)
+    
+    bearing_x = math.sin(delta_lon_rad) * math.cos(lat2_rad)
+    bearing_y = math.cos(lat1_rad)*math.sin(lat2_rad) - math.sin(lat1_rad)*math.cos(lat2_rad)*math.cos(delta_lon_rad)
+    
+    # Convert to degrees and normalize to 0-360 range
+    bearing_degrees = math.degrees(math.atan2(bearing_x, bearing_y))
+    normalized_bearing = (bearing_degrees + 360) % 360
+    
+    return normalized_bearing
+
 
 carla_client = carla.Client('127.0.0.1', 420)
 world = carla_client.load_world('Town01')
@@ -22,7 +30,7 @@ orig_geo = mymap.transform_to_geolocation(orig_loc)
 x1_geo  = mymap.transform_to_geolocation(x1_loc)
 
 # compute bearing
-bearing = geo_bearing(
+bearing = calculate_geographic_bearing(
     orig_geo.latitude, orig_geo.longitude,
     x1_geo.latitude,  x1_geo.longitude
 )

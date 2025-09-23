@@ -11,7 +11,8 @@ class MessageType:
     traffic_light_data = 2
     detector_data = 3
 
-
+#   VehicleMessageField: [id, type, vehicleClass, speed, acceleration, positionX, positionY, positionZ, heading,
+#     color, linkId, laneId, distanceTravel, speedDesired, grade, length, width, height]
 
 class MsgHelper:
     
@@ -519,14 +520,12 @@ class MsgHelper:
     
         # Read the length of the string
         strLen = struct.unpack('B', byte_data[byte_index:byte_index+1])[0]
-        if strLen > 50:
-            raise ValueError("Max characters of id, linkId, type, precedingVehicleId, linkIdNext must be smaller than 50")
 
         byte_index += 1
 
         # Initialize a string of size 50 and a uint8 array of size 50
-        str_data = [''] * 50
-        uint8Arr = [0] * 50
+        str_data = [''] * strLen
+        uint8Arr = [0] * strLen
 
         # Read characters from byte_data according to strLen
         for i in range(strLen):
@@ -600,6 +599,7 @@ def test_pack_string():
     
     unpacked_str, str_len, byte_index, uint8Arr = msg_helper.depack_string(packed_data, 0)
     print("Unpacked string:", unpacked_str)
+    
 if __name__ == "__main__":
     test_pack_simple_message()
     test_pack_string()
