@@ -95,7 +95,7 @@ def run_traffic_layer(setting_dir, config_file_name):
     
     os.system(f'start cmd /k {setting_dir}\\TrafficLayer.exe -f {os.path.join(setting_dir, config_file_name)}')
 
-def run_controller(setting_dir, config_file_name, sumo_port, traffic_layer_port, simulink_port, penetration_rate, step_length, eco_driving=True, vehicle_dynamics=True, use_simulink_for_energy_evaluation=False, vanila=True):
+def run_controller(setting_dir, config_file_name, sumo_port, traffic_layer_port, penetration_rate, step_length, eco_driving=True, vehicle_dynamics=True, use_simulink_for_energy_evaluation=False, vanila=True, simulink_port=None):
     controller_script = 'eco_driving_mpr_SUMO_vanila.py' if vanila else 'eco_driving_mpr_SUMO.py'
     command = f'start cmd /k python .\\{controller_script} -c {os.path.join(setting_dir, config_file_name)} --sumoPort {sumo_port} --trafficlayerPort {traffic_layer_port} --simulinkPort {simulink_port} --pathToNet {setting_dir} --penetrationRate {penetration_rate} --stepLength {step_length}'
     if eco_driving:
@@ -119,12 +119,17 @@ def run_one_setting(setting_dir, source_dir, experiment_setting, vanila=False):
     penetration_rate = experiment_setting['penetration_rate']
     step_length = experiment_setting['step_length']
     sumo_port = experiment_setting['SUMO']['port']
-    simulink_port = experiment_setting['Simulink']['port']
-    model_name = experiment_setting['Simulink']['model_name']
+
     fixs_port = experiment_setting['FIXS']['port']
     ecodriving = experiment_setting['eco_driving']
     vehicle_dynamics = experiment_setting['vehicle_dynamics']
     use_simulink_for_energy_evaluation = experiment_setting['use_simulink_for_energy_evaluation']
+    if vehicle_dynamics or use_simulink_for_energy_evaluation:
+        simulink_port = experiment_setting['Simulink']['port']
+        model_name = experiment_setting['Simulink']['model_name']
+    else:
+        simulink_port = '-1'
+        model_name = 'No_Dynamics'
     os.chdir(setting_dir)
     run_sumo(setting_dir, sumo_port, step_length, num_clients=2 if not vanila else 1, gui=True)
     config_file_name = os.path.basename(experiment_setting['config_file'])
@@ -137,13 +142,14 @@ def run_one_setting(setting_dir, source_dir, experiment_setting, vanila=False):
                        config_file_name, 
                        sumo_port, 
                        fixs_port, 
-                       simulink_port, 
                        penetration_rate, 
                        step_length, 
                        ecodriving, 
                        vehicle_dynamics, 
                        use_simulink_for_energy_evaluation, 
-                       vanila=vanila)
+                       vanila=vanila,
+                       simulink_port=simulink_port,
+                       )
         time.sleep(2)
         os.chdir(setting_dir)
         if vehicle_dynamics or use_simulink_for_energy_evaluation:
@@ -166,7 +172,8 @@ def run_settings(config, vanila=False):
         ecodriving = experiment_setting['eco_driving']
         vehicle_dynamics = experiment_setting['vehicle_dynamics']
         use_simulink_for_energy_evaluation = experiment_setting['use_simulink_for_energy_evaluation']
-        model_name = experiment_setting['Simulink']['model_name']
+        if vehicle_dynamics or use_simulink_for_energy_evaluation:
+            model_name = experiment_setting['Simulink']['model_name']
         output_dir = os.path.join(working_dir, '{}%_{}Hz'.format(int(penetration_rate*100), int(1/step_length)))
         
         if ecodriving:
@@ -192,7 +199,8 @@ def run_settings(config, vanila=False):
         shutil.copy(os.path.join(source_dir, 'realsim_script_Sumo.m'), output_dir)
         # copy the sumo signal control file to the experiment directory
         sumo_port = sumo_setting['port']
-        simulink_port = experiment_setting['Simulink']['port']
+        if vehicle_dynamics or use_simulink_for_energy_evaluation:
+            simulink_port = experiment_setting['Simulink']['port']
         fixs_port = experiment_setting['FIXS']['port']
         config_file_name = os.path.basename(experiment_setting['config_file'])
         config_file_path = os.path.join(source_dir, config_file_name)
@@ -205,7 +213,7 @@ def run_settings(config, vanila=False):
         # Modify the YAML data
         config['SimulationSetup']['TrafficSimulatorPort'] = sumo_port
         config['ApplicationSetup']['VehicleSubscription'][0]['port'] = [fixs_port]
-        config['XilSetup']['VehicleSubscription'][0]['port'] = [simulink_port]
+        # config['XilSetup']['VehicleSubscription'][0]['port'] = [simulink_port]
 
         # Write back to the file while preserving the original format
         with open(os.path.join(output_dir, config_file_name), 'w') as f:

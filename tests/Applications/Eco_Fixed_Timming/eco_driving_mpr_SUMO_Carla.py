@@ -388,7 +388,7 @@ class SumoEnvMultiAgent:
 if __name__ == "__main__":
     start_time = time.time()
     parser = argparse.ArgumentParser()
-    parser.add_argument("-c", "--config", type=str, help="Path to the Configuration file", default='ecodriving_config_Sumo_w_dyno_Carla.yaml')
+    parser.add_argument("-c", "--config", type=str, help="Path to the Configuration file", default='..\\..\\SumoCarla\\test_scenarios\\Shallowford_after_calibration_banleftturn_AdjustedFixedTime_V3\defaultConfig.yaml')
     parser.add_argument("--sumoPort", type=str, help="Specify port of sumo", default=1337)
     parser.add_argument("--trafficlayerPort", type=str, help="Specify port of traffic layer", default=441)
     parser.add_argument("--simulinkPort", type=str, help="Specify port of simulink", default=430)
@@ -396,7 +396,7 @@ if __name__ == "__main__":
     parser.add_argument("--vehicleDynamics", action="store_true", help="use the vehicle dynamis", default=False)
     parser.add_argument("--useSimulinkForEnergyEvaluation", action="store_true", help="use the simulink for energy evaluation", default=False)
     parser.add_argument("--penetrationRate", type=float, help="the penetration rate of cav", default=0.1)
-    parser.add_argument("--pathToNet", type=str, help="the path to the net file", default='Experiments_Sumo\\Shallowford_after_calibration_banleftturn_AdjustedFixedTime_V3')
+    parser.add_argument("--pathToNet", type=str, help="the path to the net file", default='..\\..\\SumoCarla\\test_scenarios\\Shallowford_after_calibration_banleftturn_AdjustedFixedTime_V3')
     parser.add_argument("--stepLength", type=float, help="the step length of the simulation", default=0.1)
     args = parser.parse_args()
     traffic_layer_config = args.config

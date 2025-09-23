@@ -65,7 +65,7 @@ from __future__ import print_function
 import glob
 import os
 import sys
-
+from dotenv import load_dotenv
 
 
 # ==============================================================================
@@ -1271,7 +1271,8 @@ def game_loop(args):
 
 
 def main():
-    config_path = os.path.join(os.getcwd(), 'defaultConfig.yaml')
+    load_dotenv()
+    config_path = os.environ["CONFIG_PATH"]
     config_helper = ConfigHelper()
     config_helper.getConfig(config_path)
     carla_server_ip = config_helper.Carla_setup["CarlaServerIP"]

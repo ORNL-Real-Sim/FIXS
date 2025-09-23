@@ -284,6 +284,7 @@ int main(int argc, const char* argv[]) {
 
                 if (!MAP_CONTAINS_KEY(mapSumoActor, tmpVehData.id)) {
                     mapSumoActor[tmpVehData.id] = SumoActor(tmpVehData.id, tmpVehData.type, tmpVehData.vehicleClass, tmpTransform, tmpExtent);
+                    std::cout << "Vehicle Class: " << tmpVehData.vehicleClass << std::endl;
                 }
                 else {
                     // Update the existing actor's transform and extent
@@ -291,8 +292,8 @@ int main(int argc, const char* argv[]) {
                     mapSumoActor[tmpVehData.id].extent = tmpExtent;
 				}
 				setCurrentSumoIds.insert(tmpVehData.id);
-                
             }
+
             for (const std::pair<const std::string, TrafficLightData_t>& pair : msgHelper.TlsDataRecv_um) {
                 const std::string& junctionID = pair.first;
                 const TrafficLightData_t& tmpTrafficLightData = pair.second;
@@ -315,7 +316,7 @@ int main(int argc, const char* argv[]) {
                         trafficLight.carlaTrafficLightActorPtr->SetState(carlaTrafficLightState);
                     }
                     else {
-                        std::cerr << "Carla actor for traffic light " << tmpTrafficLightData.id << " not found." << std::endl;
+                        std::cerr << "Carla actor for traffic light " << tmpTrafficLightData.id << "Junction Id:" << junctionID << "Link Id: "<< linkId << " not found." << std::endl;
                     }
                 }
             }
@@ -376,10 +377,8 @@ int main(int argc, const char* argv[]) {
                 // This is to ensure that the carla transform is on the road
                 // =======================================================
                 //carlaTransform.location = waypointTransform.location;
-				// Add a small offset to the z coordinate to avoid collision with the ground
 				
-                
-                //carlaTransform.location.z = carlaTransform.location.z + SPAWN_OFFSET_Z;
+			
                 
                 //Use the waypoint's rotation to ensure the vehicle is aligned with the road
 				//carlaTransform.rotation = waypointTransform.rotation; 
@@ -390,6 +389,7 @@ int main(int argc, const char* argv[]) {
                 // Spawn the Sumo actors that are not in the current step
                 // =======================================================
                 if (!MAP_CONTAINS_KEY(mapSumoToCarla , sumoActorId) || !sumoActor.spawnedInCarla || sumoActor.carlaVehicleActorPtr ==nullptr) {
+                    // Add a small offset to the z coordinate to avoid collision with the ground
                     carlaTransform.location.z = SPAWN_OFFSET_Z;
 					
 
@@ -423,7 +423,7 @@ int main(int argc, const char* argv[]) {
                         if (enableVerboseLog) std::cout << "Found Intertested Vehicle with Carla Type ID: " << carlaActorTypeId << " SUMO ID:" << sumoActorId << std::endl;
                     }
                     else {
-                        carlaVehicleActorPtr = boost::static_pointer_cast<carla::client::Vehicle>(carlaWorld.SpawnActor(vehicle_blueprint_local, carlaTransform));
+                        carlaVehicleActorPtr = boost::static_pointer_cast<carla::client::Vehicle>(carlaWorld.TrySpawnActor(vehicle_blueprint_local, carlaTransform));
                         if (enableVerboseLog) std::cout << "Spawning actor with Carla Type ID: " << carlaActorTypeId << " SUMO ID:" << sumoActorId << std::endl;
                         // set the simulate physics to false, so that the actor does not fall down
                         //carlaActor->SetSimulatePhysics(false);
@@ -431,7 +431,7 @@ int main(int argc, const char* argv[]) {
                     
                      
 					
-                    if (carlaVehicleActorPtr) {
+                    if (carlaVehicleActorPtr != nullptr) {
 						sumoActor.spawnedInCarla = true; // Mark the Sumo actor as spawned in Carla
 						sumoActor.carlaVehicleActorPtr = carlaVehicleActorPtr; // Store the Carla actor in the SumoActor
 
@@ -455,17 +455,17 @@ int main(int argc, const char* argv[]) {
                                 << ", yaw: " << carlaTransform.rotation.yaw
                                 << ", roll: " << carlaTransform.rotation.roll << std::endl;
                         }
-                        
+                        // convert the carla actor id (uint_32 to string)
+                        std::string carlaActorId = std::to_string(carlaVehicleActorPtr->GetId());
+                        mapCarlaToSumo[carlaActorId] = sumoActorId;
+                        mapSumoToCarla[sumoActorId] = carlaActorId;
+                        sumoActor.carlaTransform = carlaTransform; // Store the Carla transform in the SumoActor
                     }
                     else {
                         std::cerr << "Failed to spawn actor. " << sumoActorId << std::endl;
-                        return 1;
+                        /*return 1;*/
                     }
-                    // convert the carla actor id (uint_32 to string)
-                    std::string carlaActorId = std::to_string(carlaVehicleActorPtr->GetId());
-					mapCarlaToSumo[carlaActorId] = sumoActorId;
-					mapSumoToCarla[sumoActorId] = carlaActorId;
-					sumoActor.carlaTransform = carlaTransform; // Store the Carla transform in the SumoActor
+                    
                 }
                 else {
                     // ==============================================================================================================
@@ -578,18 +578,19 @@ int main(int argc, const char* argv[]) {
 						//speedDesired = simulatedSpeed; // Use the simulated speed, this can be further changed with desired speed like from the Eco-Pilot
       //              }
                     if (enableVerboseLog) std::cout << "Speed of the Sumo actor with ID: " << sumoId << " is: " << speedDesired << std::endl;
-					tmpVehData.speedDesired = speedDesired;
-					tmpVehData.positionX = sumoLocation.x;
-					tmpVehData.positionY = sumoLocation.y;
-					tmpVehData.positionZ = sumoLocation.z;
-					tmpVehData.heading = sumoRotation.yaw;
-					tmpVehData.grade = sumoRotation.pitch * M_PI / 180.0; // Convert to radians
-					
-					tmpVehData.length = carlaExtent.x * 2; // The extent is half the length, so multiply by 2
-					tmpVehData.width = carlaExtent.y * 2; // The extent is half the width, so multiply by 2
-					tmpVehData.height = carlaExtent.z * 2; // The extent is half the height, so multiply by 2
-					msgHelper.VehDataSend_um[socketHelper.serverSock[sockId]].push_back(tmpVehData);
-
+                    if (enableExternalControl) {
+					    tmpVehData.speedDesired = speedDesired;
+					    tmpVehData.positionX = sumoLocation.x;
+					    tmpVehData.positionY = sumoLocation.y;
+					    tmpVehData.positionZ = sumoLocation.z;
+					    tmpVehData.heading = sumoRotation.yaw;
+					    tmpVehData.grade = sumoRotation.pitch * M_PI / 180.0; // Convert to radians
+					    
+					    tmpVehData.length = carlaExtent.x * 2; // The extent is half the length, so multiply by 2
+					    tmpVehData.width = carlaExtent.y * 2; // The extent is half the width, so multiply by 2
+					    tmpVehData.height = carlaExtent.z * 2; // The extent is half the height, so multiply by 2
+					    msgHelper.VehDataSend_um[socketHelper.serverSock[sockId]].push_back(tmpVehData);
+                    }
                     if (sumoId == centeredViewId) {
 						// Set the spectator to follow the centered view actor
 						// Note: The spectator is a special camera that follows the actor

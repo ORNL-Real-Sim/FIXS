@@ -1,7 +1,7 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="Current" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <LocalDebuggerCommandArguments>-f ..\..\tests\SumoCarla\defaultConfig.yaml -t ..\..\tests\SumoCarla\test_scenarios\Town01_with_ego_type_as_blueprint\traffic_light_table.csv</LocalDebuggerCommandArguments>
+    <LocalDebuggerCommandArguments>-f ..\..\tests\Applications\Eco_Fixed_Timming\ecodriving_config_Sumo_w_dyno_Carla.yaml -t ..\..\tests\SumoCarla\test_scenarios\Shallowford_after_calibration_banleftturn_AdjustedFixedTime_V3\traffic_light_table.csv</LocalDebuggerCommandArguments>
     <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
   </PropertyGroup>
 </Project>

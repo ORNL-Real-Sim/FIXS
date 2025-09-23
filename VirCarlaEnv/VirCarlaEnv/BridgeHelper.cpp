@@ -4,8 +4,8 @@
 // Default value for offset
 // Town01 0.06,328.61
 // Town04 503.02,423.76
-carla::geom::Location BridgeHelper::offset = carla::geom::Location(0.06f, 328.61f, 0.0f);
-
+//carla::geom::Location BridgeHelper::offset = carla::geom::Location(0.06f, 328.61f, 0.0f);
+carla::geom::Location BridgeHelper::offset = carla::geom::Location(0.0f, 0.0f, 0.0f);
 carla::geom::Transform BridgeHelper::map_transfrom_Sumo_to_Carla(const carla::geom::Transform& in_sumo_transform,
     const carla::geom::Vector3D& extent) {
 

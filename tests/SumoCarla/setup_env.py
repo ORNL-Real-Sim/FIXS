@@ -1,9 +1,9 @@
 import os
 from utils.extract_sumo_tls_as_table import parse_sumo_tls_from_netxml, tls_groups_to_df
 
-SIMULATION_FOLDER = r"test_scenarios\Town01_with_ego_type_as_blueprint"
+SIMULATION_FOLDER = os.path.join(os.getcwd(), "test_scenarios", "Shallowford_after_calibration_banleftturn_AdjustedFixedTime_V3")
 CONFIG_PATH = os.path.join(SIMULATION_FOLDER, "defaultConfig.yaml")
-SUMO_NET_PATH = os.path.join(SIMULATION_FOLDER, "Town01.net.xml")
+SUMO_NET_PATH = os.path.join(SIMULATION_FOLDER, "chattCavMpr.sumocfg")
 SUMO_TLS_TABLE_PATH = os.path.join(SIMULATION_FOLDER, "traffic_light_table.csv")
 
 def extract_sumo_tls_as_table(sumo_net_file, sumo_tls_table_path):

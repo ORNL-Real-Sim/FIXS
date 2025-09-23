@@ -12,7 +12,7 @@ SimulationSetup:
     # Simulation end time
     # if NOT specificed, SimulationEndTime will be set to a large value (90000 seconds)
     #--------------------------------------------------
-  SimulationEndTime: 250
+  SimulationEndTime: 33000
 
     # specify which traffic simulator
     #--------------------------------------------------
@@ -20,7 +20,7 @@ SimulationSetup:
 
     # default will send all
   VehicleMessageField: [id, type, vehicleClass, speed, acceleration, positionX, positionY, positionZ, heading,
-    color, linkId, laneId, distanceTravel, speedDesired, grade, length, width, height]
+    linkId, laneId, distanceTravel, speedDesired, grade, length, width, height]
 
     # by default it is false 
   EnableExternalDynamics: false   # set ture this so that simulink will control the response
@@ -50,14 +50,14 @@ ApplicationSetup:
     ip: ["127.0.0.1"]
     port: [440]
 
-  # - type: "ego"
-  #   attribute: {id: ["ego"], radius: [0]}
-  #   ip: ["127.0.0.1"]
-  #   port: [441]
+  - type: "ego"
+    attribute: {id: ["ego"], radius: [0]}
+    ip: ["127.0.0.1"]
+    port: [441]
 
   SignalSubscription:
   - type: intersection
-    attribute: {name: ['111', '139', '156', '167', '184']}
+    attribute: {name: ['2', '9', '10', '8', '12', '3']}
     ip: ['127.0.0.1']
     port: [440]
     
@@ -73,12 +73,12 @@ CarlaSetup:
     # whether or not enable external control
     # if set to true, the sumo vehicles will be updated according to the carla vehicles' state
     # if set to false, the carla will be only visualizing the sumo vehicles
-    EnableExternalControl: true
+    EnableExternalControl: false
     
     # whether or not use vehicle type as blueprint  
     # if set to true, the carla vehicles will be created according to the vehicle type
     # if set to false, the carla vehicles will be spawned using random blueprint
-    UseVehicleTypeAsBlueprint: true
+    UseVehicleTypeAsBlueprint: false
 
     # Carla Server Ip and Port settings 
     CarlaServerIP: 127.0.0.1

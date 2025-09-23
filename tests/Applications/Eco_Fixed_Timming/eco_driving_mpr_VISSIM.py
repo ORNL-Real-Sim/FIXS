@@ -1,21 +1,15 @@
-# -*- coding: utf-8 -*-
-# import pdb  # pdb.set_trace()
-from __future__ import print_function
-from fileinput import filename
-from tabnanny import verbose
-#from cycler import V
-import pandas as pd
-#from regex import F
-import win32com.client as com # COM-Server
 import os
 import socket
+import argparse
 import numpy as np
+import pandas as pd
 from cav_casestudy.SUMO.speed_control_utils import *
 from CommonLib.SocketHelper import SocketHelper
 from CommonLib.ConfigHelper import ConfigHelper
 from CommonLib.MsgHelper import MsgHelper
 from CommonLib.VehDataMsgDefs import VehData
-import argparse
+import win32com.client as com # COM-Server
+
 
 ENABLE_SOCKET = True
 WARMUP_SECONDS = 20
@@ -186,7 +180,6 @@ class VissimEnvMultiAgent:
         assert msg_helper.vehicle_msg_field_valid['accelerationDesired'] or msg_helper.vehicle_msg_field_valid['speedDesired'] , "Must have either accelerationDesired or speedDesired in the VehicleMessageField"
         self.socket_helper = SocketHelper(config_helper=config_helper, msg_helper=msg_helper)
         # IP to connect to the FIXS server
-        
         self.vissim_port = vissim_port
         self.simulation_file_path = simulation_file_path
         # IP to connect to the traffic layer
