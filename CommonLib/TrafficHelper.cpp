@@ -32,8 +32,14 @@ void TrafficHelper::connectionSetup(string trafficIp, int trafficPort, int nClie
 
 	//system("sumo -c \"C:\Users\y0n\Dropbox (ORNL)\2_projects\1_2_sumo\1_4_speedHarmTest\speedHarmTest.sumocfg\" --remote-port 1337 ");
 
-	libtraci::Simulation::init(trafficPort, libsumo::DEFAULT_NUM_RETRIES, trafficIp);
-	libtraci::Simulation::setOrder(order);
+	try {
+		libtraci::Simulation::init(trafficPort, libsumo::DEFAULT_NUM_RETRIES, trafficIp);
+		libtraci::Simulation::setOrder(order);
+	}
+	catch (const std::exception& e) {
+		printf("ERROR: Failed to connect to SUMO at %s:%d - %s\n", trafficIp.c_str(), trafficPort, e.what());
+		throw;
+	}
 
 	/********************************************
 	* GET VEH SUBSCRIPTION
@@ -151,39 +157,43 @@ void TrafficHelper::connectionSetup(string trafficIp, int trafficPort, int nClie
 	/********************************************
 	* GET Speed Limit of every edge, lane
 	*********************************************/
-	vector <string> laneList = libtraci::Lane::getIDList();
+	// Only retrieve speed limits if speedLimit is in the message field
+	if (VehicleMessageField_set.find("speedLimit") != VehicleMessageField_set.end() ||
+		VehicleMessageField_set.find("speedLimitNext") != VehicleMessageField_set.end()) {
+		vector <string> laneList = libtraci::Lane::getIDList();
 
-	vector <string> vehClassList;
+		vector <string> vehClassList;
 
-	vector <string> vehTypeList = libtraci::VehicleType::getIDList();
-	for (int i = 0; i < vehTypeList.size(); i++) {
-		string vehType = vehTypeList[i];
-		string vehClass = libtraci::VehicleType::getVehicleClass(vehType);
+		vector <string> vehTypeList = libtraci::VehicleType::getIDList();
+		for (int i = 0; i < vehTypeList.size(); i++) {
+			string vehType = vehTypeList[i];
+			string vehClass = libtraci::VehicleType::getVehicleClass(vehType);
 
-		vehClassList.push_back(vehClass);
-	}
-
-	for (int i = 0; i < laneList.size(); i++) {
-		string laneId = laneList[i];
-		string edgeId = libtraci::Lane::getEdgeID(laneId);
-
-		vector <string> allowClassList = libtraci::Lane::getAllowed(laneId);
-		vector <string> disallowClassList = libtraci::Lane::getDisallowed(laneId);
-
-		if (allowClassList.size() == 0 && disallowClassList.size() == 0) {
-			for (int iC = 0; iC < vehClassList.size(); iC++) {
-				string vClass = vehClassList[iC];
-				LaneVehClass2SpeedLimit_um[make_pair(laneId, vClass)] = libtraci::Lane::getMaxSpeed(laneId);
-
-				EdgeVehClass2SpeedLimit_um[make_pair(edgeId, vClass)] = libtraci::Lane::getMaxSpeed(laneId);
-			}
+			vehClassList.push_back(vehClass);
 		}
-		else {
-			for (int iC = 0; iC < allowClassList.size(); iC++) {
-				string vClass = allowClassList[iC];
-				LaneVehClass2SpeedLimit_um[make_pair(laneId, vClass)] = libtraci::Lane::getMaxSpeed(laneId);
 
-				EdgeVehClass2SpeedLimit_um[make_pair(edgeId, vClass)] = libtraci::Lane::getMaxSpeed(laneId);
+		for (int i = 0; i < laneList.size(); i++) {
+			string laneId = laneList[i];
+			string edgeId = libtraci::Lane::getEdgeID(laneId);
+
+			vector <string> allowClassList = libtraci::Lane::getAllowed(laneId);
+			vector <string> disallowClassList = libtraci::Lane::getDisallowed(laneId);
+
+			if (allowClassList.size() == 0 && disallowClassList.size() == 0) {
+				for (int iC = 0; iC < vehClassList.size(); iC++) {
+					string vClass = vehClassList[iC];
+					LaneVehClass2SpeedLimit_um[make_pair(laneId, vClass)] = libtraci::Lane::getMaxSpeed(laneId);
+
+					EdgeVehClass2SpeedLimit_um[make_pair(edgeId, vClass)] = libtraci::Lane::getMaxSpeed(laneId);
+				}
+			}
+			else {
+				for (int iC = 0; iC < allowClassList.size(); iC++) {
+					string vClass = allowClassList[iC];
+					LaneVehClass2SpeedLimit_um[make_pair(laneId, vClass)] = libtraci::Lane::getMaxSpeed(laneId);
+
+					EdgeVehClass2SpeedLimit_um[make_pair(edgeId, vClass)] = libtraci::Lane::getMaxSpeed(laneId);
+				}
 			}
 		}
 	}
