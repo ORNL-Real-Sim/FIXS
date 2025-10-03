@@ -2,16 +2,6 @@
 #include <fstream>
 #include <unordered_map>
 #include <unordered_set>
-
-
-//#include "TraCIAPI.h"
-
-
-//#include <event2/bufferevent.h>
-//#include <event2/util.h>
-//#include <event2/event.h>
-
-//#define TRACI_ENABLED 1
 #include <ctime>
 #include <chrono>
 
