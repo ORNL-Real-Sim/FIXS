@@ -157,21 +157,24 @@ void TrafficHelper::connectionSetup(string trafficIp, int trafficPort, int nClie
 	/********************************************
 	* GET Speed Limit of every edge, lane
 	*********************************************/
-	// Only retrieve speed limits if speedLimit is in the message field
+	// Get list of all lanes and edges in the network
+	vector <string> laneList = libtraci::Lane::getIDList();
+
+	// Build vehicle class list from all vehicle types defined in SUMO
+	vector <string> vehClassList;
+
+	vector <string> vehTypeList = libtraci::VehicleType::getIDList();
+	for (int i = 0; i < vehTypeList.size(); i++) {
+		string vehType = vehTypeList[i];
+		string vehClass = libtraci::VehicleType::getVehicleClass(vehType);
+
+		vehClassList.push_back(vehClass);
+	}
+
+	// Only retrieve speed limits if speedLimit or speedLimitNext is defined in VehicleMessageField
+	// This avoids expensive queries when speed limit data is not needed
 	if (VehicleMessageField_set.find("speedLimit") != VehicleMessageField_set.end() ||
 		VehicleMessageField_set.find("speedLimitNext") != VehicleMessageField_set.end()) {
-		vector <string> laneList = libtraci::Lane::getIDList();
-
-		vector <string> vehClassList;
-
-		vector <string> vehTypeList = libtraci::VehicleType::getIDList();
-		for (int i = 0; i < vehTypeList.size(); i++) {
-			string vehType = vehTypeList[i];
-			string vehClass = libtraci::VehicleType::getVehicleClass(vehType);
-
-			vehClassList.push_back(vehClass);
-		}
-
 		for (int i = 0; i < laneList.size(); i++) {
 			string laneId = laneList[i];
 			string edgeId = libtraci::Lane::getEdgeID(laneId);
@@ -179,6 +182,7 @@ void TrafficHelper::connectionSetup(string trafficIp, int trafficPort, int nClie
 			vector <string> allowClassList = libtraci::Lane::getAllowed(laneId);
 			vector <string> disallowClassList = libtraci::Lane::getDisallowed(laneId);
 
+			// If no specific vehicle class restrictions, apply to all vehicle classes
 			if (allowClassList.size() == 0 && disallowClassList.size() == 0) {
 				for (int iC = 0; iC < vehClassList.size(); iC++) {
 					string vClass = vehClassList[iC];
@@ -187,6 +191,7 @@ void TrafficHelper::connectionSetup(string trafficIp, int trafficPort, int nClie
 					EdgeVehClass2SpeedLimit_um[make_pair(edgeId, vClass)] = libtraci::Lane::getMaxSpeed(laneId);
 				}
 			}
+			// Otherwise, only apply to allowed vehicle classes
 			else {
 				for (int iC = 0; iC < allowClassList.size(); iC++) {
 					string vClass = allowClassList[iC];

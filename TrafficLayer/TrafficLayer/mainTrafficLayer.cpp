@@ -486,6 +486,10 @@ int main(int argc, char* argv[]) {
 	}
 
 
+	// pass configuration to Traffic_c
+	Traffic_c.Config_c = &Config_c;
+	Traffic_c.getConfig();
+
 	/********************************************
 	* Traffic Simulator send and recv setups
 	*********************************************/
@@ -510,11 +514,6 @@ int main(int argc, char* argv[]) {
 		printf("Error: connect to traffic simulator failed\n");
 		exit(-1);
 	}
-
-
-	// pass configuration to Traffic_c
-	Traffic_c.Config_c = &Config_c;
-	Traffic_c.getConfig();
 
 	Traffic_c.MasterLogName = MasterLogName;
 
