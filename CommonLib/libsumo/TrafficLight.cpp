@@ -1,6 +1,6 @@
 /****************************************************************************/
-// Eclipse SUMO, Simulation of Urban MObility; see https://eclipse.org/sumo
-// Copyright (C) 2017-2023 German Aerospace Center (DLR) and others.
+// Eclipse SUMO, Simulation of Urban MObility; see https://eclipse.dev/sumo
+// Copyright (C) 2017-2025 German Aerospace Center (DLR) and others.
 // This program and the accompanying materials are made available under the
 // terms of the Eclipse Public License 2.0 which is available at
 // https://www.eclipse.org/legal/epl-2.0/
@@ -170,6 +170,12 @@ TrafficLight::getNextSwitch(const std::string& tlsID) {
     return STEPS2TIME(Helper::getTLS(tlsID).getActive()->getNextSwitchTime());
 }
 
+
+double
+TrafficLight::getSpentDuration(const std::string& tlsID) {
+    return STEPS2TIME(Helper::getTLS(tlsID).getActive()->getSpentDuration());
+}
+
 int
 TrafficLight::getServedPersonCount(const std::string& tlsID, int index) {
     MSTrafficLightLogic* const active = Helper::getTLS(tlsID).getActive();
@@ -182,26 +188,28 @@ TrafficLight::getServedPersonCount(const std::string& tlsID, int index) {
 
     const std::string& state = active->getPhases()[index]->getState();
     for (int i = 0; i < (int)state.size(); i++) {
-        for (MSLink* link : active->getLinksAt(i)) {
-            if (link->getLane()->getEdge().isCrossing()) {
-                // walking forwards across
-                for (MSTransportable* person : link->getLaneBefore()->getEdge().getPersons()) {
-                    if (static_cast<MSPerson*>(person)->getNextEdge() == link->getLane()->getEdge().getID()) {
-                        result += 1;
+        if (state[i] == LINKSTATE_TL_GREEN_MAJOR) {
+            for (MSLink* link : active->getLinksAt(i)) {
+                if (link->getLane()->getEdge().isCrossing()) {
+                    // walking forwards across
+                    for (MSTransportable* person : link->getLaneBefore()->getEdge().getPersons()) {
+                        if (static_cast<MSPerson*>(person)->getNextEdge() == link->getLane()->getEdge().getID()) {
+                            result += 1;
+                        }
                     }
-                }
-                // walking backwards across
-                MSLane* walkingAreaAcross = link->getLane()->getLinkCont().front()->getLane();
-                for (MSTransportable* person : walkingAreaAcross->getEdge().getPersons()) {
-                    if (static_cast<MSPerson*>(person)->getNextEdge() == link->getLane()->getEdge().getID()) {
-                        result += 1;
+                    // walking backwards across
+                    MSLane* walkingAreaAcross = link->getLane()->getLinkCont().front()->getLane();
+                    for (MSTransportable* person : walkingAreaAcross->getEdge().getPersons()) {
+                        if (static_cast<MSPerson*>(person)->getNextEdge() == link->getLane()->getEdge().getID()) {
+                            result += 1;
+                        }
                     }
-                }
-            } else if (link->getLaneBefore()->getEdge().isCrossing()) {
-                // walking backwards across (in case both sides are separately controlled)
-                for (MSTransportable* person : link->getLane()->getEdge().getPersons()) {
-                    if (static_cast<MSPerson*>(person)->getNextEdge() == link->getLaneBefore()->getEdge().getID()) {
-                        result += 1;
+                } else if (link->getLaneBefore()->getEdge().isCrossing()) {
+                    // walking backwards across (in case both sides are separately controlled)
+                    for (MSTransportable* person : link->getLane()->getEdge().getPersons()) {
+                        if (static_cast<MSPerson*>(person)->getNextEdge() == link->getLaneBefore()->getEdge().getID()) {
+                            result += 1;
+                        }
                     }
                 }
             }
@@ -294,6 +302,24 @@ TrafficLight::getConstraintsByFoe(const std::string& foeSignal, const std::strin
     }
     return result;
 }
+
+
+void
+TrafficLight::addConstraint(const std::string& tlsID, const std::string& tripId, const std::string& foeSignal, const std::string& foeId, const int type, const int limit) {
+    MSTrafficLightLogic* const active = Helper::getTLS(tlsID).getDefault();
+    MSTrafficLightLogic* const active2 = Helper::getTLS(foeSignal).getDefault();
+    MSRailSignal* s = dynamic_cast<MSRailSignal*>(active);
+    MSRailSignal* s2 = dynamic_cast<MSRailSignal*>(active2);
+    if (s == nullptr) {
+        throw TraCIException("'" + tlsID + "' is not a rail signal");
+    }
+    if (s2 == nullptr) {
+        throw TraCIException("'" + foeSignal + "' is not a rail signal");
+    }
+    MSRailSignalConstraint* c = new MSRailSignalConstraint_Predecessor((MSRailSignalConstraint::ConstraintType)type, s2, foeId, limit, true);
+    s->addConstraint(tripId, c);
+}
+
 
 std::vector<TraCISignalConstraint>
 TrafficLight::swapConstraints(const std::string& tlsID, const std::string& tripId, const std::string& foeSignal, const std::string& foeId) {
@@ -979,6 +1005,8 @@ TrafficLight::handleVariable(const std::string& objID, const int variable, Varia
             return wrapper->wrapDouble(objID, variable, getPhaseDuration(objID));
         case TL_NEXT_SWITCH:
             return wrapper->wrapDouble(objID, variable, getNextSwitch(objID));
+        case TL_SPENT_DURATION:
+            return wrapper->wrapDouble(objID, variable, getSpentDuration(objID));
         case TL_CONTROLLED_JUNCTIONS:
             return wrapper->wrapStringList(objID, variable, getControlledJunctions(objID));
         case libsumo::VAR_PARAMETER:

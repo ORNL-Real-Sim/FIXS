@@ -122,8 +122,8 @@
       <AdditionalDependencies>..\..\CommonLib\yaml-cpp\build\Debug\yaml-cppd.lib;..\..\CommonLib\libevent\build\lib\Release\event_extra.lib;..\..\CommonLib\libevent\build\lib\Release\event_core.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
-      <Command>copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\libsumocppD.dll" "$(OutDir)"
-copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\libtracicppD.dll" "$(OutDir)"</Command>
+      <Command>if exist "$(ProjectDir)..\..\CommonLib\libsumo\libsumocppD.dll" (copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\libsumocppD.dll" "$(OutDir)") else (copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\libsumocpp.dll" "$(OutDir)")
+if exist "$(ProjectDir)..\..\CommonLib\libsumo\libtracicppD.dll" (copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\libtracicppD.dll" "$(OutDir)") else (copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\libtracicpp.dll" "$(OutDir)")</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -164,11 +164,11 @@ copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\libtracicpp.dll" "$(OutDir)"</Comm
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalLibraryDirectories>..\..\CommonLib\libsumo;..\..\CommonLib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>..\..\CommonLib\yaml-cpp\build\Debug\yaml-cppd.lib;..\..\CommonLib\libsumo\libsumo.lib;..\..\CommonLib\libsumo\libtracicppD.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>..\..\CommonLib\yaml-cpp\build\Debug\yaml-cppd.lib;..\..\CommonLib\libsumo\libtracicpp.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
-      <Command>copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\libsumocppD.dll" "$(OutDir)"
-copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\libtracicppD.dll" "$(OutDir)"</Command>
+      <Command>if exist "$(ProjectDir)..\..\CommonLib\libsumo\libsumocppD.dll" (copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\libsumocppD.dll" "$(OutDir)") else (copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\libsumocpp.dll" "$(OutDir)")
+if exist "$(ProjectDir)..\..\CommonLib\libsumo\libtracicppD.dll" (copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\libtracicppD.dll" "$(OutDir)") else (copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\libtracicpp.dll" "$(OutDir)")</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -189,7 +189,7 @@ copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\libtracicppD.dll" "$(OutDir)"</Com
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalLibraryDirectories>..\..\CommonLib\libsumo; ..\..\CommonLib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>..\..\CommonLib\libsumo\libsumo.lib;..\..\CommonLib\libsumo\libtracicpp.lib;..\..\CommonLib\yaml-cpp\build\Release\yaml-cpp.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>..\..\CommonLib\yaml-cpp\build\Release\yaml-cpp.lib;..\..\CommonLib\libsumo\libtracicpp.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\libsumocpp.dll" "$(OutDir)"

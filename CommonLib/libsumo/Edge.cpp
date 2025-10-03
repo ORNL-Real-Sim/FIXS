@@ -1,6 +1,6 @@
 /****************************************************************************/
-// Eclipse SUMO, Simulation of Urban MObility; see https://eclipse.org/sumo
-// Copyright (C) 2017-2023 German Aerospace Center (DLR) and others.
+// Eclipse SUMO, Simulation of Urban MObility; see https://eclipse.dev/sumo
+// Copyright (C) 2017-2025 German Aerospace Center (DLR) and others.
 // This program and the accompanying materials are made available under the
 // terms of the Eclipse Public License 2.0 which is available at
 // https://www.eclipse.org/legal/epl-2.0/
@@ -29,6 +29,7 @@
 #include <libsumo/Helper.h>
 #include <libsumo/TraCIDefs.h>
 #include <libsumo/TraCIConstants.h>
+#include <libsumo/Lane.h>
 #include <utils/emissions/HelpersHarmonoise.h>
 #include "Edge.h"
 
@@ -46,6 +47,7 @@ ContextSubscriptionResults Edge::myContextSubscriptionResults;
 // ===========================================================================
 std::vector<std::string>
 Edge::getIDList() {
+    MSNet::getInstance(); // just to check that we actually have a network
     std::vector<std::string> ids;
     MSEdge::insertIDs(ids);
     return ids;
@@ -281,6 +283,29 @@ Edge::getPendingVehicles(const std::string& edgeID) {
     return vehIDs;
 }
 
+
+double
+Edge::getAngle(const std::string& edgeID, double relativePosition) {
+    const std::vector<MSLane*>& lanes = getEdge(edgeID)->getLanes();
+    return lanes.empty() ? libsumo::INVALID_DOUBLE_VALUE : Lane::getAngle(lanes.front()->getID(), relativePosition);
+}
+
+std::string
+Edge::getFromJunction(const std::string& edgeID) {
+    return getEdge(edgeID)->getFromJunction()->getID();
+}
+
+std::string
+Edge::getToJunction(const std::string& edgeID) {
+    return getEdge(edgeID)->getToJunction()->getID();
+}
+
+std::string
+Edge::getBidiEdge(const std::string& edgeID) {
+    const MSEdge* bidi = getEdge(edgeID)->getBidiEdge();
+    return bidi == nullptr ? "" : bidi->getID();
+}
+
 std::string
 Edge::getParameter(const std::string& edgeID, const std::string& param) {
     return getEdge(edgeID)->getParameter(param, "");
@@ -315,7 +340,7 @@ Edge::setDisallowed(const std::string& edgeID, std::vector<std::string> disallow
 
 
 void
-Edge::setAllowedSVCPermissions(const std::string& edgeID, int permissions) {
+Edge::setAllowedSVCPermissions(const std::string& edgeID, long long int permissions) {
     MSEdge* e = getEdge(edgeID);
     for (MSLane* lane : e->getLanes()) {
         lane->setPermissions(permissions, MSLane::CHANGE_PERMISSIONS_PERMANENT);
@@ -338,15 +363,13 @@ Edge::setEffort(const std::string& edgeID, double effort, double beginSeconds, d
 
 void
 Edge::setMaxSpeed(const std::string& edgeID, double speed) {
-    for (MSLane* lane : getEdge(edgeID)->getLanes()) {
-        lane->setMaxSpeed(speed);
-    }
+    getEdge(edgeID)->setMaxSpeed(speed);
 }
 
 void
-Edge::setFriction(const std::string& edgeID, double value) {
+Edge::setFriction(const std::string& edgeID, double friction) {
     for (MSLane* lane : getEdge(edgeID)->getLanes()) {
-        lane->setFrictionCoefficient(value);
+        lane->setFrictionCoefficient(friction);
     }
 }
 
@@ -425,6 +448,15 @@ Edge::handleVariable(const std::string& objID, const int variable, VariableWrapp
             return wrapper->wrapString(objID, variable, getStreetName(objID));
         case VAR_PENDING_VEHICLES:
             return wrapper->wrapStringList(objID, variable, getPendingVehicles(objID));
+        case VAR_ANGLE:
+            paramData->readUnsignedByte();
+            return wrapper->wrapDouble(objID, variable, getAngle(objID, paramData->readDouble()));
+        case FROM_JUNCTION:
+            return wrapper->wrapString(objID, variable, getFromJunction(objID));
+        case TO_JUNCTION:
+            return wrapper->wrapString(objID, variable, getToJunction(objID));
+        case VAR_BIDI:
+            return wrapper->wrapString(objID, variable, getBidiEdge(objID));
         case libsumo::VAR_PARAMETER:
             paramData->readUnsignedByte();
             return wrapper->wrapString(objID, variable, getParameter(objID, paramData->readString()));
