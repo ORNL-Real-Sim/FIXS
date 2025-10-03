@@ -88,7 +88,9 @@ This section is about how to build the source code, and then how to dispatch a r
 
 #### 1. Download and install Visual Studio 17 2022 community version. 
 
-#### 2. Several libraries need to be compiled first. You can use the ```compileExternalLibraries.bat``` to do the following steps automatically or manually execute the following steps. Make sure you have CMake installed and added to PATH
+#### 2. Download and install cmake
+
+#### 3. Several libraries need to be compiled first. You can use the ```compileExternalLibraries.bat``` to do the following steps automatically or manually execute the following steps. Make sure you have CMake installed and added to PATH
 
 * Build libevent (Currently this lib is not used, you can skip)\
 reference: https://github.com/libevent/libevent/blob/master/Documentation/Building.md#building-on-windows \
