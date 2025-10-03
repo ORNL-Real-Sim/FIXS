@@ -99,6 +99,37 @@ GitHub-specific configuration (workflows, issue templates, CI/CD).
 
 ---
 
+## Dependency Management
+
+### `dependencies.yaml`
+Central configuration file tracking external simulator and library versions used by RS_FIXS:
+- **SUMO** - Traffic simulation (currently v1.22.0)
+- **CARLA** - Virtual environment simulator
+- **CarMaker** - IPG Automotive HIL platform
+- **yaml-cpp** / **libevent** - C++ libraries
+
+This file serves as the single source of truth for external dependency versions.
+
+### `scripts/update_libsumo.ps1`
+PowerShell script to synchronize libsumo files with a specific SUMO version from official releases.
+
+**What it does:**
+1. Reads SUMO version from `dependencies.yaml`
+2. Downloads source files (.cpp/.h) from SUMO GitHub repository
+3. Downloads Windows binaries (DLLs and import libraries) from official SUMO releases
+4. Copies all files to `CommonLib/libsumo/`
+
+**Usage:**
+```powershell
+.\scripts\update_libsumo.ps1           # Update source files and binaries
+.\scripts\update_libsumo.ps1 -DryRun   # Preview what would be downloaded
+.\scripts\update_libsumo.ps1 -SkipDLLs # Only update source files
+```
+
+**Note:** Debug libraries (*D.dll, *D.lib) are not included in official SUMO releases. The build system automatically falls back to release binaries for debug builds.
+
+---
+
 ## Build Scripts
 
 ### `compileExternalLibraries.bat`
