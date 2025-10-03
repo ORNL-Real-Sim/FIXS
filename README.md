@@ -25,6 +25,7 @@ Publication list is upcoming...
 
 # Other links
 This README contains general information of the interface. For specific documentation of different simulators, check the following links:
+* ### [Developer Guide](doc/DEVELOPER_GUIDE.md) - Repository structure, build scripts, and usage guide
 * ### [VISSIM Interface](doc/VISSIMdoc.md)
 * ### [SUMO Interface](doc/SUMOdoc.md)
 * ### [CarMaker](doc/CarMakerDoc.md)
