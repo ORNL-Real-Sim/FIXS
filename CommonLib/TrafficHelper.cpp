@@ -30,6 +30,16 @@ void TrafficHelper::connectionSetup(string trafficIp, int trafficPort, int nClie
 	edgeHasSubscribed = false;
 	//nEdgeSubscribe = 0;
 
+	// Debug: Print received parameters
+	printf("DEBUG TrafficHelper::connectionSetup() received:\n");
+	printf("  trafficIp = '%s' (length=%zu)\n", trafficIp.c_str(), trafficIp.length());
+	printf("  trafficPort = %d\n", trafficPort);
+	printf("  Hex dump of IP string: ");
+	for (size_t i = 0; i < trafficIp.length() && i < 20; i++) {
+		printf("%02X ", (unsigned char)trafficIp[i]);
+	}
+	printf("\n");
+
 	//system("sumo -c \"C:\Users\y0n\Dropbox (ORNL)\2_projects\1_2_sumo\1_4_speedHarmTest\speedHarmTest.sumocfg\" --remote-port 1337 ");
 
 	try {
