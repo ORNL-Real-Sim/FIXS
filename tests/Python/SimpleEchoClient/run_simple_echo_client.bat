@@ -1,0 +1,32 @@
+@echo off
+REM Simple Echo Client - Batch script to run SUMO simulation and Python client
+
+set RealSimPath=..\..\..
+set TestPath=.
+set configFilename=config.yaml
+
+echo Starting SUMO with simple loop scenario...
+REM Remove --start flag so SUMO waits for TraCI connection
+start sumo-gui -c %TestPath%\simple_loop.sumocfg --remote-port 1337 --step-length 0.1
+
+echo Waiting for SUMO to initialize...
+timeout /t 2 /nobreak
+
+echo Starting TrafficLayer.exe (Release build)...
+start cmd /c %RealSimPath%\TrafficLayer\x64\Release\TrafficLayer.exe -f %configFilename%
+
+echo Waiting for TrafficLayer to initialize...
+timeout /t 2 /nobreak
+
+echo Starting Python Echo Client...
+REM Initialize conda if not already initialized
+if exist "%USERPROFILE%\miniconda3\Scripts\activate.bat" (
+    call %USERPROFILE%\miniconda3\Scripts\activate.bat realsim
+) else if exist "%USERPROFILE%\anaconda3\Scripts\activate.bat" (
+    call %USERPROFILE%\anaconda3\Scripts\activate.bat realsim
+) else (
+    call conda activate realsim
+)
+python %TestPath%\simple_echo_client.py
+
+pause
