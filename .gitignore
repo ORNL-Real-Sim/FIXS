@@ -25,6 +25,7 @@
 
 **/RealSim_tmp/*
 **/RS_tmp/*
+**/tmp/*
 
 **/.vscode/*
 
@@ -182,3 +183,5 @@ CM11_proj/tmp.obj
 
 # Ignore Experiments folder under tests/Applications/Eco_Fixed_Timming
 /tests/Applications/Eco_Fixed_Timming/Experiments/
+
+TODO.md
