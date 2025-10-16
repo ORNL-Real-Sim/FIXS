@@ -378,6 +378,34 @@ try {
         }
     }
 
+    # Copy SUMO runtime dependencies (DLLs required by libsumocpp.dll)
+    Write-Host "`nCopying SUMO runtime dependency DLLs..." -ForegroundColor Cyan
+    $sumoBinDir = Join-Path $sumoDir "bin"
+
+    $runtimeDlls = @(
+        "xerces-c_3_3.dll",
+        "xerces-c_3_3D.dll",
+        "zlib.dll",
+        "zlibd.dll",
+        "proj_9.dll",
+        "proj_9_d.dll"
+    )
+
+    foreach ($dll in $runtimeDlls) {
+        $sourceFile = Join-Path $sumoBinDir $dll
+        $destFile = Join-Path $destDir $dll
+
+        Write-Host "  Copying $dll..." -NoNewline
+
+        if (Test-Path $sourceFile) {
+            Copy-Item -Path $sourceFile -Destination $destFile -Force
+            Write-Host " OK" -ForegroundColor Green
+            $successCount++
+        } else {
+            Write-Host " NOT FOUND (optional)" -ForegroundColor Yellow
+        }
+    }
+
     # Copy header files from source
     Write-Host "`nCopying header files from SUMO source..." -ForegroundColor Cyan
     $sumoSrcLibsumoDir = Join-Path $sumoDir "src\libsumo"

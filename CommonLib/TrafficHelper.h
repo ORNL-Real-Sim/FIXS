@@ -7,14 +7,9 @@
 
 #include <math.h>
 
-//#include "TraCIAPI.h"
-//#define NOMINMAX
+//#define ENABLE_LIBSUMO
 
-#ifndef ENABLE_LIBSUMO
-#define ENABLE_LIBSUMO 0
-#endif
-
-#if ENABLE_LIBSUMO
+#ifdef ENABLE_LIBSUMO
 #include <libsumo/libsumo.h>
 #define SUMO_TRACI_NAMESPACE libsumo
 #else
@@ -216,6 +211,8 @@ private:
 
 	const int N_MAX_VEH = 100;
 };
+
+
 
 
 
