@@ -46,13 +46,8 @@ void TrafficHelper::connectionSetup(string trafficIp, int trafficPort, int nClie
 		// -----------------------------------------------------------------------
 		/*
 		try {
-			std::vector<std::string> cmd;
-			cmd.push_back("sumo");
-			cmd.push_back("-c");
-			cmd.push_back(Config_c->SumoSetup.SumoConfigFile);
-			cmd.push_back("--start");
-			cmd.push_back("--step-length");
-			cmd.push_back("0.1");
+			std::vector<std::string> cmd = {"sumo", "-c", Config_c->SumoSetup.SumoConfigFile, "--start", "--step-length", "0.1",
+				"--num-clients", std::to_string(Config_c->SumoSetup.NumClients)};
 
 			printf("Launching SUMO via libsumo::Simulation::start()...\n");
 			libsumo::Simulation::start(cmd);
