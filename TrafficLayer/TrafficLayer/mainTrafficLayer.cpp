@@ -502,9 +502,6 @@ int main(int argc, char* argv[]) {
 			string trafficIp = Config_c.SimulationSetup.TrafficSimulatorIP;
 			int trafficPort = Config_c.SimulationSetup.TrafficSimulatorPort;
 
-			// Debug output to verify config values
-			printf("DEBUG: TrafficSimulatorIP = '%s' (length=%zu)\n", trafficIp.c_str(), trafficIp.length());
-			printf("DEBUG: TrafficSimulatorPort = %d\n", trafficPort);
 
 			Traffic_c.connectionSetup(trafficIp, trafficPort, Sock_c.NCLIENT, Config_c.SumoSetup.ExecutionOrder);
 			Traffic_c.selectSUMO();

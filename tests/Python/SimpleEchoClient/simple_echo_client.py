@@ -52,6 +52,9 @@ def main():
         print(f'Failed to connect: {e}', file=sys.stderr)
         return
 
+    # Get verbose log flag from config
+    verbose_log = config_helper.simulation_setup.get('EnableVerboseLog', False)
+
     # Main loop: receive and echo back
     step_count = 0
     try:
@@ -64,19 +67,32 @@ def main():
 
             # Print received vehicle data
             step_count += 1
-            print(f'\n--- Step {step_count} | Time: {sim_time:.2f}s | State: {sim_state} ---')
-            print(f'Received {len(socket_helper.vehicle_data_receive_list)} vehicles:')
 
-            for veh_data in socket_helper.vehicle_data_receive_list:
-                print(f'  Vehicle ID: {veh_data.id.strip()}, Speed: {veh_data.speed:.2f} m/s, '
-                      f'Pos: ({veh_data.positionX:.2f}, {veh_data.positionY:.2f})')
+            if verbose_log:
+                print(f'\n--- Step {step_count} | Time: {sim_time:.2f}s | State: {sim_state} ---')
+                print(f'Received {len(socket_helper.vehicle_data_receive_list)} vehicles:')
 
-                # Echo back: add received vehicle to send list
-                socket_helper.vehicle_data_send_list.append(veh_data)
+                for veh_data in socket_helper.vehicle_data_receive_list:
+                    print(f'  Vehicle ID: {veh_data.id.strip()}, Speed: {veh_data.speed:.2f} m/s, '
+                          f'Pos: ({veh_data.positionX:.2f}, {veh_data.positionY:.2f})')
 
-            # Send data back to TrafficLayer
-            socket_helper.sendData(sim_state, sim_time, client_socket)
-            print(f'Echoed {len(socket_helper.vehicle_data_send_list)} vehicles back to server')
+                    # Echo back: add received vehicle to send list
+                    socket_helper.vehicle_data_send_list.append(veh_data)
+
+                # Send data back to TrafficLayer
+                socket_helper.sendData(sim_state, sim_time, client_socket)
+                print(f'Echoed {len(socket_helper.vehicle_data_send_list)} vehicles back to server')
+            else:
+                # Echo back: add received vehicles to send list
+                for veh_data in socket_helper.vehicle_data_receive_list:
+                    socket_helper.vehicle_data_send_list.append(veh_data)
+
+                # Send data back to TrafficLayer
+                socket_helper.sendData(sim_state, sim_time, client_socket)
+
+                # Print basic info every 100 steps
+                if step_count % 100 == 0:
+                    print(f'Step {step_count} | Time: {sim_time:.2f}s | Vehicles: {len(socket_helper.vehicle_data_receive_list)}')
 
     except KeyboardInterrupt:
         print('\nShutting down client...', file=sys.stderr)

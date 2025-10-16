@@ -24,6 +24,9 @@ SimulationSetup:
     # Using a common subset for simplicity
     VehicleMessageField: [id, type, vehicleClass, speed, acceleration, speedDesired]
 
+    # Use setPreviousSpeed instead of setSpeed to respect SUMO's acceleration dynamics
+    EnableExternalDynamics: true
+
 # SUMO Setup
 SumoSetup:
     # Auto-launch SUMO directly from TrafficLayer
