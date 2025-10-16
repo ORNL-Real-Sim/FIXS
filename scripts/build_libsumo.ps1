@@ -1,5 +1,5 @@
-# Script to build SUMO Debug DLLs from source
-# Reads version from dependencies.yaml, clones SUMO, builds Debug DLLs, and copies them
+# Script to build SUMO Release and Debug DLLs from source
+# Reads version from dependencies.yaml, clones SUMO, builds Release and Debug DLLs, and copies them along with headers
 
 param(
     [switch]$KeepBuildDir = $false,
@@ -24,7 +24,7 @@ if ($yamlContent -match 'sumo:\s+version:\s+"([^"]+)"') {
     exit 1
 }
 
-Write-Host "Building SUMO Debug DLLs for version $version" -ForegroundColor Cyan
+Write-Host "Building SUMO Release and Debug DLLs for version $version" -ForegroundColor Cyan
 
 # Check for required tools
 Write-Host "`nChecking prerequisites..." -ForegroundColor Cyan
@@ -198,35 +198,57 @@ try {
 
     Write-Host "  Configuration complete" -ForegroundColor Green
 
-    # Build Debug configuration for libsumocpp and libtracicpp
+    # Build Release configuration first
+    Write-Host "`nBuilding Release libraries (this may take 10-30 minutes)..." -ForegroundColor Cyan
+    Write-Host "  Building libsumocpp (Release)..." -ForegroundColor Gray
+    cmake --build . --config Release --target libsumocpp
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "Building libsumocpp (Release) failed"
+    }
+
+    Write-Host "  Building libtracicpp (Release)..." -ForegroundColor Gray
+    cmake --build . --config Release --target libtracicpp
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "Building libtracicpp (Release) failed"
+    }
+
+    Write-Host "  Release build complete" -ForegroundColor Green
+
+    # Build Debug configuration
     Write-Host "`nBuilding Debug libraries (this may take 10-30 minutes)..." -ForegroundColor Cyan
-    Write-Host "  Building libsumocpp..." -ForegroundColor Gray
+    Write-Host "  Building libsumocpp (Debug)..." -ForegroundColor Gray
     cmake --build . --config Debug --target libsumocpp
 
     if ($LASTEXITCODE -ne 0) {
-        throw "Building libsumocpp failed"
+        throw "Building libsumocpp (Debug) failed"
     }
 
-    Write-Host "  Building libtracicpp..." -ForegroundColor Gray
+    Write-Host "  Building libtracicpp (Debug)..." -ForegroundColor Gray
     cmake --build . --config Debug --target libtracicpp
 
     if ($LASTEXITCODE -ne 0) {
-        throw "Building libtracicpp failed"
+        throw "Building libtracicpp (Debug) failed"
     }
 
-    Write-Host "  Build complete" -ForegroundColor Green
+    Write-Host "  Debug build complete" -ForegroundColor Green
 
     Pop-Location
     Pop-Location
 
-    # Find and copy DLLs
-    Write-Host "`nCopying Debug DLLs..." -ForegroundColor Cyan
+    # Find and copy DLLs and headers
+    Write-Host "`nCopying Release and Debug DLLs..." -ForegroundColor Cyan
 
     $destDir = Join-Path $PSScriptRoot "..\CommonLib\libsumo"
-    # DLLs are built directly in sumo/bin, not in build/bin/Debug
-    $binDebugDir = Join-Path $sumoDir "bin"
+    # DLLs are built directly in sumo/bin
+    $binDir = Join-Path $sumoDir "bin"
 
     $requiredFiles = @(
+        "libsumocpp.dll",
+        "libsumocpp.lib",
+        "libtracicpp.dll",
+        "libtracicpp.lib",
         "libsumocppD.dll",
         "libsumocppD.lib",
         "libtracicppD.dll",
@@ -237,7 +259,7 @@ try {
     $failCount = 0
 
     foreach ($file in $requiredFiles) {
-        $sourceFile = Join-Path $binDebugDir $file
+        $sourceFile = Join-Path $binDir $file
         $destFile = Join-Path $destDir $file
 
         Write-Host "  Copying $file..." -NoNewline
@@ -253,9 +275,36 @@ try {
         }
     }
 
+    # Copy header files from source
+    Write-Host "`nCopying header files from SUMO source..." -ForegroundColor Cyan
+    $sumoSrcLibsumoDir = Join-Path $sumoDir "src\libsumo"
+
+    $headerFiles = @(
+        "libsumo.h",
+        "libtraci.h"
+    )
+
+    foreach ($file in $headerFiles) {
+        $sourceFile = Join-Path $sumoSrcLibsumoDir $file
+        $destFile = Join-Path $destDir $file
+
+        Write-Host "  Copying $file..." -NoNewline
+
+        if (Test-Path $sourceFile) {
+            Copy-Item -Path $sourceFile -Destination $destFile -Force
+            Write-Host " OK" -ForegroundColor Green
+            $successCount++
+        } else {
+            Write-Host " NOT FOUND" -ForegroundColor Red
+            Write-Host "    Expected at: $sourceFile" -ForegroundColor Yellow
+            $failCount++
+        }
+    }
+
+    $totalFiles = $requiredFiles.Count + $headerFiles.Count
     Write-Host "`nCopy Summary:" -ForegroundColor Cyan
-    Write-Host "  Success: $successCount / $($requiredFiles.Count)" -ForegroundColor Green
-    Write-Host "  Failed: $failCount / $($requiredFiles.Count)" -ForegroundColor $(if ($failCount -eq 0) { "Green" } else { "Red" })
+    Write-Host "  Success: $successCount / $totalFiles" -ForegroundColor Green
+    Write-Host "  Failed: $failCount / $totalFiles" -ForegroundColor $(if ($failCount -eq 0) { "Green" } else { "Red" })
 
     if ($failCount -gt 0) {
         throw "Failed to copy all required files"
@@ -271,9 +320,9 @@ try {
     }
 
     Write-Host "`n========================================" -ForegroundColor Green
-    Write-Host "SUCCESS! Debug DLLs are ready." -ForegroundColor Green
+    Write-Host "SUCCESS! Release and Debug DLLs are ready." -ForegroundColor Green
     Write-Host "========================================" -ForegroundColor Green
-    Write-Host "`nCopied files:" -ForegroundColor Cyan
+    Write-Host "`nCopied DLLs and libraries:" -ForegroundColor Cyan
     foreach ($file in $requiredFiles) {
         $destFile = Join-Path $destDir $file
         if (Test-Path $destFile) {
@@ -281,7 +330,11 @@ try {
             Write-Host "  $file ($("{0:N2}" -f $fileSize) MB)" -ForegroundColor Green
         }
     }
-    Write-Host "`nNext step: Build TrafficLayer in Debug mode in Visual Studio" -ForegroundColor Yellow
+    Write-Host "`nCopied headers:" -ForegroundColor Cyan
+    foreach ($file in $headerFiles) {
+        Write-Host "  $file" -ForegroundColor Green
+    }
+    Write-Host "`nNext step: Build TrafficLayer in Visual Studio (Release or Debug)" -ForegroundColor Yellow
     Write-Host "`nPress any key to exit..." -ForegroundColor Gray
     $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
 
