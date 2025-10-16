@@ -84,41 +84,140 @@ if ($DryRun) {
 }
 
 # Check if SUMO build directory already exists
-$sumoExists = Test-Path $sumoDir
-$sumoLibrariesExists = Test-Path $sumoLibrariesDir
+$sumoExists = $false
+$sumoLibrariesExists = $false
 $reuseClones = $false
+$skipBuild = $false
+
+# Check if SUMO is a valid git repository
+if ((Test-Path $sumoDir) -and (Test-Path (Join-Path $sumoDir ".git"))) {
+    Push-Location $sumoDir
+    try {
+        $null = git rev-parse --git-dir 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            $sumoExists = $true
+        }
+    } catch {
+        # Not a valid git repo
+    }
+    Pop-Location
+}
+
+# Check if SUMOLibraries is a valid git repository
+if ((Test-Path $sumoLibrariesDir) -and (Test-Path (Join-Path $sumoLibrariesDir ".git"))) {
+    Push-Location $sumoLibrariesDir
+    try {
+        $null = git rev-parse --git-dir 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            $sumoLibrariesExists = $true
+        }
+    } catch {
+        # Not a valid git repo
+    }
+    Pop-Location
+}
 
 if (Test-Path $sumoBuildDir) {
-    Write-Host "`nSUMO build directory already exists: $sumoBuildDir" -ForegroundColor Yellow
+    Write-Host "`nSUMO build directory found: $sumoBuildDir" -ForegroundColor Cyan
 
     # Check what's inside
     $existingItems = @()
     if ($sumoExists) { $existingItems += "sumo" }
     if ($sumoLibrariesExists) { $existingItems += "SUMOLibraries" }
 
-    if ($existingItems.Count -gt 0) {
-        Write-Host "Found existing: $($existingItems -join ', ')" -ForegroundColor Yellow
+    # Check for invalid repositories
+    $hasInvalidRepos = $false
+    if ((Test-Path $sumoDir) -and -not $sumoExists) {
+        Write-Host "  Warning: sumo directory exists but is not a valid git repository" -ForegroundColor Yellow
+        $hasInvalidRepos = $true
+    }
+    if ((Test-Path $sumoLibrariesDir) -and -not $sumoLibrariesExists) {
+        Write-Host "  Warning: SUMOLibraries directory exists but is not a valid git repository" -ForegroundColor Yellow
+        $hasInvalidRepos = $true
+    }
 
-        $response = Read-Host "Do you want to reuse existing clones? (Y=reuse/N=re-clone)"
-
+    if ($hasInvalidRepos) {
+        $response = Read-Host "Invalid repositories found. Re-clone? (Y=yes/N=quit)"
         if ($response -match '^[Yy]') {
-            Write-Host "Reusing existing clones (faster build)" -ForegroundColor Green
-            $reuseClones = $true
-
-            # Only delete build directory if it exists
-            if (Test-Path $buildDir) {
-                Write-Host "Removing old build artifacts..." -ForegroundColor Yellow
-                Remove-Item $buildDir -Recurse -Force -ErrorAction Stop
+            Write-Host "Removing invalid directories to re-clone..." -ForegroundColor Yellow
+            if ((Test-Path $sumoDir) -and -not $sumoExists) {
+                Remove-Item $sumoDir -Recurse -Force -ErrorAction Stop
             }
-        } else {
-            Write-Host "Removing old SUMO build directory to re-clone..." -ForegroundColor Yellow
-            Remove-Item $sumoBuildDir -Recurse -Force -ErrorAction Stop
+            if ((Test-Path $sumoLibrariesDir) -and -not $sumoLibrariesExists) {
+                Remove-Item $sumoLibrariesDir -Recurse -Force -ErrorAction Stop
+            }
             $sumoExists = $false
             $sumoLibrariesExists = $false
+        } else {
+            Write-Host "Exiting..." -ForegroundColor Gray
+            exit 0
+        }
+    }
+
+    if ($existingItems.Count -gt 0) {
+        Write-Host "Found valid repositories: $($existingItems -join ', ')" -ForegroundColor Green
+
+        # Check if DLLs already exist in bin
+        $binDir = Join-Path $sumoDir "bin"
+        $requiredDlls = @("libsumocpp.dll", "libsumocppD.dll", "libtracicpp.dll", "libtracicppD.dll")
+        $allDllsExist = $true
+
+        foreach ($dll in $requiredDlls) {
+            if (-not (Test-Path (Join-Path $binDir $dll))) {
+                $allDllsExist = $false
+                break
+            }
+        }
+
+        if ($allDllsExist) {
+            Write-Host "`nAll required DLLs already exist in the build!" -ForegroundColor Green
+            $response = Read-Host "What would you like to do? (C=copy existing/R=rebuild/N=re-clone/Q=quit)"
+
+            if ($response -match '^[Cc]') {
+                Write-Host "Will copy existing DLLs and headers (fastest)" -ForegroundColor Green
+                $skipBuild = $true
+                $reuseClones = $true
+            } elseif ($response -match '^[Rr]') {
+                Write-Host "Will rebuild from source" -ForegroundColor Yellow
+                $reuseClones = $true
+                if (Test-Path $buildDir) {
+                    Write-Host "Removing old build artifacts..." -ForegroundColor Yellow
+                    Remove-Item $buildDir -Recurse -Force -ErrorAction Stop
+                }
+            } elseif ($response -match '^[Nn]') {
+                Write-Host "Removing old SUMO build directory to re-clone..." -ForegroundColor Yellow
+                Remove-Item $sumoBuildDir -Recurse -Force -ErrorAction Stop
+                $sumoExists = $false
+                $sumoLibrariesExists = $false
+            } else {
+                Write-Host "Exiting..." -ForegroundColor Gray
+                exit 0
+            }
+        } else {
+            $response = Read-Host "Do you want to reuse existing clones or re-clone? (Y=reuse/N=re-clone/Q=quit)"
+
+            if ($response -match '^[Yy]') {
+                Write-Host "Reusing existing clones (faster build)" -ForegroundColor Green
+                $reuseClones = $true
+
+                # Only delete build directory if it exists
+                if (Test-Path $buildDir) {
+                    Write-Host "Removing old build artifacts..." -ForegroundColor Yellow
+                    Remove-Item $buildDir -Recurse -Force -ErrorAction Stop
+                }
+            } elseif ($response -match '^[Nn]') {
+                Write-Host "Removing old SUMO build directory to re-clone..." -ForegroundColor Yellow
+                Remove-Item $sumoBuildDir -Recurse -Force -ErrorAction Stop
+                $sumoExists = $false
+                $sumoLibrariesExists = $false
+            } else {
+                Write-Host "Exiting..." -ForegroundColor Gray
+                exit 0
+            }
         }
     } else {
-        # Directory exists but is empty, just use it
-        Write-Host "Directory is empty, will clone fresh." -ForegroundColor Cyan
+        # Directory exists but is empty or has invalid repos, will clone fresh
+        Write-Host "Will clone fresh." -ForegroundColor Cyan
     }
 }
 
@@ -130,112 +229,116 @@ if (-not (Test-Path $sumoBuildDir)) {
 try {
     Push-Location $sumoBuildDir
 
-    # Clone SUMOLibraries if requested
-    if ($UseSumoLibraries) {
-        if ($sumoLibrariesExists -and $reuseClones) {
-            Write-Host "`nReusing existing SUMOLibraries clone" -ForegroundColor Green
+    if (-not $skipBuild) {
+        # Clone SUMOLibraries if requested
+        if ($UseSumoLibraries) {
+            if ($sumoLibrariesExists -and $reuseClones) {
+                Write-Host "`nReusing existing SUMOLibraries clone" -ForegroundColor Green
+            } else {
+                Write-Host "`nCloning SUMOLibraries (pre-compiled dependencies)..." -ForegroundColor Cyan
+                Write-Host "  git clone --depth 1 https://github.com/DLR-TS/SUMOLibraries.git" -ForegroundColor Gray
+                git clone --depth 1 https://github.com/DLR-TS/SUMOLibraries.git
+
+                if ($LASTEXITCODE -ne 0) {
+                    throw "Git clone of SUMOLibraries failed"
+                }
+
+                Write-Host "  SUMOLibraries clone complete" -ForegroundColor Green
+            }
+        }
+
+        # Clone SUMO repository
+        if ($sumoExists -and $reuseClones) {
+            Write-Host "`nReusing existing SUMO clone" -ForegroundColor Green
         } else {
-            Write-Host "`nCloning SUMOLibraries (pre-compiled dependencies)..." -ForegroundColor Cyan
-            Write-Host "  git clone --depth 1 https://github.com/DLR-TS/SUMOLibraries.git" -ForegroundColor Gray
-            git clone --depth 1 https://github.com/DLR-TS/SUMOLibraries.git
+            Write-Host "`nCloning SUMO repository..." -ForegroundColor Cyan
+            $tag = "v$($version.Replace('.', '_'))"
+
+            Write-Host "  git clone --depth 1 --branch $tag https://github.com/eclipse/sumo.git" -ForegroundColor Gray
+            git clone --depth 1 --branch $tag https://github.com/eclipse/sumo.git
 
             if ($LASTEXITCODE -ne 0) {
-                throw "Git clone of SUMOLibraries failed"
+                throw "Git clone failed"
             }
 
-            Write-Host "  SUMOLibraries clone complete" -ForegroundColor Green
+            Write-Host "  Clone complete" -ForegroundColor Green
         }
-    }
 
-    # Clone SUMO repository
-    if ($sumoExists -and $reuseClones) {
-        Write-Host "`nReusing existing SUMO clone" -ForegroundColor Green
-    } else {
-        Write-Host "`nCloning SUMO repository..." -ForegroundColor Cyan
-        $tag = "v$($version.Replace('.', '_'))"
+        # Create build directory
+        New-Item -ItemType Directory -Path $buildDir -Force | Out-Null
 
-        Write-Host "  git clone --depth 1 --branch $tag https://github.com/eclipse/sumo.git" -ForegroundColor Gray
-        git clone --depth 1 --branch $tag https://github.com/eclipse/sumo.git
+        # Configure with CMake
+        Write-Host "`nConfiguring with CMake..." -ForegroundColor Cyan
+        Push-Location $buildDir
+
+        # Determine which dependency method to use
+        if ($UseSumoLibraries -and (Test-Path $sumoLibrariesDir)) {
+            Write-Host "  Using SUMOLibraries from: $sumoLibrariesDir" -ForegroundColor Green
+            Write-Host "  cmake .. -G `"$Generator`" -A x64 -DSUMO_LIBRARIES=`"$sumoLibrariesDir`"" -ForegroundColor Gray
+            cmake .. -G $Generator -A x64 -DSUMO_LIBRARIES="$sumoLibrariesDir"
+        } else {
+            # Check if vcpkg exists
+            $vcpkgToolchain = Join-Path $VcpkgRoot "scripts\buildsystems\vcpkg.cmake"
+
+            if (Test-Path $vcpkgToolchain) {
+                Write-Host "  Using vcpkg toolchain from: $VcpkgRoot" -ForegroundColor Green
+                Write-Host "  cmake .. -G `"$Generator`" -A x64 -DCMAKE_TOOLCHAIN_FILE=`"$vcpkgToolchain`"" -ForegroundColor Gray
+                cmake .. -G $Generator -A x64 -DCMAKE_TOOLCHAIN_FILE="$vcpkgToolchain"
+            } else {
+                Write-Host "  No dependency manager found (vcpkg or SUMOLibraries)" -ForegroundColor Yellow
+                Write-Host "  Attempting build without dependencies (may fail)" -ForegroundColor Yellow
+                Write-Host "  cmake .. -G `"$Generator`" -A x64" -ForegroundColor Gray
+                cmake .. -G $Generator -A x64
+            }
+        }
 
         if ($LASTEXITCODE -ne 0) {
-            throw "Git clone failed"
+            throw "CMake configuration failed"
         }
 
-        Write-Host "  Clone complete" -ForegroundColor Green
-    }
+        Write-Host "  Configuration complete" -ForegroundColor Green
 
-    # Create build directory
-    New-Item -ItemType Directory -Path $buildDir -Force | Out-Null
+        # Build Release configuration first
+        Write-Host "`nBuilding Release libraries (this may take 10-30 minutes)..." -ForegroundColor Cyan
+        Write-Host "  Building libsumocpp (Release)..." -ForegroundColor Gray
+        cmake --build . --config Release --target libsumocpp
 
-    # Configure with CMake
-    Write-Host "`nConfiguring with CMake..." -ForegroundColor Cyan
-    Push-Location $buildDir
+        if ($LASTEXITCODE -ne 0) {
+            throw "Building libsumocpp (Release) failed"
+        }
 
-    # Determine which dependency method to use
-    if ($UseSumoLibraries -and (Test-Path $sumoLibrariesDir)) {
-        Write-Host "  Using SUMOLibraries from: $sumoLibrariesDir" -ForegroundColor Green
-        Write-Host "  cmake .. -G `"$Generator`" -A x64 -DSUMO_LIBRARIES=`"$sumoLibrariesDir`"" -ForegroundColor Gray
-        cmake .. -G $Generator -A x64 -DSUMO_LIBRARIES="$sumoLibrariesDir"
+        Write-Host "  Building libtracicpp (Release)..." -ForegroundColor Gray
+        cmake --build . --config Release --target libtracicpp
+
+        if ($LASTEXITCODE -ne 0) {
+            throw "Building libtracicpp (Release) failed"
+        }
+
+        Write-Host "  Release build complete" -ForegroundColor Green
+
+        # Build Debug configuration
+        Write-Host "`nBuilding Debug libraries (this may take 10-30 minutes)..." -ForegroundColor Cyan
+        Write-Host "  Building libsumocpp (Debug)..." -ForegroundColor Gray
+        cmake --build . --config Debug --target libsumocpp
+
+        if ($LASTEXITCODE -ne 0) {
+            throw "Building libsumocpp (Debug) failed"
+        }
+
+        Write-Host "  Building libtracicpp (Debug)..." -ForegroundColor Gray
+        cmake --build . --config Debug --target libtracicpp
+
+        if ($LASTEXITCODE -ne 0) {
+            throw "Building libtracicpp (Debug) failed"
+        }
+
+        Write-Host "  Debug build complete" -ForegroundColor Green
+
+        Pop-Location
+        Pop-Location
     } else {
-        # Check if vcpkg exists
-        $vcpkgToolchain = Join-Path $VcpkgRoot "scripts\buildsystems\vcpkg.cmake"
-
-        if (Test-Path $vcpkgToolchain) {
-            Write-Host "  Using vcpkg toolchain from: $VcpkgRoot" -ForegroundColor Green
-            Write-Host "  cmake .. -G `"$Generator`" -A x64 -DCMAKE_TOOLCHAIN_FILE=`"$vcpkgToolchain`"" -ForegroundColor Gray
-            cmake .. -G $Generator -A x64 -DCMAKE_TOOLCHAIN_FILE="$vcpkgToolchain"
-        } else {
-            Write-Host "  No dependency manager found (vcpkg or SUMOLibraries)" -ForegroundColor Yellow
-            Write-Host "  Attempting build without dependencies (may fail)" -ForegroundColor Yellow
-            Write-Host "  cmake .. -G `"$Generator`" -A x64" -ForegroundColor Gray
-            cmake .. -G $Generator -A x64
-        }
+        Write-Host "`nSkipping build, using existing DLLs" -ForegroundColor Green
     }
-
-    if ($LASTEXITCODE -ne 0) {
-        throw "CMake configuration failed"
-    }
-
-    Write-Host "  Configuration complete" -ForegroundColor Green
-
-    # Build Release configuration first
-    Write-Host "`nBuilding Release libraries (this may take 10-30 minutes)..." -ForegroundColor Cyan
-    Write-Host "  Building libsumocpp (Release)..." -ForegroundColor Gray
-    cmake --build . --config Release --target libsumocpp
-
-    if ($LASTEXITCODE -ne 0) {
-        throw "Building libsumocpp (Release) failed"
-    }
-
-    Write-Host "  Building libtracicpp (Release)..." -ForegroundColor Gray
-    cmake --build . --config Release --target libtracicpp
-
-    if ($LASTEXITCODE -ne 0) {
-        throw "Building libtracicpp (Release) failed"
-    }
-
-    Write-Host "  Release build complete" -ForegroundColor Green
-
-    # Build Debug configuration
-    Write-Host "`nBuilding Debug libraries (this may take 10-30 minutes)..." -ForegroundColor Cyan
-    Write-Host "  Building libsumocpp (Debug)..." -ForegroundColor Gray
-    cmake --build . --config Debug --target libsumocpp
-
-    if ($LASTEXITCODE -ne 0) {
-        throw "Building libsumocpp (Debug) failed"
-    }
-
-    Write-Host "  Building libtracicpp (Debug)..." -ForegroundColor Gray
-    cmake --build . --config Debug --target libtracicpp
-
-    if ($LASTEXITCODE -ne 0) {
-        throw "Building libtracicpp (Debug) failed"
-    }
-
-    Write-Host "  Debug build complete" -ForegroundColor Green
-
-    Pop-Location
-    Pop-Location
 
     # Find and copy DLLs and headers
     Write-Host "`nCopying Release and Debug DLLs..." -ForegroundColor Cyan
@@ -281,7 +384,36 @@ try {
 
     $headerFiles = @(
         "libsumo.h",
-        "libtraci.h"
+        "libtraci.h",
+        "Edge.h",
+        "GUI.h",
+        "InductionLoop.h",
+        "Junction.h",
+        "LaneArea.h",
+        "Lane.h",
+        "MultiEntryExit.h",
+        "POI.h",
+        "Polygon.h",
+        "Route.h",
+        "Simulation.h",
+        "TrafficLight.h",
+        "VehicleType.h",
+        "Vehicle.h",
+        "Person.h",
+        "Calibrator.h",
+        "BusStop.h",
+        "ParkingArea.h",
+        "ChargingStation.h",
+        "OverheadWire.h",
+        "Rerouter.h",
+        "MeanData.h",
+        "VariableSpeedSign.h",
+        "RouteProbe.h",
+        "Helper.h",
+        "StorageHelper.h",
+        "Subscription.h",
+        "TraCIConstants.h",
+        "TraCIDefs.h"
     )
 
     foreach ($file in $headerFiles) {
