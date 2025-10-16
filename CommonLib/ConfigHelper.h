@@ -140,6 +140,11 @@ struct SumoSetup_t {
 
 	int SpeedMode;
 	int ExecutionOrder;
+
+	// Auto-launch SUMO configuration
+	bool EnableAutoLaunch;
+	std::string SumoConfigFile;
+	int NumClients;
 };
 
 typedef struct SubscriptionVehicleList_t {

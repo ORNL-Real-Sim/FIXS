@@ -392,6 +392,24 @@ int ConfigHelper::getConfig(string configName) {
 		SumoSetup.ExecutionOrder = 1;
 		printf("\nSumo Execution Order not specified! Will use 1 as default!\n");
 	}
+	if (node["EnableAutoLaunch"]) {
+		SumoSetup.EnableAutoLaunch = parserFlag(node, "EnableAutoLaunch");
+	}
+	else {
+		SumoSetup.EnableAutoLaunch = false;
+	}
+	if (node["SumoConfigFile"]) {
+		SumoSetup.SumoConfigFile = parserString(node, "SumoConfigFile");
+	}
+	else {
+		SumoSetup.SumoConfigFile = "";
+	}
+	if (node["NumClients"]) {
+		SumoSetup.NumClients = parserInteger(node, "NumClients");
+	}
+	else {
+		SumoSetup.NumClients = 1;
+	}
 
 	// ===========================================================================
 	// 			READ Carla Setup section

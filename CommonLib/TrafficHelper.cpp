@@ -42,13 +42,96 @@ void TrafficHelper::connectionSetup(string trafficIp, int trafficPort, int nClie
 
 	//system("sumo -c \"C:\Users\y0n\Dropbox (ORNL)\2_projects\1_2_sumo\1_4_speedHarmTest\speedHarmTest.sumocfg\" --remote-port 1337 ");
 
-	try {
-		libtraci::Simulation::init(trafficPort, libsumo::DEFAULT_NUM_RETRIES, trafficIp);
-		libtraci::Simulation::setOrder(order);
+	// ===========================================================================
+	// Auto-launch SUMO if configured
+	// ===========================================================================
+	if (Config_c->SumoSetup.EnableAutoLaunch) {
+		printf("Auto-launch SUMO enabled\n");
+		printf("  Config file: %s\n", Config_c->SumoSetup.SumoConfigFile.c_str());
+		printf("  Num clients: %d\n", Config_c->SumoSetup.NumClients);
+
+		// -----------------------------------------------------------------------
+		// OPTION A: Direct launch via libsumo (headless only, no GUI)
+		// Uncomment this section to use libsumo direct launch
+		// -----------------------------------------------------------------------
+		/*
+		try {
+			std::vector<std::string> cmd;
+			cmd.push_back("sumo");
+			cmd.push_back("-c");
+			cmd.push_back(Config_c->SumoSetup.SumoConfigFile);
+			cmd.push_back("--start");
+			cmd.push_back("--step-length");
+			cmd.push_back("0.1");
+
+			printf("Launching SUMO via libsumo::Simulation::start()...\n");
+			libsumo::Simulation::start(cmd);
+			libsumo::Simulation::setOrder(order);
+			printf("SUMO launched successfully via libsumo\n");
+		}
+		catch (const std::exception& e) {
+			printf("ERROR: Failed to start SUMO via libsumo: %s\n", e.what());
+			throw;
+		}
+		*/
+
+		// -----------------------------------------------------------------------
+		// OPTION B: External process launch with sumo-gui (supports GUI)
+		// This is the active implementation
+		// -----------------------------------------------------------------------
+		try {
+			// Build command line for sumo-gui with multi-client support
+			std::string sumoCmd = "sumo-gui -c \"" + Config_c->SumoSetup.SumoConfigFile +
+				"\" --remote-port " + std::to_string(trafficPort) +
+				" --num-clients " + std::to_string(Config_c->SumoSetup.NumClients) +
+				" --step-length 0.1 --start";
+
+			printf("Launching SUMO-GUI as external process...\n");
+			printf("  Command: %s\n", sumoCmd.c_str());
+
+			// Launch in background (platform-specific)
+#ifdef WIN32
+			std::string launchCmd = "start /B " + sumoCmd;  // Windows: use start /B
+#else
+			std::string launchCmd = sumoCmd + " &";         // Linux: append &
+#endif
+			int result = system(launchCmd.c_str());
+			if (result != 0) {
+				printf("ERROR: Failed to launch SUMO-GUI (exit code: %d)\n", result);
+				throw std::runtime_error("Failed to launch SUMO-GUI process");
+			}
+
+			printf("SUMO-GUI process started successfully\n");
+
+			// Wait a bit for SUMO to initialize
+			printf("Waiting for SUMO to initialize...\n");
+#ifdef WIN32
+			Sleep(3000); // Wait 3 seconds (Windows)
+#else
+			sleep(3); // Wait 3 seconds (Linux)
+#endif
+
+			// Now connect via TraCI as usual
+			printf("Connecting to SUMO via TraCI...\n");
+			libtraci::Simulation::init(trafficPort, libsumo::DEFAULT_NUM_RETRIES, trafficIp);
+			libtraci::Simulation::setOrder(order);
+			printf("Connected to SUMO successfully\n");
+		}
+		catch (const std::exception& e) {
+			printf("ERROR: Failed to auto-launch SUMO: %s\n", e.what());
+			throw;
+		}
 	}
-	catch (const std::exception& e) {
-		printf("ERROR: Failed to connect to SUMO at %s:%d - %s\n", trafficIp.c_str(), trafficPort, e.what());
-		throw;
+	else {
+		// Original behavior: connect to existing SUMO instance
+		try {
+			libtraci::Simulation::init(trafficPort, libsumo::DEFAULT_NUM_RETRIES, trafficIp);
+			libtraci::Simulation::setOrder(order);
+		}
+		catch (const std::exception& e) {
+			printf("ERROR: Failed to connect to SUMO at %s:%d - %s\n", trafficIp.c_str(), trafficPort, e.what());
+			throw;
+		}
 	}
 
 	/********************************************
