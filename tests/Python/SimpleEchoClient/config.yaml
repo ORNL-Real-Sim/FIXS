@@ -32,7 +32,7 @@ SumoSetup:
     # Auto-launch SUMO directly from TrafficLayer
     # If true, TrafficLayer will launch sumo-gui automatically
     # If false, you must start SUMO manually before running TrafficLayer
-    EnableAutoLaunch: false
+    EnableAutoLaunch: true
 
     # Path to SUMO configuration file (.sumocfg)
     # Relative paths are relative to TrafficLayer.exe location

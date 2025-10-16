@@ -10,7 +10,13 @@
 //#include "TraCIAPI.h"
 //#define NOMINMAX
 
+#ifdef ENABLE_LIBSUMO
+#include <libsumo/libsumo.h>
+#define SUMO_TRACI_NAMESPACE libsumo
+#else
 #include <libsumo/libtraci.h>
+#define SUMO_TRACI_NAMESPACE libtraci
+#endif
 #include "SocketHelper.h"
 
 
@@ -206,4 +212,6 @@ private:
 
 	const int N_MAX_VEH = 100;
 };
+
+
 
