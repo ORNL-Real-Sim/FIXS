@@ -76,7 +76,7 @@ $buildDir = Join-Path $sumoDir "build"
 $sumoLibrariesDir = Join-Path $sumoBuildDir "SUMOLibraries"
 
 Write-Host "`nBuild directory: $sumoBuildDir" -ForegroundColor Cyan
-Write-Host "(This directory is gitignored and will be cleaned up after build)" -ForegroundColor Gray
+Write-Host "(This directory is gitignored; source clones will be kept for faster future builds)" -ForegroundColor Gray
 
 if ($DryRun) {
     Write-Host "[DRY RUN] Would build in $sumoBuildDir" -ForegroundColor Yellow
@@ -310,11 +310,20 @@ try {
         throw "Failed to copy all required files"
     }
 
-    # Cleanup
+    # Cleanup only the build artifacts, keep source clones for future builds
+    Write-Host "`nCleaning up build artifacts (keeping source clones for reuse)..." -ForegroundColor Cyan
+    if (Test-Path $buildDir) {
+        Remove-Item $buildDir -Recurse -Force -ErrorAction Stop
+        Write-Host "  Removed build directory" -ForegroundColor Green
+    }
+
     if (-not $KeepBuildDir) {
-        Write-Host "`nCleaning up build directory..." -ForegroundColor Cyan
-        Remove-Item $sumoBuildDir -Recurse -Force -ErrorAction Stop
-        Write-Host "  Cleanup complete" -ForegroundColor Green
+        Write-Host "  SUMO source preserved at: $sumoDir" -ForegroundColor Green
+        if (Test-Path $sumoLibrariesDir) {
+            Write-Host "  SUMOLibraries preserved at: $sumoLibrariesDir" -ForegroundColor Green
+        }
+        Write-Host "`nNote: Source clones are kept in tmp/ for faster future builds" -ForegroundColor Cyan
+        Write-Host "      To force re-clone, delete the tmp/ directory manually" -ForegroundColor Gray
     } else {
         Write-Host "`nBuild directory preserved at: $sumoBuildDir" -ForegroundColor Yellow
     }
@@ -348,17 +357,17 @@ try {
     Write-Host "`nStack trace:" -ForegroundColor Yellow
     Write-Host $_.ScriptStackTrace -ForegroundColor Gray
 
-    # Cleanup on error
+    # Cleanup on error (only remove build artifacts, keep source clones)
     Pop-Location -ErrorAction SilentlyContinue
     Pop-Location -ErrorAction SilentlyContinue
 
-    if (-not $KeepBuildDir -and (Test-Path $sumoBuildDir)) {
-        Write-Host "`nCleaning up build directory..." -ForegroundColor Yellow
-        Remove-Item $sumoBuildDir -Recurse -Force -ErrorAction SilentlyContinue
-    } else {
-        Write-Host "`nBuild directory preserved at: $sumoBuildDir" -ForegroundColor Yellow
-        Write-Host "You can inspect it for debugging or manually delete it." -ForegroundColor Yellow
+    if (Test-Path $buildDir) {
+        Write-Host "`nCleaning up build artifacts..." -ForegroundColor Yellow
+        Remove-Item $buildDir -Recurse -Force -ErrorAction SilentlyContinue
     }
+
+    Write-Host "`nSource clones preserved at: $sumoBuildDir" -ForegroundColor Yellow
+    Write-Host "You can inspect it for debugging or delete tmp/ to start fresh." -ForegroundColor Yellow
 
     Write-Host "`nPress any key to exit..." -ForegroundColor Gray
     $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
