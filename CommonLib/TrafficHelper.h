@@ -10,7 +10,11 @@
 //#include "TraCIAPI.h"
 //#define NOMINMAX
 
-#ifdef ENABLE_LIBSUMO
+#ifndef ENABLE_LIBSUMO
+#define ENABLE_LIBSUMO 0
+#endif
+
+#if ENABLE_LIBSUMO
 #include <libsumo/libsumo.h>
 #define SUMO_TRACI_NAMESPACE libsumo
 #else

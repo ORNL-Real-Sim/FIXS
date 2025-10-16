@@ -1,5 +1,7 @@
 #include "TrafficHelper.h"
 #include <stdexcept>
+#include <chrono>
+#include <thread>
 
 
 //const unsigned short selfServerPort[NSERVER] = { 420 };
@@ -41,7 +43,7 @@ void TrafficHelper::connectionSetup(string trafficIp, int trafficPort, int nClie
 		printf("  Config file: %s\n", Config_c->SumoSetup.SumoConfigFile.c_str());
 		printf("  Num clients: %d\n", Config_c->SumoSetup.NumClients);
 
-#ifdef ENABLE_LIBSUMO
+#if ENABLE_LIBSUMO
 		// -----------------------------------------------------------------------
 		// OPTION A: Direct launch via libsumo (headless only, no GUI)
 		// This is the active implementation
@@ -59,12 +61,10 @@ void TrafficHelper::connectionSetup(string trafficIp, int trafficPort, int nClie
 			printf("ERROR: Failed to start SUMO via libsumo: %s\n", e.what());
 			throw;
 		}
-
+#else
 		// -----------------------------------------------------------------------
 		// OPTION B: External process launch with sumo-gui (supports GUI)
-		// Uncomment this section to use sumo-gui with TraCI
 		// -----------------------------------------------------------------------
-		/*
 		try {
 			// Build command line for sumo-gui with multi-client support
 			std::string sumoCmd = "sumo-gui -c \"" + Config_c->SumoSetup.SumoConfigFile +
@@ -91,11 +91,7 @@ void TrafficHelper::connectionSetup(string trafficIp, int trafficPort, int nClie
 
 			// Wait a bit for SUMO to initialize
 			printf("Waiting for SUMO to initialize...\n");
-#ifdef WIN32
-			Sleep(3000); // Wait 3 seconds (Windows)
-#else
-			sleep(3); // Wait 3 seconds (Linux)
-#endif
+			std::this_thread::sleep_for(std::chrono::seconds(3));
 
 			// Now connect via TraCI as usual
 			printf("Connecting to SUMO via TraCI...\n");
@@ -107,10 +103,6 @@ void TrafficHelper::connectionSetup(string trafficIp, int trafficPort, int nClie
 			printf("ERROR: Failed to auto-launch SUMO: %s\n", e.what());
 			throw;
 		}
-		*/
-#else
-		printf("ERROR: Auto-launch requested but this build was compiled without ENABLE_LIBSUMO support.\n");
-		throw std::runtime_error("libsumo auto-launch disabled at compile time");
 #endif
 	}
 	else {
