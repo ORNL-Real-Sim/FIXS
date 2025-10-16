@@ -341,27 +341,38 @@ try {
     }
 
     # Find and copy DLLs and headers
-    Write-Host "`nCopying Release and Debug DLLs..." -ForegroundColor Cyan
+    Write-Host "`nPreparing CommonLib\libsumo directory..." -ForegroundColor Cyan
 
     $destDir = Join-Path $PSScriptRoot "..\CommonLib\libsumo"
+
+    # Clean up existing CommonLib/libsumo to avoid stale files
+    if (Test-Path $destDir) {
+        Write-Host "  Cleaning up old files in CommonLib\libsumo..." -ForegroundColor Yellow
+        Remove-Item -Path $destDir -Recurse -Force -ErrorAction Stop
+        Write-Host "  Old files removed" -ForegroundColor Green
+    }
+
+    # Create fresh directory
+    New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+    Write-Host "  Created fresh CommonLib\libsumo directory" -ForegroundColor Green
+
+    Write-Host "`nCopying Release and Debug DLLs..." -ForegroundColor Cyan
+
     # DLLs are built directly in sumo/bin
     $binDir = Join-Path $sumoDir "bin"
 
-    $requiredFiles = @(
-        "libsumocpp.dll",
+    # List of .lib files to copy to root (for linking)
+    $requiredLibs = @(
         "libsumocpp.lib",
-        "libtracicpp.dll",
         "libtracicpp.lib",
-        "libsumocppD.dll",
         "libsumocppD.lib",
-        "libtracicppD.dll",
         "libtracicppD.lib"
     )
 
     $successCount = 0
     $failCount = 0
 
-    foreach ($file in $requiredFiles) {
+    foreach ($file in $requiredLibs) {
         $sourceFile = Join-Path $binDir $file
         $destFile = Join-Path $destDir $file
 
@@ -378,32 +389,28 @@ try {
         }
     }
 
-    # Copy SUMO runtime dependencies (DLLs required by libsumocpp.dll)
-    Write-Host "`nCopying SUMO runtime dependency DLLs..." -ForegroundColor Cyan
+    # Copy all SUMO runtime DLLs to bin subdirectory
+    Write-Host "`nCopying all SUMO runtime DLLs to bin/..." -ForegroundColor Cyan
     $sumoBinDir = Join-Path $sumoDir "bin"
+    $destBinDir = Join-Path $destDir "bin"
 
-    $runtimeDlls = @(
-        "xerces-c_3_3.dll",
-        "xerces-c_3_3D.dll",
-        "zlib.dll",
-        "zlibd.dll",
-        "proj_9.dll",
-        "proj_9_d.dll"
-    )
+    # Create bin directory if it doesn't exist
+    if (-not (Test-Path $destBinDir)) {
+        New-Item -ItemType Directory -Path $destBinDir -Force | Out-Null
+    }
 
-    foreach ($dll in $runtimeDlls) {
-        $sourceFile = Join-Path $sumoBinDir $dll
-        $destFile = Join-Path $destDir $dll
+    if (Test-Path $sumoBinDir) {
+        $allDlls = Get-ChildItem -Path $sumoBinDir -Filter "*.dll"
+        $dllCount = 0
 
-        Write-Host "  Copying $dll..." -NoNewline
-
-        if (Test-Path $sourceFile) {
-            Copy-Item -Path $sourceFile -Destination $destFile -Force
-            Write-Host " OK" -ForegroundColor Green
-            $successCount++
-        } else {
-            Write-Host " NOT FOUND (optional)" -ForegroundColor Yellow
+        foreach ($dll in $allDlls) {
+            Copy-Item -Path $dll.FullName -Destination $destBinDir -Force
+            $dllCount++
         }
+
+        Write-Host "  Copied $dllCount DLL files to bin/" -ForegroundColor Green
+    } else {
+        Write-Host "  Warning: SUMO bin directory not found at $sumoBinDir" -ForegroundColor Yellow
     }
 
     # Copy header files from source
@@ -489,15 +496,22 @@ try {
     }
 
     Write-Host "`n========================================" -ForegroundColor Green
-    Write-Host "SUCCESS! Release and Debug DLLs are ready." -ForegroundColor Green
+    Write-Host "SUCCESS! Release and Debug libraries are ready." -ForegroundColor Green
     Write-Host "========================================" -ForegroundColor Green
-    Write-Host "`nCopied DLLs and libraries:" -ForegroundColor Cyan
-    foreach ($file in $requiredFiles) {
+    Write-Host "`nCopied import libraries (.lib):" -ForegroundColor Cyan
+    foreach ($file in $requiredLibs) {
         $destFile = Join-Path $destDir $file
         if (Test-Path $destFile) {
             $fileSize = (Get-Item $destFile).Length / 1MB
             Write-Host "  $file ($("{0:N2}" -f $fileSize) MB)" -ForegroundColor Green
         }
+    }
+    Write-Host "`nCopied runtime dependency DLLs to bin/:" -ForegroundColor Cyan
+    $destBinDir = Join-Path $destDir "bin"
+    if (Test-Path $destBinDir) {
+        $dllFiles = Get-ChildItem -Path $destBinDir -Filter "*.dll"
+        $totalDllSize = ($dllFiles | Measure-Object -Property Length -Sum).Sum / 1MB
+        Write-Host "  $($dllFiles.Count) DLL files ($("{0:N2}" -f $totalDllSize) MB total)" -ForegroundColor Green
     }
     Write-Host "`nCopied headers:" -ForegroundColor Cyan
     foreach ($file in $headerFiles) {

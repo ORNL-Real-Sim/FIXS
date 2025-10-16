@@ -126,7 +126,9 @@
 copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\libtracicppD.dll" "$(OutDir)"
 copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\xerces-c_3_3D.dll" "$(OutDir)"
 copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\zlibd.dll" "$(OutDir)"
-copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\proj_9_d.dll" "$(OutDir)"</Command>
+copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\proj_9.dll" "$(OutDir)"
+copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\fox-16d.dll" "$(OutDir)"
+copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\gdald.dll" "$(OutDir)"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -153,7 +155,9 @@ copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\proj_9_d.dll" "$(OutDir)"</Command
 copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\libtracicpp.dll" "$(OutDir)"
 copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\xerces-c_3_3.dll" "$(OutDir)"
 copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\zlib.dll" "$(OutDir)"
-copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\proj_9.dll" "$(OutDir)"</Command>
+copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\proj_9.dll" "$(OutDir)"
+copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\fox-16.dll" "$(OutDir)"
+copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\gdal.dll" "$(OutDir)"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -177,7 +181,9 @@ copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\proj_9.dll" "$(OutDir)"</Command>
 copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\libtracicppD.dll" "$(OutDir)"
 copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\xerces-c_3_3D.dll" "$(OutDir)"
 copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\zlibd.dll" "$(OutDir)"
-copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\proj_9_d.dll" "$(OutDir)"</Command>
+copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\proj_9.dll" "$(OutDir)"
+copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\fox-16d.dll" "$(OutDir)"
+copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\gdald.dll" "$(OutDir)"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -205,7 +211,9 @@ copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\proj_9_d.dll" "$(OutDir)"</Command
 copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\libtracicpp.dll" "$(OutDir)"
 copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\xerces-c_3_3.dll" "$(OutDir)"
 copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\zlib.dll" "$(OutDir)"
-copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\proj_9.dll" "$(OutDir)"</Command>
+copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\proj_9.dll" "$(OutDir)"
+copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\fox-16.dll" "$(OutDir)"
+copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\gdal.dll" "$(OutDir)"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
