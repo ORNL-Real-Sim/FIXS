@@ -39,6 +39,9 @@
 
 Temp/*
 
+# Auto-generated version file
+CommonLib/RealSimVersion.h
+
 CommonLib/libevent/build/*
 CommonLib/libevent/out/build/*
 CommonLib/yaml-cpp/build/*

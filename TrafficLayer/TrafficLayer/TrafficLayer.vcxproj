@@ -106,6 +106,10 @@
     <SourcePath>$(VC_SourcePath)</SourcePath>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <PreBuildEvent>
+      <Command>powershell.exe -ExecutionPolicy Bypass -NoProfile -File "$(SolutionDir)..\..\scripts\generate_version.ps1"</Command>
+      <Message>Generating version header from git tags...</Message>
+    </PreBuildEvent>
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
@@ -123,6 +127,10 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <PreBuildEvent>
+      <Command>powershell.exe -ExecutionPolicy Bypass -NoProfile -File "$(SolutionDir)..\..\scripts\generate_version.ps1"</Command>
+      <Message>Generating version header from git tags...</Message>
+    </PreBuildEvent>
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <FunctionLevelLinking>true</FunctionLevelLinking>
@@ -143,6 +151,10 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <PreBuildEvent>
+      <Command>powershell.exe -ExecutionPolicy Bypass -NoProfile -File "$(SolutionDir)..\..\scripts\generate_version.ps1"</Command>
+      <Message>Generating version header from git tags...</Message>
+    </PreBuildEvent>
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
@@ -161,6 +173,10 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <PreBuildEvent>
+      <Command>powershell.exe -ExecutionPolicy Bypass -NoProfile -File "$(SolutionDir)..\..\scripts\generate_version.ps1"</Command>
+      <Message>Generating version header from git tags...</Message>
+    </PreBuildEvent>
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <FunctionLevelLinking>true</FunctionLevelLinking>
