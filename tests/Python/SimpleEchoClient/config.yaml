@@ -1,0 +1,62 @@
+# NOTE: YAML files do not allow tabs. use 2 or 4 spaces for indentation
+#
+# Simple Echo Client Configuration
+# This client receives VehicleData from TrafficLayer.exe and echoes it back
+#
+
+# Global Simulation setup
+SimulationSetup:
+
+    # Master Switch to turn on/off RealSim interface
+    EnableRealSim: true
+
+    # Whether or not to save verbose log during the simulation
+    EnableVerboseLog: false
+
+    # specify which traffic simulator
+    SelectedTrafficSimulator: 'SUMO'
+
+    # SUMO connection parameters
+    TrafficSimulatorIP: "127.0.0.1"
+    TrafficSimulatorPort: 1337
+
+    # Vehicle message fields to receive/send
+    # Using a common subset for simplicity
+    VehicleMessageField: [id, type, vehicleClass, speed, acceleration, speedDesired]
+
+    # Use setPreviousSpeed instead of setSpeed to respect SUMO's acceleration dynamics
+    EnableExternalDynamics: true
+
+# SUMO Setup
+SumoSetup:
+    # Auto-launch SUMO directly from TrafficLayer
+    # If true, TrafficLayer will launch sumo-gui automatically
+    # If false, you must start SUMO manually before running TrafficLayer
+    EnableAutoLaunch: true
+
+    # Path to SUMO configuration file (.sumocfg)
+    # Relative paths are relative to TrafficLayer.exe location
+    SumoConfigFile: "./simple_loop.sumocfg"
+    # Optional override for the SUMO runtime library directory. Leave commented to use the default search order.
+    #RuntimeLibraryPath: '../../../CommonLib/libsumo/bin'
+
+    # Number of SUMO client instances (typically 1)
+    #NumClients: 1
+
+# setup Application Layer
+ApplicationSetup:
+    # Enable application layer to receive vehicle data
+    EnableApplicationLayer: true
+
+    # Subscribe to ego vehicle only
+    # The client will listen on port 2444 for vehicle data
+    VehicleSubscription:
+    -   type: ego
+        attribute: {id: ['ego'], radius: [0]}
+        ip: ['127.0.0.1']
+        port: [2444]
+
+# XilSetup
+XilSetup:
+    EnableXil: false
+    VehicleSubscription:

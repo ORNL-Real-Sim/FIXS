@@ -1,4 +1,5 @@
 #include "ConfigHelper.h"
+#include <filesystem>
 
 using namespace std;
 
@@ -88,6 +89,13 @@ int ConfigHelper::getConfig(string configName) {
 		// return -1;
 	// }
 #endif
+
+	// Store the config file's directory for resolving relative paths
+	std::filesystem::path configPath(configName);
+	std::filesystem::path configDir = configPath.parent_path();
+	if (configDir.empty()) {
+		configDir = std::filesystem::current_path();
+	}
 
 	YAML::Node node;
 
@@ -392,6 +400,42 @@ int ConfigHelper::getConfig(string configName) {
 		SumoSetup.ExecutionOrder = 1;
 		printf("\nSumo Execution Order not specified! Will use 1 as default!\n");
 	}
+	if (node["EnableAutoLaunch"]) {
+		SumoSetup.EnableAutoLaunch = parserFlag(node, "EnableAutoLaunch");
+	}
+	else {
+		SumoSetup.EnableAutoLaunch = false;
+	}
+	if (node["SumoConfigFile"]) {
+		SumoSetup.SumoConfigFile = parserString(node, "SumoConfigFile");
+
+		// Convert relative path to absolute path (relative to config file directory)
+		if (!SumoSetup.SumoConfigFile.empty()) {
+			std::filesystem::path sumoPath(SumoSetup.SumoConfigFile);
+			if (sumoPath.is_relative()) {
+				sumoPath = configDir / sumoPath;
+				// Normalize to remove redundant . and ..
+				sumoPath = sumoPath.lexically_normal();
+				SumoSetup.SumoConfigFile = sumoPath.string();
+			}
+		}
+	}
+	else {
+		SumoSetup.SumoConfigFile = "";
+	}
+	if (node["NumClients"]) {
+		SumoSetup.NumClients = parserInteger(node, "NumClients");
+	}
+	else {
+		SumoSetup.NumClients = 1;
+	}
+	if (node["RuntimeLibraryPath"]) {
+		SumoSetup.RuntimeLibraryPath = parserString(node, "RuntimeLibraryPath");
+	}
+	else {
+		SumoSetup.RuntimeLibraryPath = "";
+	}
+
 
 	// ===========================================================================
 	// 			READ Carla Setup section

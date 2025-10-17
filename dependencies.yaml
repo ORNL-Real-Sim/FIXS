@@ -1,0 +1,28 @@
+# External simulator and library dependencies for RS_FIXS
+# Update these versions when syncing with upstream releases
+
+simulators:
+  sumo:
+    version: "1.22.0"
+    source: "https://github.com/eclipse/sumo"
+    location: "CommonLib/libsumo"
+    notes: "libsumo/libtraci headers and DLLs vendored from SUMO release"
+
+  carla:
+    version: "0.9.15"  # TODO: verify actual version
+    source: "https://github.com/carla-simulator/carla"
+    location: "VirCarlaEnv"
+    notes: "CARLA client library"
+
+  carmaker:
+    version: "13.0"  # TODO: verify actual version (saw CM9, CM10, CM11, CM13 folders)
+    vendor: "IPG Automotive"
+    location: "ProprietaryFiles/CM*_proj"
+    notes: "Proprietary - multiple versions in use (CM9, CM10, CM11, CM13)"
+
+libraries:
+  libevent:
+    location: "CommonLib/libevent"
+
+  yaml-cpp:
+    location: "CommonLib/yaml-cpp"

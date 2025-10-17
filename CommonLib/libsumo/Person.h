@@ -1,6 +1,6 @@
 /****************************************************************************/
-// Eclipse SUMO, Simulation of Urban MObility; see https://eclipse.org/sumo
-// Copyright (C) 2012-2023 German Aerospace Center (DLR) and others.
+// Eclipse SUMO, Simulation of Urban MObility; see https://eclipse.dev/sumo
+// Copyright (C) 2012-2025 German Aerospace Center (DLR) and others.
 // This program and the accompanying materials are made available under the
 // terms of the Eclipse Public License 2.0 which is available at
 // https://www.eclipse.org/legal/epl-2.0/
@@ -60,7 +60,7 @@ public:
     static double getSlope(const std::string& personID);
     static double getLanePosition(const std::string& personID);
 
-    static std::vector<libsumo::TraCIReservation> getTaxiReservations(int stateFilter = 0);
+    static std::vector<libsumo::TraCIReservation> getTaxiReservations(int onlyNew = 0);
     static std::string splitTaxiReservation(std::string reservationID, const std::vector<std::string>& personIDs);
 
     LIBSUMO_ID_PARAMETER_API

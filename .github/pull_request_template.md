@@ -1,9 +1,17 @@
-## Summary  
-Describe what this PR does.  
+<!--
+TITLE FORMAT: Use the convention #<issue_number>/<short_description>
+For multiple issues: #<issue1> #<issue2>/<short_description>
+Examples:
+  - #27/carla lights placement
+  - #55 #56/migrate to libtraci libsumo
+-->
+
+## Summary
+Describe what this PR does.
 e.g., Implements lane merging logic in `TrafficLayer`, fixes YAML parsing issue in config loader.
 
-## Related Issues / Tasks  
-Closes #123 or relates to a maintenance task, bug report, feature request, or documentation update.  
+## Related Issues / Tasks
+Closes #123 or relates to a maintenance task, bug report, feature request, or documentation update.
 List IDs or links here if applicable.
 
 ## Type of Change  

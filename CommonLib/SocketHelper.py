@@ -16,6 +16,9 @@ class SocketHelper:
         self.msg_header_size = self.msg_helper.msg_header_size
         self.msg_each_header_size = self.msg_helper.msg_each_header_size
 
+        # Get verbose logging setting from config
+        self.enable_verbose_log = config_helper.simulation_setup.get('EnableVerboseLog', False)
+
         # initialize lists to store sending data
         self.vehicle_data_send_list: typing.List[VehData] = []
         self.traffic_light_data_send_list = []
@@ -97,29 +100,29 @@ class SocketHelper:
         msg_processed_size = 0
         msg_processed_size = msg_processed_size + self.msg_header_size
         # total message size is the data to be received
-        # save received_buffer to local log for debugging
-        log_file_path = "received_header_buffer.log"
-        with open(log_file_path, 'ab') as log_file:  # 'ab' for appending binary data
-            log_file.write(received_buffer)
-            log_file.write(b'\n')
+        # save received_buffer to local log for debugging (only if verbose logging enabled)
+        if self.enable_verbose_log:
+            log_file_path = "received_header_buffer.log"
+            with open(log_file_path, 'a', encoding='utf-8') as log_file:  # 'a' for appending text
+                log_file.write(f"[HEADER] State: {sim_state}, Time: {sim_time:.2f}, TotalSize: {total_msg_size} | Hex: {received_buffer.hex()}\n")
         
         while (msg_processed_size < total_msg_size):
             # get message type header
             received_buffer = sock.recv(self.msg_each_header_size)
             msg_size, msg_type = self.msg_helper.depack_msg_type(received_buffer)
 
-            log_file_path = "received_each_header_buffer.log"
-            with open(log_file_path, 'ab') as log_file:  # 'ab' for appending binary data
-                log_file.write(received_buffer)
-                log_file.write(b'\n')
+            if self.enable_verbose_log:
+                log_file_path = "received_each_header_buffer.log"
+                with open(log_file_path, 'a', encoding='utf-8') as log_file:  # 'a' for appending text
+                    log_file.write(f"[MSG_HEADER] Size: {msg_size}, Type: {msg_type} | Hex: {received_buffer.hex()}\n")
 
             # get message it self
             received_buffer = sock.recv(msg_size - self.msg_each_header_size)
 
-            log_file_path = "received_msg_buffer.log"
-            with open(log_file_path, 'ab') as log_file:  # 'ab' for appending binary data
-                log_file.write(received_buffer)
-                log_file.write(b'\n')
+            if self.enable_verbose_log:
+                log_file_path = "received_msg_buffer.log"
+                with open(log_file_path, 'a', encoding='utf-8') as log_file:  # 'a' for appending text
+                    log_file.write(f"[MSG_DATA] Size: {len(received_buffer)}, Type: {msg_type} | Hex: {received_buffer.hex()}\n")
 
             # unpack message based on type identifier
             if msg_type == MessageType.vehicle_data:
