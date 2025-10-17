@@ -147,6 +147,11 @@ int main(int argc, char* argv[]) {
 	printf("==================================================\n");
 	printf("\t\tRealSim Interface\n");
 	printf("\t\t    v%s\n",REALSIM_VERSION_STRING);
+#ifdef _DEBUG
+	printf("\t\t    (DEBUG build)\n");
+#else
+	printf("\t\t    (RELEASE build)\n");
+#endif
 	printf("==================================================\n");
 
 	// control-c handles
