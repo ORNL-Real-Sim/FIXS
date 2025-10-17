@@ -18,8 +18,9 @@ Real-Sim Documentation
    ConfigSetup
    contact
    acknowledgements
-   vissimdoc
-   sumodoc
+   VISSIMdoc
+   SUMOdoc
+   CarMakerDoc
 
 .. toctree::
    :maxdepth: 3
