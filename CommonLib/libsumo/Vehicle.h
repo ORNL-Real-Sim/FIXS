@@ -1,6 +1,6 @@
 /****************************************************************************/
-// Eclipse SUMO, Simulation of Urban MObility; see https://eclipse.org/sumo
-// Copyright (C) 2012-2023 German Aerospace Center (DLR) and others.
+// Eclipse SUMO, Simulation of Urban MObility; see https://eclipse.dev/sumo
+// Copyright (C) 2012-2025 German Aerospace Center (DLR) and others.
 // This program and the accompanying materials are made available under the
 // terms of the Eclipse Public License 2.0 which is available at
 // https://www.eclipse.org/legal/epl-2.0/
@@ -58,6 +58,8 @@ public:
     static std::string getRoadID(const std::string& vehID);
     static std::string getLaneID(const std::string& vehID);
     static int getLaneIndex(const std::string& vehID);
+    static std::string getSegmentID(const std::string& vehID);
+    static int getSegmentIndex(const std::string& vehID);
     static std::string getTypeID(const std::string& vehID);
     static std::string getRouteID(const std::string& vehID);
     static double getDeparture(const std::string& vehID);
@@ -75,7 +77,7 @@ public:
     static double getElectricityConsumption(const std::string& vehID);
     static int getPersonNumber(const std::string& vehID);
     static std::vector<std::string> getPersonIDList(const std::string& vehID);
-    static std::pair<std::string, double> getLeader(const std::string& vehID, double dist = 0.);
+    static std::pair<std::string, double> getLeader(const std::string& vehID, double dist = 100.);
     static std::pair<std::string, double> getFollower(const std::string& vehID, double dist = 0.);
     static std::vector<libsumo::TraCIJunctionFoe> getJunctionFoes(const std::string& vehID, double dist = 0.);
     static double getWaitingTime(const std::string& vehID);
@@ -91,10 +93,10 @@ public:
     static std::vector<libsumo::TraCIConnection> getNextLinks(const std::string& vehID);
     static std::vector<libsumo::TraCINextStopData> getStops(const std::string& vehID, int limit = 0);
     static int getStopState(const std::string& vehID);
-    static std::string getStopParameter(const std::string& vehID, int nextStopIndex, const std::string& param);
+    static std::string getStopParameter(const std::string& vehID, int nextStopIndex, const std::string& param, bool customParam = false);
 
     static double getDistance(const std::string& vehID);
-    static double getDrivingDistance(const std::string& vehID, const std::string& edgeID, double position, int laneIndex = 0);
+    static double getDrivingDistance(const std::string& vehID, const std::string& edgeID, double pos, int laneIndex = 0);
     static double getDrivingDistance2D(const std::string& vehID, double x, double y);
     static double getAllowedSpeed(const std::string& vehID);
     static int getSpeedMode(const std::string& vehID);
@@ -155,7 +157,8 @@ public:
                            int teleport = 0);
 
     static void setStopParameter(const std::string& vehID, int nextStopIndex,
-                                 const std::string& param, const std::string& value);
+                                 const std::string& param, const std::string& value,
+                                 bool customParam = false);
 
     static void rerouteParkingArea(const std::string& vehID,
                                    const std::string& parkingAreaID);
@@ -188,7 +191,7 @@ public:
     static void deactivateGapControl(const std::string& vehID);
     static void requestToC(const std::string& vehID, double leadTime);
     static void setSpeed(const std::string& vehID, double speed);
-    static void setAcceleration(const std::string& vehID, double accel, double duration);
+    static void setAcceleration(const std::string& vehID, double acceleration, double duration);
     static void setPreviousSpeed(const std::string& vehID, double prevSpeed, double prevAcceleration = libsumo::INVALID_DOUBLE_VALUE);
     static void setSpeedMode(const std::string& vehID, int speedMode);
     static void setLaneChangeMode(const std::string& vehID, int laneChangeMode);
@@ -206,11 +209,11 @@ public:
     static void rerouteTraveltime(const std::string& vehID, const bool currentTravelTimes = true);
     static void rerouteEffort(const std::string& vehID);
     static void setSignals(const std::string& vehID, int signals);
-    static void moveTo(const std::string& vehID, const std::string& laneID, double position, int reason = libsumo::MOVE_AUTOMATIC);
+    static void moveTo(const std::string& vehID, const std::string& laneID, double pos, int reason = libsumo::MOVE_AUTOMATIC);
     static void moveToXY(const std::string& vehID, const std::string& edgeID, const int laneIndex, const double x, const double y, double angle = libsumo::INVALID_DOUBLE_VALUE, const int keepRoute = 1, double matchThreshold = 100);
     static void remove(const std::string& vehID, char reason = libsumo::REMOVE_VAPORIZED);
     static void setLine(const std::string& vehID, const std::string& line);
-    static void setVia(const std::string& vehID, const std::vector<std::string>& via);
+    static void setVia(const std::string& vehID, const std::vector<std::string>& edgeList);
     static void highlight(const std::string& vehID, const libsumo::TraCIColor& col = libsumo::TraCIColor(255, 0, 0, 255), double size = -1, const int alphaMax = -1, const double duration = -1, const int type = 0);
     static void dispatchTaxi(const std::string& vehID,  const std::vector<std::string>& reservations);
     /// @}

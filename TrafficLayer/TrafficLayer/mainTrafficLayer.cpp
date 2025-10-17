@@ -1,26 +1,94 @@
-#include <iostream>
-#include <fstream>
-#include <unordered_map>
-#include <unordered_set>
-
-
-//#include "TraCIAPI.h"
-
-
-//#include <event2/bufferevent.h>
-//#include <event2/util.h>
-//#include <event2/event.h>
-
-//#define TRACI_ENABLED 1
+#include <string>
 #include <ctime>
 #include <chrono>
-
+#include <filesystem>
+#include <system_error>
+#include <cstdlib>
+#include <cstring>
 
 #include "TrafficHelper.h"
 
 #include "RealSimVersion.h"
 
 using namespace std;
+
+namespace {
+std::string GetExecutableDirectory() {
+#ifdef WIN32
+    std::vector<char> buffer(MAX_PATH);
+    DWORD length = 0;
+    while (true) {
+        length = GetModuleFileNameA(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+        if (length == 0) {
+            return std::string();
+        }
+        if (length < buffer.size() - 1) {
+            return std::filesystem::path(std::string(buffer.data(), length)).parent_path().string();
+        }
+        buffer.resize(buffer.size() * 2);
+    }
+#else
+    std::vector<char> buffer(PATH_MAX);
+    ssize_t length = readlink("/proc/self/exe", buffer.data(), buffer.size() - 1);
+    if (length == -1) {
+        return std::string();
+    }
+    buffer[length] = '\0';
+    return std::filesystem::path(std::string(buffer.data())).parent_path().string();
+#endif
+}
+
+void ConfigureSumoLibraryPath(const ConfigHelper& config) {
+    static bool configured = false;
+    if (configured) return;
+    configured = true;
+
+    std::filesystem::path exeDir(GetExecutableDirectory());
+    std::vector<std::filesystem::path> candidates;
+
+    // Override path first
+    if (!config.SumoSetup.RuntimeLibraryPath.empty()) {
+        std::filesystem::path override(config.SumoSetup.RuntimeLibraryPath);
+        candidates.push_back(override.is_absolute() ? override : exeDir / override);
+    }
+
+    // Standard locations
+    if (!exeDir.empty()) {
+        candidates.push_back(exeDir / "libsumo" / "bin");
+        std::filesystem::path parent = exeDir.parent_path();
+        for (int i = 0; i < 5 && !parent.empty(); ++i, parent = parent.parent_path()) {
+            candidates.push_back(parent / "CommonLib" / "libsumo" / "bin");
+        }
+    }
+    candidates.push_back(std::filesystem::current_path() / "CommonLib" / "libsumo" / "bin");
+
+    // Try each candidate
+    for (const auto& path : candidates) {
+        std::error_code ec;
+        if (!std::filesystem::is_directory(path, ec)) continue;
+
+        std::string pathStr = path.string();
+#ifdef WIN32
+        if (!SetDllDirectoryA(pathStr.c_str())) continue;
+#else
+        std::string newPath = pathStr;
+        if (const char* current = std::getenv("LD_LIBRARY_PATH")) {
+            newPath += ':' + std::string(current);
+        }
+        setenv("LD_LIBRARY_PATH", newPath.c_str(), 1);
+#endif
+        printf("Using SUMO library directory: %s\n", pathStr.c_str());
+        return;
+    }
+
+    // Only error if SUMO is selected as traffic simulator
+    if (config.SimulationSetup.SelectedTrafficSimulator != "VISSIM") {
+        printf("ERROR: Unable to locate SUMO library directory.\n");
+        printf("Please check SumoSetup.RuntimeLibraryPath in your configuration file.\n");
+        exit(-1);
+    }
+}
+}
 
 //!!!!! NEED TO
 // -multithread
@@ -79,6 +147,11 @@ int main(int argc, char* argv[]) {
 	printf("==================================================\n");
 	printf("\t\tRealSim Interface\n");
 	printf("\t\t    v%s\n",REALSIM_VERSION_STRING);
+#ifdef _DEBUG
+	printf("\t\t    (DEBUG build)\n");
+#else
+	printf("\t\t    (RELEASE build)\n");
+#endif
 	printf("==================================================\n");
 
 	// control-c handles
@@ -232,6 +305,8 @@ int main(int argc, char* argv[]) {
 	else {
 		ENABLE_VISSIM = false;
 		printf("Selected Traffic Simulator SUMO\n\n");
+		// Configure SUMO library path for runtime DLL loading
+		ConfigureSumoLibraryPath(Config_c);
 	}
 	if (Config_c.SimulationSetup.EnableVerboseLog) {
 		ENABLE_VERBOSE = true;
@@ -496,6 +571,10 @@ int main(int argc, char* argv[]) {
 	}
 
 
+	// pass configuration to Traffic_c
+	Traffic_c.Config_c = &Config_c;
+	Traffic_c.getConfig();
+
 	/********************************************
 	* Traffic Simulator send and recv setups
 	*********************************************/
@@ -507,6 +586,8 @@ int main(int argc, char* argv[]) {
 		else {
 			string trafficIp = Config_c.SimulationSetup.TrafficSimulatorIP;
 			int trafficPort = Config_c.SimulationSetup.TrafficSimulatorPort;
+
+
 			Traffic_c.connectionSetup(trafficIp, trafficPort, Sock_c.NCLIENT, Config_c.SumoSetup.ExecutionOrder);
 			Traffic_c.selectSUMO();
 		}
@@ -520,11 +601,6 @@ int main(int argc, char* argv[]) {
 		printf("Error: connect to traffic simulator failed\n");
 		exit(-1);
 	}
-
-
-	// pass configuration to Traffic_c
-	Traffic_c.Config_c = &Config_c;
-	Traffic_c.getConfig();
 
 	Traffic_c.MasterLogName = MasterLogName;
 

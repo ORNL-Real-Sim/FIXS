@@ -102,7 +102,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>NOMINMAX;_CRT_SECURE_NO_WARNINGS;_WINSOCK_DEPRECATED_NO_WARNINGS;WIN32;_DEBUG;_CONSOLE;_WIN32_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>..\..\CommonLib\traci;..\..\CommonLib\libsumo;..\..\CommonLib\yaml-cpp\build\include;..\..\CommonLib\yaml-cpp\include;..\..\CommonLib;..\..\CommonLib\libcarla\include;..\..\CommonLib\libcarla\include\system</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\..\CommonLib\libsumo;..\..\CommonLib\yaml-cpp\build\include;..\..\CommonLib\yaml-cpp\include;..\..\CommonLib;..\..\CommonLib\libcarla\include;..\..\CommonLib\libcarla\include\system</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
