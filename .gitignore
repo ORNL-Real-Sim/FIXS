@@ -182,3 +182,6 @@ CM11_proj/tmp.obj
 
 # Ignore Experiments folder under tests/Applications/Eco_Fixed_Timming
 /tests/Applications/Eco_Fixed_Timming/Experiments/
+
+# Ignore Claude Code configuration
+.claude/
