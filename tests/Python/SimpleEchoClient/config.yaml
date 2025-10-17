@@ -37,6 +37,8 @@ SumoSetup:
     # Path to SUMO configuration file (.sumocfg)
     # Relative paths are relative to TrafficLayer.exe location
     SumoConfigFile: "./simple_loop.sumocfg"
+    # Optional override for the SUMO runtime library directory. Leave commented to use the default search order.
+    #RuntimeLibraryPath: '../../../CommonLib/libsumo/bin'
 
     # Number of SUMO client instances (typically 1)
     #NumClients: 1

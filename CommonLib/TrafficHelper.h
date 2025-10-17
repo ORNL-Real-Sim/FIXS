@@ -7,7 +7,7 @@
 
 #include <math.h>
 
-#define ENABLE_LIBSUMO
+//#define ENABLE_LIBSUMO
 
 #ifdef ENABLE_LIBSUMO
 #include <libsumo/libsumo.h>

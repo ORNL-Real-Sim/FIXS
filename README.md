@@ -51,13 +51,16 @@ CM13.1.2, Carla 0.9.15, VISSIM 2022, SUMO 1.21, dSPACE/Matlab 2024a
 ## Preface
 Before testing the Real-Sim interface, please 
 - read through this README
-- check comments in config.yaml which specifies how to properly write/modify the configuration file
+- review the [configuration reference](ConfigSetup.md) for a full description of every YAML option
+- check comments in config.yaml for quick reminders on common fields
 - check annotations in the Simulink template which specifies how to properly use each block
 - RealSimPack.m and RealSimDepack.m files are currently open-source. check the comments before modifying.
 
 
 ## General Setups
 The interface runs the connections to different software, simulators by itself to provide plug-in-and-play experience for the users. A config.yaml file is critical to setup the interface parameters and configure different scenarios. 
+
+By default the executable looks for the SUMO runtime under `CommonLib/libsumo/bin` relative to the repository. When running from `TrafficLayer/x64/<Config>` or `build`, keep that folder with the executable or set `SumoSetup.RuntimeLibraryPath` in the configuration file.
 
 **NOTE: below is still experimental features and only applies to SUMO for now.**
 There are different mode of synchronization and opeartion of the Real-Sim interface. The **SimulationMode** parameter is an integer with each bit as the followings:

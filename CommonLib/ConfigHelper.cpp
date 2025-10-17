@@ -410,6 +410,13 @@ int ConfigHelper::getConfig(string configName) {
 	else {
 		SumoSetup.NumClients = 1;
 	}
+	if (node["RuntimeLibraryPath"]) {
+		SumoSetup.RuntimeLibraryPath = parserString(node, "RuntimeLibraryPath");
+	}
+	else {
+		SumoSetup.RuntimeLibraryPath = "";
+	}
+
 
 	// ===========================================================================
 	// 			READ Carla Setup section

@@ -145,6 +145,7 @@ struct SumoSetup_t {
 	bool EnableAutoLaunch;
 	std::string SumoConfigFile;
 	int NumClients;
+	std::string RuntimeLibraryPath;
 };
 
 typedef struct SubscriptionVehicleList_t {

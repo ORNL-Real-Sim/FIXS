@@ -361,7 +361,7 @@ try {
     # DLLs are built directly in sumo/bin
     $binDir = Join-Path $sumoDir "bin"
 
-    # List of .lib files to copy to root (for linking)
+    # List of .lib files to copy to bin subdirectory (for linking)
     $requiredLibs = @(
         "libsumocpp.lib",
         "libtracicpp.lib",
@@ -369,12 +369,20 @@ try {
         "libtracicppD.lib"
     )
 
+    # Create bin subdirectory for both .lib and .dll files
+    $destBinDir = Join-Path $destDir "bin"
+    if (-not (Test-Path $destBinDir)) {
+        New-Item -ItemType Directory -Path $destBinDir -Force | Out-Null
+    }
+
     $successCount = 0
     $failCount = 0
 
+    # Copy .lib files to bin subdirectory
+    Write-Host "`nCopying .lib files to bin/..." -ForegroundColor Cyan
     foreach ($file in $requiredLibs) {
         $sourceFile = Join-Path $binDir $file
-        $destFile = Join-Path $destDir $file
+        $destFile = Join-Path $destBinDir $file
 
         Write-Host "  Copying $file..." -NoNewline
 
@@ -392,12 +400,6 @@ try {
     # Copy all SUMO runtime DLLs to bin subdirectory
     Write-Host "`nCopying all SUMO runtime DLLs to bin/..." -ForegroundColor Cyan
     $sumoBinDir = Join-Path $sumoDir "bin"
-    $destBinDir = Join-Path $destDir "bin"
-
-    # Create bin directory if it doesn't exist
-    if (-not (Test-Path $destBinDir)) {
-        New-Item -ItemType Directory -Path $destBinDir -Force | Out-Null
-    }
 
     if (Test-Path $sumoBinDir) {
         $allDlls = Get-ChildItem -Path $sumoBinDir -Filter "*.dll"
@@ -498,16 +500,15 @@ try {
     Write-Host "`n========================================" -ForegroundColor Green
     Write-Host "SUCCESS! Release and Debug libraries are ready." -ForegroundColor Green
     Write-Host "========================================" -ForegroundColor Green
-    Write-Host "`nCopied import libraries (.lib):" -ForegroundColor Cyan
+    Write-Host "`nCopied import libraries (.lib) to bin/:" -ForegroundColor Cyan
     foreach ($file in $requiredLibs) {
-        $destFile = Join-Path $destDir $file
+        $destFile = Join-Path $destBinDir $file
         if (Test-Path $destFile) {
             $fileSize = (Get-Item $destFile).Length / 1MB
             Write-Host "  $file ($("{0:N2}" -f $fileSize) MB)" -ForegroundColor Green
         }
     }
     Write-Host "`nCopied runtime dependency DLLs to bin/:" -ForegroundColor Cyan
-    $destBinDir = Join-Path $destDir "bin"
     if (Test-Path $destBinDir) {
         $dllFiles = Get-ChildItem -Path $destBinDir -Filter "*.dll"
         $totalDllSize = ($dllFiles | Measure-Object -Property Length -Sum).Sum / 1MB

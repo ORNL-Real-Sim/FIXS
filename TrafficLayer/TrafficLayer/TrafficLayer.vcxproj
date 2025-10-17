@@ -118,18 +118,9 @@
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>..\..\CommonLib\libsumo;..\..\CommonLib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>..\..\CommonLib\yaml-cpp\build\Debug\yaml-cppd.lib;..\..\CommonLib\libsumo\libsumocppD.lib;..\..\CommonLib\libsumo\libtracicppD.lib;..\..\CommonLib\libevent\build\lib\Release\event_extra.lib;..\..\CommonLib\libevent\build\lib\Release\event_core.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>..\..\CommonLib\libsumo\bin;..\..\CommonLib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>..\..\CommonLib\yaml-cpp\build\Debug\yaml-cppd.lib;..\..\CommonLib\libsumo\bin\libsumocppD.lib;..\..\CommonLib\libsumo\bin\libtracicppD.lib;..\..\CommonLib\libevent\build\lib\Release\event_extra.lib;..\..\CommonLib\libevent\build\lib\Release\event_core.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
-    <PostBuildEvent>
-      <Command>copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\libsumocppD.dll" "$(OutDir)"
-copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\libtracicppD.dll" "$(OutDir)"
-copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\xerces-c_3_3D.dll" "$(OutDir)"
-copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\zlibd.dll" "$(OutDir)"
-copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\proj_9.dll" "$(OutDir)"
-copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\fox-16d.dll" "$(OutDir)"
-copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\gdald.dll" "$(OutDir)"</Command>
-    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
@@ -147,18 +138,9 @@ copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\gdald.dll" "$(OutDir)"</Command>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>..\..\CommonLib\libsumo;..\..\CommonLib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>..\..\CommonLib\yaml-cpp\build\Release\yaml-cpp.lib;..\..\CommonLib\libsumo\libsumocpp.lib;..\..\CommonLib\libsumo\libtracicpp.lib;..\..\CommonLib\libevent\build\lib\Release\event_extra.lib;..\..\CommonLib\libevent\build\lib\Release\event_core.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>..\..\CommonLib\libsumo\bin;..\..\CommonLib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>..\..\CommonLib\yaml-cpp\build\Release\yaml-cpp.lib;..\..\CommonLib\libsumo\bin\libsumocpp.lib;..\..\CommonLib\libsumo\bin\libtracicpp.lib;..\..\CommonLib\libevent\build\lib\Release\event_extra.lib;..\..\CommonLib\libevent\build\lib\Release\event_core.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
-    <PostBuildEvent>
-      <Command>copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\libsumocpp.dll" "$(OutDir)"
-copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\libtracicpp.dll" "$(OutDir)"
-copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\xerces-c_3_3.dll" "$(OutDir)"
-copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\zlib.dll" "$(OutDir)"
-copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\proj_9.dll" "$(OutDir)"
-copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\fox-16.dll" "$(OutDir)"
-copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\gdal.dll" "$(OutDir)"</Command>
-    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
@@ -173,18 +155,9 @@ copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\gdal.dll" "$(OutDir)"</Command>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>..\..\CommonLib\libsumo;..\..\CommonLib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>..\..\CommonLib\yaml-cpp\build\Debug\yaml-cppd.lib;..\..\CommonLib\libsumo\libsumocppD.lib;..\..\CommonLib\libsumo\libtracicppD.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>..\..\CommonLib\libsumo\bin;..\..\CommonLib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>..\..\CommonLib\yaml-cpp\build\Debug\yaml-cppd.lib;..\..\CommonLib\libsumo\bin\libsumocppD.lib;..\..\CommonLib\libsumo\bin\libtracicppD.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
-    <PostBuildEvent>
-      <Command>copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\libsumocppD.dll" "$(OutDir)"
-copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\libtracicppD.dll" "$(OutDir)"
-copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\xerces-c_3_3D.dll" "$(OutDir)"
-copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\zlibd.dll" "$(OutDir)"
-copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\proj_9.dll" "$(OutDir)"
-copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\fox-16d.dll" "$(OutDir)"
-copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\gdald.dll" "$(OutDir)"</Command>
-    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -203,18 +176,9 @@ copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\gdald.dll" "$(OutDir)"</Command>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>..\..\CommonLib\libsumo; ..\..\CommonLib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>..\..\CommonLib\yaml-cpp\build\Release\yaml-cpp.lib;..\..\CommonLib\libsumo\libsumocpp.lib;..\..\CommonLib\libsumo\libtracicpp.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>..\..\CommonLib\libsumo\bin;..\..\CommonLib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>..\..\CommonLib\yaml-cpp\build\Release\yaml-cpp.lib;..\..\CommonLib\libsumo\bin\libsumocpp.lib;..\..\CommonLib\libsumo\bin\libtracicpp.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
-    <PostBuildEvent>
-      <Command>copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\libsumocpp.dll" "$(OutDir)"
-copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\libtracicpp.dll" "$(OutDir)"
-copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\xerces-c_3_3.dll" "$(OutDir)"
-copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\zlib.dll" "$(OutDir)"
-copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\proj_9.dll" "$(OutDir)"
-copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\fox-16.dll" "$(OutDir)"
-copy /Y "$(ProjectDir)..\..\CommonLib\libsumo\gdal.dll" "$(OutDir)"</Command>
-    </PostBuildEvent>
   </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
