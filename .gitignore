@@ -199,4 +199,5 @@ TODO.md
 
 **/nul
 
+# Ignore Claude Code configuration
 .claude/
