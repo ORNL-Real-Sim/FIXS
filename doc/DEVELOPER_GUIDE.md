@@ -110,23 +110,46 @@ Central configuration file tracking external simulator and library versions used
 
 This file serves as the single source of truth for external dependency versions.
 
-### `scripts/update_libsumo.ps1`
-PowerShell script to synchronize libsumo files with a specific SUMO version from official releases.
+### `build_libsumo.ps1`
+PowerShell script to build libsumo and libtraci libraries from SUMO source code.
 
 **What it does:**
-1. Reads SUMO version from `dependencies.yaml`
-2. Downloads source files (.cpp/.h) from SUMO GitHub repository
-3. Downloads Windows binaries (DLLs and import libraries) from official SUMO releases
-4. Copies all files to `CommonLib/libsumo/`
+1. Clones the SUMO repository at the specified version tag
+2. Configures the build using CMake with required dependencies
+3. Compiles libsumo, libtraci, and all required DLLs
+4. Copies built libraries, headers, and DLLs to `CommonLib/libsumo/`
+5. Organizes files into `bin/`, `include/`, and `lib/` directories
 
 **Usage:**
 ```powershell
-.\scripts\update_libsumo.ps1           # Update source files and binaries
-.\scripts\update_libsumo.ps1 -DryRun   # Preview what would be downloaded
-.\scripts\update_libsumo.ps1 -SkipDLLs # Only update source files
+# Build for SUMO v1.22.0 (default from dependencies.yaml)
+.\build_libsumo.ps1
+
+# Build for a specific SUMO version
+.\build_libsumo.ps1 -SumoVersion "v1_22_0"
+
+# Build with custom installation location
+.\build_libsumo.ps1 -SumoVersion "v1_22_0" -InstallPrefix "C:\custom\path"
+
+# Build with multiple parallel jobs (faster compilation)
+.\build_libsumo.ps1 -Jobs 8
 ```
 
-**Note:** Debug libraries (*D.dll, *D.lib) are not included in official SUMO releases. The build system automatically falls back to release binaries for debug builds.
+**Requirements:**
+- CMake ≥3.13
+- Visual Studio 2022 (or compatible C++ compiler)
+- Git
+- Python ≥3.8
+
+**Output Structure:**
+```
+CommonLib/libsumo/
+├── bin/           # All runtime DLLs (libsumocpp.dll, libtracicpp.dll, etc.)
+├── include/       # Header files (libsumo/*.h, libtraci/*.h)
+└── lib/           # Import libraries (*.lib)
+```
+
+**Note:** The script preserves the SUMO source clone in `tmp/sumo_build/` for faster rebuilds. Delete this directory to force a clean clone on the next build.
 
 ---
 
@@ -317,8 +340,24 @@ The main configuration file is `CommonLib/config.yaml`. Key sections include:
 - `InterestedIds`: Vehicle IDs to track
 
 #### SumoSetup
-- `SpeedMode`: SUMO speed control mode
-- `ExecutionOrder`: Simulation step execution order
+- `EnableAutoLaunch`: Enable automatic SUMO startup (true/false)
+- `SumoConfigFile`: Path to SUMO `.sumocfg` file (relative to config.yaml location)
+- `NumClients`: Number of TraCI client connections (default: 1)
+- `RuntimeLibraryPath`: Optional override for SUMO DLL directory
+- `SpeedMode`: SUMO speed control mode (bitfield, see SUMO documentation)
+- `ExecutionOrder`: Simulation step execution order for multi-client coordination
+
+**Auto-Launch Example:**
+```yaml
+SumoSetup:
+  EnableAutoLaunch: true
+  SumoConfigFile: "./simple_loop.sumocfg"
+  NumClients: 1
+  SpeedMode: 0
+  ExecutionOrder: 0
+```
+
+**Note:** When `EnableAutoLaunch: false`, you must manually start SUMO before running TrafficLayer.
 
 Refer to comments in `config.yaml` for detailed parameter descriptions.
 
