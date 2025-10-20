@@ -185,3 +185,6 @@ CM11_proj/tmp.obj
 
 # Ignore Claude Code configuration
 .claude/
+
+# Ignore large SUMO output files
+fcd.xml
