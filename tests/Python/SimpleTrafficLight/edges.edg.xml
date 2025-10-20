@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<edges>
+    <!-- Main corridor edges - 2 lanes + left turn lane -->
+    <edge id="corridor_w_in" from="west_end" to="int_west" numLanes="3" speed="13.89" priority="3"/>
+    <edge id="corridor_w_out" from="int_west" to="west_end" numLanes="2" speed="13.89" priority="3"/>
+    
+    <edge id="corridor_wc_e" from="int_west" to="int_center" numLanes="3" speed="13.89" priority="3"/>
+    <edge id="corridor_wc_w" from="int_center" to="int_west" numLanes="2" speed="13.89" priority="3"/>
+    
+    <edge id="corridor_ce_e" from="int_center" to="int_east" numLanes="3" speed="13.89" priority="3"/>
+    <edge id="corridor_ce_w" from="int_east" to="int_center" numLanes="2" speed="13.89" priority="3"/>
+    
+    <edge id="corridor_e_out" from="int_east" to="east_end" numLanes="2" speed="13.89" priority="3"/>
+    <edge id="corridor_e_in" from="east_end" to="int_east" numLanes="3" speed="13.89" priority="3"/>
+    
+    <!-- Minor roads - 1 lane each -->
+    <edge id="west_N_in" from="west_north" to="int_west" numLanes="1" speed="11.11" priority="2"/>
+    <edge id="west_N_out" from="int_west" to="west_north" numLanes="1" speed="11.11" priority="2"/>
+    <edge id="west_S_in" from="west_south" to="int_west" numLanes="1" speed="11.11" priority="2"/>
+    <edge id="west_S_out" from="int_west" to="west_south" numLanes="1" speed="11.11" priority="2"/>
+    
+    <edge id="center_N_in" from="center_north" to="int_center" numLanes="1" speed="11.11" priority="2"/>
+    <edge id="center_N_out" from="int_center" to="center_north" numLanes="1" speed="11.11" priority="2"/>
+    <edge id="center_S_in" from="center_south" to="int_center" numLanes="1" speed="11.11" priority="2"/>
+    <edge id="center_S_out" from="int_center" to="center_south" numLanes="1" speed="11.11" priority="2"/>
+    
+    <edge id="east_N_in" from="east_north" to="int_east" numLanes="1" speed="11.11" priority="2"/>
+    <edge id="east_N_out" from="int_east" to="east_north" numLanes="1" speed="11.11" priority="2"/>
+    <edge id="east_S_in" from="east_south" to="int_east" numLanes="1" speed="11.11" priority="2"/>
+    <edge id="east_S_out" from="int_east" to="east_south" numLanes="1" speed="11.11" priority="2"/>
+</edges>

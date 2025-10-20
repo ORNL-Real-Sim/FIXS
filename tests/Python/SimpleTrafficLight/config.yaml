@@ -1,0 +1,43 @@
+# NOTE: YAML files do not allow tabs. use 2 or 4 spaces for indentation
+#
+# Simple Traffic Light Test Configuration
+# TrafficLayer with Python Echo Client using simple network with signalized intersections
+#
+
+# Global Simulation setup
+SimulationSetup:
+
+    # Master Switch to turn on/off RealSim interface
+    EnableRealSim: true
+
+    # Whether or not to save verbose log during the simulation
+    EnableVerboseLog: false
+
+    # specify which traffic simulator
+    SelectedTrafficSimulator: 'SUMO'
+
+    # Use setPreviousSpeed instead of setSpeed to respect SUMO's acceleration dynamics
+    EnableExternalDynamics: true
+
+    # default will send all
+    VehicleMessageField: [id, type, vehicleClass, speed, acceleration, positionX, positionY, positionZ, color, linkId, laneId, distanceTravel, speedDesired, heading, grade, speedLimit, speedLimitNext, signalLightId, signalLightHeadId, signalLightDistance, signalLightColor]
+
+
+# setup Application Layer
+ApplicationSetup:
+    # turn on/off application layer
+    EnableApplicationLayer: true
+
+    # Python echo client subscription
+    VehicleSubscription:
+    -   type: ego
+        attribute: {id: ['egoCm123'], radius: [400]}
+        ip: ["127.0.0.1"]
+        port: [2444]
+
+# subscription in XilSetup must be subset of ApplicationSetup
+XilSetup:
+    # enable/disable XIL
+    EnableXil: false
+
+    VehicleSubscription:
