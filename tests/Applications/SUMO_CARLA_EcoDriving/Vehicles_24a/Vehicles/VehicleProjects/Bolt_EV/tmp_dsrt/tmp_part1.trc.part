@@ -1,0 +1,45 @@
+-- ******** Model variables ***************************************************
+
+group "Model Root"
+	group "Sine Wave" -- block-group
+	{
+	 block: "Sin"
+	}
+		p_0_tmp_real_T_0[0]
+		{
+		 type:    flt(64,IEEE)*
+		 alias:   "Out1"
+		 flags:   OUTPUT|READONLY
+		}
+		p_1_tmp_real_T_0[0]
+		{
+		 type:    flt(64,IEEE)*
+		 alias:   "Amplitude"
+		 flags:   PARAM
+		}
+		p_1_tmp_real_T_0[1]
+		{
+		 type:    flt(64,IEEE)*
+		 alias:   "Bias"
+		 flags:   PARAM
+		}
+		p_1_tmp_real_T_0[2]
+		{
+		 type:    flt(64,IEEE)*
+		 alias:   "Frequency"
+		 flags:   PARAM
+		}
+		p_1_tmp_real_T_0[3]
+		{
+		 type:    flt(64,IEEE)*
+		 alias:   "Phase"
+		 flags:   PARAM
+		}
+
+
+	endgroup -- block-group "Sine Wave"
+
+
+
+
+endgroup -- "Model Root"
