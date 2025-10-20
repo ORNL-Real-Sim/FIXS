@@ -11,18 +11,22 @@ assignees: ''
 A clear and concise description of what the bug is.
 
 **To Reproduce**  
-Provide a minimal and specific sequence that leads to the bug. If it relates to co-simulation or simulation parameters, include them here.
-
-- Scenario name/config:
-- Involved tools (e.g., CARLA, SUMO, VISSIM):
-- Configuration used:
-- Controller version (if any):
-
+Provide a minimal and specific sequence that leads to the bug. 
 **Example:**  
 1. Run `eco_driving_Sumo.py --config eco_driving_config.yaml`
 2. SUMO is running with proper settings
 3. Ego vehicle fails to proceed after time = 123.4s
 4. Terminal shows: `No valid route from edge ...`
+
+If it relates to a specific simulation, please compress all related data (logs, configs, simulation files) into a single `.zip` file and name it:
+
+    <ISSUE_NUMBER>_<SHORT_DESCRIPTION>.zip
+    e.g., 145_vehicle_simulation.zip
+
+Then upload your `.zip` file using this private OneDrive link:  
+**[Upload to OneDrive (FIXS)](https://outlookuga-my.sharepoint.com/:f:/g/personal/ys04893_uga_edu/EmyW7v04lJhGh263oGvKDfwBMunLjrKmkOkgKDoGfshXVQ)**
+
+
 
 **Screenshots (if any)**  
 Add screenshots or error logs to help explain the problem.
