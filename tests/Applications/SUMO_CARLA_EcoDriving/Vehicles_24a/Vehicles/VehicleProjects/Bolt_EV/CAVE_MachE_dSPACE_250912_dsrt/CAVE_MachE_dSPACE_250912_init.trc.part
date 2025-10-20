@@ -1,0 +1,361 @@
+
+
+-- Type definitions for structures
+
+typedef CAVE_MachE_dSPACE_250912_VehDataBus_id_0 uint(8)[50]
+
+struct CAVE_MachE_dSPACE_250912_VehDataBus
+{
+  array-incr: -1
+}
+    structField0 
+    {
+      alias:   "id"
+      type:    CAVE_MachE_dSPACE_250912_VehDataBus_id_0
+      offs:    -1
+    }
+    structField1 
+    {
+      alias:   "idLength"
+      type:    flt(64,IEEE)
+      offs:    -1
+    }
+    structField2 
+    {
+      alias:   "type"
+      type:    CAVE_MachE_dSPACE_250912_VehDataBus_id_0
+      offs:    -1
+    }
+    structField3 
+    {
+      alias:   "typeLength"
+      type:    flt(64,IEEE)
+      offs:    -1
+    }
+    structField4 
+    {
+      alias:   "vehicleClass"
+      type:    CAVE_MachE_dSPACE_250912_VehDataBus_id_0
+      offs:    -1
+    }
+    structField5 
+    {
+      alias:   "vehicleClassLength"
+      type:    flt(64,IEEE)
+      offs:    -1
+    }
+    structField6 
+    {
+      alias:   "speed"
+      type:    flt(64,IEEE)
+      offs:    -1
+    }
+    structField7 
+    {
+      alias:   "acceleration"
+      type:    flt(64,IEEE)
+      offs:    -1
+    }
+    structField8 
+    {
+      alias:   "positionX"
+      type:    flt(64,IEEE)
+      offs:    -1
+    }
+    structField9 
+    {
+      alias:   "positionY"
+      type:    flt(64,IEEE)
+      offs:    -1
+    }
+    structField10 
+    {
+      alias:   "positionZ"
+      type:    flt(64,IEEE)
+      offs:    -1
+    }
+    structField11 
+    {
+      alias:   "heading"
+      type:    flt(64,IEEE)
+      offs:    -1
+    }
+    structField12 
+    {
+      alias:   "color"
+      type:    flt(64,IEEE)
+      offs:    -1
+    }
+    structField13 
+    {
+      alias:   "linkId"
+      type:    CAVE_MachE_dSPACE_250912_VehDataBus_id_0
+      offs:    -1
+    }
+    structField14 
+    {
+      alias:   "linkIdLength"
+      type:    flt(64,IEEE)
+      offs:    -1
+    }
+    structField15 
+    {
+      alias:   "laneId"
+      type:    flt(64,IEEE)
+      offs:    -1
+    }
+    structField16 
+    {
+      alias:   "distanceTravel"
+      type:    flt(64,IEEE)
+      offs:    -1
+    }
+    structField17 
+    {
+      alias:   "speedDesired"
+      type:    flt(64,IEEE)
+      offs:    -1
+    }
+    structField18 
+    {
+      alias:   "accelerationDesired"
+      type:    flt(64,IEEE)
+      offs:    -1
+    }
+    structField19 
+    {
+      alias:   "hasPrecedingVehicle"
+      type:    flt(64,IEEE)
+      offs:    -1
+    }
+    structField20 
+    {
+      alias:   "precedingVehicleId"
+      type:    CAVE_MachE_dSPACE_250912_VehDataBus_id_0
+      offs:    -1
+    }
+    structField21 
+    {
+      alias:   "precedingVehicleIdLength"
+      type:    flt(64,IEEE)
+      offs:    -1
+    }
+    structField22 
+    {
+      alias:   "precedingVehicleDistance"
+      type:    flt(64,IEEE)
+      offs:    -1
+    }
+    structField23 
+    {
+      alias:   "precedingVehicleSpeed"
+      type:    flt(64,IEEE)
+      offs:    -1
+    }
+    structField24 
+    {
+      alias:   "signalLightId"
+      type:    CAVE_MachE_dSPACE_250912_VehDataBus_id_0
+      offs:    -1
+    }
+    structField25 
+    {
+      alias:   "signalLightIdLength"
+      type:    flt(64,IEEE)
+      offs:    -1
+    }
+    structField26 
+    {
+      alias:   "signalLightHeadId"
+      type:    flt(64,IEEE)
+      offs:    -1
+    }
+    structField27 
+    {
+      alias:   "signalLightDistance"
+      type:    flt(64,IEEE)
+      offs:    -1
+    }
+    structField28 
+    {
+      alias:   "signalLightColor"
+      type:    flt(64,IEEE)
+      offs:    -1
+    }
+    structField29 
+    {
+      alias:   "speedLimit"
+      type:    flt(64,IEEE)
+      offs:    -1
+    }
+    structField30 
+    {
+      alias:   "speedLimitNext"
+      type:    flt(64,IEEE)
+      offs:    -1
+    }
+    structField31 
+    {
+      alias:   "speedLimitChangeDistance"
+      type:    flt(64,IEEE)
+      offs:    -1
+    }
+    structField32 
+    {
+      alias:   "linkIdNext"
+      type:    CAVE_MachE_dSPACE_250912_VehDataBus_id_0
+      offs:    -1
+    }
+    structField33 
+    {
+      alias:   "linkIdNextLength"
+      type:    flt(64,IEEE)
+      offs:    -1
+    }
+    structField34 
+    {
+      alias:   "grade"
+      type:    flt(64,IEEE)
+      offs:    -1
+    }
+    structField35 
+    {
+      alias:   "activeLaneChange"
+      type:    flt(64,IEEE)
+      offs:    -1
+    }
+endstruct
+
+struct CAVE_MachE_dSPACE_250912_struct_RLXElOtgrzvJMUIzjpiLaD
+{
+  array-incr: -1
+}
+    structField0 
+    {
+      alias:   "warmupTime"
+      type:    flt(64,IEEE)
+      offs:    -1
+    }
+    structField1 
+    {
+      alias:   "speedInit"
+      type:    flt(64,IEEE)
+      offs:    -1
+    }
+    structField2 
+    {
+      alias:   "tLookahead"
+      type:    flt(64,IEEE)
+      offs:    -1
+    }
+    structField3 
+    {
+      alias:   "smoothWindow"
+      type:    flt(64,IEEE)
+      offs:    -1
+    }
+    structField4 
+    {
+      alias:   "speedSource"
+      type:    flt(64,IEEE)
+      offs:    -1
+    }
+endstruct
+
+struct CAVE_MachE_dSPACE_250912_struct_m2VjwNiXoluKspK4Fr7zNG
+{
+  array-incr: -1
+}
+    structField0 
+    {
+      alias:   "VehSpd"
+      type:    flt(64,IEEE)
+      offs:    -1
+    }
+    structField1 
+    {
+      alias:   "AxleTorq"
+      type:    flt(64,IEEE)
+      offs:    -1
+    }
+    structField2 
+    {
+      alias:   "BattSoc"
+      type:    flt(64,IEEE)
+      offs:    -1
+    }
+    structField3 
+    {
+      alias:   "BattCurr"
+      type:    flt(64,IEEE)
+      offs:    -1
+    }
+endstruct
+
+typedef CAVE_MachE_dSPACE_250912_struct_H6OzwuYMZP7H9bFCBCIB9C_Time_0 flt(64,IEEE)[600]
+
+struct CAVE_MachE_dSPACE_250912_struct_H6OzwuYMZP7H9bFCBCIB9C
+{
+  array-incr: -1
+}
+    structField0 
+    {
+      alias:   "Time"
+      type:    CAVE_MachE_dSPACE_250912_struct_H6OzwuYMZP7H9bFCBCIB9C_Time_0
+      offs:    -1
+    }
+    structField1 
+    {
+      alias:   "Speed"
+      type:    CAVE_MachE_dSPACE_250912_struct_H6OzwuYMZP7H9bFCBCIB9C_Time_0
+      offs:    -1
+    }
+endstruct
+
+
+-- Type definitions for arrays
+typedef CAVE_MachE_dSPACE_250912_ArrayDT0_4 flt(64,IEEE)[4]
+typedef CAVE_MachE_dSPACE_250912_ArrayDT0_7 flt(64,IEEE)[7]
+typedef CAVE_MachE_dSPACE_250912_ArrayDT0_2 flt(64,IEEE)[2]
+typedef CAVE_MachE_dSPACE_250912_ArrayDT0_1_2_Col col flt(64,IEEE)[1][2]
+typedef CAVE_MachE_dSPACE_250912_ArrayDT0_2_2_Col col flt(64,IEEE)[2][2]
+typedef CAVE_MachE_dSPACE_250912_ArrayDT0_4_3_Col col flt(64,IEEE)[4][3]
+typedef CAVE_MachE_dSPACE_250912_ArrayDT0_3_4_Col col flt(64,IEEE)[3][4]
+typedef CAVE_MachE_dSPACE_250912_ArrayDT0_1_4_Col col flt(64,IEEE)[1][4]
+typedef CAVE_MachE_dSPACE_250912_ArrayDT0_3 flt(64,IEEE)[3]
+typedef CAVE_MachE_dSPACE_250912_ArrayDT0_9 flt(64,IEEE)[9]
+typedef CAVE_MachE_dSPACE_250912_ArrayDT0_3_3_Col col flt(64,IEEE)[3][3]
+typedef CAVE_MachE_dSPACE_250912_ArrayDT0_3_1_Col col flt(64,IEEE)[3][1]
+typedef CAVE_MachE_dSPACE_250912_ArrayDT0_3_2_Col col flt(64,IEEE)[3][2]
+typedef CAVE_MachE_dSPACE_250912_ArrayDT0_2_1_Col col flt(64,IEEE)[2][1]
+typedef CAVE_MachE_dSPACE_250912_ArrayDT0_27_4_Col col flt(64,IEEE)[27][4]
+typedef CAVE_MachE_dSPACE_250912_ArrayDT0_27_1_Col col flt(64,IEEE)[27][1]
+typedef CAVE_MachE_dSPACE_250912_ArrayDT0_6 flt(64,IEEE)[6]
+typedef CAVE_MachE_dSPACE_250912_ArrayDT0_8_2_Col col flt(64,IEEE)[8][2]
+typedef CAVE_MachE_dSPACE_250912_ArrayDT0_4_1_Col col flt(64,IEEE)[4][1]
+typedef CAVE_MachE_dSPACE_250912_ArrayDT0_12 flt(64,IEEE)[12]
+typedef CAVE_MachE_dSPACE_250912_ArrayDT0_8 flt(64,IEEE)[8]
+typedef CAVE_MachE_dSPACE_250912_ArrayDT0_6_1_Col col flt(64,IEEE)[6][1]
+typedef CAVE_MachE_dSPACE_250912_ArrayDT0_16 flt(64,IEEE)[16]
+typedef CAVE_MachE_dSPACE_250912_ArrayDT3_1024 uint(8)[1024]
+typedef CAVE_MachE_dSPACE_250912_ArrayDT3_200_1_Col col uint(8)[200][1]
+typedef CAVE_MachE_dSPACE_250912_ArrayDT8_2 uint(8)[2]
+typedef CAVE_MachE_dSPACE_250912_ArrayDT0_1_3_Col col flt(64,IEEE)[1][3]
+typedef CAVE_MachE_dSPACE_250912_ArrayDT18_34 struct CAVE_MachE_dSPACE_250912_struct_m2VjwNiXoluKspK4Fr7zNG[34]
+typedef CAVE_MachE_dSPACE_250912_ArrayDT0_11 flt(64,IEEE)[11]
+typedef CAVE_MachE_dSPACE_250912_ArrayDT0_7_6_Col col flt(64,IEEE)[7][6]
+typedef CAVE_MachE_dSPACE_250912_ArrayDT0_12_15_Col col flt(64,IEEE)[12][15]
+typedef CAVE_MachE_dSPACE_250912_ArrayDT0_15 flt(64,IEEE)[15]
+typedef CAVE_MachE_dSPACE_250912_ArrayDT0_2017 flt(64,IEEE)[2017]
+typedef CAVE_MachE_dSPACE_250912_ArrayDT0_29 flt(64,IEEE)[29]
+typedef CAVE_MachE_dSPACE_250912_ArrayDT0_17 flt(64,IEEE)[17]
+typedef CAVE_MachE_dSPACE_250912_ArrayDT0_183 flt(64,IEEE)[183]
+typedef CAVE_MachE_dSPACE_250912_ArrayDT0_23_4_Col col flt(64,IEEE)[23][4]
+typedef CAVE_MachE_dSPACE_250912_ArrayDT0_23_29_Col col flt(64,IEEE)[23][29]
+typedef CAVE_MachE_dSPACE_250912_ArrayDT0_23 flt(64,IEEE)[23]
+typedef CAVE_MachE_dSPACE_250912_ArrayDT0_189 flt(64,IEEE)[189]
+typedef CAVE_MachE_dSPACE_250912_ArrayDT7_2 uint(32)[2]
+typedef CAVE_MachE_dSPACE_250912_ArrayDT8_8 uint(8)[8]
+typedef CAVE_MachE_dSPACE_250912_ArrayDT0_279 flt(64,IEEE)[279]
+
+

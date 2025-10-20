@@ -202,3 +202,7 @@ TODO.md
 # Ignore Claude Code configuration
 .claude/
 
+
+# Ignore large SUMO output files
+fcd.xml
+
