@@ -13,12 +13,12 @@ format compact;
 % Different Vehicle Model, if different, need change!!!!!
 
 addpath(genpath('.\\Vehicles_24a'))
-configPath = 'C:\GitSrc\XIL_EcoPilot\FIXS\tests\Applications\SUMO_CARLA_EcoDriving\MLK_Sumo_Scenario\config_Sumo_Carla_default.yaml';
+configPath = 'C:\GitDev\Yunli\XIL_CAVE\FIXS\tests\Applications\SUMO_CARLA_EcoDriving\MLK_Sumo_Scenario\config_Sumo.yaml';
 
 
 
 % Initializations
-RealSimPath = 'C:\GitSrc\XIL_EcoPilot\FIXS\CommonLib';
+RealSimPath = 'C:\GitDev\Yunli\XIL_CAVE\FIXS\CommonLib';
 % Add path of RealSim tools
 addpath(genpath(RealSimPath));
 % Initialize RealSim for Simulink, Read yaml file

@@ -20,7 +20,7 @@ SimulationSetup:
 
     # default will send all
   VehicleMessageField: [id, type, vehicleClass, speed, acceleration, positionX, positionY, positionZ, heading,
-    linkId, laneId, distanceTravel, speedDesired, grade, length, width, height]
+    linkId, laneId, distanceTravel, speedDesired, grade]
 
     # by default it is false 
   EnableExternalDynamics: false   # set ture this so that simulink will control the response
@@ -46,15 +46,14 @@ ApplicationSetup:
     # 1. Receive data from FIXS LAYER
     # 2. Send data to XIL LAYER / Back to FIXS LAYER
   - type: "ego"
+    attribute: {id: ["ego"], radius: [0]}
+    ip: ["127.0.0.1"]
+    port: [420]
+
+  - type: "ego"
     attribute: {id: ["ego"], radius: [50]}
     ip: ["127.0.0.1"]
     port: [440]
-
-  - type: "ego"
-    attribute: {id: ["ego"], radius: [0]}
-    ip: ["127.0.0.1"]
-    port: [441]
-
   SignalSubscription:
   - type: intersection
     attribute: {name: ['2', '9', '10', '8', '12', '3']}
@@ -63,7 +62,12 @@ ApplicationSetup:
     
 XilSetup:
     # enable/disable XIL
-  EnableXil: false
+  EnableXil: true
+  VehicleSubscription:
+  - type: "ego"
+    attribute: {id: ["ego"], radius: [0]}
+    ip: ["192.168.140.11"]
+    port: [420]
 
 CarlaSetup:
     EnableVerboseLog: false
@@ -81,7 +85,7 @@ CarlaSetup:
     UseVehicleTypeAsBlueprint: false
 
     # Carla Server Ip and Port settings 
-    CarlaServerIP: 172.20.91.174
+    CarlaServerIP: 192.168.140.56
     CarlaServerPort: 2000
 
     # Carla Client Ip and Port settings 

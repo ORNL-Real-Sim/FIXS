@@ -126,7 +126,7 @@ class SumoEnvMultiAgent:
             print("Created Directory:" + output_dir)
         except OSError as error:
             print("Directory already exists, will overwrite  upon simulation.")
-
+        shutil.copy(os.path.join(self.sumo_folder, "updated_signal.xml"), output_dir)
         shutil.copy(os.path.join(self.sumo_folder, self.sumo_net), output_dir)
 
         # MPR
@@ -266,9 +266,9 @@ class SumoEnvMultiAgent:
         # start sumo-gui -c .\chattCavMpr.sumocfg --remote-port 1337 --step-length 1 --netstate-dump chatt.xml --netstate-dump.precision 10 --num-clients 2  --begin 28800 --end 33000
         # the files are in setting_dir
         if gui:
-            os.system(f'start sumo-gui -c {self.sumo_config} --remote-port {self.sumo_port} --step-length {self.step_length} --num-clients {num_clients} --time-to-teleport -1 --collision.action warn --collision.check-junctions false')
+            os.system(f'start C:\\Users\\RVDP\\Desktop\\sumo-1.24.0\\bin\\sumo-gui -c {self.sumo_config} --remote-port {self.sumo_port} --step-length {self.step_length} --num-clients {num_clients} --time-to-teleport -1 --collision.action warn --collision.check-junctions false')
         else:
-            os.system(f'start sumo -c {self.sumo_config} --remote-port {self.sumo_port} --step-length {self.step_length} --num-clients {num_clients}')
+            os.system(f'start C:\\Users\\RVDP\\Desktop\\sumo-1.24.0\\bin\\sumo -c {self.sumo_config} --remote-port {self.sumo_port} --step-length {self.step_length} --num-clients {num_clients}')
     
     def setup_connections(self):
         
@@ -378,10 +378,6 @@ class SumoEnvMultiAgent:
             
             self.cav_object_dict = {key: value for key, value in self.cav_object_dict.items() if key in (list_cav_back_to_sumo + list_cav_control)}
 
-            
-            
-
-
         self.close()
 
     
@@ -485,16 +481,16 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--trafficlayerConfig", type=str, help="Path to the Configuration file", default=os.environ["CONFIG_PATH"])
     parser.add_argument("--trafficlayerIp", type=str, help="Specify Ip of traffic layer", default='127.0.0.1')
-    parser.add_argument("--trafficlayerPort", type=str, help="Specify port of traffic layer", default=420)
-    parser.add_argument("--enableVehicleDynamics", action="store_true", help="use the vehicle dynamics", default=False)
-    parser.add_argument("--vehicleDynamicsIp", type=str, help="Specify Ip of vehicle dynamics", default='127.0.0.1')
-    parser.add_argument("--vehicleDynamicsPort", type=str, help="Specify port of vehicle dynamics", default=430)
+    parser.add_argument("--trafficlayerPort", type=str, help="Specify port of traffic layer", default=430)
+    parser.add_argument("--enableVehicleDynamics", action="store_true", help="use the vehicle dynamics", default=True)
+    parser.add_argument("--vehicleDynamicsIp", type=str, help="Specify Ip of vehicle dynamics", default='192.168.140.11')
+    parser.add_argument("--vehicleDynamicsPort", type=str, help="Specify port of vehicle dynamics", default=420)
 
     # the following parameters are for CAV settings
     parser.add_argument("--penetrationRate", type=float, help="the market penetration rate of cav", default=0.1)
     parser.add_argument("--stepLength", type=float, help="the step length of the simulation", default=0.1)
     parser.add_argument("--ecoDriving", action="store_true", help="Use the eco driving controller", default=True)
-    parser.add_argument("--vehicleDynamics", action="store_true", help="use the vehicle dynamics", default=False)
+    parser.add_argument("--vehicleDynamics", action="store_true", help="use the vehicle dynamics", default=True)
     # the following parameters are for SUMO 
     parser.add_argument("--sumoIp", type=str, help="Specify Ip of sumo", default='127.0.0.1')
     parser.add_argument("--sumoPort", type=str, help="Specify port of sumo", default=1337)
@@ -502,7 +498,7 @@ if __name__ == "__main__":
     parser.add_argument("--sumoFolder", type=str, help="Specify folder of sumo", default=os.environ["SIMULATION_FOLDER"])
     parser.add_argument("--sumoConfig", type=str, help="Specify sumo config file", default='mlk_simulation.sumocfg')
     parser.add_argument("--sumoNet", type=str, help="Specify sumo net file", default=os.environ["SUMO_NET_PATH"])
-    parser.add_argument("--sumoRoute", type=str, help="Specify sumo route file", default='routes_8_9AM_v2.rou.xml')
+    parser.add_argument("--sumoRoute", type=str, help="Specify sumo route file", default='routes_8_9AM_v3.rou.xml')
     parser.add_argument("--workingDirectory", type=str, help="Specify working directory", default='MPR')
     args = parser.parse_args()
     traffic_layer_config = args.trafficlayerConfig
