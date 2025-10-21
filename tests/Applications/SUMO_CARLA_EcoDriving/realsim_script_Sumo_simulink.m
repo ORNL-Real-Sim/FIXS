@@ -13,7 +13,7 @@ format compact;
 % Different Vehicle Model, if different, need change!!!!!
 
 addpath(genpath('.\\Vehicles_24a'))
-configPath = 'C:\GitDev\Yunli\XIL_CAVE\FIXS\tests\Applications\SUMO_CARLA_EcoDriving\MLK_Sumo_Scenario\config_Sumo.yaml';
+configPath = 'C:\GitDev\Yunli\XIL_CAVE\FIXS\tests\Applications\SUMO_CARLA_EcoDriving\MLK_Sumo_Scenario\config_Sumo_Carla_dSPACE.yaml';
 
 
 
