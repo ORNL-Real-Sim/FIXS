@@ -3,7 +3,7 @@ from utils.extract_sumo_tls_as_table import parse_sumo_tls_from_netxml, tls_grou
 
 SIMULATION_FOLDER = os.path.join(os.getcwd(), "MLK_Sumo_Scenario")
 CONFIG_PATH = os.path.join(SIMULATION_FOLDER, "config_Sumo_Carla_default.yaml")
-SUMO_NET_PATH = os.path.join(SIMULATION_FOLDER, "MLK_final_elevation_20250930.net.xml")
+SUMO_NET_PATH = os.path.join(SIMULATION_FOLDER, "MLK_final_elevation_20251009.net.xml")
 SUMO_TLS_TABLE_PATH = os.path.join(SIMULATION_FOLDER, "traffic_light_table.csv")
 
 def extract_sumo_tls_as_table(sumo_net_file, sumo_tls_table_path):

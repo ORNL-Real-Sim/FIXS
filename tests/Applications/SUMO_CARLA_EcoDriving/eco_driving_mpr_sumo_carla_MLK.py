@@ -266,9 +266,9 @@ class SumoEnvMultiAgent:
         # start sumo-gui -c .\chattCavMpr.sumocfg --remote-port 1337 --step-length 1 --netstate-dump chatt.xml --netstate-dump.precision 10 --num-clients 2  --begin 28800 --end 33000
         # the files are in setting_dir
         if gui:
-            os.system(f'start sumo-gui -c {self.sumo_config} --remote-port {self.sumo_port} --step-length {self.step_length} --num-clients {num_clients} --time-to-teleport -1 --collision.action warn --collision.check-junctions false')
+            os.system(f'start C:\\Users\\RVDP\\Desktop\\sumo-1.24.0\\bin\\sumo-gui -c {self.sumo_config} --remote-port {self.sumo_port} --step-length {self.step_length} --num-clients {num_clients} --time-to-teleport -1 --collision.action warn --collision.check-junctions false')
         else:
-            os.system(f'start sumo -c {self.sumo_config} --remote-port {self.sumo_port} --step-length {self.step_length} --num-clients {num_clients}')
+            os.system(f'start C:\\Users\\RVDP\\Desktop\\sumo-1.24.0\\bin\\sumo -c {self.sumo_config} --remote-port {self.sumo_port} --step-length {self.step_length} --num-clients {num_clients}')
     
     def setup_connections(self):
         
@@ -300,12 +300,12 @@ class SumoEnvMultiAgent:
         sim_time = traci.simulation.getTime()
 
         start_time_1 = time.time()
-        while sim_time < 28885:
+        while sim_time < 28985:
             sim_time = traci.simulation.getTime()
             # Phase trackers
             self.phase_tracker()
             self.subscribe_departed_veh()
-            if sim_time == 28885:
+            if sim_time == 28985:
                 self.reset()
             traci.simulationStep()
             self.apply_vehicle_control_FIXS({}, vehicle_dynamics=vehicle_dynamics, eco_driving=eco_driving, control_veh_ids=veh_ids_controlled_by_FIXS)
@@ -507,7 +507,7 @@ if __name__ == "__main__":
     parser.add_argument("--sumoFolder", type=str, help="Specify folder of sumo", default=os.environ["SIMULATION_FOLDER"])
     parser.add_argument("--sumoConfig", type=str, help="Specify sumo config file", default='mlk_simulation.sumocfg')
     parser.add_argument("--sumoNet", type=str, help="Specify sumo net file", default=os.environ["SUMO_NET_PATH"])
-    parser.add_argument("--sumoRoute", type=str, help="Specify sumo route file", default='routes_8_9AM_v2.rou.xml')
+    parser.add_argument("--sumoRoute", type=str, help="Specify sumo route file", default='routes_8_9AM_v3.rou.xml')
     parser.add_argument("--workingDirectory", type=str, help="Specify working directory", default='MPR')
     args = parser.parse_args()
     traffic_layer_config = args.trafficlayerConfig
