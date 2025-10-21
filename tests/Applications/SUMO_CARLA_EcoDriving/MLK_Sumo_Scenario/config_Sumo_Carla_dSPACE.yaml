@@ -48,15 +48,17 @@ ApplicationSetup:
   - type: "ego"
     attribute: {id: ["ego"], radius: [0]}
     ip: ["127.0.0.1"]
-    port: [420]
+    port: [430]
 
   - type: "ego"
     attribute: {id: ["ego"], radius: [50]}
     ip: ["127.0.0.1"]
     port: [440]
+    
   SignalSubscription:
   - type: intersection
-    attribute: {name: ['2', '9', '10', '8', '12', '3']}
+    attribute: {name: ['202587081', '202605864', '651276685', '202596786', '202612556', '202645406', '202633693',
+              '202608349', '202692612', '202639124', '202695971']}
     ip: ['127.0.0.1']
     port: [440]
     

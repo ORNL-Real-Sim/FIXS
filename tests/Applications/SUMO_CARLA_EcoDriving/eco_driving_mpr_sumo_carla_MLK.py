@@ -300,12 +300,12 @@ class SumoEnvMultiAgent:
         sim_time = traci.simulation.getTime()
 
         start_time_1 = time.time()
-        while sim_time < 28985:
+        while sim_time < 28885:
             sim_time = traci.simulation.getTime()
             # Phase trackers
             self.phase_tracker()
             self.subscribe_departed_veh()
-            if sim_time == 28985:
+            if sim_time == 28885:
                 self.reset()
             traci.simulationStep()
             self.apply_vehicle_control_FIXS({}, vehicle_dynamics=vehicle_dynamics, eco_driving=eco_driving, control_veh_ids=veh_ids_controlled_by_FIXS)
@@ -485,15 +485,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--trafficlayerConfig", type=str, help="Path to the Configuration file", default=os.environ["CONFIG_PATH"])
     parser.add_argument("--trafficlayerIp", type=str, help="Specify Ip of traffic layer", default='127.0.0.1')
-    parser.add_argument("--trafficlayerPort", type=str, help="Specify port of traffic layer", default=420)
-    parser.add_argument("--vehicleDynamics", action="store_true", help="use the vehicle dynamics", default=False)
-    parser.add_argument("--enableVehicleDynamics", action="store_true", help="use the vehicle dynamics", default=False)
-    parser.add_argument("--vehicleDynamicsIp", type=str, help="Specify Ip of vehicle dynamics", default='127.0.0.1')
-    # used for the  vehicle dynamics
-    # parser.add_argument("--vehicleDynamics", action="store_true", help="use the vehicle dynamics", default=True)
-    # parser.add_argument("--enableVehicleDynamics", action="store_true", help="use the vehicle dynamics", default=True)
-    # parser.add_argument("--vehicleDynamicsIp", type=str, help="Specify Ip of vehicle dynamics", default='192.168.140.11')
-    parser.add_argument("--vehicleDynamicsPort", type=str, help="Specify port of vehicle dynamics", default=430)
+    parser.add_argument("--trafficlayerPort", type=str, help="Specify port of traffic layer", default=430)
+    parser.add_argument("--vehicleDynamics", action="store_true", help="use the vehicle dynamics", default=True)
+    parser.add_argument("--enableVehicleDynamics", action="store_true", help="use the vehicle dynamics", default=True)
+    parser.add_argument("--vehicleDynamicsIp", type=str, help="Specify Ip of vehicle dynamics", default='192.168.140.11')
+    parser.add_argument("--vehicleDynamicsPort", type=str, help="Specify port of vehicle dynamics", default=420)
 
     # the following parameters are for CAV settings
     parser.add_argument("--penetrationRate", type=float, help="the market penetration rate of cav", default=0.1)
