@@ -25,6 +25,10 @@ if __name__ == "__main__":
     carla_client = carla.Client(carla_server_ip, carla_server_port)
 
     carla_world = carla_client.get_world()
+    carla_settings = carla_world.get_settings()
+    if not carla_settings.synchronous_mode:
+        carla_settings.synchronous_mode = True  # Enable synchronous mode
+        carla_world.apply_settings(carla_settings)
     carla_blueprint_library = carla_world.get_blueprint_library()
     camera_bp = carla_blueprint_library.find('sensor.camera.rgb')
     camera_bp.set_attribute('image_size_x', '800')
@@ -36,7 +40,7 @@ if __name__ == "__main__":
     ego_vehicle_role_name = 'ego'
     ego_vehicle_carla_actor: carla.Vehicle = None
     ego_vehicle_carla_actor_id = ''
-    while True:
+    while ego_vehicle_carla_actor is None:
         try:
             carla_vehicle_actors_in_world = carla_world.get_actors().filter('vehicle.*')
             carla_vehicle_actor: carla.Vehicle
@@ -44,11 +48,12 @@ if __name__ == "__main__":
             if RANDOM_SPAWN:
                 spawn_points = carla_world.get_map().get_spawn_points()
                 spawn_point = random.choice(spawn_points)
-                ego_vehicle_carla_actor = carla_world.spawn_actor(carla_blueprint_library.find('vehicle.tesla.model3'), spawn_point)
+                vehicle_blueprint = carla_blueprint_library.find('vehicle.tesla.model3')
+                vehicle_blueprint.set_attribute('role_name', ego_vehicle_role_name)
+                ego_vehicle_carla_actor = carla_world.spawn_actor(vehicle_blueprint, spawn_point)
                 # set as auto pilot
                 ego_vehicle_carla_actor.set_autopilot(True)
-            if ego_vehicle_carla_actor is None or carla_world.get_actor(ego_vehicle_carla_actor_id) is None:
-                camera_actor.destroy()
+            if ego_vehicle_carla_actor is None:
                 for carla_vehicle_actor in carla_vehicle_actors_in_world:
                     if 'role_name' in carla_vehicle_actor.attributes.keys():
                         carla_actor_role_name = carla_vehicle_actor.attributes.get('role_name', None)
@@ -58,14 +63,26 @@ if __name__ == "__main__":
                             # if the ego vehicle is in carla
                             camera_actor: carla.Sensor
                             camera_actor = carla_world.spawn_actor(camera_bp, camera_transform, attach_to=ego_vehicle_carla_actor)
-            camera_actor.listen(lambda image: process_image(image))
+            
         except Exception as e:
             print(f"Error occurred: {str(e)}")
 
-        finally:
-            # Clean up: stop camera and vehicle
-            camera_actor.stop()
-            ego_vehicle_carla_actor.destroy()
-            camera_actor.destroy()
-            cv2.destroyAllWindows()
-            print("Cleaning up...")
+
+    camera_actor.listen(lambda image: process_image(image))
+    latest_image = None
+
+    try:
+        while True:
+            carla_world.tick()
+            if latest_image is not None:
+                cv2.imshow("Front Camera", latest_image)
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    break
+    except KeyboardInterrupt:
+        print("Stopping the simulation.")
+    finally:
+        camera_actor.stop()
+        ego_vehicle_carla_actor.destroy()
+        camera_actor.destroy()
+        cv2.destroyAllWindows()
+        print("Cleaning up...")
