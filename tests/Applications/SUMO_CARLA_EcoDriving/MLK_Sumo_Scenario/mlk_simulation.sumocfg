@@ -1,13 +1,13 @@
 ﻿<?xml version="1.0" encoding="UTF-8"?>
 <configuration>
     <input>
-        <net-file value="MLK_final_elevation_20250930.net.xml"/>
-        <route-files value="routes_8_9AM_v2.rou.xml"/>
+        <net-file value="MLK_final_elevation_20251009.net.xml"/>
+        <route-files value="routes_8_9AM_v3.rou.xml"/>
+	<additional-files value="updated_signal.xml"/>
     </input>
     <time>
         <begin value="28800"/>
         <end value="32400"/>
-        <step-length value="0.1"/>
     </time>
     <processing>
         <ignore-route-errors value="true"/>
@@ -18,10 +18,6 @@
         <tripinfo-output value="tripinfo.xml"/>
         <fcd-output value="fcd.xml" samplingRate="1"/>
     </output>
-    <gui_only>
-        <start value="t"/>
-        <quit-on-end value="true"/>
-    </gui_only>
     <report>
         <verbose value="true"/>
         <no-step-log value="true"/>
