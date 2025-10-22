@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!-- Simple Traffic Light Routes - Three intersections corridor -->
+<routes xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/routes_file.xsd">
+
+    <!-- Vehicle Types -->
+    <vType id="passenger_car" accel="2.6" decel="4.5" sigma="0.5" length="5.0" minGap="2.5" maxSpeed="33.33" guiShape="passenger" color="1,1,0"/>
+    <vType id="ego_vehicle" accel="2.6" decel="4.5" sigma="0.0" length="5.0" minGap="2.5" maxSpeed="33.33" guiShape="passenger" color="1,0,0"/>
+
+    <!-- Main Corridor Routes (West to East) -->
+    <route id="route_full_WE" edges="corridor_w_in corridor_wc_e corridor_ce_e corridor_e_out"/>
+    <route id="route_full_EW" edges="corridor_e_in corridor_ce_w corridor_wc_w corridor_w_out"/>
+
+    <!-- Ego Vehicle - starts from west end, travels through all three intersections -->
+    <vehicle id="egoCm123" type="ego_vehicle" route="route_full_WE" depart="0.0" departSpeed="max" departPos="0" departLane="0" color="1,0,0"/>
+
+    <!-- Background Traffic - Main Corridor -->
+    <flow id="flow_WE" type="passenger_car" route="route_full_WE" begin="15.0" end="1200.0" vehsPerHour="400" departLane="best" departSpeed="max"/>
+    <flow id="flow_EW" type="passenger_car" route="route_full_EW" begin="15.0" end="1200.0" vehsPerHour="400" departLane="best" departSpeed="max"/>
+
+    <!-- Routes from minor roads -->
+    <route id="route_west_N_in" edges="west_N_in corridor_wc_e"/>
+    <route id="route_west_S_in" edges="west_S_in corridor_w_out"/>
+    <route id="route_center_N_in" edges="center_N_in corridor_ce_e"/>
+    <route id="route_center_S_in" edges="center_S_in corridor_wc_w"/>
+    <route id="route_east_N_in" edges="east_N_in corridor_e_out"/>
+    <route id="route_east_S_in" edges="east_S_in corridor_ce_w"/>
+
+    <!-- Minor road traffic -->
+    <flow id="flow_west_N" type="passenger_car" route="route_west_N_in" begin="20.0" end="1200.0" vehsPerHour="80" departLane="0" departSpeed="max"/>
+    <flow id="flow_west_S" type="passenger_car" route="route_west_S_in" begin="20.0" end="1200.0" vehsPerHour="80" departLane="0" departSpeed="max"/>
+    <flow id="flow_center_N" type="passenger_car" route="route_center_N_in" begin="20.0" end="1200.0" vehsPerHour="80" departLane="0" departSpeed="max"/>
+    <flow id="flow_center_S" type="passenger_car" route="route_center_S_in" begin="20.0" end="1200.0" vehsPerHour="80" departLane="0" departSpeed="max"/>
+    <flow id="flow_east_N" type="passenger_car" route="route_east_N_in" begin="20.0" end="1200.0" vehsPerHour="80" departLane="0" departSpeed="max"/>
+    <flow id="flow_east_S" type="passenger_car" route="route_east_S_in" begin="20.0" end="1200.0" vehsPerHour="80" departLane="0" departSpeed="max"/>
+
+</routes>

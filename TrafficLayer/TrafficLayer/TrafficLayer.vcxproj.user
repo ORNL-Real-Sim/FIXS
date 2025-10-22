@@ -5,7 +5,7 @@
     <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <LocalDebuggerCommandArguments>-f C:\src_git\RS_FIXS\#55\tests\Python\SimpleEchoClient\config.yaml</LocalDebuggerCommandArguments>
+    <LocalDebuggerCommandArguments>-f C:\src_git\Debug_Project\tests\UAtest\RS_config_release.yaml</LocalDebuggerCommandArguments>
     <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
     <LocalDebuggerEnvironment>PATH=%PATH%;..\..\CommonLib\libsumo;</LocalDebuggerEnvironment>
   </PropertyGroup>

@@ -450,17 +450,26 @@ int TrafficHelper::addEgoVehicle(double simTime) {
 			// !!!!check if what received is ego vehicle
 			// use default type if not specified!!
 			string idStr = Config_c->CarMakerSetup.EgoId;
-			// if ego not exist yet, add it
-			string typeStr = Config_c->CarMakerSetup.EgoType;
 
-			// if is empty
-			if (typeStr.size() == 0) {
-				SUMO_TRACI_NAMESPACE::Vehicle::add(idStr, "");
+			// Get all vehicle IDs from SUMO
+			vector<string> vehicleIds = SUMO_TRACI_NAMESPACE::Vehicle::getIDList();
+
+			// Check if ego vehicle already exists
+			bool vehicleExist = (find(vehicleIds.begin(), vehicleIds.end(), idStr) != vehicleIds.end());
+
+			// if ego not exist yet, add it
+			if (!vehicleExist) {
+				string typeStr = Config_c->CarMakerSetup.EgoType;
+
+				// if is empty
+				if (typeStr.size() == 0) {
+					SUMO_TRACI_NAMESPACE::Vehicle::add(idStr, "");
+				}
+				else {
+					SUMO_TRACI_NAMESPACE::Vehicle::add(idStr, "", typeStr);
+				}
+				SUMO_TRACI_NAMESPACE::Vehicle::setColor(idStr, libsumo::TraCIColor(255, 0, 0));
 			}
-			else {
-				SUMO_TRACI_NAMESPACE::Vehicle::add(idStr, "", typeStr);
-			}
-			SUMO_TRACI_NAMESPACE::Vehicle::setColor(idStr, libsumo::TraCIColor(255, 0, 0));
 		}
 
 		return 1;

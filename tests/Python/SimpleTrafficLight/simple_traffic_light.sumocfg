@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<configuration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/sumoConfiguration.xsd">
+
+    <input>
+        <net-file value="simple_traffic_light.net.xml"/>
+        <route-files value="simple_traffic_light.rou.xml"/>
+    </input>
+
+    <random>
+        <seed value="42"/>
+    </random>
+
+    <time>
+        <begin value="0"/>
+        <end value="1200"/>
+        <step-length value="0.1"/>
+    </time>
+
+    <processing>
+        <time-to-teleport value="-1"/>
+    </processing>
+
+    <gui_only>
+        <start value="f"/>
+        <quit-on-end value="true"/>
+    </gui_only>
+
+    <report>
+        <no-warnings value="false"/>
+        <no-step-log value="false"/>
+    </report>
+
+</configuration>
