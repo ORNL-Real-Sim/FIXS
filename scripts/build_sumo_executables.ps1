@@ -1,12 +1,13 @@
-# Script to build SUMO Release and Debug DLLs from source
-# Reads version from dependencies.yaml, clones SUMO, builds Release and Debug DLLs, and copies them along with headers
+# Script to build SUMO executables (sumo.exe, sumo-gui.exe, etc.) from source
+# Reads version from dependencies.yaml, clones SUMO if needed, and builds executables
 
 param(
     [switch]$KeepBuildDir = $false,
     [switch]$DryRun = $false,
     [string]$Generator = "Visual Studio 17 2022",
     [string]$VcpkgRoot = "C:\vcpkg",
-    [switch]$UseSumoLibraries = $true  # Use SUMOLibraries by default (faster)
+    [switch]$UseSumoLibraries = $true,  # Use SUMOLibraries by default (faster)
+    [string]$Configuration = "Release"   # Build configuration (Release or Debug)
 )
 
 # Read version from dependencies.yaml
@@ -24,7 +25,7 @@ if ($yamlContent -match 'sumo:\s+version:\s+"([^"]+)"') {
     exit 1
 }
 
-Write-Host "Building SUMO Release and Debug DLLs for version $version" -ForegroundColor Cyan
+Write-Host "Building SUMO executables for version $version ($Configuration)" -ForegroundColor Cyan
 
 # Check for required tools
 Write-Host "`nChecking prerequisites..." -ForegroundColor Cyan
@@ -157,24 +158,24 @@ if (Test-Path $sumoBuildDir) {
     if ($existingItems.Count -gt 0) {
         Write-Host "Found valid repositories: $($existingItems -join ', ')" -ForegroundColor Green
 
-        # Check if DLLs already exist in bin
+        # Check if executables already exist in bin
         $binDir = Join-Path $sumoDir "bin"
-        $requiredDlls = @("libsumocpp.dll", "libsumocppD.dll", "libtracicpp.dll", "libtracicppD.dll")
-        $allDllsExist = $true
+        $requiredExes = @("sumo.exe", "sumo-gui.exe")
+        $allExesExist = $true
 
-        foreach ($dll in $requiredDlls) {
-            if (-not (Test-Path (Join-Path $binDir $dll))) {
-                $allDllsExist = $false
+        foreach ($exe in $requiredExes) {
+            if (-not (Test-Path (Join-Path $binDir $exe))) {
+                $allExesExist = $false
                 break
             }
         }
 
-        if ($allDllsExist) {
-            Write-Host "`nAll required DLLs already exist in the build!" -ForegroundColor Green
+        if ($allExesExist) {
+            Write-Host "`nSUMO executables already exist in the build!" -ForegroundColor Green
             $response = Read-Host "What would you like to do? (C=copy existing/R=rebuild/N=re-clone/Q=quit)"
 
             if ($response -match '^[Cc]') {
-                Write-Host "Will copy existing DLLs and headers (fastest)" -ForegroundColor Green
+                Write-Host "Will copy existing executables (fastest)" -ForegroundColor Green
                 $skipBuild = $true
                 $reuseClones = $true
             } elseif ($response -match '^[Rr]') {
@@ -194,10 +195,10 @@ if (Test-Path $sumoBuildDir) {
                 exit 0
             }
         } else {
-            $response = Read-Host "Do you want to reuse existing clones or re-clone? (Y=reuse/N=re-clone/Q=quit)"
+            $response = Read-Host "Do you want to reuse existing SUMO source or re-clone? (Y=reuse/N=re-clone/Q=quit)"
 
             if ($response -match '^[Yy]') {
-                Write-Host "Reusing existing clones (faster build)" -ForegroundColor Green
+                Write-Host "Reusing existing source (faster build)" -ForegroundColor Green
                 $reuseClones = $true
 
                 # Only delete build directory if it exists
@@ -298,46 +299,22 @@ try {
 
         Write-Host "  Configuration complete" -ForegroundColor Green
 
-        # Build Release configuration first
-        Write-Host "`nBuilding Release libraries (this may take 10-30 minutes)..." -ForegroundColor Cyan
-        Write-Host "  Building libsumocpp (Release)..." -ForegroundColor Gray
-        cmake --build . --config Release --target libsumocpp
+        # Build SUMO executables
+        Write-Host "`nBuilding SUMO executables (this may take 30-60 minutes)..." -ForegroundColor Cyan
+        Write-Host "  Configuration: $Configuration" -ForegroundColor Gray
+        Write-Host "  cmake --build . --config $Configuration" -ForegroundColor Gray
+        cmake --build . --config $Configuration
 
         if ($LASTEXITCODE -ne 0) {
-            throw "Building libsumocpp (Release) failed"
+            throw "Building SUMO executables failed"
         }
 
-        Write-Host "  Building libtracicpp (Release)..." -ForegroundColor Gray
-        cmake --build . --config Release --target libtracicpp
-
-        if ($LASTEXITCODE -ne 0) {
-            throw "Building libtracicpp (Release) failed"
-        }
-
-        Write-Host "  Release build complete" -ForegroundColor Green
-
-        # Build Debug configuration
-        Write-Host "`nBuilding Debug libraries (this may take 10-30 minutes)..." -ForegroundColor Cyan
-        Write-Host "  Building libsumocpp (Debug)..." -ForegroundColor Gray
-        cmake --build . --config Debug --target libsumocpp
-
-        if ($LASTEXITCODE -ne 0) {
-            throw "Building libsumocpp (Debug) failed"
-        }
-
-        Write-Host "  Building libtracicpp (Debug)..." -ForegroundColor Gray
-        cmake --build . --config Debug --target libtracicpp
-
-        if ($LASTEXITCODE -ne 0) {
-            throw "Building libtracicpp (Debug) failed"
-        }
-
-        Write-Host "  Debug build complete" -ForegroundColor Green
+        Write-Host "  Build complete" -ForegroundColor Green
 
         Pop-Location
         Pop-Location
     } else {
-        Write-Host "`nSkipping build, using existing DLLs" -ForegroundColor Green
+        Write-Host "`nSkipping build, using existing executables" -ForegroundColor Green
     }
 
     # Display build summary and request confirmation before copying
@@ -347,6 +324,7 @@ try {
 
     Write-Host "`nBuild Information:" -ForegroundColor Yellow
     Write-Host "  SUMO Version: $version" -ForegroundColor Green
+    Write-Host "  Configuration: $Configuration" -ForegroundColor Green
     Write-Host "  Source Directory: $sumoDir" -ForegroundColor Gray
 
     # Detect generator/compiler used
@@ -361,37 +339,42 @@ try {
         Write-Host "  Dependencies: None (built without external deps)" -ForegroundColor Yellow
     }
 
-    Write-Host "`nFiles to be copied:" -ForegroundColor Yellow
-    Write-Host "  - 4 import libraries (.lib files): libsumocpp, libtracicpp (Release + Debug)" -ForegroundColor Gray
-
-    # Count DLLs
+    Write-Host "`nExecutables built:" -ForegroundColor Yellow
     $binDir = Join-Path $sumoDir "bin"
     if (Test-Path $binDir) {
-        $dllCount = (Get-ChildItem -Path $binDir -Filter "*.dll").Count
-        $totalDllSize = ((Get-ChildItem -Path $binDir -Filter "*.dll" | Measure-Object -Property Length -Sum).Sum / 1MB)
-        Write-Host "  - $dllCount runtime DLLs ($("{0:N2}" -f $totalDllSize) MB total)" -ForegroundColor Gray
+        $exeFiles = Get-ChildItem -Path $binDir -Filter "*.exe"
+        $totalExeCount = $exeFiles.Count
+        $totalExeSize = ($exeFiles | Measure-Object -Property Length -Sum).Sum / 1MB
+        Write-Host "  $totalExeCount executables ($("{0:N2}" -f $totalExeSize) MB total)" -ForegroundColor Gray
+
+        # Show key executables
+        $keyExes = @("sumo.exe", "sumo-gui.exe", "netconvert.exe", "netgenerate.exe", "polyconvert.exe")
+        foreach ($exe in $keyExes) {
+            $exePath = Join-Path $binDir $exe
+            if (Test-Path $exePath) {
+                $exeSize = (Get-Item $exePath).Length / 1MB
+                Write-Host "    - $exe ($("{0:N2}" -f $exeSize) MB)" -ForegroundColor Green
+            }
+        }
     }
 
-    Write-Host "  - 24 header files from libsumo API" -ForegroundColor Gray
-
     Write-Host "`nDestination:" -ForegroundColor Yellow
-    $destDir = Join-Path $PSScriptRoot "..\CommonLib\libsumo"
+    $destDir = Join-Path $PSScriptRoot "..\build\sumo"
     Write-Host "  $destDir" -ForegroundColor Gray
 
     if (Test-Path $destDir) {
-        Write-Host "`n  WARNING: This will DELETE existing files in CommonLib\libsumo" -ForegroundColor Red
+        Write-Host "`n  WARNING: This will DELETE existing files in build\sumo" -ForegroundColor Red
     }
 
-    Write-Host "`nDo you want to proceed with copying files to the repository?" -ForegroundColor Cyan
+    Write-Host "`nDo you want to proceed with copying executables to the repository?" -ForegroundColor Cyan
     $response = Read-Host "(Y=yes and copy/N=no and exit)"
 
     if (-not ($response -match '^[Yy]')) {
-        Write-Host "`nCopy cancelled by user. Files remain in build directory:" -ForegroundColor Yellow
+        Write-Host "`nCopy cancelled by user. Executables remain in build directory:" -ForegroundColor Yellow
         Write-Host "  $binDir" -ForegroundColor Gray
-        Write-Host "`nTo copy manually later, you can:" -ForegroundColor Cyan
-        Write-Host "  1. Copy .lib and .dll files from: $binDir" -ForegroundColor Gray
-        Write-Host "  2. Copy .h files from: $(Join-Path $sumoDir 'src\libsumo')" -ForegroundColor Gray
-        Write-Host "  3. To destination: $destDir" -ForegroundColor Gray
+        Write-Host "`nYou can run SUMO directly from:" -ForegroundColor Cyan
+        Write-Host "  $binDir\sumo.exe" -ForegroundColor Gray
+        Write-Host "  $binDir\sumo-gui.exe" -ForegroundColor Gray
         Write-Host "`nPress any key to exit..." -ForegroundColor Gray
         $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
         exit 0
@@ -400,138 +383,42 @@ try {
     # User confirmed, proceed with copy
     Write-Host "`nProceeding with file copy..." -ForegroundColor Green
 
-    # Clean up existing CommonLib/libsumo to avoid stale files
+    # Clean up existing build/sumo directory to avoid stale files
     if (Test-Path $destDir) {
-        Write-Host "  Cleaning up old files in CommonLib\libsumo..." -ForegroundColor Yellow
+        Write-Host "  Cleaning up old files in build\sumo..." -ForegroundColor Yellow
         Remove-Item -Path $destDir -Recurse -Force -ErrorAction Stop
         Write-Host "  Old files removed" -ForegroundColor Green
     }
 
     # Create fresh directory
     New-Item -ItemType Directory -Path $destDir -Force | Out-Null
-    Write-Host "  Created fresh CommonLib\libsumo directory" -ForegroundColor Green
+    Write-Host "  Created fresh build\sumo directory" -ForegroundColor Green
 
-    Write-Host "`nCopying Release and Debug DLLs..." -ForegroundColor Cyan
+    Write-Host "`nCopying executables and DLLs..." -ForegroundColor Cyan
 
-    # DLLs are built directly in sumo/bin
-    $binDir = Join-Path $sumoDir "bin"
+    # Copy all files from bin directory
+    if (Test-Path $binDir) {
+        $allFiles = Get-ChildItem -Path $binDir -File
+        $copiedCount = 0
 
-    # List of .lib files to copy to bin subdirectory (for linking)
-    $requiredLibs = @(
-        "libsumocpp.lib",
-        "libtracicpp.lib",
-        "libsumocppD.lib",
-        "libtracicppD.lib"
-    )
-
-    # Create bin subdirectory for both .lib and .dll files
-    $destBinDir = Join-Path $destDir "bin"
-    if (-not (Test-Path $destBinDir)) {
-        New-Item -ItemType Directory -Path $destBinDir -Force | Out-Null
-    }
-
-    $successCount = 0
-    $failCount = 0
-
-    # Copy .lib files to bin subdirectory
-    Write-Host "`nCopying .lib files to bin/..." -ForegroundColor Cyan
-    foreach ($file in $requiredLibs) {
-        $sourceFile = Join-Path $binDir $file
-        $destFile = Join-Path $destBinDir $file
-
-        Write-Host "  Copying $file..." -NoNewline
-
-        if (Test-Path $sourceFile) {
-            Copy-Item -Path $sourceFile -Destination $destFile -Force
-            Write-Host " OK" -ForegroundColor Green
-            $successCount++
-        } else {
-            Write-Host " NOT FOUND" -ForegroundColor Red
-            Write-Host "    Expected at: $sourceFile" -ForegroundColor Yellow
-            $failCount++
-        }
-    }
-
-    # Copy all SUMO runtime DLLs to bin subdirectory
-    Write-Host "`nCopying all SUMO runtime DLLs to bin/..." -ForegroundColor Cyan
-    $sumoBinDir = Join-Path $sumoDir "bin"
-
-    if (Test-Path $sumoBinDir) {
-        $allDlls = Get-ChildItem -Path $sumoBinDir -Filter "*.dll"
-        $dllCount = 0
-
-        foreach ($dll in $allDlls) {
-            Copy-Item -Path $dll.FullName -Destination $destBinDir -Force
-            $dllCount++
+        foreach ($file in $allFiles) {
+            Copy-Item -Path $file.FullName -Destination $destDir -Force
+            $copiedCount++
         }
 
-        Write-Host "  Copied $dllCount DLL files to bin/" -ForegroundColor Green
+        Write-Host "  Copied $copiedCount files" -ForegroundColor Green
     } else {
-        Write-Host "  Warning: SUMO bin directory not found at $sumoBinDir" -ForegroundColor Yellow
+        throw "SUMO bin directory not found at $binDir"
     }
 
-    # Copy header files from source
-    Write-Host "`nCopying header files from SUMO source..." -ForegroundColor Cyan
-    $sumoSrcLibsumoDir = Join-Path $sumoDir "src\libsumo"
+    # Copy data directory (contains configuration files and schemas)
+    $dataSourceDir = Join-Path $sumoDir "data"
+    $dataDestDir = Join-Path $destDir "data"
 
-    $headerFiles = @(
-        "libsumo.h",
-        "libtraci.h",
-        "Edge.h",
-        "GUI.h",
-        "InductionLoop.h",
-        "Junction.h",
-        "LaneArea.h",
-        "Lane.h",
-        "MultiEntryExit.h",
-        "POI.h",
-        "Polygon.h",
-        "Route.h",
-        "Simulation.h",
-        "TrafficLight.h",
-        "VehicleType.h",
-        "Vehicle.h",
-        "Person.h",
-        "Calibrator.h",
-        "BusStop.h",
-        "ParkingArea.h",
-        "ChargingStation.h",
-        "OverheadWire.h",
-        "Rerouter.h",
-        "MeanData.h",
-        "VariableSpeedSign.h",
-        "RouteProbe.h",
-        "Helper.h",
-        "StorageHelper.h",
-        "Subscription.h",
-        "TraCIConstants.h",
-        "TraCIDefs.h"
-    )
-
-    foreach ($file in $headerFiles) {
-        $sourceFile = Join-Path $sumoSrcLibsumoDir $file
-        $destFile = Join-Path $destDir $file
-
-        Write-Host "  Copying $file..." -NoNewline
-
-        if (Test-Path $sourceFile) {
-            Copy-Item -Path $sourceFile -Destination $destFile -Force
-            Write-Host " OK" -ForegroundColor Green
-            $successCount++
-        } else {
-            Write-Host " NOT FOUND" -ForegroundColor Red
-            Write-Host "    Expected at: $sourceFile" -ForegroundColor Yellow
-            $failCount++
-        }
-    }
-
-    $totalFiles = $requiredFiles.Count + $headerFiles.Count
-    Write-Host "`nCopy Summary:" -ForegroundColor Cyan
-    Write-Host "  Success: $successCount / $totalFiles" -ForegroundColor Green
-    Write-Host "  Failed: $failCount / $totalFiles" -ForegroundColor $(if ($failCount -eq 0) { "Green" } else { "Red" })
-
-    if ($failCount -gt 0) {
-        throw "Failed to copy all required files"
+    if (Test-Path $dataSourceDir) {
+        Write-Host "`nCopying data directory (configs, schemas, etc.)..." -ForegroundColor Cyan
+        Copy-Item -Path $dataSourceDir -Destination $dataDestDir -Recurse -Force
+        Write-Host "  Data directory copied" -ForegroundColor Green
     }
 
     # Cleanup only the build artifacts, keep source clones for future builds
@@ -553,27 +440,14 @@ try {
     }
 
     Write-Host "`n========================================" -ForegroundColor Green
-    Write-Host "SUCCESS! Release and Debug libraries are ready." -ForegroundColor Green
+    Write-Host "SUCCESS! SUMO executables are ready." -ForegroundColor Green
     Write-Host "========================================" -ForegroundColor Green
-    Write-Host "`nCopied import libraries (.lib) to bin/:" -ForegroundColor Cyan
-    foreach ($file in $requiredLibs) {
-        $destFile = Join-Path $destBinDir $file
-        if (Test-Path $destFile) {
-            $fileSize = (Get-Item $destFile).Length / 1MB
-            Write-Host "  $file ($("{0:N2}" -f $fileSize) MB)" -ForegroundColor Green
-        }
-    }
-    Write-Host "`nCopied runtime dependency DLLs to bin/:" -ForegroundColor Cyan
-    if (Test-Path $destBinDir) {
-        $dllFiles = Get-ChildItem -Path $destBinDir -Filter "*.dll"
-        $totalDllSize = ($dllFiles | Measure-Object -Property Length -Sum).Sum / 1MB
-        Write-Host "  $($dllFiles.Count) DLL files ($("{0:N2}" -f $totalDllSize) MB total)" -ForegroundColor Green
-    }
-    Write-Host "`nCopied headers:" -ForegroundColor Cyan
-    foreach ($file in $headerFiles) {
-        Write-Host "  $file" -ForegroundColor Green
-    }
-    Write-Host "`nNext step: Build TrafficLayer in Visual Studio (Release or Debug)" -ForegroundColor Yellow
+    Write-Host "`nCopied to: $destDir" -ForegroundColor Cyan
+    Write-Host "`nYou can now run:" -ForegroundColor Yellow
+    Write-Host "  $destDir\sumo.exe" -ForegroundColor Green
+    Write-Host "  $destDir\sumo-gui.exe" -ForegroundColor Green
+    Write-Host "`nAdd to PATH to run from anywhere:" -ForegroundColor Cyan
+    Write-Host "  `$env:PATH += `";$destDir`"" -ForegroundColor Gray
     Write-Host "`nPress any key to exit..." -ForegroundColor Gray
     $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
 
