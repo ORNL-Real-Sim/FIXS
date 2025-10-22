@@ -73,7 +73,7 @@ class SumoEnvMultiAgent:
         self.subscribed_vehicles = []
         self.speed_min = 0
         self.speed_max = 21
-        self.max_acc = 4.0
+        self.max_acc = 2.0
         self.prev_acc = 0.01
 
         # initialize the socket connections
@@ -126,7 +126,7 @@ class SumoEnvMultiAgent:
             print("Created Directory:" + output_dir)
         except OSError as error:
             print("Directory already exists, will overwrite  upon simulation.")
-
+        shutil.copy(os.path.join(self.sumo_folder, "updated_signal.xml"), output_dir)
         shutil.copy(os.path.join(self.sumo_folder, self.sumo_net), output_dir)
 
         # MPR
@@ -230,7 +230,7 @@ class SumoEnvMultiAgent:
         # determine if control or not
         # still have two or more intersections to go
         if veh_type == 'CAV' or veh_id == 'ego':
-            if travel_direction in ['EB', 'WB']:
+            if travel_direction in ['EB', 'WB'] and road_id not in ['pos_1216083266', ':202695973_2', 'pos_19505254', 'E2', ':1939230364_4', ':1939230364_3', '111563727#2']:
                 next_light = next_tls[0][0] if next_tls else None
                 if next_light is not None:
                     next_tls_index = next_tls[0][1]
@@ -300,12 +300,12 @@ class SumoEnvMultiAgent:
         sim_time = traci.simulation.getTime()
 
         start_time_1 = time.time()
-        while sim_time < 28885:
+        while sim_time < 28850:
             sim_time = traci.simulation.getTime()
             # Phase trackers
             self.phase_tracker()
             self.subscribe_departed_veh()
-            if sim_time == 28885:
+            if sim_time == 28850:
                 self.reset()
             traci.simulationStep()
             self.apply_vehicle_control_FIXS({}, vehicle_dynamics=vehicle_dynamics, eco_driving=eco_driving, control_veh_ids=veh_ids_controlled_by_FIXS)
@@ -372,15 +372,11 @@ class SumoEnvMultiAgent:
                                                          results_df.loc[key, 'r1s'],
                                                          results_df.loc[key, 'curr_status']) for index, (key, veh) in enumerate(self.cav_object_dict.items()) if key in (list_cav_back_to_sumo + list_cav_control)}
 
-            self.apply_vehicle_control(eco_speed_dic, smooth=True)
+            self.apply_vehicle_control(eco_speed_dic, smooth=True, exclude_veh_ids=veh_ids_controlled_by_FIXS)
             traci.simulationStep()
             self.apply_vehicle_control_FIXS(eco_speed_dic, vehicle_dynamics=vehicle_dynamics, eco_driving=eco_driving, control_veh_ids=veh_ids_controlled_by_FIXS)
             
-            self.cav_object_dict = {key: value for key, value in self.cav_object_dict.items() if key in (list_cav_back_to_sumo + list_cav_control)}
-
-            
-            
-
+            self.cav_object_dict = {key: value for key, value in self.cav_object_dict.items() if key in list(set(list_cav_back_to_sumo + list_cav_control + ["ego"]))}
 
         self.close()
 
@@ -410,11 +406,12 @@ class SumoEnvMultiAgent:
             self.socket_helper.clear_data()
             # receive data from the client (the actual vehicle data after the vehidle dynamics model)
             self.socket_helper.recv_data(self.socket2simulink)
+            self.socket_helper.vehicle_data_send_list.clear()
             self.socket_helper.vehicle_data_send_list.extend(self.socket_helper.vehicle_data_receive_list)
         
         for idx in range(len(self.socket_helper.vehicle_data_send_list)):
-            
-            if not vehicle_dynamics or not self.enable_vehicle_dynamics:
+
+            if not vehicle_dynamics:
                 # if not applying vehicle dynamics, set the speedDesired to the eco_speed
                 veh_id = self.socket_helper.vehicle_data_receive_list[idx].id
                 if veh_id not in eco_speed_dic.keys():
@@ -427,7 +424,9 @@ class SumoEnvMultiAgent:
                     self.socket_helper.vehicle_data_send_list[idx].speedDesired = ori_speed[veh_id]
 
             else:
+                
                 speed_desired_simulink = self.socket_helper.vehicle_data_receive_list[idx].speedDesired
+                speed_desired_simulink = max(self.speed_min, min(self.speed_max, speed_desired_simulink))
                 # if applying vehicle dynamics, set the speedDesired to the speedDesired from the simulink
                 self.socket_helper.vehicle_data_send_list[idx].speedDesired = speed_desired_simulink
                 
@@ -439,14 +438,14 @@ class SumoEnvMultiAgent:
         self.socket_helper.clear_data()
 
 
-    def apply_vehicle_control(self, eco_speed_dic, smooth=False):
+    def apply_vehicle_control(self, eco_speed_dic, smooth=False, exclude_veh_ids=None):
         # to handle the case of a single vehicle
         for veh_id, eco_speed in eco_speed_dic.items():
-            if eco_speed is not None and eco_speed >= 0:
-                if smooth:
-                    traci.vehicle.slowDown(veh_id, eco_speed, self.step_length)
-                else:
-                    traci.vehicle.setSpeed(veh_id, eco_speed)
+            if eco_speed is not None and eco_speed >= 0 and veh_id not in (exclude_veh_ids if exclude_veh_ids else []):
+                    if smooth:
+                        traci.vehicle.slowDown(veh_id, eco_speed, self.step_length)
+                    else:
+                        traci.vehicle.setSpeed(veh_id, eco_speed)
 
 
     def close(self):
