@@ -73,7 +73,7 @@ class SumoEnvMultiAgent:
         self.subscribed_vehicles = []
         self.speed_min = 0
         self.speed_max = 21
-        self.max_acc = 4.0
+        self.max_acc = 2.0
         self.prev_acc = 0.01
 
         # initialize the socket connections
@@ -230,7 +230,7 @@ class SumoEnvMultiAgent:
         # determine if control or not
         # still have two or more intersections to go
         if veh_type == 'CAV' or veh_id == 'ego':
-            if travel_direction in ['EB', 'WB']:
+            if travel_direction in ['EB', 'WB'] and road_id not in ['pos_1216083266', ':202695973_2', 'pos_19505254', 'E2', ':1939230364_4', ':1939230364_3', '111563727#2']:
                 next_light = next_tls[0][0] if next_tls else None
                 if next_light is not None:
                     next_tls_index = next_tls[0][1]
@@ -376,7 +376,7 @@ class SumoEnvMultiAgent:
             traci.simulationStep()
             self.apply_vehicle_control_FIXS(eco_speed_dic, vehicle_dynamics=vehicle_dynamics, eco_driving=eco_driving, control_veh_ids=veh_ids_controlled_by_FIXS)
             
-            self.cav_object_dict = {key: value for key, value in self.cav_object_dict.items() if key in (list_cav_back_to_sumo + list_cav_control)}
+            self.cav_object_dict = {key: value for key, value in self.cav_object_dict.items() if key in list(set(list_cav_back_to_sumo + list_cav_control + ["ego"]))}
 
         self.close()
 
@@ -482,7 +482,8 @@ if __name__ == "__main__":
     parser.add_argument("--trafficlayerConfig", type=str, help="Path to the Configuration file", default=os.environ["CONFIG_PATH"])
     parser.add_argument("--trafficlayerIp", type=str, help="Specify Ip of traffic layer", default='127.0.0.1')
     parser.add_argument("--trafficlayerPort", type=str, help="Specify port of traffic layer", default=430)
-    parser.add_argument("--enableVehicleDynamics", action="store_true", help="use the vehicle dynamics", default=True)
+    parser.add_argument("--vehicleDynamics", action="store_true", help="use the vehicle dynamics", default=False)
+    parser.add_argument("--enableVehicleDynamics", action="store_true", help="use the vehicle dynamics", default=False)
     parser.add_argument("--vehicleDynamicsIp", type=str, help="Specify Ip of vehicle dynamics", default='192.168.140.11')
     parser.add_argument("--vehicleDynamicsPort", type=str, help="Specify port of vehicle dynamics", default=420)
 
@@ -490,7 +491,7 @@ if __name__ == "__main__":
     parser.add_argument("--penetrationRate", type=float, help="the market penetration rate of cav", default=0.1)
     parser.add_argument("--stepLength", type=float, help="the step length of the simulation", default=0.1)
     parser.add_argument("--ecoDriving", action="store_true", help="Use the eco driving controller", default=True)
-    parser.add_argument("--vehicleDynamics", action="store_true", help="use the vehicle dynamics", default=True)
+
     # the following parameters are for SUMO 
     parser.add_argument("--sumoIp", type=str, help="Specify Ip of sumo", default='127.0.0.1')
     parser.add_argument("--sumoPort", type=str, help="Specify port of sumo", default=1337)
