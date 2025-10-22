@@ -12,6 +12,45 @@
 
 using namespace std;
 
+// Global shutdown state - single point of access for cleanup coordination
+struct ShutdownState {
+    volatile bool shutdownRequested = false;
+    bool initialized = false;
+
+    // Pointers to resources that need cleanup (set after initialization)
+    TrafficHelper* traffic = nullptr;
+    SocketHelper* socket = nullptr;
+    MsgHelper* msgClient = nullptr;
+    vector<int>* clientSockets = nullptr;
+    double* simTime = nullptr;
+
+    // Configuration flags (set during initialization)
+    bool enableVissim = false;
+    bool enableClient = false;
+    bool enableRealSim = false;
+
+    // Track if traffic simulator connection was already closed
+    bool trafficSimulatorClosed = false;
+
+    // Reset all state
+    void reset() {
+        shutdownRequested = false;
+        initialized = false;
+        traffic = nullptr;
+        socket = nullptr;
+        msgClient = nullptr;
+        clientSockets = nullptr;
+        simTime = nullptr;
+        enableVissim = false;
+        enableClient = false;
+        enableRealSim = false;
+        trafficSimulatorClosed = false;
+    }
+};
+
+// Single global instance
+static ShutdownState g_shutdown;
+
 namespace {
 std::string GetExecutableDirectory() {
 #ifdef WIN32
@@ -115,6 +154,86 @@ SocketHelper Sock_c;
 
 
 
+// Perform graceful cleanup with proper shutdown sequence
+void performCleanup(bool emergencyShutdown) {
+	if (emergencyShutdown) {
+		printf("\nEmergency shutdown initiated...\n");
+	}
+	else {
+		printf("\nGraceful shutdown initiated...\n");
+	}
+
+	// Step 1: Notify all connected clients about shutdown (state=0)
+	if (g_shutdown.initialized && g_shutdown.enableClient &&
+		g_shutdown.socket && g_shutdown.msgClient &&
+		g_shutdown.clientSockets && g_shutdown.simTime) {
+
+		try {
+			printf("Notifying clients of shutdown...\n");
+			MsgHelper* msgClient = g_shutdown.msgClient;
+			msgClient->clearSendStorage();
+
+			float simTimeSend = *g_shutdown.simTime;
+			uint8_t simStateSend = 0; // 0 = shutdown signal
+
+			for (unsigned int iC = 0; iC < g_shutdown.clientSockets->size(); iC++) {
+				try {
+					g_shutdown.socket->sendData((*g_shutdown.clientSockets)[iC], iC,
+						simTimeSend, simStateSend, *msgClient);
+				}
+				catch (...) {
+					// Continue notifying other clients even if one fails
+				}
+			}
+			printf("Client notification complete.\n");
+
+			// Give clients time to receive and process shutdown notification
+			Sleep(100);
+		}
+		catch (const std::exception& e) {
+			printf("Warning: Error notifying clients: %s\n", e.what());
+		}
+		catch (...) {
+			printf("Warning: Unknown error notifying clients.\n");
+		}
+	}
+
+	// Step 2: Close SUMO/VISSIM connection gracefully
+	if (g_shutdown.initialized && g_shutdown.traffic && g_shutdown.enableRealSim && !g_shutdown.trafficSimulatorClosed) {
+		try {
+			printf("Closing traffic simulator connection...\n");
+			g_shutdown.traffic->close();
+			printf("Traffic simulator connection closed.\n");
+		}
+		catch (const std::exception& e) {
+			printf("Warning: Error closing traffic simulator: %s\n", e.what());
+		}
+		catch (...) {
+			printf("Warning: Unknown error closing traffic simulator.\n");
+		}
+	}
+	else if (g_shutdown.trafficSimulatorClosed) {
+		printf("Traffic simulator already closed by user.\n");
+	}
+
+	// Step 3: Close all sockets
+	if (g_shutdown.socket) {
+		try {
+			printf("Closing sockets...\n");
+			g_shutdown.socket->socketShutdown();
+			printf("Sockets closed.\n");
+		}
+		catch (const std::exception& e) {
+			printf("Warning: Error closing sockets: %s\n", e.what());
+		}
+		catch (...) {
+			printf("Warning: Unknown error closing sockets.\n");
+		}
+	}
+
+	printf("Shutdown complete.\n");
+}
+
 BOOL WINAPI CtrlHandler(DWORD fdwCtrlType)
 {
 	switch (fdwCtrlType)
@@ -122,10 +241,31 @@ BOOL WINAPI CtrlHandler(DWORD fdwCtrlType)
 		// Handle the CTRL-C signal.
 	case CTRL_C_EVENT:
 		printf("Ctrl-C event caught\n\n");
-		printf("RealSim Exits, Please stop VISSIM/SUMO manually\n\n");
-		Sock_c.socketShutdown();
-		exit(-1);
+		g_shutdown.shutdownRequested = true;
+		return TRUE;
 
+	// Handle Ctrl-Break signal
+	case CTRL_BREAK_EVENT:
+		printf("Ctrl-Break event caught\n\n");
+		g_shutdown.shutdownRequested = true;
+		return TRUE;
+
+	// Handle console window close (X button)
+	case CTRL_CLOSE_EVENT:
+		printf("Console close event caught\n\n");
+		performCleanup(true); // Emergency cleanup (Windows gives ~5 seconds)
+		return TRUE;
+
+	// Handle user logoff
+	case CTRL_LOGOFF_EVENT:
+		printf("User logoff event caught\n\n");
+		performCleanup(true); // Emergency cleanup
+		return TRUE;
+
+	// Handle system shutdown
+	case CTRL_SHUTDOWN_EVENT:
+		printf("System shutdown event caught\n\n");
+		performCleanup(true); // Emergency cleanup
 		return TRUE;
 
 	default:
@@ -624,19 +764,50 @@ int main(int argc, char* argv[]) {
 	//*********************************************/
 	//Sock_c.initConnection();
 
+	// Initialize shutdown state for graceful cleanup
+	g_shutdown.traffic = &Traffic_c;
+	g_shutdown.socket = &Sock_c;
+	g_shutdown.msgClient = &MsgClient_c;
+	g_shutdown.clientSockets = &actualClientSock;
+	g_shutdown.simTime = &simTime;
+	g_shutdown.enableVissim = ENABLE_VISSIM;
+	g_shutdown.enableClient = ENABLE_CLIENT;
+	g_shutdown.enableRealSim = ENABLE_REALSIM;
+	g_shutdown.initialized = true;
+
 	bool isVeryFirstStep = true; 
 
 	bool isEgoExist = false;
 	bool isInitialTimeFinished = false;
 
 	//while (simTime <= tSimuEnd && ii < nT) {
-	while (1) {
+	while (!g_shutdown.shutdownRequested) {
 
 		///****************************************************
 		// RUN one-step simulation
 		///****************************************************
-		
-		Traffic_c.runOneStepSimulation();
+
+		if (ENABLE_REALSIM && !g_shutdown.trafficSimulatorClosed) {
+			try {
+				Traffic_c.runOneStepSimulation();
+			}
+			catch (const std::exception& e) {
+				printf("ERROR: Traffic simulator step failed: %s\n", e.what());
+				printf("\tTraffic simulator may have been closed\n");
+				printf("\tInitiating graceful shutdown...\n");
+				g_shutdown.trafficSimulatorClosed = true;
+				g_shutdown.shutdownRequested = true;
+				break;
+			}
+			catch (...) {
+				printf("ERROR: Traffic simulator step failed (unknown error)\n");
+				printf("\tTraffic simulator may have been closed\n");
+				printf("\tInitiating graceful shutdown...\n");
+				g_shutdown.trafficSimulatorClosed = true;
+				g_shutdown.shutdownRequested = true;
+				break;
+			}
+		}
 
 		if (ENABLE_VEH_SIMULATOR && isVeryFirstStep) {
 			if (Sock_c.initConnection(TrafficLayerErrorFile) > 0) {
@@ -691,22 +862,25 @@ int main(int argc, char* argv[]) {
 		try {
 			MsgServer_c.clearRecvStorage();
 
-			if (ENABLE_REALSIM) {
+			if (ENABLE_REALSIM && !g_shutdown.trafficSimulatorClosed) {
 				if (Traffic_c.recvFromTrafficSimulator(&simTime, MsgServer_c) < 0) {
 					if (WSAGetLastError() != WSAEINTR) {
 
 						printf("WARNING: receive from traffic simulator fails\n");
 
 						printf("\tVISSIM or SUMO may already be closed\n");
-						printf("\texit......\n");
+						printf("\tInitiating graceful shutdown...\n");
 					}
-					Sock_c.socketShutdown();
-					exit(-1);
+					g_shutdown.trafficSimulatorClosed = true; // Mark that simulator is already closed
+					g_shutdown.shutdownRequested = true;
+					break;
 				};
 
 				// end simulation if simulation time is greater than simulation end time setup
 				if (simTime > Config_c.SimulationSetup.SimulationEndTime) {
-					exit(1);
+					printf("Simulation end time reached.\n");
+					g_shutdown.shutdownRequested = true;
+					break;
 				}
 			}
 
@@ -719,14 +893,14 @@ int main(int argc, char* argv[]) {
 			}
 		}
 		catch (const std::exception& e) {
-			Sock_c.socketShutdown();
-			std::cout << e.what();
-			exit(-1);
+			printf("ERROR: Exception in traffic simulator receive: %s\n", e.what());
+			g_shutdown.shutdownRequested = true;
+			break;
 		}
 		catch (...) {
-			Sock_c.socketShutdown();
 			printf("UNKNOWN ERROR: receive from traffic simulator fails\n");
-			exit(-1);
+			g_shutdown.shutdownRequested = true;
+			break;
 		}
 
 		///****************************************************
@@ -829,15 +1003,15 @@ int main(int argc, char* argv[]) {
 						if (isVeryFirstStep) {
 							if (Sock_c.sendData(actualClientSock[iC], iC, simTimeSend, simStateSend, MsgClient_c) < 0) {
 								printf("ERROR: send to client fails\n");
-								Sock_c.socketShutdown();
-								exit(-1);
+								g_shutdown.shutdownRequested = true;
+								break;
 							};
 						}
 						else {
 							if (Sock_c.sendData(actualClientSock[iC], iC, simTimeSend, simStateSend, MsgClient_c) < 0) {
 								printf("ERROR: send to client fails\n");
-								Sock_c.socketShutdown();
-								exit(-1);
+								g_shutdown.shutdownRequested = true;
+								break;
 							};
 						}
 					}
@@ -848,16 +1022,16 @@ int main(int argc, char* argv[]) {
 						//else {
 							if (Sock_c.sendData(actualClientSock[iC], iC, simTimeSend, simStateSend, MsgClient_c) < 0) {
 								printf("ERROR: send to client fails\n");
-								Sock_c.socketShutdown();
-								exit(-1);
+								g_shutdown.shutdownRequested = true;
+								break;
 							};
 						//}
 					}
 					else {
 						if (Sock_c.sendData(actualClientSock[iC], iC, simTimeSend, simStateSend, MsgClient_c) < 0) {
 							printf("ERROR: send to client fails\n");
-							Sock_c.socketShutdown();
-							exit(-1);
+							g_shutdown.shutdownRequested = true;
+							break;
 						};
 					}
 
@@ -872,15 +1046,20 @@ int main(int argc, char* argv[]) {
 				}
 			}
 			catch (const std::exception& e) {
-				Sock_c.socketShutdown();
-				std::cout << e.what();
-				exit(-1);
+				printf("ERROR: Exception in send to client: %s\n", e.what());
+				g_shutdown.shutdownRequested = true;
+				break;
 			}
 			catch (...) {
-				Sock_c.socketShutdown();
 				printf("UNKNOWN ERROR: send to client fails\n");
-				exit(-1);
+				g_shutdown.shutdownRequested = true;
+				break;
 			}
+		}
+
+		// Check if shutdown was requested during client send
+		if (g_shutdown.shutdownRequested) {
+			break;
 		}
 
 		///****************************************************
@@ -910,8 +1089,8 @@ int main(int argc, char* argv[]) {
 						if (WSAGetLastError() != WSAEINTR && WSAGetLastError() != WSAEFAULT) {
 							printf("ERROR: receive from client fails\n");
 						}
-						Sock_c.socketShutdown();
-						exit(-1);
+						g_shutdown.shutdownRequested = true;
+						break;
 					};
 
 					if (ENABLE_VERBOSE) {
@@ -968,18 +1147,23 @@ int main(int argc, char* argv[]) {
 				}
 			}
 			catch (const std::exception& e) {
-				Sock_c.socketShutdown();
-				std::cout << e.what();
-				exit(-1);
+				printf("ERROR: Exception in receive from client: %s\n", e.what());
+				g_shutdown.shutdownRequested = true;
+				break;
 			}
 			catch (...) {
-				Sock_c.socketShutdown();
 				printf("UNKNOWN ERROR: receive from client fails\n");
-				exit(-1);
+				g_shutdown.shutdownRequested = true;
+				break;
 			}
 		}
 		else {
 			//Sleep(100);
+		}
+
+		// Check if shutdown was requested during client recv
+		if (g_shutdown.shutdownRequested) {
+			break;
 		}
 
 		if (ENABLE_TIMING) {
@@ -1000,11 +1184,12 @@ int main(int argc, char* argv[]) {
 				Traffic_c.parseSendMsg(MsgServer_c, MsgServer_c);
 			}
 
-			if (ENABLE_REALSIM) {
+			if (ENABLE_REALSIM && !g_shutdown.trafficSimulatorClosed) {
 				if (Traffic_c.sendToTrafficSimulator(simTime, MsgServer_c) < 0) {
 					printf("ERROR: send to traffic simulator fails\n");
-					Sock_c.socketShutdown();
-					exit(-1);
+					g_shutdown.trafficSimulatorClosed = true;
+					g_shutdown.shutdownRequested = true;
+					break;
 				};
 			}
 
@@ -1021,14 +1206,14 @@ int main(int argc, char* argv[]) {
 			}
 		}
 		catch (const std::exception& e) {
-			Sock_c.socketShutdown();
-			std::cout << e.what();
-			exit(-1);
+			printf("ERROR: Exception in send to traffic simulator: %s\n", e.what());
+			g_shutdown.shutdownRequested = true;
+			break;
 		}
 		catch (...) {
-			Sock_c.socketShutdown();
 			printf("UNKNOWN ERROR: send to traffic simulator fails\n");
-			exit(-1);
+			g_shutdown.shutdownRequested = true;
+			break;
 		}
 
 		///****************************************************
@@ -1042,6 +1227,8 @@ int main(int argc, char* argv[]) {
 
 	}
 
-	Traffic_c.close();
+	// Perform graceful cleanup after main loop exits
+	performCleanup(false);
 
+	return 0;
 }

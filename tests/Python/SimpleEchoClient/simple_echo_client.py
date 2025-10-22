@@ -65,6 +65,11 @@ def main():
             # Receive data from TrafficLayer
             sim_state, sim_time = socket_helper.recv_data(client_socket)
 
+            # Check for shutdown signal (state == 0)
+            if sim_state == 0:
+                print('\nReceived shutdown signal from server. Exiting gracefully...', file=sys.stderr)
+                break
+
             # Print received vehicle data
             step_count += 1
 
@@ -96,6 +101,8 @@ def main():
 
     except KeyboardInterrupt:
         print('\nShutting down client...', file=sys.stderr)
+    except ConnectionResetError:
+        print('\nServer closed the connection.', file=sys.stderr)
     except Exception as e:
         print(f'\nError occurred: {e}', file=sys.stderr)
         import traceback
