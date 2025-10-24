@@ -93,7 +93,7 @@ void ConfigureSumoLibraryPath(const ConfigHelper& config) {
 
     // Standard locations
     if (!exeDir.empty()) {
-        candidates.push_back(exeDir / "libsumo" / "bin");
+        candidates.push_back(exeDir / "CommonLib" / "libsumo" / "bin");
         std::filesystem::path parent = exeDir.parent_path();
         for (int i = 0; i < 5 && !parent.empty(); ++i, parent = parent.parent_path()) {
             candidates.push_back(parent / "CommonLib" / "libsumo" / "bin");
