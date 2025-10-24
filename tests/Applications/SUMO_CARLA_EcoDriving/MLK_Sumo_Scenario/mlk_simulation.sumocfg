@@ -24,4 +24,8 @@
         <log value="simulation.log"/>
 	<timedEvent type="SaveTLSSwitchStates" dest="signal_result.xml"/>
     </report>
+    <gui_only>
+        <start value="t"/>
+        <quit-on-end value="true"/>
+    </gui_only>
 </configuration>

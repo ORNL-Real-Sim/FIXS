@@ -72,7 +72,7 @@ class SumoEnvMultiAgent:
                                   tc.VAR_ROUTE_INDEX, tc.VAR_SPEED_WITHOUT_TRACI, tc.VAR_ALLOWED_SPEED]
         self.subscribed_vehicles = []
         self.speed_min = 0
-        self.speed_max = 21
+        self.speed_max = 10 # 21
         self.max_acc = 2.0
         self.prev_acc = 0.01
 
@@ -165,14 +165,14 @@ class SumoEnvMultiAgent:
             typeID='CAV',  # '' uses DEFAULT_VEHTYPE (or change to an existing vType, e.g. 'CAV')
             depart="now",  # explicit time in seconds (string or int is fine)
             departPos='free',
-            departLane='best',
+            departLane='first',
             departSpeed='max',
         )
         traci.vehicle.setColor('ego', (255, 0, 0, 255))
         traci.vehicle.setSpeedMode('ego', 31)
         traci.vehicle.setDecel('ego', self.max_acc)
         traci.vehicle.setAccel('ego', self.max_acc)
-    
+        traci.vehicle.setLaneChangeMode('ego', 512) # no discretionary lane change
     def reset(self):
         # If ego is currently in the network, remove it and step once so removal takes effect
         if 'ego' in traci.vehicle.getIDList():
@@ -300,15 +300,15 @@ class SumoEnvMultiAgent:
         sim_time = traci.simulation.getTime()
 
         start_time_1 = time.time()
-        while sim_time < 28850:
+        while sim_time < 28985:
             sim_time = traci.simulation.getTime()
             # Phase trackers
             self.phase_tracker()
             self.subscribe_departed_veh()
-            if sim_time == 28850:
+            if sim_time == 28985:
                 self.reset()
             traci.simulationStep()
-            self.apply_vehicle_control_FIXS({}, vehicle_dynamics=vehicle_dynamics, eco_driving=eco_driving, control_veh_ids=veh_ids_controlled_by_FIXS)
+            self.apply_vehicle_control_FIXS({}, vehicle_dynamics=vehicle_dynamics, eco_driving=eco_driving, control_veh_ids=veh_ids_controlled_by_FIXS, warmup=True)
             
             
         print('Total time spent for the first 28985: ', time.time() - start_time_1)
@@ -381,7 +381,7 @@ class SumoEnvMultiAgent:
         self.close()
 
     
-    def apply_vehicle_control_FIXS(self, eco_speed_dic, vehicle_dynamics=False, eco_driving=False, control_veh_ids = ['ego']):
+    def apply_vehicle_control_FIXS(self, eco_speed_dic, vehicle_dynamics=False, eco_driving=False, control_veh_ids = ['ego'], warmup=False):
         """
         Apply the vehicle control to the vehicles
         :param eco_speed_dic: dictionary of vehicle id and eco speed
@@ -402,16 +402,20 @@ class SumoEnvMultiAgent:
                 self.socket_helper.vehicle_data_send_list.append(veh_data)
                 
         if self.enable_vehicle_dynamics:
+            if warmup:
+                veh_data = VehData(id='ego', speedDesired=self.speed_max)
+                self.socket_helper.vehicle_data_send_list.append(veh_data)
             self.socket_helper.sendData(sim_state, sim_time, self.socket2simulink)
             self.socket_helper.clear_data()
             # receive data from the client (the actual vehicle data after the vehidle dynamics model)
             self.socket_helper.recv_data(self.socket2simulink)
-            self.socket_helper.vehicle_data_send_list.clear()
+            if warmup:
+                self.socket_helper.clear_data()
             self.socket_helper.vehicle_data_send_list.extend(self.socket_helper.vehicle_data_receive_list)
         
         for idx in range(len(self.socket_helper.vehicle_data_send_list)):
-
-            if not vehicle_dynamics:
+            
+            if not vehicle_dynamics or not self.enable_vehicle_dynamics:
                 # if not applying vehicle dynamics, set the speedDesired to the eco_speed
                 veh_id = self.socket_helper.vehicle_data_receive_list[idx].id
                 if veh_id not in eco_speed_dic.keys():
@@ -424,9 +428,7 @@ class SumoEnvMultiAgent:
                     self.socket_helper.vehicle_data_send_list[idx].speedDesired = ori_speed[veh_id]
 
             else:
-                
                 speed_desired_simulink = self.socket_helper.vehicle_data_receive_list[idx].speedDesired
-                speed_desired_simulink = max(self.speed_min, min(self.speed_max, speed_desired_simulink))
                 # if applying vehicle dynamics, set the speedDesired to the speedDesired from the simulink
                 self.socket_helper.vehicle_data_send_list[idx].speedDesired = speed_desired_simulink
                 

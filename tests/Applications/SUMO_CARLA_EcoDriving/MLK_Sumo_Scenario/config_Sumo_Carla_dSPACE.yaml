@@ -7,7 +7,7 @@ SimulationSetup:
   EnableRealSim: true
 
     # Whether or not to save verbose log during the simulation. skip log can potentially speed up
-  EnableVerboseLog: true
+  EnableVerboseLog: false
 
     # Simulation end time
     # if NOT specificed, SimulationEndTime will be set to a large value (90000 seconds)

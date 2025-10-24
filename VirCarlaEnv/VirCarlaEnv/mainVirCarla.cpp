@@ -68,6 +68,9 @@ double periodicCosineSpeed(double t, double T_period, double v_max) {
     return 0.5 * v_max * (1 - std::cos(2 * M_PI * t_in_period / T_period));
 }
 
+float lowPassFilter(float currentValue, float lastValue, float alpha) {
+    return alpha * currentValue + (1 - alpha) * lastValue;
+}
 
 int main(int argc, const char* argv[]) {
     std::string CarlaClientLogFile = "CarlaClient.log";
@@ -283,7 +286,7 @@ int main(int argc, const char* argv[]) {
 				carla::geom::Location tmpLocation(tmpVehData.positionX, tmpVehData.positionY, tmpVehData.positionZ);
 				// The grade received from FIXS is in radians, convert to degrees
                 //carla::geom::Rotation tmpRotation(tmpVehData.grade * 180/M_PI, tmpVehData.heading, 0.0f);
-                carla::geom::Rotation tmpRotation(0.0f, tmpVehData.heading, 0.0f);
+                carla::geom::Rotation tmpRotation(0.0f, std::round(tmpVehData.heading / 5.0f) * 5.0f, 0.0f);
                 //carla::geom::Vector3D tmpExtent(tmpVehData.length / 2, tmpVehData.width / 2, tmpVehData.height / 2);
                 carla::geom::Vector3D tmpExtent(4.8f, 2.0f, 1.8f); // Default extent, can be modified later
                 carla::geom::Transform tmpTransform(tmpLocation, tmpRotation);
@@ -293,7 +296,20 @@ int main(int argc, const char* argv[]) {
                     std::cout << "Vehicle Class: " << tmpVehData.vehicleClass << std::endl;
                 }
                 else {
-                    // Update the existing actor's transform and extent
+                    //// Update the existing actor's transform and extent
+                    //carla::geom::Location prvLocation = mapSumoActor[tmpVehData.id].sumoTransform.location;
+                    //carla::geom::Rotation prvRotation = mapSumoActor[tmpVehData.id].sumoTransform.rotation;
+                    //carla::geom::Transform updatedTransform(
+                    //    carla::geom::Location(
+                    //        lowPassFilter(tmpTransform.location.x, prvLocation.x, 0.5f),
+                    //        lowPassFilter(tmpTransform.location.y, prvLocation.y, 0.5f),
+                    //        lowPassFilter(tmpTransform.location.z, prvLocation.z, 0.5f)
+                    //    ), carla::geom::Rotation(
+                    //        lowPassFilter(tmpTransform.rotation.pitch, prvRotation.pitch, 0.5f),
+                    //        lowPassFilter(tmpTransform.rotation.yaw, prvRotation.yaw, 0.5f),
+                    //        lowPassFilter(tmpTransform.rotation.roll, prvRotation.roll, 0.5f)
+                    //    )
+                    //);
                     mapSumoActor[tmpVehData.id].sumoTransform = tmpTransform;
                     mapSumoActor[tmpVehData.id].extent = tmpExtent;
 				}
@@ -368,6 +384,7 @@ int main(int argc, const char* argv[]) {
 						mapRoleNameToActorId[carlaRoleName] = carlaActorId;
 						break; // No need to check further attributes for this actor
                     }
+
                 }
 			}
 

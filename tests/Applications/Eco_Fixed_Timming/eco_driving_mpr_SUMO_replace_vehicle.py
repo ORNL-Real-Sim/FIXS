@@ -171,12 +171,11 @@ class SumoEnvMultiAgent:
         traci.vehicle.setDecel('ego', self.max_acc)
         traci.vehicle.setAccel('ego', self.max_acc)
     
-    def reset(self):
+    def reset(self, replace_veh_id=''):
         # If ego is currently in the network, remove it and step once so removal takes effect
-        if 'ego' in traci.vehicle.getIDList():
-            traci.vehicle.remove('ego')
-            
-        self.insert_ego_safely()
+        if replace_veh_id in traci.vehicle.getIDList():
+            traci.vehicle.remove(replace_veh_id)
+            self.insert_ego_safely()
 
     def subscribe_departed_veh(self):
 
@@ -281,7 +280,7 @@ class SumoEnvMultiAgent:
         else:
             os.system(f'start C:\\Users\\RVDP\\Desktop\\sumo-1.24.0\\bin\\sumo -c {self.sumo_config} --remote-port {self.sumo_port} --step-length {self.step_length} --num-clients {num_clients}')
   
-    def start_subscription(self, vehicle_dynamics=False, eco_driving=False):
+    def start_subscription(self, vehicle_dynamics=False, eco_driving=False, replace_veh_id=''):
 
         veh_ids_controlled_by_FIXS = ['ego']
         traci.init(port=int(self.sumo_port), host='127.0.0.1')
@@ -292,27 +291,22 @@ class SumoEnvMultiAgent:
         self.get_phases(self.sumo_signal_config)
         sim_time = traci.simulation.getTime()
 
-        start_time_1 = time.time()
-        while sim_time < 28985:
+        while replace_veh_id not in traci.vehicle.getIDList():
             sim_time = traci.simulation.getTime()
             # Phase trackers
             self.phase_tracker()
             self.subscribe_departed_veh()
-            if sim_time < 28985:
-                pass
-                
-            elif sim_time == 28985:
-                self.reset()
             traci.simulationStep()
             self.apply_vehicle_control_FIXS({}, vehicle_dynamics=vehicle_dynamics, eco_driving=eco_driving, control_veh_ids=veh_ids_controlled_by_FIXS, warmup=True)
             
+        self.reset(replace_veh_id=replace_veh_id)
+        traci.simulationStep()
+        self.apply_vehicle_control_FIXS({}, vehicle_dynamics=vehicle_dynamics, eco_driving=eco_driving, control_veh_ids=veh_ids_controlled_by_FIXS, warmup=True)
             
-        print('Total time spent for the first 28985: ', time.time() - start_time_1)
+        print('target vehicle has entered the network, start eco-driving control')
          
         while sim_time <= 32400:
             
-
-            # try:
             sim_time = traci.simulation.getTime()
             if sim_time % 100 == 0:
                 print(sim_time)
@@ -381,10 +375,6 @@ class SumoEnvMultiAgent:
             self.apply_vehicle_control_FIXS(eco_speed_dic, vehicle_dynamics=vehicle_dynamics, eco_driving=eco_driving, control_veh_ids=veh_ids_controlled_by_FIXS)
             
             self.cav_object_dict = {key: value for key, value in self.cav_object_dict.items() if key in (list_cav_back_to_sumo + list_cav_control)}
-
-            
-            
-
 
         self.close()
 
@@ -493,8 +483,8 @@ if __name__ == "__main__":
     parser.add_argument("--trafficlayerConfig", type=str, help="Path to the Configuration file", default=os.environ["CONFIG_PATH"])
     parser.add_argument("--trafficlayerIp", type=str, help="Specify Ip of traffic layer", default='127.0.0.1')
     parser.add_argument("--trafficlayerPort", type=str, help="Specify port of traffic layer", default=430)
-    parser.add_argument("--vehicleDynamics", action="store_true", help="use the vehicle dynamics", default=True)
-    parser.add_argument("--enableVehicleDynamics", action="store_true", help="use the vehicle dynamics", default=True)
+    parser.add_argument("--vehicleDynamics", action="store_true", help="use the vehicle dynamics", default=False)
+    parser.add_argument("--enableVehicleDynamics", action="store_true", help="use the vehicle dynamics", default=False)
     parser.add_argument("--vehicleDynamicsIp", type=str, help="Specify Ip of vehicle dynamics", default='192.168.140.11')
     parser.add_argument("--vehicleDynamicsPort", type=str, help="Specify port of vehicle dynamics", default=420)
 
@@ -571,4 +561,4 @@ if __name__ == "__main__":
     print('Starting subscription')
     print('Enable vehicle dynamics: ', enable_vehicle_dynamics)
     print('Use eco driving controller: ', eco_driving)
-    senv.start_subscription(eco_driving=eco_driving, vehicle_dynamics=vehicle_dynamics)
+    senv.start_subscription(eco_driving=eco_driving, vehicle_dynamics=vehicle_dynamics, replace_veh_id='4.66')
