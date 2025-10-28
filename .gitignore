@@ -188,3 +188,8 @@ CM11_proj/tmp.obj
 /tests/Applications/Eco_Fixed_Timming/Experiments/
 
 TODO.md
+
+# User-provided proprietary scenarios - track folder structure but ignore contents
+/tests/UserScenarios/*
+!/tests/UserScenarios/.gitkeep
+!/tests/UserScenarios/README.md
