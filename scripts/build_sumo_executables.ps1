@@ -74,6 +74,8 @@ $tempDir = Join-Path $repoRoot "tmp"
 $sumoBuildDir = Join-Path $tempDir "sumo_build"
 $sumoDir = Join-Path $sumoBuildDir "sumo"
 $buildDir = Join-Path $sumoDir "build"
+$templatesPath = Join-Path $sumoDir "tools\build_config\templates.py"
+$templatesPatched = $false
 $sumoLibrariesDir = Join-Path $sumoBuildDir "SUMOLibraries"
 
 Write-Host "`nBuild directory: $sumoBuildDir" -ForegroundColor Cyan
@@ -265,6 +267,48 @@ try {
             Write-Host "  Clone complete" -ForegroundColor Green
         }
 
+        # Apply escape fix to SUMO templates generator (temporary for build)
+        if (Test-Path $templatesPath) {
+            $templatesContent = Get-Content $templatesPath -Raw
+            if ($templatesContent -notmatch "formatted_lines\.append") {
+                Write-Host "`nApplying local templates.py escape fix..." -ForegroundColor Cyan
+                $fixedFunction = @'
+
+def formatToolTemplate(templateStr):
+    """
+    @brief format python tool template
+    """
+    if not templateStr or templateStr[0] != "<":
+        return '""'
+    # replace all current directory values (src/netedit)
+    templateStr = re.sub("(?<=value)(.*)(?=netedit)", "", templateStr)
+    templateStr = templateStr.replace('netedit', '="')
+    templateStr = templateStr.replace("\"", "\\\"")
+    lines = templateStr.splitlines()
+    formatted_lines = []
+    for idx, line in enumerate(lines):
+        prefix = '' if idx == 0 else '    '
+        formatted_lines.append(f'{prefix}"{line}"')
+    return "\n".join(formatted_lines)
+
+'@
+                $regexOptions = [System.Text.RegularExpressions.RegexOptions]::Singleline -bor [System.Text.RegularExpressions.RegexOptions]::Multiline
+                $regex = New-Object System.Text.RegularExpressions.Regex('def formatToolTemplate\(templateStr\):.*?(?=^def generateTemplate\(app, appBin\):)', $regexOptions)
+                $updatedContent = $regex.Replace($templatesContent, $fixedFunction)
+                if ($templatesContent -ne $updatedContent) {
+                    Set-Content -Path $templatesPath -Value $updatedContent -Encoding UTF8
+                    $templatesPatched = $true
+                    Write-Host "  Patched templates.py for build" -ForegroundColor Green
+                } else {
+                    Write-Host "  templates.py escape fix pattern not found (skipping)" -ForegroundColor Yellow
+                }
+            } else {
+                Write-Host "  templates.py already contains escape fix" -ForegroundColor Gray
+            }
+        } else {
+            Write-Host "  WARNING: templates.py not found; skipping escape fix" -ForegroundColor Yellow
+        }
+
         # Create build directory
         New-Item -ItemType Directory -Path $buildDir -Force | Out-Null
 
@@ -310,6 +354,19 @@ try {
         }
 
         Write-Host "  Build complete" -ForegroundColor Green
+
+        if ($templatesPatched -and (Test-Path $templatesPath)) {
+            Write-Host "`nRestoring templates.py to upstream state..." -ForegroundColor Cyan
+            Push-Location $sumoDir
+            git checkout -- tools/build_config/templates.py | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "  Restored templates.py" -ForegroundColor Green
+                $templatesPatched = $false
+            } else {
+                Write-Host "  WARNING: Failed to restore templates.py (please check manually)" -ForegroundColor Yellow
+            }
+            Pop-Location
+        }
 
         Pop-Location
         Pop-Location
@@ -454,6 +511,12 @@ try {
     exit 0
 
 } catch {
+    if ($templatesPatched -and (Test-Path $templatesPath)) {
+        Push-Location $sumoDir
+        git checkout -- tools/build_config/templates.py | Out-Null
+        $templatesPatched = $false
+        Pop-Location
+    }
     Write-Host "`n========================================" -ForegroundColor Red
     Write-Host "ERROR OCCURRED" -ForegroundColor Red
     Write-Host "========================================" -ForegroundColor Red
