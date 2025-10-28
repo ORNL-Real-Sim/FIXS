@@ -24,9 +24,32 @@ unzip ~/Downloads/user_scenario.zip
 ```
 
 ### 3. Debugging Process
+
+**Visual Studio Debugging (Automatic):**
+
+When running from Visual Studio (working directory = repo root), TrafficLayer automatically discovers config files:
+
+- **Single scenario**: Just hit F5! Auto-discovers the YAML in `tests/UserScenarios/`
+- **Multiple scenarios**: Create `TrafficLayer/.active_config` to select which one:
+  ```bash
+  echo tests/UserScenarios/issue_85_description/config.yaml > TrafficLayer/.active_config
+  ```
+- **Other test scenarios**: Point `TrafficLayer/.active_config` to any config:
+  ```bash
+  echo tests/CoordMerge/config.yaml > TrafficLayer/.active_config
+  ```
+
+**Command-line/Deployment:**
+```bash
+# For deployed executables (build/ or repo root), always use -f explicitly
+TrafficLayer.exe -f path/to/config.yaml
+```
+
+**Notes:**
+- Auto-discovery only works when working directory is repo root (VS debugging scenario)
 - Files in `tests/UserScenarios/*` are gitignored (except this README and .gitkeep)
+- `TrafficLayer/.active_config` is also gitignored (per-worktree)
 - You can freely modify/test these files without git tracking them
-- Use Visual Studio debugging with the scenario's config.yaml
 - Document findings and solutions in the GitHub issue
 
 ### 4. Privacy Considerations
