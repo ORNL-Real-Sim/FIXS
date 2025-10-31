@@ -165,7 +165,7 @@ set "TARGET_NAME=%~1" & set "SOLUTION_PATH=%~2" & set "MSBUILD_ARGS=%~3"
 if not exist "%SOLUTION_PATH%" echo ===^> %TARGET_NAME% skipped (solution not found)>>"%LOG_SUMMARY%" & exit /b 0
 echo Building %TARGET_NAME%...
 echo ===^> %TARGET_NAME% build started>>"%LOG_SUMMARY%"
-msbuild "%SOLUTION_PATH%" %MSBUILD_ARGS% >>"%LOG_OUTPUT%" 2>&1
+(call msbuild "%SOLUTION_PATH%" %MSBUILD_ARGS%) >>"%LOG_OUTPUT%" 2>&1
 if errorlevel 1 echo ===^> %TARGET_NAME% built failed>>"%LOG_SUMMARY%" & exit /b 1
 echo ===^> %TARGET_NAME% built success>>"%LOG_SUMMARY%"
 exit /b 0

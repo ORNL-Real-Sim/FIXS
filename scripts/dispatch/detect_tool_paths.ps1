@@ -80,10 +80,87 @@ function Find-DSpace {
     return $null
 }
 
+function Find-CarMaker {
+    param(
+        [string]$RequestedVersion = ""
+    )
+
+    # Check common installation paths
+    $searchPaths = @(
+        "C:\IPG\carmaker",
+        "${env:ProgramFiles}\IPG\carmaker",
+        "${env:ProgramFiles(x86)}\IPG\carmaker"
+    )
+
+    $installations = @()
+
+    foreach ($basePath in $searchPaths) {
+        if (-not (Test-Path $basePath)) {
+            continue
+        }
+
+        # Get all version directories (format: win64-X.Y.Z) that contain CM_Office.exe
+        $versionDirs = Get-ChildItem $basePath -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match '^win64-(\d+\.\d+\.\d+)$' }
+
+        foreach ($dir in $versionDirs) {
+            $cmOfficeExe = Join-Path $dir.FullName "bin\CM_Office.exe"
+            if (Test-Path $cmOfficeExe) {
+                # Extract version number from directory name
+                if ($dir.Name -match '^win64-(\d+)\.(\d+)\.(\d+)$') {
+                    $installations += [PSCustomObject]@{
+                        Path = $dir.FullName
+                        Version = [version]"$($matches[1]).$($matches[2]).$($matches[3])"
+                        DirName = $dir.Name
+                    }
+                }
+            }
+        }
+    }
+
+    if ($installations.Count -eq 0) {
+        return $null
+    }
+
+    # Sort by version descending
+    $installations = $installations | Sort-Object Version -Descending
+
+    # If a specific version is requested, try to find the best match
+    if ($RequestedVersion) {
+        # Try exact match first
+        $exactMatch = $installations | Where-Object { $_.Version -eq [version]$RequestedVersion } | Select-Object -First 1
+        if ($exactMatch) {
+            return $exactMatch.Path
+        }
+
+        # Try matching major.minor version (e.g., 13.1.3 matches 13.1.x)
+        if ($RequestedVersion -match '^(\d+)\.(\d+)') {
+            $majorMinor = "$($matches[1]).$($matches[2])"
+            $majorMinorMatch = $installations | Where-Object { $_.Version.ToString() -like "$majorMinor.*" } | Select-Object -First 1
+            if ($majorMinorMatch) {
+                return $majorMinorMatch.Path
+            }
+        }
+
+        # Try matching major version (e.g., 13.1.3 matches 13.x.x)
+        if ($RequestedVersion -match '^(\d+)\.') {
+            $major = $matches[1]
+            $majorMatch = $installations | Where-Object { $_.Version.Major -eq [int]$major } | Select-Object -First 1
+            if ($majorMatch) {
+                return $majorMatch.Path
+            }
+        }
+    }
+
+    # Return latest version
+    return $installations[0].Path
+}
+
 switch ($Tool.ToLower()) {
     "visual_studio" { $result = Find-VisualStudio }
     "matlab" { $result = Find-Matlab }
     "dspace" { $result = Find-DSpace }
+    "carmaker" { $result = Find-CarMaker -RequestedVersion $args[0] }
     default { $result = $null }
 }
 
