@@ -101,9 +101,11 @@ if exist "%BUILD_DIR%\DriverModel_RealSim.dll" set /a COUNT_VISSIM+=1
 if exist "%BUILD_DIR%\DriverModel_RealSim_v2021.dll" set /a COUNT_VISSIM+=1
 
 REM Count CarMaker items
-for %%v in (%CARMAKER_VERSIONS%) do (
-    for /f "tokens=1 delims=." %%m in ("%%v") do (
-        if exist "%BUILD_DIR%\CarMaker\CM%%m" set /a COUNT_CM+=1
+for %%v in (!CARMAKER_VERSIONS!) do (
+    set "CM_VER=%%v"
+    for /f "tokens=1 delims=." %%m in ("!CM_VER!") do (
+        set "CM_MAJOR=%%m"
+        if exist "%BUILD_DIR%\CarMaker\CM!CM_MAJOR!" set /a COUNT_CM+=1
     )
 )
 
@@ -118,7 +120,7 @@ for %%f in ("%BUILD_DIR%\CommonLib\*.m") do set /a COUNT_MATLAB+=1
 REM Build statistics
 REM Count total possible components: 3 core + 2 VISSIM + N CarMaker versions
 set /a "TOTAL_COMPONENTS=3+2"
-for %%v in (%CARMAKER_VERSIONS%) do set /a "TOTAL_COMPONENTS+=1"
+for %%v in (!CARMAKER_VERSIONS!) do set /a "TOTAL_COMPONENTS+=1"
 set /a "BUILT_COMPONENTS=%COUNT_CORE%+%COUNT_VISSIM%+%COUNT_CM%"
 set /a "SKIPPED_COMPONENTS=%TOTAL_COMPONENTS%-%BUILT_COMPONENTS%"
 
@@ -183,15 +185,19 @@ call :FileStatus "%BUILD_DIR%\DriverModel_RealSim_v2021.dll" "DriverModel_RealSi
 REM CarMaker Integration
 >>"%OUTPUT_FILE%" echo CarMaker Integration:
 if defined CARMAKER_VERSIONS (
-    for %%v in (%CARMAKER_VERSIONS%) do (
+    for %%v in (!CARMAKER_VERSIONS!) do (
         set "CM_VER=%%v"
-        for /f "tokens=1 delims=." %%m in ("%%v") do (
-            call :FileStatus "%BUILD_DIR%\CarMaker\CM%%m" "CarMaker !CM_VER! ^(CM%%m^)" "Skipped - CM%%m_proj not found"
+        for /f "tokens=1 delims=." %%m in ("!CM_VER!") do (
+            set "CM_MAJOR=%%m"
+            set "CM_LABEL=CarMaker !CM_VER! (CM!CM_MAJOR!)"
+            set "CM_SKIP_MSG=Skipped - CM!CM_MAJOR!_proj not found"
+            call :FileStatus "%BUILD_DIR%\CarMaker\CM!CM_MAJOR!" "!CM_LABEL!" "!CM_SKIP_MSG!"
         )
     )
-) else (
-    >>"%OUTPUT_FILE%" echo   [No CarMaker versions configured in dependencies.yaml]
+    goto :CarMakerDone
 )
+>>"%OUTPUT_FILE%" echo   [No CarMaker versions configured in dependencies.yaml]
+:CarMakerDone
 
 REM List dSPACE libraries
 for %%f in ("%BUILD_DIR%\CarMaker\libRealSimDsLib_*.a") do (
@@ -260,9 +266,12 @@ if exist "%BUILD_DIR%\CommonLib" (
 if exist "%BUILD_DIR%\CarMaker" (
     >>"%OUTPUT_FILE%" echo   └── CarMaker/
     if defined CARMAKER_VERSIONS (
-        for %%v in (%CARMAKER_VERSIONS%) do (
-            for /f "tokens=1 delims=." %%m in ("%%v") do (
-                if exist "%BUILD_DIR%\CarMaker\CM%%m" >>"%OUTPUT_FILE%" echo       ├── CM%%m/
+        for %%v in (!CARMAKER_VERSIONS!) do (
+            set "CM_VER=%%v"
+            for /f "tokens=1 delims=." %%m in ("!CM_VER!") do (
+                set "CM_MAJOR=%%m"
+                set "CM_DIR_LINE=      ├── CM!CM_MAJOR!/"
+                if exist "%BUILD_DIR%\CarMaker\CM!CM_MAJOR!" >>"%OUTPUT_FILE%" echo !CM_DIR_LINE!
             )
         )
     )
@@ -319,10 +328,12 @@ if exist "%FILEPATH%" (
         set "TIMESTAMP=%%~tA"
     )
     set /a "SIZE_KB=!SIZE! / 1024"
-    >>"%OUTPUT_FILE%" echo   %CHECK% %FILENAME%
+    set "OUTPUT_LINE=  %CHECK% %FILENAME%"
+    >>"%OUTPUT_FILE%" echo !OUTPUT_LINE!
 ) else (
     if defined MISSING_MSG (
-        >>"%OUTPUT_FILE%" echo   %CROSS% %FILENAME%                            [%MISSING_MSG%]
+        set "OUTPUT_LINE=  %CROSS% %FILENAME%                            [%MISSING_MSG%]"
+        >>"%OUTPUT_FILE%" echo !OUTPUT_LINE!
     )
 )
 exit /b 0
