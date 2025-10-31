@@ -916,6 +916,7 @@ int main(int argc, char* argv[]) {
 		// RUN one-step simulation
 		///****************************************************
 
+
 		PERF_TIC("traffic_step");
 		if (ENABLE_REALSIM && !g_shutdown.trafficSimulatorClosed) {
 			try {
@@ -947,6 +948,7 @@ int main(int argc, char* argv[]) {
 		// Log number of vehicles received from traffic simulator
 		PERF_LOG("t=%.2f vehicles_in_network=%d\n", simTime, (int)MsgServer_c.VehDataRecv_um.size());
 #endif
+
 
 		if (ENABLE_VEH_SIMULATOR && isVeryFirstStep) {
 			if (Sock_c.initConnection(TrafficLayerErrorFile) > 0) {
@@ -1383,7 +1385,11 @@ int main(int argc, char* argv[]) {
 
 		ii = ii + 1;
 
+
 		PERF_TOC("main_loop");
+
+
+		Traffic_c.runOneStepSimulation();
 
 	}
 
