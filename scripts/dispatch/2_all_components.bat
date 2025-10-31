@@ -130,7 +130,7 @@ for %%v in (%CARMAKER_VERSIONS%) do (
             set "BUILD_RESULT=1"
         )
 
-        call :BuildSolution "CarMaker!CM_MAJOR! Simulink" ".\ProprietaryFiles\CM!CM_MAJOR!_proj\src_cm4sl\CarMaker for Simulink.sln" "/target:\"CarMaker for Simulink\" /p:Configuration=Release"
+        call :BuildSolution "CarMaker!CM_MAJOR! Simulink" ".\ProprietaryFiles\CM!CM_MAJOR!_proj\src_cm4sl\CarMaker for Simulink.sln" "/p:Configuration=Release"
         if errorlevel 1 (
             call :TrackFailure "CarMaker!CM_MAJOR! Simulink"
             set "BUILD_RESULT=1"
