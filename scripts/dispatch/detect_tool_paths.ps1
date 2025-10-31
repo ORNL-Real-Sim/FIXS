@@ -67,12 +67,13 @@ function Find-DSpace {
     $programFiles = @($env:ProgramFiles, ${env:ProgramFiles(x86)})
 
     foreach ($pf in $programFiles) {
-        $dspaceBase = Join-Path $pf "dSPACE"
-        if (Test-Path $dspaceBase) {
-            $installations = Get-ChildItem $dspaceBase -Directory | Where-Object { $_.Name -like "ConfigurationDesk*" } | Sort-Object Name -Descending
-            if ($installations.Count -gt 0) {
-                return $installations[0].FullName
-            }
+        # Look for dSPACE ConfigurationDesk installations directly in Program Files
+        $installations = Get-ChildItem $pf -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -like "dSPACE ConfigurationDesk*" } |
+            Sort-Object Name -Descending
+
+        if ($installations.Count -gt 0) {
+            return $installations[0].FullName
         }
     }
 
