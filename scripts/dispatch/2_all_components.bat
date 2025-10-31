@@ -1,0 +1,193 @@
+@echo off
+setlocal EnableExtensions EnableDelayedExpansion
+
+REM ====================================
+REM Build All RealSim Components
+REM Supports double-click (standalone) and inline invocation via dispatch.
+REM ====================================
+
+set "SCRIPT_DIR=%~dp0"
+set "RUN_MODE=%~1"
+set "YAML_HELPER=%SCRIPT_DIR%yaml_helper.ps1"
+
+for %%I in ("%SCRIPT_DIR%..\..") do set "REPO_ROOT=%%~fI"
+for %%I in ("%SCRIPT_DIR%.") do set "DISPATCH_DIR=%%~fI"
+set "DEPS_FILE=%REPO_ROOT%\dependencies.yaml"
+set "LOG_OUTPUT=%DISPATCH_DIR%\build_output.log"
+set "LOG_SUMMARY=%DISPATCH_DIR%\build_results.log"
+
+REM Handle optional window request
+if /I "%RUN_MODE%"=="window" (
+    start "RS FIXS Build" cmd /k "%~f0" inline
+    exit /b 0
+)
+
+REM Determine run mode (standalone vs inline)
+if /I "%RUN_MODE%"=="inline" (
+    set "RUN_MODE=inline"
+) else (
+    if /I "%RUN_MODE%"=="standalone" (
+        set "RUN_MODE=standalone"
+    ) else (
+        if defined RS_FIXS_AUTOMATION (
+            set "RUN_MODE=inline"
+        ) else (
+            set "RUN_MODE=standalone"
+        )
+    )
+)
+
+set "STACK_CHANGED=0"
+set "BUILD_RESULT=0"
+set "FAILED_BUILDS="
+set "MATLAB_VERSION="
+
+if not defined REPO_ROOT (
+    echo ERROR: Failed to resolve repository root from script directory.
+    set "BUILD_RESULT=1"
+    goto :cleanup
+)
+
+if not exist "%REPO_ROOT%" (
+    echo ERROR: Repository root not found: %REPO_ROOT%
+    set "BUILD_RESULT=1"
+    goto :cleanup
+)
+
+pushd "%REPO_ROOT%" >nul
+if errorlevel 1 (
+    echo ERROR: Failed to change directory to %REPO_ROOT%
+    set "BUILD_RESULT=1"
+    goto :cleanup
+)
+set "STACK_CHANGED=1"
+
+if not exist "%DEPS_FILE%" (
+    echo ERROR: dependencies.yaml not found at %DEPS_FILE%
+    set "BUILD_RESULT=1"
+    goto :cleanup
+)
+
+echo Parsing dependencies from: %DEPS_FILE%
+call :ReadYamlVersion "%DEPS_FILE%" "matlab" MATLAB_VERSION
+if not defined MATLAB_VERSION (
+    echo WARNING: MATLAB version not found in dependencies.yaml. Defaulting to 2024a
+    set "MATLAB_VERSION=2024a"
+)
+
+echo.
+echo Using versions from dependencies.yaml:
+echo   MATLAB: %MATLAB_VERSION%
+echo.
+
+>"%LOG_SUMMARY%" echo Build Results
+>>"%LOG_SUMMARY%" echo ==============
+>>"%LOG_SUMMARY%" echo.
+if exist "%LOG_OUTPUT%" del "%LOG_OUTPUT%" >nul 2>&1
+
+REM Build TrafficLayer
+call :BuildSolution "TrafficLayer" ".\TrafficLayer\TrafficLayer.sln" "/p:Configuration=Release"
+if errorlevel 1 (
+    call :TrackFailure "TrafficLayer"
+    set "BUILD_RESULT=1"
+)
+
+REM Build VISSIM server components if present
+if exist ".\ProprietaryFiles\VISSIMserver" (
+    call :BuildSolution "DriverModel_RealSim" ".\ProprietaryFiles\VISSIMserver\VISSIMserver.sln" "/target:DriverModel_RealSim /p:Configuration=Release"
+    if errorlevel 1 (
+        call :TrackFailure "DriverModel_RealSim"
+        set "BUILD_RESULT=1"
+    )
+
+    call :BuildSolution "DriverModel_RealSim_v2021" ".\ProprietaryFiles\VISSIMserver\VISSIMserver.sln" "/target:DriverModel_RealSim_v2021 /p:Configuration=Release"
+    if errorlevel 1 (
+        call :TrackFailure "DriverModel_RealSim_v2021"
+        set "BUILD_RESULT=1"
+    )
+) else (
+    >>"%LOG_SUMMARY%" echo VISSIMserver folder not found, skipping VISSIM builds
+)
+
+REM Build VirtualEnvironment
+call :BuildSolution "VirtualEnvironment" ".\VirtualEnvironment\VirtualEnvironment.sln" "/p:Configuration=Release"
+if errorlevel 1 (
+    call :TrackFailure "VirtualEnvironment"
+    set "BUILD_RESULT=1"
+)
+
+REM Build CarMaker desktop and Simulink variants
+for %%v in (9 10 11 13) do (
+    if exist ".\ProprietaryFiles\CM%%v_proj" (
+        call :BuildSolution "CarMaker%%v" ".\ProprietaryFiles\CM%%v_proj\src\CarMaker.sln" "/target:CarMaker /p:Configuration=Release"
+        if errorlevel 1 (
+            call :TrackFailure "CarMaker%%v"
+            set "BUILD_RESULT=1"
+        )
+
+        call :BuildSolution "CarMaker%%v Simulink" ".\ProprietaryFiles\CM%%v_proj\src_cm4sl\CarMaker for Simulink.sln" "/target:\"CarMaker for Simulink\" /p:Configuration=Release"
+        if errorlevel 1 (
+            call :TrackFailure "CarMaker%%v Simulink"
+            set "BUILD_RESULT=1"
+        )
+    ) else (
+        >>"%LOG_SUMMARY%" echo CM%%v_proj folder not found, skipping CarMaker %%v builds
+    )
+)
+
+echo.
+echo ==============================
+if defined FAILED_BUILDS (
+    echo Build completed with failures!
+    echo Failed builds: %FAILED_BUILDS%
+) else (
+    echo All builds completed successfully!
+)
+echo Check %LOG_SUMMARY% for summary and %LOG_OUTPUT% for details.
+echo ==============================
+
+:cleanup
+if "%STACK_CHANGED%"=="1" popd >nul
+
+if /I "%RUN_MODE%"=="standalone" (
+    echo.
+    pause
+)
+exit /b %BUILD_RESULT%
+
+:BuildSolution
+set "TARGET_NAME=%~1" & set "SOLUTION_PATH=%~2" & set "MSBUILD_ARGS=%~3"
+if not exist "%SOLUTION_PATH%" echo ===^> %TARGET_NAME% skipped (solution not found)>>"%LOG_SUMMARY%" & exit /b 0
+echo Building %TARGET_NAME%...
+echo ===^> %TARGET_NAME% build started>>"%LOG_SUMMARY%"
+msbuild "%SOLUTION_PATH%" %MSBUILD_ARGS% >>"%LOG_OUTPUT%" 2>&1
+if errorlevel 1 echo ===^> %TARGET_NAME% built failed>>"%LOG_SUMMARY%" & exit /b 1
+echo ===^> %TARGET_NAME% built success>>"%LOG_SUMMARY%"
+exit /b 0
+
+:CopyIfExists
+if exist "%~1" copy /Y "%~1" "%~2" >nul 2>&1
+exit /b 0
+
+:TrackFailure
+if defined FAILED_BUILDS (
+    set "FAILED_BUILDS=%FAILED_BUILDS% %~1"
+) else (
+    set "FAILED_BUILDS=%~1"
+)
+exit /b 0
+
+:ReadYamlVersion
+set "FILE=%~1"
+set "SECTION=%~2"
+set "OUT_VAR=%~3"
+set "RESULT="
+
+if exist "%YAML_HELPER%" (
+    for /f "usebackq tokens=* delims=" %%I in (`powershell -NoProfile -File "%YAML_HELPER%" -File "%FILE%" -Section "%SECTION%"`) do (
+        if not defined RESULT set "RESULT=%%~I"
+    )
+)
+
+set "%OUT_VAR%=%RESULT%"
+exit /b 0
