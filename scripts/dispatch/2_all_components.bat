@@ -40,7 +40,7 @@ if /I "%RUN_MODE%"=="inline" (
 set "STACK_CHANGED=0"
 set "BUILD_RESULT=0"
 set "FAILED_BUILDS="
-set "MATLAB_VERSION="
+set "CARMAKER_VERSIONS="
 
 if not defined REPO_ROOT (
     echo ERROR: Failed to resolve repository root from script directory.
@@ -69,15 +69,16 @@ if not exist "%DEPS_FILE%" (
 )
 
 echo Parsing dependencies from: %DEPS_FILE%
-call :ReadYamlVersion "%DEPS_FILE%" "matlab" MATLAB_VERSION
-if not defined MATLAB_VERSION (
-    echo WARNING: MATLAB version not found in dependencies.yaml. Defaulting to 2024a
-    set "MATLAB_VERSION=2024a"
+call :ReadYamlList "%DEPS_FILE%" "carmaker" "versions" CARMAKER_VERSIONS
+if not defined CARMAKER_VERSIONS (
+    echo ERROR: CarMaker versions not found in dependencies.yaml
+    set "BUILD_RESULT=1"
+    goto :cleanup
 )
 
 echo.
 echo Using versions from dependencies.yaml:
-echo   MATLAB: %MATLAB_VERSION%
+echo   CarMaker versions: %CARMAKER_VERSIONS%
 echo.
 
 >"%LOG_SUMMARY%" echo Build Results
@@ -117,21 +118,25 @@ if errorlevel 1 (
 )
 
 REM Build CarMaker desktop and Simulink variants
-for %%v in (9 10 11 13) do (
-    if exist ".\ProprietaryFiles\CM%%v_proj" (
-        call :BuildSolution "CarMaker%%v" ".\ProprietaryFiles\CM%%v_proj\src\CarMaker.sln" "/target:CarMaker /p:Configuration=Release"
+for %%v in (%CARMAKER_VERSIONS%) do (
+    set "CM_VERSION=%%v"
+    REM Extract major version (e.g., 13.1.3 -> 13, 11.1.2 -> 11)
+    for /f "tokens=1 delims=." %%m in ("!CM_VERSION!") do set "CM_MAJOR=%%m"
+
+    if exist ".\ProprietaryFiles\CM!CM_MAJOR!_proj" (
+        call :BuildSolution "CarMaker!CM_MAJOR!" ".\ProprietaryFiles\CM!CM_MAJOR!_proj\src\CarMaker.sln" "/target:CarMaker /p:Configuration=Release"
         if errorlevel 1 (
-            call :TrackFailure "CarMaker%%v"
+            call :TrackFailure "CarMaker!CM_MAJOR!"
             set "BUILD_RESULT=1"
         )
 
-        call :BuildSolution "CarMaker%%v Simulink" ".\ProprietaryFiles\CM%%v_proj\src_cm4sl\CarMaker for Simulink.sln" "/target:\"CarMaker for Simulink\" /p:Configuration=Release"
+        call :BuildSolution "CarMaker!CM_MAJOR! Simulink" ".\ProprietaryFiles\CM!CM_MAJOR!_proj\src_cm4sl\CarMaker for Simulink.sln" "/target:\"CarMaker for Simulink\" /p:Configuration=Release"
         if errorlevel 1 (
-            call :TrackFailure "CarMaker%%v Simulink"
+            call :TrackFailure "CarMaker!CM_MAJOR! Simulink"
             set "BUILD_RESULT=1"
         )
     ) else (
-        >>"%LOG_SUMMARY%" echo CM%%v_proj folder not found, skipping CarMaker %%v builds
+        >>"%LOG_SUMMARY%" echo CM!CM_MAJOR!_proj folder not found, skipping CarMaker !CM_MAJOR! builds
     )
 )
 
@@ -185,6 +190,22 @@ set "RESULT="
 
 if exist "%YAML_HELPER%" (
     for /f "usebackq tokens=* delims=" %%I in (`powershell -NoProfile -File "%YAML_HELPER%" -File "%FILE%" -Section "%SECTION%"`) do (
+        if not defined RESULT set "RESULT=%%~I"
+    )
+)
+
+set "%OUT_VAR%=%RESULT%"
+exit /b 0
+
+:ReadYamlList
+set "FILE=%~1"
+set "SECTION=%~2"
+set "LIST_KEY=%~3"
+set "OUT_VAR=%~4"
+set "RESULT="
+
+if exist "%YAML_HELPER%" (
+    for /f "usebackq tokens=* delims=" %%I in (`powershell -NoProfile -File "%YAML_HELPER%" -File "%FILE%" -Section "%SECTION%" -ListKey "%LIST_KEY%" -ReturnList`) do (
         if not defined RESULT set "RESULT=%%~I"
     )
 )

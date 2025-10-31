@@ -52,36 +52,29 @@ if not exist "%DEPS_FILE%" (
 )
 
 call :ReadYamlVersion "%DEPS_FILE%" "dspace" DSPACE_VERSION
-call :ReadYamlVersion "%DEPS_FILE%" "carmaker" CARMAKER_PRIMARY_VERSION
+call :ReadYamlKey "%DEPS_FILE%" "dspace" "install_path" DSPACE_INSTALL
 call :ReadYamlList "%DEPS_FILE%" "carmaker" "versions" CARMAKER_VERSIONS
 
 if not defined DSPACE_VERSION (
-    echo Falling back to default dSPACE version 2024a...
-    set "DSPACE_VERSION=2024a"
+    echo ERROR: dSPACE version not found in dependencies.yaml
+    set "BUILD_RESULT=1"
+    goto :end
+)
+
+if not defined DSPACE_INSTALL (
+    echo ERROR: dSPACE install_path not found in dependencies.yaml
+    set "BUILD_RESULT=1"
+    goto :end
 )
 
 if not defined CARMAKER_VERSIONS (
-    if defined CARMAKER_PRIMARY_VERSION (
-        set "CARMAKER_VERSIONS=%CARMAKER_PRIMARY_VERSION%"
-    )
-)
-
-if not defined CARMAKER_VERSIONS (
-    echo WARNING: CarMaker versions not found in dependencies.yaml. Defaulting to 13.1.3
-    set "CARMAKER_VERSIONS=13.1.3"
-)
-
-if /I "%DSPACE_VERSION%"=="2024a" (
-    set "DSPACE_INSTALL=C:\Program Files\dSPACE ConfigurationDesk 2024-A (24.1)"
+    echo ERROR: CarMaker versions not found in dependencies.yaml
+    set "BUILD_RESULT=1"
+    goto :end
 )
 
 set "DSPACE_VERSION_SAFE=%DSPACE_VERSION%"
 set "DSPACE_VERSION_SAFE=%DSPACE_VERSION_SAFE:.=_%"
-if not defined DSPACE_INSTALL (
-    echo ERROR: Could not determine dSPACE install path for version: %DSPACE_VERSION%
-    set "BUILD_RESULT=1"
-    goto :end
-)
 
 echo.
 echo Building dSPACE library version: %DSPACE_VERSION%
@@ -220,6 +213,24 @@ set "RESULT="
 
 if exist "%YAML_HELPER%" (
     for /f "usebackq tokens=* delims=" %%I in (`powershell -NoProfile -File "%YAML_HELPER%" -File "%FILE%" -Section "%TARGET%"`) do (
+        if not defined RESULT set "RESULT=%%~I"
+    )
+)
+
+endlocal & set "%OUT_VAR%=%RESULT%"
+exit /b 0
+
+:ReadYamlKey
+REM %1 file path, %2 subsection name, %3 key name, %4 output var
+setlocal EnableExtensions EnableDelayedExpansion
+set "FILE=%~1"
+set "TARGET=%~2"
+set "KEY=%~3"
+set "OUT_VAR=%~4"
+set "RESULT="
+
+if exist "%YAML_HELPER%" (
+    for /f "usebackq tokens=* delims=" %%I in (`powershell -NoProfile -File "%YAML_HELPER%" -File "%FILE%" -Section "%TARGET%" -Key "%KEY%"`) do (
         if not defined RESULT set "RESULT=%%~I"
     )
 )

@@ -8,6 +8,7 @@ REM ====================================
 
 set "SCRIPT_DIR=%~dp0"
 set "RUN_MODE=%~1"
+set "YAML_HELPER=%SCRIPT_DIR%yaml_helper.ps1"
 
 if /I "%RUN_MODE%"=="window" (
     start "RealSimSocket MEX Build" cmd /k "%~f0" inline
@@ -45,8 +46,9 @@ if not exist "%DEPS_FILE%" (
 call :ReadYamlVersion "%DEPS_FILE%" "matlab" MATLAB_VERSION
 
 if not defined MATLAB_VERSION (
-    echo Falling back to default MATLAB version 2024a...
-    set "MATLAB_VERSION=2024a"
+    echo ERROR: MATLAB version not found in dependencies.yaml
+    set "BUILD_RESULT=1"
+    goto :end
 )
 
 if defined MATLAB_ROOT (
@@ -112,20 +114,16 @@ if /I "%RUN_MODE%"=="standalone" (
 exit /b %BUILD_RESULT%
 
 :ReadYamlVersion
-REM %1 file path, %2 subsection name under development_tools, %3 output var
-setlocal EnableDelayedExpansion
 set "FILE=%~1"
-set "TARGET=%~2"
+set "SECTION=%~2"
 set "OUT_VAR=%~3"
-set "TMP_FILE=%TEMP%\rs_fixs_%RANDOM%%RANDOM%.txt"
-
-powershell -NoProfile -Command "try { $target = '%TARGET%'; $file = '%FILE%'; $lines = Get-Content -Path $file -ErrorAction Stop; $pattern = '^[\s]*' + [regex]::Escape($target) + ':'; $match = $lines | Select-String -Pattern $pattern | Select-Object -First 1; $value = ''; if ($match) { $lineIndex = $match.LineNumber - 1; $indent = $lines[$lineIndex].Length - $lines[$lineIndex].TrimStart().Length; for ($i = $lineIndex + 1; $i -lt $lines.Count; $i++) { $current = $lines[$i]; if ([string]::IsNullOrWhiteSpace($current)) { continue }; $currIndent = $current.Length - $current.TrimStart().Length; if ($currIndent -le $indent) { break }; $verMatch = [regex]::Match($current, '^[\s]*version:[\s]*\"(.+?)\"'); if ($verMatch.Success) { $value = $verMatch.Groups[1].Value; break } } }; Set-Content -Path '%TMP_FILE%' -Value $value -Encoding ASCII } catch { Set-Content -Path '%TMP_FILE%' -Value '' -Encoding ASCII }" 2>nul
-
 set "RESULT="
-if exist "%TMP_FILE%" (
-    set /p RESULT=<"%TMP_FILE%"
-    del "%TMP_FILE%" >nul 2>&1
+
+if exist "%YAML_HELPER%" (
+    for /f "usebackq tokens=* delims=" %%I in (`powershell -NoProfile -File "%YAML_HELPER%" -File "%FILE%" -Section "%SECTION%"`) do (
+        if not defined RESULT set "RESULT=%%~I"
+    )
 )
 
-endlocal & set "%OUT_VAR%=%RESULT%"
+set "%OUT_VAR%=%RESULT%"
 exit /b 0

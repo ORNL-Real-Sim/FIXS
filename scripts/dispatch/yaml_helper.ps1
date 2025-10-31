@@ -2,6 +2,7 @@ param(
     [Parameter(Mandatory=$true)][string]$File,
     [Parameter(Mandatory=$true)][string]$Section,
     [string]$ListKey,
+    [string]$Key = "version",
     [switch]$ReturnList
 )
 
@@ -65,12 +66,13 @@ if ($ReturnList) {
         Write-Output ($values -join ' ')
     }
 } else {
+    $keyPattern = '^[\s]*' + [regex]::Escape($Key) + ':[\s]*"(.+?)"'
     for ($j = $sectionMatch + 1; $j -lt $lines.Count; $j++) {
         $line = $lines[$j]
         if ([string]::IsNullOrWhiteSpace($line)) { continue }
         $indent = $line.Length - $line.TrimStart().Length
         if ($indent -le $sectionIndent) { break }
-        $match = [regex]::Match($line, '^[\s]*version:[\s]*"(.+?)"')
+        $match = [regex]::Match($line, $keyPattern)
         if ($match.Success) {
             Write-Output $match.Groups[1].Value
             break

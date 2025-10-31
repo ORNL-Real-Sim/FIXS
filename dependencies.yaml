@@ -33,6 +33,12 @@ libraries:
     notes: "YAML configuration parser"
 
 development_tools:
+  visual_studio:
+    version: "2022"
+    product: "Visual Studio 2022"
+    install_path: "C:\\Program Files\\Microsoft Visual Studio\\2022"
+    notes: "Required for building all C++ components (TrafficLayer, CommonLib, VISSIM DLLs)"
+
   dspace:
     version: "2024a"
     product: "ConfigurationDesk 2024-A"
