@@ -6,13 +6,27 @@ echo RealSim FIXS Release Builder
 echo ==============================
 echo.
 
-REM Version Configuration (update these to match dependencies.yaml)
-set DSPACE_VERSION=2024a
-set MATLAB_VERSION=2024a
+REM Set paths
+set "SCRIPT_DIR=%~dp0"
+for %%I in ("%SCRIPT_DIR%..\..") do set "SOURCE_PATH=%%~fI"
+set "RELEASE_PATH=%SOURCE_PATH%\build"
+set "DEPS_FILE=%SOURCE_PATH%\dependencies.yaml"
+set "YAML_HELPER=%SCRIPT_DIR%yaml_helper.ps1"
 
-REM Set paths (script runs from scripts/dispatch/)
-set SOURCE_PATH=%CD%\..\..\
-set RELEASE_PATH=%SOURCE_PATH%build
+REM Parse versions from dependencies.yaml
+set "MATLAB_VERSION="
+set "CARMAKER_VERSION="
+if exist "%YAML_HELPER%" (
+    for /f "usebackq tokens=* delims=" %%I in (`powershell -NoProfile -File "%YAML_HELPER%" -File "%DEPS_FILE%" -Section "matlab"`) do set "MATLAB_VERSION=%%~I"
+    for /f "usebackq tokens=* delims=" %%I in (`powershell -NoProfile -File "%YAML_HELPER%" -File "%DEPS_FILE%" -Section "carmaker"`) do set "CARMAKER_VERSION=%%~I"
+)
+if not defined MATLAB_VERSION set "MATLAB_VERSION=2024a"
+if not defined CARMAKER_VERSION set "CARMAKER_VERSION=13.1.2"
+
+echo Using versions from dependencies.yaml:
+echo   MATLAB: %MATLAB_VERSION%
+echo   CarMaker: %CARMAKER_VERSION%
+echo.
 
 REM Clean and create build directory
 echo Cleaning build directory...
@@ -41,7 +55,7 @@ REM ====================================
 REM Step 2: Compile All Components
 REM ====================================
 echo [2/5] Compiling all components...
-call "%~dp0\2_all_components.bat"
+call "%~dp0\2_all_components.bat" inline
 if %ERRORLEVEL% neq 0 (
     echo ERROR: Failed to compile components!
     goto :failed
@@ -75,11 +89,41 @@ echo [5/5] Copying files to build directory...
 
 REM Release executables
 echo Copying executables...
-copy /Y "%SOURCE_PATH%\TrafficLayer\x64\Release\TrafficLayer.exe" "%RELEASE_PATH%\TrafficLayer.exe" >nul
+if exist "%SOURCE_PATH%\TrafficLayer\x64\Release\TrafficLayer.exe" (
+    copy /Y "%SOURCE_PATH%\TrafficLayer\x64\Release\TrafficLayer.exe" "%RELEASE_PATH%\TrafficLayer.exe" >nul
+) else (
+    echo WARNING: TrafficLayer.exe not found
+)
 
-REM Release CommonLib folder with complete structure (includes libsumo)
-echo Copying CommonLib...
-xcopy /Y /E /I "%SOURCE_PATH%\CommonLib" "%RELEASE_PATH%\CommonLib" >nul
+REM Release VirtualEnvironment library
+echo Copying VirtualEnvironment library...
+if exist "%SOURCE_PATH%\VirtualEnvironment\x64\Release\VirtualEnvironment.lib" (
+    copy /Y "%SOURCE_PATH%\VirtualEnvironment\x64\Release\VirtualEnvironment.lib" "%RELEASE_PATH%\VirtualEnvironment.lib" >nul
+) else (
+    echo WARNING: VirtualEnvironment.lib not found
+)
+
+REM Release CommonLib - libraries only
+echo Copying CommonLib libraries...
+if exist "%SOURCE_PATH%\CommonLib\libsumo" (
+    xcopy /Y /E /I "%SOURCE_PATH%\CommonLib\libsumo" "%RELEASE_PATH%\CommonLib\libsumo" >nul
+)
+if exist "%SOURCE_PATH%\CommonLib\YAMLMatlab_0.4.3" (
+    xcopy /Y /E /I "%SOURCE_PATH%\CommonLib\YAMLMatlab_0.4.3" "%RELEASE_PATH%\CommonLib\YAMLMatlab_0.4.3" >nul
+)
+
+REM Release CommonLib - MATLAB source files (exclude test/utility scripts)
+echo Copying MATLAB source files...
+if not exist "%RELEASE_PATH%\CommonLib" mkdir "%RELEASE_PATH%\CommonLib"
+set "EXCLUDE_FILES=autoRealSimBatchCall.m main_autoRealSim.m startVissim.m"
+for %%f in ("%SOURCE_PATH%\CommonLib\*.m") do (
+    set "SKIP="
+    for %%e in (%EXCLUDE_FILES%) do if "%%~nxf"=="%%e" set "SKIP=1"
+    if not defined SKIP copy /Y "%%f" "%RELEASE_PATH%\CommonLib\" >nul 2>&1
+)
+if exist "%SOURCE_PATH%\CommonLib\RealSimSocket.mexw64" (
+    copy /Y "%SOURCE_PATH%\CommonLib\RealSimSocket.mexw64" "%RELEASE_PATH%\CommonLib\" >nul
+)
 
 REM Release CarMaker files
 echo Copying CarMaker files...
@@ -111,7 +155,9 @@ if exist "%SOURCE_PATH%\CarMaker" (
 
 REM Copy dSPACE library (if present)
 echo Copying dSPACE library...
-copy /Y "%SOURCE_PATH%\CommonLib\libRealSimDsLib_%DSPACE_VERSION%.a" "%RELEASE_PATH%\CarMaker\" 2>nul
+for %%f in ("%SOURCE_PATH%\CommonLib\libRealSimDsLib_*.a") do (
+    copy /Y "%%f" "%RELEASE_PATH%\CarMaker\" >nul 2>&1
+)
 
 REM Release VISSIM files
 echo Copying VISSIM files...
