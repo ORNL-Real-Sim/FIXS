@@ -1,5 +1,9 @@
+from encodings.punycode import T
 import os
+import threading
 import time
+
+from matplotlib.pyplot import step
 import traci
 import sumolib
 import shutil
@@ -295,14 +299,23 @@ class SumoEnvMultiAgent:
 
         
             
-    def run_sumo(self, num_clients, gui=False):
+    def run_sumo(self, num_clients, seed, gui=False):
         # start sumo-gui -c .\chattCavMpr.sumocfg --remote-port 1337 --step-length 1 --netstate-dump chatt.xml --netstate-dump.precision 10 --num-clients 2  --begin 28800 --end 33000
         # the files are in setting_dir
         if gui:
-            os.system(f'start C:\\Users\\RVDP\\Desktop\\sumo-1.24.0\\bin\\sumo-gui -c {self.sumo_config} --remote-port {self.sumo_port} --step-length {self.step_length} --num-clients {num_clients} --time-to-teleport -1 --collision.action warn --collision.check-junctions false')
+            os.system(f'start sumo-gui -c {self.sumo_config} --seed {seed} --remote-port {self.sumo_port} --step-length {self.step_length} --num-clients {num_clients} --time-to-teleport -1 --collision.action warn --collision.check-junctions false')
         else:
-            os.system(f'start C:\\Users\\RVDP\\Desktop\\sumo-1.24.0\\bin\\sumo -c {self.sumo_config} --remote-port {self.sumo_port} --step-length {self.step_length} --num-clients {num_clients}')
+            os.system(f'start sumo -c {self.sumo_config} --seed {seed} --remote-port {self.sumo_port} --step-length {self.step_length} --num-clients {num_clients}')
 
+    def step_parallel(self, eco_speed_dic, vehicle_dynamics, eco_driving, veh_ids_controlled_by_FIXS, warmup=False):
+        threads = [
+            threading.Thread(target=self.apply_vehicle_control_FIXS, args=(
+                eco_speed_dic, vehicle_dynamics, eco_driving, veh_ids_controlled_by_FIXS, warmup)),
+            threading.Thread(target=traci.simulationStep)
+        ]
+        for t in threads: t.start()
+        for t in threads: t.join()
+        
     def start_subscription(self, vehicle_dynamics=False, eco_driving=False, add_ego_time=29100):
 
         # Register signal handlers for graceful shutdown
@@ -310,22 +323,24 @@ class SumoEnvMultiAgent:
         signal.signal(signal.SIGTERM, self._signal_handler)  # Termination signal
 
         veh_ids_controlled_by_FIXS = ['ego']
-        traci.init(port=int(self.sumo_port), host='127.0.0.1')
-        traci.setOrder(2)
-
+        traci.init(port=int(self.sumo_port), host=self.sumo_ip)
+        traci.setOrder(1)
+        
         traci.route.add(routeID='route1', edges=self.edges)
 
         self.get_phases(self.sumo_signal_config)
         sim_time = traci.simulation.getTime()
-
+        print('Warming up the simulation before inserting the ego vehicle...')
 
         while sim_time < add_ego_time:
             sim_time = traci.simulation.getTime()
             # Phase trackers
             self.phase_tracker()
             self.subscribe_departed_veh()
-            traci.simulationStep()
-            self.apply_vehicle_control_FIXS({}, vehicle_dynamics=vehicle_dynamics, eco_driving=eco_driving, control_veh_ids=veh_ids_controlled_by_FIXS, warmup=True)
+            self.step_parallel({}, vehicle_dynamics, eco_driving, veh_ids_controlled_by_FIXS, warmup=True)
+            # self.apply_vehicle_control_FIXS({}, vehicle_dynamics=vehicle_dynamics, eco_driving=eco_driving, control_veh_ids=veh_ids_controlled_by_FIXS, warmup=True)
+            # traci.simulationStep()
+            
         
         if self.enable_vehicle_dynamics:
             socket2simulink = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -350,9 +365,8 @@ class SumoEnvMultiAgent:
             print('Connected by vehicle dynamics client')
  
         self.reset()
-        traci.simulationStep()
-        self.apply_vehicle_control_FIXS({}, vehicle_dynamics=vehicle_dynamics, eco_driving=eco_driving, control_veh_ids=veh_ids_controlled_by_FIXS, warmup=True)
-            
+
+        self.step_parallel({}, vehicle_dynamics, eco_driving, veh_ids_controlled_by_FIXS, warmup=True)
         print('target vehicle has entered the network, start eco-driving control')
          
         try:
@@ -420,12 +434,11 @@ class SumoEnvMultiAgent:
                                                             results_df.loc[key, 't2e'],
                                                             results_df.loc[key, 'r1s'],
                                                             results_df.loc[key, 'curr_status']) for index, (key, veh) in enumerate(self.cav_object_dict.items()) if key in (list_cav_back_to_sumo + list_cav_control)}
-                if 'ego' in eco_speed_dic and not eco_driving:
-                    eco_speed_dic['ego'] = traci.vehicle.getSpeedWithoutTraCI('ego')
-
+                
                 self.apply_vehicle_control(eco_speed_dic, smooth=True, exclude_veh_ids=veh_ids_controlled_by_FIXS)
-                traci.simulationStep()
-                self.apply_vehicle_control_FIXS(eco_speed_dic, vehicle_dynamics=vehicle_dynamics, eco_driving=eco_driving, control_veh_ids=veh_ids_controlled_by_FIXS)
+                
+                self.step_parallel(eco_speed_dic, vehicle_dynamics, eco_driving, veh_ids_controlled_by_FIXS, warmup=False)
+                
                 
                 self.cav_object_dict = {key: value for key, value in self.cav_object_dict.items() if key in (list_cav_back_to_sumo + list_cav_control)}
         except Exception as e:
@@ -448,9 +461,9 @@ class SumoEnvMultiAgent:
             print(f"ERROR: Lost connection to FIXS server: {e}")
             print("The TrafficLayer may have been closed. Initiating shutdown...")
             raise RuntimeError("Connection to FIXS lost") from e
-        ori_speed = {veh_data.id:veh_data.speed for veh_data in self.socket_helper.vehicle_data_receive_list}
+        ori_speed_dic = {veh_data.id:veh_data.speed for veh_data in self.socket_helper.vehicle_data_receive_list}
 
-        for veh_id, ori_speed in ori_speed.items():
+        for veh_id, ori_speed in ori_speed_dic.items():
             eco_speed = eco_speed_dic.get(veh_id, None)
             if eco_speed is not None and veh_id in control_veh_ids:
                 if eco_driving:
@@ -462,6 +475,7 @@ class SumoEnvMultiAgent:
                 self.socket_helper.vehicle_data_send_list.append(veh_data)
                 
         if self.enable_vehicle_dynamics and not warmup:
+            
             if warmup:
                 veh_data = VehData(id='ego', speedDesired=self.speed_max)
                 self.socket_helper.vehicle_data_send_list.append(veh_data)
@@ -477,29 +491,32 @@ class SumoEnvMultiAgent:
             if warmup:
                 self.socket_helper.clear_data()
             self.socket_helper.vehicle_data_send_list.extend(self.socket_helper.vehicle_data_receive_list)
-        
+        speed_desired_eco = -1
+        speed_desired_simulink = -1
         for idx in range(len(self.socket_helper.vehicle_data_send_list)):
-            
+            speed_desired_eco = eco_speed_dic[veh_id]
             if not vehicle_dynamics or not self.enable_vehicle_dynamics:
                 # if not applying vehicle dynamics, set the speedDesired to the eco_speed
                 veh_id = self.socket_helper.vehicle_data_receive_list[idx].id
                 
-                speed_desired_eco = eco_speed_dic[veh_id]
+                
                 if speed_desired_eco is not None and eco_driving:
                     self.socket_helper.vehicle_data_send_list[idx].speedDesired = speed_desired_eco
                 else:
-                    self.socket_helper.vehicle_data_send_list[idx].speedDesired = ori_speed[veh_id]
+                    self.socket_helper.vehicle_data_send_list[idx].speedDesired = ori_speed_dic[veh_id]
 
             else:
                 speed_desired_simulink = self.socket_helper.vehicle_data_receive_list[idx].speedDesired
                 # if applying vehicle dynamics, set the speedDesired to the speedDesired from the simulink
                 self.socket_helper.vehicle_data_send_list[idx].speedDesired = speed_desired_simulink
-                
+                # print(f"Original Speed {ori_speed_dic[veh_id]} speedDesired from vehicle dynamics: {speed_desired_simulink}")
         if len(self.socket_helper.vehicle_data_send_list) == 0:
             veh_data = VehData()
             self.socket_helper.vehicle_data_send_list.append(veh_data)
 
         try:
+            for idx in self.socket_helper.vehicle_data_send_list:
+                print(f"Sending to FIXS: Vehicle ID: {idx.id}, Speed Desired: {speed_desired_eco} Speed Desired Simulink: {speed_desired_simulink}\n")
             self.socket_helper.sendData(sim_state, sim_time, self.socket2FIXS)
         except (socket.timeout, socket.error, ConnectionResetError, BrokenPipeError) as e:
             print(f"ERROR: Failed to send data to FIXS server: {e}")
@@ -640,15 +657,15 @@ if __name__ == "__main__":
     parser.add_argument("--trafficlayerConfig", type=str, help="Path to the Configuration file", default=os.environ["CONFIG_PATH"])
     parser.add_argument("--trafficlayerIp", type=str, help="Specify Ip of traffic layer", default='127.0.0.1')
     parser.add_argument("--trafficlayerPort", type=str, help="Specify port of traffic layer", default=430)
-    parser.add_argument("--vehicleDynamics", action="store_true", help="use the vehicle dynamics", default=True)
-    parser.add_argument("--enableVehicleDynamics", action="store_true", help="use the vehicle dynamics", default=True)
-    parser.add_argument("--vehicleDynamicsIp", type=str, help="Specify Ip of vehicle dynamics", default='192.168.140.11')
+    parser.add_argument("--vehicleDynamics", action="store_true", help="use the vehicle dynamics", default=False)
+    parser.add_argument("--enableVehicleDynamics", action="store_true", help="use the vehicle dynamics", default=False)
+    parser.add_argument("--vehicleDynamicsIp", type=str, help="Specify Ip of vehicle dynamics", default='127.0.0.1')
     parser.add_argument("--vehicleDynamicsPort", type=str, help="Specify port of vehicle dynamics", default=420)
 
     # the following parameters are for CAV settings
     parser.add_argument("--penetrationRate", type=float, help="the market penetration rate of cav", default=0.0)
     parser.add_argument("--stepLength", type=float, help="the step length of the simulation", default=0.1)
-    parser.add_argument("--ecoDriving", action="store_true", help="Use the eco driving controller", default=False)
+    parser.add_argument("--ecoDriving", action="store_true", help="Use the eco driving controller", default=True)
     
     # the following parameters are for SUMO 
     parser.add_argument("--sumoIp", type=str, help="Specify Ip of sumo", default='127.0.0.1')
@@ -690,6 +707,10 @@ if __name__ == "__main__":
     eb_links = ['-312', '-293', '-297', '-288', '-2881', '-286', '-302', '-3221', '-322', '-313', '-284', '-2841', '-328', '-304']
     tl_ids = ['2', '3', '10', '8', '9', '12']
     print(f'running with penetration rate: {penetration_rate}, vehicle dynamics: {vehicle_dynamics}, eco driving: {eco_driving}')
+    # 4.66 : 29119.31
+    # 4.77 : 29172.53
+    # 4.82 : 29196.72
+    # 4.85 : 29211.23
     add_ego_time = 29119.31
     senv = SumoEnvMultiAgent(sumo_folder = sumo_folder, # path to the folder containing the sumo files
                              sumo_config = sumo_config, # file name of the sumo config file
@@ -713,7 +734,7 @@ if __name__ == "__main__":
                              add_ego_time = add_ego_time
                              )
 
-    senv.run_sumo(num_clients=2, gui=True)
+    senv.run_sumo(num_clients=2, seed=100, gui=True)
     time.sleep(2)
     run_traffic_layer('TrafficLayer.exe', os.environ["CONFIG_PATH"])
     time.sleep(2)
@@ -721,8 +742,5 @@ if __name__ == "__main__":
     print('Starting subscription')
     print('Enable vehicle dynamics: ', enable_vehicle_dynamics)
     print('Use eco driving controller: ', eco_driving)
-    # 4.66 : 29119.31
-    # 4.77 : 29172.53
-    # 4.82 : 29196.72
-    # 4.85 : 29211.23
+
     senv.start_subscription(eco_driving=eco_driving, vehicle_dynamics=vehicle_dynamics, add_ego_time=add_ego_time)
