@@ -560,7 +560,7 @@ int main(int argc, char* argv[]) {
 		// RUN one-step simulation
 		///****************************************************
 		
-		Traffic_c.runOneStepSimulation();
+		
 
 		if (ENABLE_VEH_SIMULATOR && isVeryFirstStep) {
 			if (Sock_c.initConnection(TrafficLayerErrorFile) > 0) {
@@ -963,7 +963,7 @@ int main(int argc, char* argv[]) {
 		}
 
 		ii = ii + 1;
-
+		Traffic_c.runOneStepSimulation();
 	}
 
 	Traffic_c.close();
