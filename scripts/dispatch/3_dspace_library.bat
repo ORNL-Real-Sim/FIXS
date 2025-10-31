@@ -52,7 +52,6 @@ if not exist "%DEPS_FILE%" (
 )
 
 call :ReadYamlVersion "%DEPS_FILE%" "dspace" DSPACE_VERSION
-call :ReadYamlKey "%DEPS_FILE%" "dspace" "install_path" DSPACE_INSTALL
 call :ReadYamlList "%DEPS_FILE%" "carmaker" "versions" CARMAKER_VERSIONS
 
 if not defined DSPACE_VERSION (
@@ -61,16 +60,15 @@ if not defined DSPACE_VERSION (
     goto :end
 )
 
+echo Auto-detecting dSPACE installation...
+for /f "usebackq tokens=* delims=" %%I in (`powershell -NoProfile -File "%SCRIPT_DIR%detect_tool_paths.ps1" -Tool "dspace"`) do set "DSPACE_INSTALL=%%~I"
 if not defined DSPACE_INSTALL (
-    echo dSPACE install_path not found in dependencies.yaml, attempting auto-detection...
-    for /f "usebackq tokens=* delims=" %%I in (`powershell -NoProfile -File "%SCRIPT_DIR%detect_tool_paths.ps1" -Tool "dspace"`) do set "DSPACE_INSTALL=%%~I"
-    if not defined DSPACE_INSTALL (
-        echo ERROR: Could not auto-detect dSPACE installation
-        set "BUILD_RESULT=1"
-        goto :end
-    )
-    echo Auto-detected dSPACE at: !DSPACE_INSTALL!
+    echo ERROR: Could not auto-detect dSPACE installation
+    echo Please ensure dSPACE ConfigurationDesk is installed
+    set "BUILD_RESULT=1"
+    goto :end
 )
+echo Auto-detected dSPACE at: !DSPACE_INSTALL!
 
 if not defined CARMAKER_VERSIONS (
     echo ERROR: CarMaker versions not found in dependencies.yaml
@@ -218,24 +216,6 @@ set "RESULT="
 
 if exist "%YAML_HELPER%" (
     for /f "usebackq tokens=* delims=" %%I in (`powershell -NoProfile -File "%YAML_HELPER%" -File "%FILE%" -Section "%TARGET%"`) do (
-        if not defined RESULT set "RESULT=%%~I"
-    )
-)
-
-endlocal & set "%OUT_VAR%=%RESULT%"
-exit /b 0
-
-:ReadYamlKey
-REM %1 file path, %2 subsection name, %3 key name, %4 output var
-setlocal EnableExtensions EnableDelayedExpansion
-set "FILE=%~1"
-set "TARGET=%~2"
-set "KEY=%~3"
-set "OUT_VAR=%~4"
-set "RESULT="
-
-if exist "%YAML_HELPER%" (
-    for /f "usebackq tokens=* delims=" %%I in (`powershell -NoProfile -File "%YAML_HELPER%" -File "%FILE%" -Section "%TARGET%" -Key "%KEY%"`) do (
         if not defined RESULT set "RESULT=%%~I"
     )
 )
