@@ -34,21 +34,19 @@ libraries:
 
   yaml_matlab:
     version: "0.4.3"
-    location: "CommonLib/YAMLMatlab_0.4.3"
+    location: "CommonLib/YAMLMatlab"
     notes: "YAML parser for MATLAB"
 
 development_tools:
   visual_studio:
     version: "2022"
     product: "Visual Studio 2022"
-    install_path: "C:\\Program Files\\Microsoft Visual Studio\\2022"
     notes: "Required for building all C++ components (TrafficLayer, CommonLib, VISSIM DLLs)"
 
   dspace:
     version: "2024a"
     product: "ConfigurationDesk 2024-A"
     release: "24.1"
-    install_path: "C:\\Program Files\\dSPACE ConfigurationDesk 2024-A (24.1)"
     notes: "Used for building RealSimDsLib for CarMaker integration"
 
   matlab:

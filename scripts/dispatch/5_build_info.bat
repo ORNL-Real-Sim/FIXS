@@ -42,21 +42,34 @@ REM Get system information
 for /f "tokens=*" %%i in ('ver') do set "OS_VERSION=%%i"
 for /f "tokens=*" %%i in ('hostname') do set "HOSTNAME=%%i"
 
-REM Get git information
-for /f "tokens=*" %%i in ('git rev-parse --abbrev-ref HEAD 2^>nul') do set "GIT_BRANCH=%%i"
-for /f "tokens=*" %%i in ('git rev-parse --short HEAD 2^>nul') do set "GIT_COMMIT=%%i"
-for /f "tokens=*" %%i in ('git log -1 --pretty^=%%s 2^>nul') do set "GIT_MSG=%%i"
-for /f "tokens=*" %%i in ('git describe --tags --abbrev^=0 2^>nul') do set "GIT_TAG=%%i"
-if not defined GIT_TAG set "GIT_TAG=No tag"
+REM Check if git is available
+where git >nul 2>&1
+if errorlevel 1 (
+    set "GIT_AVAILABLE=0"
+    set "GIT_BRANCH=N/A"
+    set "GIT_COMMIT=N/A"
+    set "GIT_MSG=N/A"
+    set "GIT_TAG=N/A"
+    set "GIT_STATUS_CLEAN=1"
+    set "GIT_MODIFIED=0"
+) else (
+    set "GIT_AVAILABLE=1"
+    REM Get git information
+    for /f "tokens=*" %%i in ('git rev-parse --abbrev-ref HEAD 2^>nul') do set "GIT_BRANCH=%%i"
+    for /f "tokens=*" %%i in ('git rev-parse --short HEAD 2^>nul') do set "GIT_COMMIT=%%i"
+    for /f "tokens=*" %%i in ('git log -1 --pretty^=%%s 2^>nul') do set "GIT_MSG=%%i"
+    for /f "tokens=*" %%i in ('git describe --tags --abbrev^=0 2^>nul') do set "GIT_TAG=%%i"
+    if not defined GIT_TAG set "GIT_TAG=No tag"
 
-REM Get git status (check for uncommitted changes)
-set "GIT_STATUS_CLEAN=1"
-git diff-index --quiet HEAD -- 2>nul
-if errorlevel 1 set "GIT_STATUS_CLEAN=0"
+    REM Get git status (check for uncommitted changes)
+    set "GIT_STATUS_CLEAN=1"
+    git diff-index --quiet HEAD -- 2>nul
+    if errorlevel 1 set "GIT_STATUS_CLEAN=0"
 
-REM Count modified/staged files
-set "GIT_MODIFIED=0"
-for /f %%i in ('git status --porcelain 2^>nul ^| find /c /v ""') do set "GIT_MODIFIED=%%i"
+    REM Count modified/staged files
+    set "GIT_MODIFIED=0"
+    for /f %%i in ('git status --porcelain 2^>nul ^| find /c /v ""') do set "GIT_MODIFIED=%%i"
+)
 
 REM Get dependency versions from dependencies.yaml
 call :ReadYamlVersion "sumo" SUMO_VER

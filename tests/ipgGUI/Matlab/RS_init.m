@@ -1,4 +1,4 @@
-addpath(genpath('YAMLMatlab_0.4.3'))
+addpath(genpath('YAMLMatlab'))
 addpath('RS files')
 spdlimMap = readmatrix('C:\CM_Projects\Super_RS\tests\I81Small\Simulation\spdLimMapNB.csv');
 spdlimMap = spdlimMap(2:end,:);
