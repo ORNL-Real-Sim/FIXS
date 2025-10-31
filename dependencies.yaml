@@ -9,13 +9,16 @@ simulators:
     notes: "libsumo/libtraci headers and DLLs vendored from SUMO release"
 
   carla:
-    version: "0.9.15"  # TODO: verify actual version
+    version: "0.9.15"
     source: "https://github.com/carla-simulator/carla"
     location: "VirCarlaEnv"
     notes: "CARLA client library"
 
   carmaker:
-    version: "13.0"  # TODO: verify actual version (saw CM9, CM10, CM11, CM13 folders)
+    version: "13.1.3"
+    versions:
+      - "13.1.3"
+      - "11.1.2"
     vendor: "IPG Automotive"
     location: "ProprietaryFiles/CM*_proj"
     notes: "Proprietary - multiple versions in use (CM9, CM10, CM11, CM13)"
@@ -23,6 +26,20 @@ simulators:
 libraries:
   libevent:
     location: "CommonLib/libevent"
+    notes: "Not currently used"
 
   yaml-cpp:
     location: "CommonLib/yaml-cpp"
+    notes: "YAML configuration parser"
+
+development_tools:
+  dspace:
+    version: "2024a"
+    product: "ConfigurationDesk 2024-A"
+    release: "24.1"
+    install_path: "C:\\Program Files\\dSPACE ConfigurationDesk 2024-A (24.1)"
+    notes: "Used for building RealSimDsLib for CarMaker integration"
+
+  matlab:
+    version: "2024a"
+    notes: "Required for building RealSimSocket MEX file and Simulink models"
