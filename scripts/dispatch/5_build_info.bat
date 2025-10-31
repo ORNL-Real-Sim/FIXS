@@ -182,10 +182,15 @@ call :FileStatus "%BUILD_DIR%\DriverModel_RealSim_v2021.dll" "DriverModel_RealSi
 
 REM CarMaker Integration
 >>"%OUTPUT_FILE%" echo CarMaker Integration:
-for %%v in (%CARMAKER_VERSIONS%) do (
-    for /f "tokens=1 delims=." %%m in ("%%v") do (
-        call :FileStatus "%BUILD_DIR%\CarMaker\CM%%m" "CarMaker %%v ^(CM%%m^)" "Skipped - CM%%m_proj not found"
+if defined CARMAKER_VERSIONS (
+    for %%v in (%CARMAKER_VERSIONS%) do (
+        set "CM_VER=%%v"
+        for /f "tokens=1 delims=." %%m in ("%%v") do (
+            call :FileStatus "%BUILD_DIR%\CarMaker\CM%%m" "CarMaker !CM_VER! ^(CM%%m^)" "Skipped - CM%%m_proj not found"
+        )
     )
+) else (
+    >>"%OUTPUT_FILE%" echo   [No CarMaker versions configured in dependencies.yaml]
 )
 
 REM List dSPACE libraries
@@ -254,9 +259,11 @@ if exist "%BUILD_DIR%\CommonLib" (
 )
 if exist "%BUILD_DIR%\CarMaker" (
     >>"%OUTPUT_FILE%" echo   └── CarMaker/
-    for %%v in (%CARMAKER_VERSIONS%) do (
-        for /f "tokens=1 delims=." %%m in ("%%v") do (
-            if exist "%BUILD_DIR%\CarMaker\CM%%m" >>"%OUTPUT_FILE%" echo       ├── CM%%m/
+    if defined CARMAKER_VERSIONS (
+        for %%v in (%CARMAKER_VERSIONS%) do (
+            for /f "tokens=1 delims=." %%m in ("%%v") do (
+                if exist "%BUILD_DIR%\CarMaker\CM%%m" >>"%OUTPUT_FILE%" echo       ├── CM%%m/
+            )
         )
     )
     for %%f in ("%BUILD_DIR%\CarMaker\libRealSimDsLib_*.a") do (
