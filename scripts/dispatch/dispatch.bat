@@ -188,7 +188,7 @@ set /a "DURATION_MIN=DURATION_SECONDS/60"
 set /a "DURATION_SEC=DURATION_SECONDS%%60"
 set "BUILD_DURATION=%DURATION_MIN%m %DURATION_SEC%s"
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0\generate_build_info.ps1" -BuildStartTime "%BUILD_START%" -BuildDuration "%BUILD_DURATION%"
+call "%~dp0\5_build_info.bat" inline "%BUILD_START%" "%BUILD_DURATION%"
 echo.
 
 echo.
