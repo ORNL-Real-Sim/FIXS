@@ -15,6 +15,7 @@ set "DEPS_FILE=%REPO_ROOT%\dependencies.yaml"
 set "OUTPUT_FILE=%BUILD_DIR%\BUILD_INFO.txt"
 set "YAML_HELPER=%SCRIPT_DIR%yaml_helper.ps1"
 set "CARMAKER_VERSIONS="
+set "YAML_MATLAB_DIR="
 
 REM Get build start time from command line or use current time
 set "BUILD_START_TIME=%~2"
@@ -29,9 +30,10 @@ if not exist "%BUILD_DIR%" (
     exit /b 1
 )
 
-REM Read CarMaker versions from dependencies.yaml
+REM Read CarMaker versions and YAMLMatlab location from dependencies.yaml
 if exist "%YAML_HELPER%" (
     for /f "usebackq tokens=* delims=" %%I in (`powershell -NoProfile -File "%YAML_HELPER%" -File "%DEPS_FILE%" -Section "carmaker" -ListKey "versions" -ReturnList`) do set "CARMAKER_VERSIONS=%%~I"
+    for /f "usebackq tokens=* delims=" %%I in (`powershell -NoProfile -File "%YAML_HELPER%" -File "%DEPS_FILE%" -Section "yaml_matlab" -Key "location"`) do set "YAML_MATLAB_DIR=%%~I"
 )
 
 echo Generating BUILD_INFO.txt...
@@ -190,8 +192,11 @@ call :FileStatus "%BUILD_DIR%\CommonLib\RealSimSocket.mexw64" "RealSimSocket.mex
 if exist "%BUILD_DIR%\CommonLib\*.m" (
     >>"%OUTPUT_FILE%" echo   %CHECK% CommonLib MATLAB files                  [%COUNT_MATLAB% files]
 )
-if exist "%BUILD_DIR%\CommonLib\YAMLMatlab_0.4.3" (
-    >>"%OUTPUT_FILE%" echo   %CHECK% YAMLMatlab_0.4.3/                       [Library]
+if defined YAML_MATLAB_DIR (
+    for %%d in ("%REPO_ROOT%\%YAML_MATLAB_DIR%") do set "YAML_MATLAB_FOLDER=%%~nxd"
+    if exist "%BUILD_DIR%\CommonLib\!YAML_MATLAB_FOLDER!" (
+        >>"%OUTPUT_FILE%" echo   %CHECK% !YAML_MATLAB_FOLDER!/                       [Library]
+    )
 )
 if exist "%BUILD_DIR%\CommonLib\libsumo" (
     >>"%OUTPUT_FILE%" echo   %CHECK% libsumo/                                [Library]
@@ -229,7 +234,10 @@ if exist "%BUILD_DIR%\CommonLib" (
     if exist "%BUILD_DIR%\CommonLib\RealSimSocket.mexw64" >>"%OUTPUT_FILE%" echo   │   ├── RealSimSocket.mexw64
     if exist "%BUILD_DIR%\CommonLib\*.m" >>"%OUTPUT_FILE%" echo   │   ├── *.m files ^(%COUNT_MATLAB% files^)
     if exist "%BUILD_DIR%\CommonLib\libsumo" >>"%OUTPUT_FILE%" echo   │   ├── libsumo/
-    if exist "%BUILD_DIR%\CommonLib\YAMLMatlab_0.4.3" >>"%OUTPUT_FILE%" echo   │   └── YAMLMatlab_0.4.3/
+    if defined YAML_MATLAB_DIR (
+        for %%d in ("%REPO_ROOT%\%YAML_MATLAB_DIR%") do set "YAML_MATLAB_FOLDER=%%~nxd"
+        if exist "%BUILD_DIR%\CommonLib\!YAML_MATLAB_FOLDER!" >>"%OUTPUT_FILE%" echo   │   └── !YAML_MATLAB_FOLDER!/
+    )
 )
 if exist "%BUILD_DIR%\CarMaker" (
     >>"%OUTPUT_FILE%" echo   └── CarMaker/

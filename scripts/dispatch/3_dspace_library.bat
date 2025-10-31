@@ -62,9 +62,14 @@ if not defined DSPACE_VERSION (
 )
 
 if not defined DSPACE_INSTALL (
-    echo ERROR: dSPACE install_path not found in dependencies.yaml
-    set "BUILD_RESULT=1"
-    goto :end
+    echo dSPACE install_path not found in dependencies.yaml, attempting auto-detection...
+    for /f "usebackq tokens=* delims=" %%I in (`powershell -NoProfile -File "%SCRIPT_DIR%detect_tool_paths.ps1" -Tool "dspace"`) do set "DSPACE_INSTALL=%%~I"
+    if not defined DSPACE_INSTALL (
+        echo ERROR: Could not auto-detect dSPACE installation
+        set "BUILD_RESULT=1"
+        goto :end
+    )
+    echo Auto-detected dSPACE at: !DSPACE_INSTALL!
 )
 
 if not defined CARMAKER_VERSIONS (

@@ -16,9 +16,13 @@ set "YAML_HELPER=%SCRIPT_DIR%yaml_helper.ps1"
 REM Parse versions from dependencies.yaml
 set "MATLAB_VERSION="
 set "CARMAKER_VERSIONS="
+set "YAML_MATLAB_VERSION="
+set "YAML_MATLAB_DIR="
 if exist "%YAML_HELPER%" (
     for /f "usebackq tokens=* delims=" %%I in (`powershell -NoProfile -File "%YAML_HELPER%" -File "%DEPS_FILE%" -Section "matlab"`) do set "MATLAB_VERSION=%%~I"
     for /f "usebackq tokens=* delims=" %%I in (`powershell -NoProfile -File "%YAML_HELPER%" -File "%DEPS_FILE%" -Section "carmaker" -ListKey "versions" -ReturnList`) do set "CARMAKER_VERSIONS=%%~I"
+    for /f "usebackq tokens=* delims=" %%I in (`powershell -NoProfile -File "%YAML_HELPER%" -File "%DEPS_FILE%" -Section "yaml_matlab"`) do set "YAML_MATLAB_VERSION=%%~I"
+    for /f "usebackq tokens=* delims=" %%I in (`powershell -NoProfile -File "%YAML_HELPER%" -File "%DEPS_FILE%" -Section "yaml_matlab" -Key "location"`) do set "YAML_MATLAB_DIR=%%~I"
 )
 if not defined MATLAB_VERSION (
     echo ERROR: MATLAB version not found in dependencies.yaml
@@ -118,8 +122,11 @@ echo Copying CommonLib libraries...
 if exist "%SOURCE_PATH%\CommonLib\libsumo" (
     xcopy /Y /E /I "%SOURCE_PATH%\CommonLib\libsumo" "%RELEASE_PATH%\CommonLib\libsumo" >nul
 )
-if exist "%SOURCE_PATH%\CommonLib\YAMLMatlab_0.4.3" (
-    xcopy /Y /E /I "%SOURCE_PATH%\CommonLib\YAMLMatlab_0.4.3" "%RELEASE_PATH%\CommonLib\YAMLMatlab_0.4.3" >nul
+if defined YAML_MATLAB_DIR (
+    if exist "%SOURCE_PATH%\%YAML_MATLAB_DIR%" (
+        for %%d in ("%SOURCE_PATH%\%YAML_MATLAB_DIR%") do set "YAML_MATLAB_FOLDER=%%~nxd"
+        xcopy /Y /E /I "%SOURCE_PATH%\%YAML_MATLAB_DIR%" "%RELEASE_PATH%\CommonLib\!YAML_MATLAB_FOLDER!" >nul
+    )
 )
 
 REM Release CommonLib - MATLAB source files (exclude test/utility scripts)

@@ -32,6 +32,11 @@ libraries:
     location: "CommonLib/yaml-cpp"
     notes: "YAML configuration parser"
 
+  yaml_matlab:
+    version: "0.4.3"
+    location: "CommonLib/YAMLMatlab_0.4.3"
+    notes: "YAML parser for MATLAB"
+
 development_tools:
   visual_studio:
     version: "2022"

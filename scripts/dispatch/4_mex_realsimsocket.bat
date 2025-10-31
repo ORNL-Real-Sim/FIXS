@@ -56,7 +56,15 @@ if defined MATLAB_ROOT (
 ) else if exist "%ProgramFiles%\MATLAB\R%MATLAB_VERSION%" (
     set "MATLAB_INSTALL=%ProgramFiles%\MATLAB\R%MATLAB_VERSION%"
 ) else (
-    set "MATLAB_INSTALL=C:\Program Files\MATLAB\R%MATLAB_VERSION%"
+    echo MATLAB not found at standard location, attempting auto-detection...
+    for /f "usebackq tokens=* delims=" %%I in (`powershell -NoProfile -File "%SCRIPT_DIR%detect_tool_paths.ps1" -Tool "matlab"`) do set "MATLAB_INSTALL=%%~I"
+)
+
+if not defined MATLAB_INSTALL (
+    echo ERROR: Could not locate MATLAB installation
+    echo Please set MATLAB_ROOT environment variable or add install_path to dependencies.yaml
+    set "BUILD_RESULT=1"
+    goto :end
 )
 
 echo.
@@ -65,7 +73,6 @@ echo MATLAB root: %MATLAB_INSTALL%
 
 if not exist "%MATLAB_INSTALL%\bin\mex.bat" (
     echo ERROR: Unable to locate mex.bat at: %MATLAB_INSTALL%\bin\mex.bat
-    echo Ensure MATLAB is installed or set MATLAB_ROOT environment variable.
     set "BUILD_RESULT=1"
     goto :end
 )
