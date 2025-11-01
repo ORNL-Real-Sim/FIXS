@@ -32,6 +32,7 @@ if /I "%RUN_MODE%"=="inline" (
 set "BUILD_RESULT=0"
 set "MATLAB_VERSION="
 set "MATLAB_INSTALL="
+set "VS_VERSION="
 set "DEPS_FILE=%SCRIPT_DIR%..\..\dependencies.yaml"
 set "STACK_CHANGED=0"
 
@@ -44,11 +45,16 @@ if not exist "%DEPS_FILE%" (
 )
 
 call :ReadYamlVersion "%DEPS_FILE%" "matlab" MATLAB_VERSION
+call :ReadYamlVersion "%DEPS_FILE%" "visual_studio" VS_VERSION
 
 if not defined MATLAB_VERSION (
     echo ERROR: MATLAB version not found in dependencies.yaml
     set "BUILD_RESULT=1"
     goto :end
+)
+
+if not defined VS_VERSION (
+    echo WARNING: Visual Studio version not found in dependencies.yaml, MEX will auto-detect compiler
 )
 
 if defined MATLAB_ROOT (
@@ -95,8 +101,17 @@ if %ERRORLEVEL% EQU 0 (
     goto :end
 )
 
+REM Set up compiler if Visual Studio version is specified
+if defined VS_VERSION (
+    echo Configuring MEX to use Visual Studio %VS_VERSION%...
+    call "%MATLAB_INSTALL%\bin\mex.bat" -setup C++ -client engine COMPILER=msvc%VS_VERSION% >nul 2>&1
+    if %ERRORLEVEL% NEQ 0 (
+        echo WARNING: Failed to configure Visual Studio %VS_VERSION%, MEX will use default compiler
+    )
+)
+
 echo Invoking mex...
-call "%MATLAB_INSTALL%\bin\mex.bat" -v -largeArrayDims -outdir "%SOURCE_DIR%" "%SOURCE_FILE%"
+call "%MATLAB_INSTALL%\bin\mex.bat" -largeArrayDims -outdir "%SOURCE_DIR%" "%SOURCE_FILE%"
 if %ERRORLEVEL% NEQ 0 (
     echo.
     echo ==============================
