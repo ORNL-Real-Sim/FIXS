@@ -111,8 +111,6 @@ if %ERRORLEVEL% EQU 0 (
     goto :end
 )
 
-call "%DSPACE_INSTALL%\CFD_vars.bat"
-
 REM Add section header to summary log if using shared logging
 if "%USE_LOGGING%"=="1" (
     >>"%LOG_SUMMARY%" echo.
@@ -170,21 +168,24 @@ echo Include path: !CARMAKER_INCLUDE!
 echo Output name : !OUTPUT_NAME! (CarMaker !CM_VERSION!)
 echo ----------------------------------
 
+REM Initialize dSPACE environment before calling dsmake
+call "%DSPACE_INSTALL%\CFD_vars.bat"
+
 if "%USE_LOGGING%"=="1" (
     >>"%LOG_SUMMARY%" echo ==^> Building !OUTPUT_NAME!...
-    call dsmake -f "%DSPACE_MAKEFILE%" output_filename=!OUTPUT_NAME! source_files="SocketHelper.cpp MsgHelper.cpp VirEnvHelper.cpp VirEnv_Wrapper.cpp" custom_cpp_options="!CPP_OPTS!" target=Dsx86_32 >>"%LOG_OUTPUT%" 2>&1
+    (call dsmake -f "%DSPACE_MAKEFILE%" output_filename=!OUTPUT_NAME! source_files="SocketHelper.cpp MsgHelper.cpp VirEnvHelper.cpp VirEnv_Wrapper.cpp" custom_cpp_options="!CPP_OPTS!" target=Dsx86_32) >>"%LOG_OUTPUT%" 2>&1
 ) else (
     call dsmake -f "%DSPACE_MAKEFILE%" output_filename=!OUTPUT_NAME! source_files="SocketHelper.cpp MsgHelper.cpp VirEnvHelper.cpp VirEnv_Wrapper.cpp" custom_cpp_options="!CPP_OPTS!" target=Dsx86_32
 )
-set "DSM_RESULT=!ERRORLEVEL!"
 
-if not "!DSM_RESULT!"=="0" (
+REM Check if library was actually created (dsmake returns non-zero even on success due to warnings)
+if not exist "lib!OUTPUT_NAME!.a" (
     echo.
     echo ==============================
-    echo dSPACE library build FAILED for CarMaker !CM_VERSION! (exit code !DSM_RESULT!)
+    echo dSPACE library build FAILED for CarMaker !CM_VERSION! - output file not found
     echo ==============================
     if "%USE_LOGGING%"=="1" >>"%LOG_SUMMARY%" echo ==^> !OUTPUT_NAME! build FAILED
-    endlocal & exit /b !DSM_RESULT!
+    endlocal & exit /b 1
 )
 
 echo.
