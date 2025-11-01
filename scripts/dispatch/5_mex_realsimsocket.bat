@@ -36,6 +36,15 @@ set "VS_VERSION="
 set "DEPS_FILE=%SCRIPT_DIR%..\..\dependencies.yaml"
 set "STACK_CHANGED=0"
 
+REM Use shared log files if set by dispatch
+if defined RS_BUILD_LOG (
+    set "LOG_OUTPUT=%RS_BUILD_LOG%"
+    set "LOG_SUMMARY=%RS_BUILD_SUMMARY%"
+    set "USE_LOGGING=1"
+) else (
+    set "USE_LOGGING=0"
+)
+
 echo Parsing dependencies from: %DEPS_FILE%
 
 if not exist "%DEPS_FILE%" (
@@ -101,6 +110,13 @@ if %ERRORLEVEL% EQU 0 (
     goto :end
 )
 
+REM Add section header to summary log if using shared logging
+if "%USE_LOGGING%"=="1" (
+    >>"%LOG_SUMMARY%" echo.
+    >>"%LOG_SUMMARY%" echo RealSimSocket MEX Build
+    >>"%LOG_SUMMARY%" echo -----------------------
+)
+
 REM Set up compiler if Visual Studio version is specified
 if defined VS_VERSION (
     echo Configuring MEX to use Visual Studio %VS_VERSION%...
@@ -111,12 +127,18 @@ if defined VS_VERSION (
 )
 
 echo Invoking mex...
-call "%MATLAB_INSTALL%\bin\mex.bat" -largeArrayDims -outdir "%SOURCE_DIR%" "%SOURCE_FILE%"
+if "%USE_LOGGING%"=="1" (
+    >>"%LOG_SUMMARY%" echo ==^> Building RealSimSocket.mexw64...
+    call "%MATLAB_INSTALL%\bin\mex.bat" -largeArrayDims -outdir "%SOURCE_DIR%" "%SOURCE_FILE%" >>"%LOG_OUTPUT%" 2>&1
+) else (
+    call "%MATLAB_INSTALL%\bin\mex.bat" -largeArrayDims -outdir "%SOURCE_DIR%" "%SOURCE_FILE%"
+)
 if %ERRORLEVEL% NEQ 0 (
     echo.
     echo ==============================
     echo RealSimSocket MEX build FAILED!
     echo ==============================
+    if "%USE_LOGGING%"=="1" >>"%LOG_SUMMARY%" echo ==^> RealSimSocket.mexw64 build FAILED
     set "BUILD_RESULT=1"
 ) else (
     echo.
@@ -124,6 +146,7 @@ if %ERRORLEVEL% NEQ 0 (
     echo RealSimSocket MEX built successfully.
     echo Output: %SOURCE_DIR%\RealSimSocket.mexw64
     echo ==============================
+    if "%USE_LOGGING%"=="1" >>"%LOG_SUMMARY%" echo ==^> RealSimSocket.mexw64 build SUCCESS
     set "BUILD_RESULT=0"
 )
 

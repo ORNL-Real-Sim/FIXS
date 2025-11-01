@@ -13,8 +13,12 @@ set "YAML_HELPER=%SCRIPT_DIR%yaml_helper.ps1"
 for %%I in ("%SCRIPT_DIR%..\..") do set "REPO_ROOT=%%~fI"
 for %%I in ("%SCRIPT_DIR%.") do set "DISPATCH_DIR=%%~fI"
 set "DEPS_FILE=%REPO_ROOT%\dependencies.yaml"
-set "LOG_OUTPUT=%DISPATCH_DIR%\build_carmaker.log"
-set "LOG_SUMMARY=%DISPATCH_DIR%\build_carmaker_summary.log"
+
+REM Use shared log files if set by dispatch, otherwise create local ones
+if not defined RS_BUILD_LOG set "RS_BUILD_LOG=%DISPATCH_DIR%build.log"
+if not defined RS_BUILD_SUMMARY set "RS_BUILD_SUMMARY=%DISPATCH_DIR%build_summary.log"
+set "LOG_OUTPUT=%RS_BUILD_LOG%"
+set "LOG_SUMMARY=%RS_BUILD_SUMMARY%"
 
 REM Handle optional window request
 if /I "%RUN_MODE%"=="window" (
@@ -81,10 +85,17 @@ echo Using versions from dependencies.yaml:
 echo   CarMaker versions: %CARMAKER_VERSIONS%
 echo.
 
->"%LOG_SUMMARY%" echo CarMaker Build Results
->>"%LOG_SUMMARY%" echo ======================
->>"%LOG_SUMMARY%" echo.
-if exist "%LOG_OUTPUT%" del "%LOG_OUTPUT%" >nul 2>&1
+REM Only initialize logs in standalone mode
+if /I "%RUN_MODE%"=="standalone" (
+    >"%LOG_SUMMARY%" echo CarMaker Build Results
+    >>"%LOG_SUMMARY%" echo ======================
+    >>"%LOG_SUMMARY%" echo.
+    if exist "%LOG_OUTPUT%" del "%LOG_OUTPUT%" >nul 2>&1
+) else (
+    >>"%LOG_SUMMARY%" echo.
+    >>"%LOG_SUMMARY%" echo CarMaker Components Build
+    >>"%LOG_SUMMARY%" echo -------------------------
+)
 
 REM Build CarMaker desktop and Simulink variants
 for %%v in (%CARMAKER_VERSIONS%) do (

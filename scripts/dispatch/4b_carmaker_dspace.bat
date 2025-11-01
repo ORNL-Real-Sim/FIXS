@@ -43,6 +43,15 @@ set "STACK_CHANGED=0"
 if defined RS_FIXS_CARMAKER_BASE set "CARMAKER_BASE=%RS_FIXS_CARMAKER_BASE%"
 if defined CARMAKER_ROOT set "CARMAKER_BASE=%CARMAKER_ROOT%"
 
+REM Use shared log files if set by dispatch
+if defined RS_BUILD_LOG (
+    set "LOG_OUTPUT=%RS_BUILD_LOG%"
+    set "LOG_SUMMARY=%RS_BUILD_SUMMARY%"
+    set "USE_LOGGING=1"
+) else (
+    set "USE_LOGGING=0"
+)
+
 echo Parsing dependencies from: %DEPS_FILE%
 
 if not exist "%DEPS_FILE%" (
@@ -104,6 +113,13 @@ if %ERRORLEVEL% EQU 0 (
 
 call "%DSPACE_INSTALL%\CFD_vars.bat"
 
+REM Add section header to summary log if using shared logging
+if "%USE_LOGGING%"=="1" (
+    >>"%LOG_SUMMARY%" echo.
+    >>"%LOG_SUMMARY%" echo dSPACE CarMaker Libraries Build
+    >>"%LOG_SUMMARY%" echo -------------------------------
+)
+
 set "CARMAKER_SUCCESS_COUNT=0"
 set "CARMAKER_FAIL_COUNT=0"
 
@@ -154,7 +170,12 @@ echo Include path: !CARMAKER_INCLUDE!
 echo Output name : !OUTPUT_NAME! (CarMaker !CM_VERSION!)
 echo ----------------------------------
 
-call dsmake -f "%DSPACE_MAKEFILE%" output_filename=!OUTPUT_NAME! source_files="SocketHelper.cpp MsgHelper.cpp VirEnvHelper.cpp VirEnv_Wrapper.cpp" custom_cpp_options="!CPP_OPTS!" target=Dsx86_32
+if "%USE_LOGGING%"=="1" (
+    >>"%LOG_SUMMARY%" echo ==^> Building !OUTPUT_NAME!...
+    call dsmake -f "%DSPACE_MAKEFILE%" output_filename=!OUTPUT_NAME! source_files="SocketHelper.cpp MsgHelper.cpp VirEnvHelper.cpp VirEnv_Wrapper.cpp" custom_cpp_options="!CPP_OPTS!" target=Dsx86_32 >>"%LOG_OUTPUT%" 2>&1
+) else (
+    call dsmake -f "%DSPACE_MAKEFILE%" output_filename=!OUTPUT_NAME! source_files="SocketHelper.cpp MsgHelper.cpp VirEnvHelper.cpp VirEnv_Wrapper.cpp" custom_cpp_options="!CPP_OPTS!" target=Dsx86_32
+)
 set "DSM_RESULT=!ERRORLEVEL!"
 
 if not "!DSM_RESULT!"=="0" (
@@ -162,6 +183,7 @@ if not "!DSM_RESULT!"=="0" (
     echo ==============================
     echo dSPACE library build FAILED for CarMaker !CM_VERSION! (exit code !DSM_RESULT!)
     echo ==============================
+    if "%USE_LOGGING%"=="1" >>"%LOG_SUMMARY%" echo ==^> !OUTPUT_NAME! build FAILED
     endlocal & exit /b !DSM_RESULT!
 )
 
@@ -169,6 +191,7 @@ echo.
 echo ==============================
 echo dSPACE library built successfully: lib!OUTPUT_NAME!.a
 echo ==============================
+if "%USE_LOGGING%"=="1" >>"%LOG_SUMMARY%" echo ==^> !OUTPUT_NAME! build SUCCESS
 endlocal & exit /b 0
 
 :missing_makefile

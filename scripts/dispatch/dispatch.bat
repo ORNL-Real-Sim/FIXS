@@ -13,6 +13,20 @@ set "RELEASE_PATH=%SOURCE_PATH%\build"
 set "DEPS_FILE=%SOURCE_PATH%\dependencies.yaml"
 set "YAML_HELPER=%SCRIPT_DIR%yaml_helper.ps1"
 
+REM Set up shared log files
+set "RS_BUILD_LOG=%SCRIPT_DIR%build.log"
+set "RS_BUILD_SUMMARY=%SCRIPT_DIR%build_summary.log"
+
+REM Initialize log files
+>"%RS_BUILD_LOG%" echo RealSim FIXS Build Log
+>>"%RS_BUILD_LOG%" echo =====================
+>>"%RS_BUILD_LOG%" echo Build started: %date% %time%
+>>"%RS_BUILD_LOG%" echo.
+>"%RS_BUILD_SUMMARY%" echo RealSim FIXS Build Summary
+>>"%RS_BUILD_SUMMARY%" echo ==========================
+>>"%RS_BUILD_SUMMARY%" echo Build started: %date% %time%
+>>"%RS_BUILD_SUMMARY%" echo.
+
 REM Parse versions from dependencies.yaml
 set "MATLAB_VERSION="
 set "CARMAKER_VERSIONS="
@@ -216,6 +230,8 @@ echo RealSim: Release Complete!
 echo ==============================
 echo Files copied to: %RELEASE_PATH%
 echo Build info: %RELEASE_PATH%\BUILD_INFO.txt
+echo Build logs: %RS_BUILD_LOG%
+echo Build summary: %RS_BUILD_SUMMARY%
 echo.
 pause
 exit /b 0
@@ -225,5 +241,9 @@ echo.
 echo ==============================
 echo RealSim: Release FAILED!
 echo ==============================
+echo Check logs for details:
+echo   Summary: %RS_BUILD_SUMMARY%
+echo   Details: %RS_BUILD_LOG%
+echo.
 pause
 exit /b 1

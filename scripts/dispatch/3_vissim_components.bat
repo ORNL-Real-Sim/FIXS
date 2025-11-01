@@ -11,8 +11,12 @@ set "RUN_MODE=%~1"
 
 for %%I in ("%SCRIPT_DIR%..\..") do set "REPO_ROOT=%%~fI"
 for %%I in ("%SCRIPT_DIR%.") do set "DISPATCH_DIR=%%~fI"
-set "LOG_OUTPUT=%DISPATCH_DIR%\build_vissim.log"
-set "LOG_SUMMARY=%DISPATCH_DIR%\build_vissim_summary.log"
+
+REM Use shared log files if set by dispatch, otherwise create local ones
+if not defined RS_BUILD_LOG set "RS_BUILD_LOG=%DISPATCH_DIR%build.log"
+if not defined RS_BUILD_SUMMARY set "RS_BUILD_SUMMARY=%DISPATCH_DIR%build_summary.log"
+set "LOG_OUTPUT=%RS_BUILD_LOG%"
+set "LOG_SUMMARY=%RS_BUILD_SUMMARY%"
 
 REM Handle optional window request
 if /I "%RUN_MODE%"=="window" (
@@ -59,10 +63,17 @@ if errorlevel 1 (
 )
 set "STACK_CHANGED=1"
 
->"%LOG_SUMMARY%" echo VISSIM Build Results
->>"%LOG_SUMMARY%" echo ====================
->>"%LOG_SUMMARY%" echo.
-if exist "%LOG_OUTPUT%" del "%LOG_OUTPUT%" >nul 2>&1
+REM Only initialize logs in standalone mode
+if /I "%RUN_MODE%"=="standalone" (
+    >"%LOG_SUMMARY%" echo VISSIM Build Results
+    >>"%LOG_SUMMARY%" echo ====================
+    >>"%LOG_SUMMARY%" echo.
+    if exist "%LOG_OUTPUT%" del "%LOG_OUTPUT%" >nul 2>&1
+) else (
+    >>"%LOG_SUMMARY%" echo.
+    >>"%LOG_SUMMARY%" echo VISSIM Components Build
+    >>"%LOG_SUMMARY%" echo -----------------------
+)
 
 REM Build VISSIM server components if present
 if exist ".\ProprietaryFiles\VISSIMserver" (
