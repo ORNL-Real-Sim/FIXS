@@ -179,14 +179,7 @@ goto :end
 :missing_cfd
 echo ERROR: dSPACE environment file not found: %DSPACE_INSTALL%\CFD_vars.bat
 set "BUILD_RESULT=1"
-
-:end
-if "%STACK_CHANGED%"=="1" popd >nul
-if /I "%RUN_MODE%"=="standalone" (
-    echo.
-    pause
-)
-exit /b %BUILD_RESULT%
+goto :end
 
 :ReadYamlList
 REM %1 file path, %2 subsection name, %3 list key, %4 output var
@@ -223,5 +216,12 @@ if exist "%YAML_HELPER%" (
 endlocal & set "%OUT_VAR%=%RESULT%"
 exit /b 0
 
+:end
+if "%STACK_CHANGED%"=="1" popd >nul
+if /I "%RUN_MODE%"=="standalone" (
+    echo.
+    pause
+)
+exit /b %BUILD_RESULT%
 
 

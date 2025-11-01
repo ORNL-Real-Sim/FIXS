@@ -52,7 +52,7 @@ set "BUILD_START_SECONDS=%time:~0,2%%time:~3,2%%time:~6,2%"
 REM ====================================
 REM Step 1: Compile External Libraries
 REM ====================================
-echo [1/6] Checking external libraries...
+echo [1/7] Checking external libraries...
 if not exist "%SOURCE_PATH%\CommonLib\yaml-cpp\build" (
     echo External libraries not found. Compiling...
     call "%~dp0\1_external_libraries.bat"
@@ -66,40 +66,74 @@ if not exist "%SOURCE_PATH%\CommonLib\yaml-cpp\build" (
 echo.
 
 REM ====================================
-REM Step 2: Compile All Components
+REM Step 2: Compile Core Components
 REM ====================================
-echo [2/6] Compiling all components...
-call "%~dp0\2_all_components.bat" inline
+echo [2/7] Compiling core components (TrafficLayer, VirtualEnvironment)...
+call "%~dp0\2_core_components.bat" inline
 if %ERRORLEVEL% neq 0 (
-    echo ERROR: Failed to compile components!
+    echo ERROR: Failed to compile core components!
     goto :failed
 )
 echo.
 
 REM ====================================
-REM Step 3: Build RS dSPACE Library
+REM Step 3: Compile VISSIM Components
 REM ====================================
-echo [3/6] Building RealSim dSPACE library...
-call "%~dp0\3_dspace_library.bat" inline
+echo [3/7] Compiling VISSIM components...
+call "%~dp0\3_vissim_components.bat" inline
+if %ERRORLEVEL% neq 0 (
+    echo WARNING: VISSIM components build failed or skipped
+)
+echo.
+
+REM ====================================
+REM Step 4a: Compile CarMaker Components
+REM ====================================
+echo [4a/7] Compiling CarMaker components...
+call "%~dp0\4a_carmaker_components.bat" inline
+if %ERRORLEVEL% neq 0 (
+    echo WARNING: CarMaker components build failed or skipped
+)
+echo.
+
+REM ====================================
+REM Step 4b: Compile dSPACE Libraries for CarMaker
+REM ====================================
+echo [4b/7] Compiling dSPACE libraries for CarMaker...
+call "%~dp0\4b_carmaker_dspace.bat" inline
 if %ERRORLEVEL% neq 0 (
     echo WARNING: dSPACE library build failed or skipped
 )
 echo.
 
 REM ====================================
-REM Step 4: Build RealSimSocket MEX
+REM Step 5: Build RealSimSocket MEX
 REM ====================================
-echo [4/6] Building RealSimSocket MEX...
-call "%~dp0\4_mex_realsimsocket.bat" inline
+echo [5/7] Building RealSimSocket MEX...
+call "%~dp0\5_mex_realsimsocket.bat" inline
 if %ERRORLEVEL% neq 0 (
     echo WARNING: RealSimSocket MEX build failed or skipped
 )
 echo.
 
 REM ====================================
-REM Step 5: Release Files to build\
+REM Step 6: Generate BUILD_INFO.txt and Release Files
 REM ====================================
-echo [5/6] Copying files to build directory...
+
+REM Calculate build duration
+set "BUILD_END=%date% %time%"
+set "BUILD_END_SECONDS=%time:~0,2%%time:~3,2%%time:~6,2%"
+set /a "DURATION_SECONDS=BUILD_END_SECONDS-BUILD_START_SECONDS"
+if %DURATION_SECONDS% lss 0 set /a "DURATION_SECONDS+=86400"
+set /a "DURATION_MIN=DURATION_SECONDS/60"
+set /a "DURATION_SEC=DURATION_SECONDS%%60"
+set "BUILD_DURATION=%DURATION_MIN%m %DURATION_SEC%s"
+
+echo [6/7] Generating BUILD_INFO.txt...
+call "%~dp0\6_build_info.bat" inline "%BUILD_START%" "%BUILD_DURATION%"
+echo.
+
+echo [7/7] Copying files to build directory...
 
 REM Release executables
 echo Copying executables...
@@ -146,10 +180,18 @@ REM Release CarMaker files
 echo Copying CarMaker files...
 for %%v in (%CARMAKER_VERSIONS%) do (
     for /f "tokens=1 delims=." %%m in ("%%v") do (
+        set "CM_VERSION_SAFE=%%v"
+        set "CM_VERSION_SAFE=!CM_VERSION_SAFE:.=_!"
+
         if exist "%SOURCE_PATH%\ProprietaryFiles\CM%%m_proj\src\CarMaker.win64.exe" (
             if not exist "%RELEASE_PATH%\CarMaker\CM%%m" mkdir "%RELEASE_PATH%\CarMaker\CM%%m"
             copy /Y "%SOURCE_PATH%\ProprietaryFiles\CM%%m_proj\src\CarMaker.win64.exe" "%RELEASE_PATH%\CarMaker\CM%%m\" >nul
             copy /Y "%SOURCE_PATH%\ProprietaryFiles\CM%%m_proj\src_cm4sl\libcarmaker4sl.mexw64" "%RELEASE_PATH%\CarMaker\CM%%m\" >nul
+
+            REM Copy corresponding dSPACE library to CarMaker folder
+            for %%f in ("%SOURCE_PATH%\CommonLib\libRealSimDsLib_*_CM!CM_VERSION_SAFE!.a") do (
+                copy /Y "%%f" "%RELEASE_PATH%\CarMaker\CM%%m\" >nul 2>&1
+            )
         )
     )
 )
@@ -157,12 +199,6 @@ for %%v in (%CARMAKER_VERSIONS%) do (
 REM Copy CarMaker utility files
 if exist "%SOURCE_PATH%\CarMaker" (
     xcopy /Y /E /I "%SOURCE_PATH%\CarMaker" "%RELEASE_PATH%\CarMaker" >nul
-)
-
-REM Copy dSPACE library (if present)
-echo Copying dSPACE library...
-for %%f in ("%SOURCE_PATH%\CommonLib\libRealSimDsLib_*.a") do (
-    copy /Y "%%f" "%RELEASE_PATH%\CarMaker\" >nul 2>&1
 )
 
 REM Release VISSIM files
@@ -173,23 +209,6 @@ if exist "%SOURCE_PATH%\ProprietaryFiles\VISSIMserver\x64\Release\DriverModel_Re
 if exist "%SOURCE_PATH%\ProprietaryFiles\VISSIMserver\x64\Release\DriverModel_RealSim_v2021.dll" (
     copy /Y "%SOURCE_PATH%\ProprietaryFiles\VISSIMserver\x64\Release\DriverModel_RealSim_v2021.dll" "%RELEASE_PATH%\" >nul
 )
-
-REM ====================================
-REM Step 6: Generate BUILD_INFO.txt
-REM ====================================
-echo [6/6] Generating BUILD_INFO.txt...
-
-REM Calculate build duration
-set "BUILD_END=%date% %time%"
-set "BUILD_END_SECONDS=%time:~0,2%%time:~3,2%%time:~6,2%"
-set /a "DURATION_SECONDS=BUILD_END_SECONDS-BUILD_START_SECONDS"
-if %DURATION_SECONDS% lss 0 set /a "DURATION_SECONDS+=86400"
-set /a "DURATION_MIN=DURATION_SECONDS/60"
-set /a "DURATION_SEC=DURATION_SECONDS%%60"
-set "BUILD_DURATION=%DURATION_MIN%m %DURATION_SEC%s"
-
-call "%~dp0\5_build_info.bat" inline "%BUILD_START%" "%BUILD_DURATION%"
-echo.
 
 echo.
 echo ==============================

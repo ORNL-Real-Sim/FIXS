@@ -2,8 +2,8 @@
 setlocal EnableExtensions EnableDelayedExpansion
 
 REM ====================================
-REM Build All RealSim Components
-REM Supports double-click (standalone) and inline invocation via dispatch.
+REM Build CarMaker Components
+REM Builds: CarMaker desktop and Simulink variants
 REM ====================================
 
 set "SCRIPT_DIR=%~dp0"
@@ -13,12 +13,12 @@ set "YAML_HELPER=%SCRIPT_DIR%yaml_helper.ps1"
 for %%I in ("%SCRIPT_DIR%..\..") do set "REPO_ROOT=%%~fI"
 for %%I in ("%SCRIPT_DIR%.") do set "DISPATCH_DIR=%%~fI"
 set "DEPS_FILE=%REPO_ROOT%\dependencies.yaml"
-set "LOG_OUTPUT=%DISPATCH_DIR%\build_output.log"
-set "LOG_SUMMARY=%DISPATCH_DIR%\build_results.log"
+set "LOG_OUTPUT=%DISPATCH_DIR%\build_carmaker.log"
+set "LOG_SUMMARY=%DISPATCH_DIR%\build_carmaker_summary.log"
 
 REM Handle optional window request
 if /I "%RUN_MODE%"=="window" (
-    start "RS FIXS Build" cmd /k "%~f0" inline
+    start "RS FIXS CarMaker Build" cmd /k "%~f0" inline
     exit /b 0
 )
 
@@ -81,41 +81,10 @@ echo Using versions from dependencies.yaml:
 echo   CarMaker versions: %CARMAKER_VERSIONS%
 echo.
 
->"%LOG_SUMMARY%" echo Build Results
->>"%LOG_SUMMARY%" echo ==============
+>"%LOG_SUMMARY%" echo CarMaker Build Results
+>>"%LOG_SUMMARY%" echo ======================
 >>"%LOG_SUMMARY%" echo.
 if exist "%LOG_OUTPUT%" del "%LOG_OUTPUT%" >nul 2>&1
-
-REM Build TrafficLayer
-call :BuildSolution "TrafficLayer" ".\TrafficLayer\TrafficLayer.sln" "/p:Configuration=Release"
-if errorlevel 1 (
-    call :TrackFailure "TrafficLayer"
-    set "BUILD_RESULT=1"
-)
-
-REM Build VISSIM server components if present
-if exist ".\ProprietaryFiles\VISSIMserver" (
-    call :BuildSolution "DriverModel_RealSim" ".\ProprietaryFiles\VISSIMserver\VISSIMserver.sln" "/target:DriverModel_RealSim /p:Configuration=Release"
-    if errorlevel 1 (
-        call :TrackFailure "DriverModel_RealSim"
-        set "BUILD_RESULT=1"
-    )
-
-    call :BuildSolution "DriverModel_RealSim_v2021" ".\ProprietaryFiles\VISSIMserver\VISSIMserver.sln" "/target:DriverModel_RealSim_v2021 /p:Configuration=Release"
-    if errorlevel 1 (
-        call :TrackFailure "DriverModel_RealSim_v2021"
-        set "BUILD_RESULT=1"
-    )
-) else (
-    >>"%LOG_SUMMARY%" echo VISSIMserver folder not found, skipping VISSIM builds
-)
-
-REM Build VirtualEnvironment
-call :BuildSolution "VirtualEnvironment" ".\VirtualEnvironment\VirtualEnvironment.sln" "/p:Configuration=Release"
-if errorlevel 1 (
-    call :TrackFailure "VirtualEnvironment"
-    set "BUILD_RESULT=1"
-)
 
 REM Build CarMaker desktop and Simulink variants
 for %%v in (%CARMAKER_VERSIONS%) do (
@@ -143,10 +112,10 @@ for %%v in (%CARMAKER_VERSIONS%) do (
 echo.
 echo ==============================
 if defined FAILED_BUILDS (
-    echo Build completed with failures!
+    echo CarMaker build completed with failures!
     echo Failed builds: %FAILED_BUILDS%
 ) else (
-    echo All builds completed successfully!
+    echo All CarMaker components built successfully!
 )
 echo Check %LOG_SUMMARY% for summary and %LOG_OUTPUT% for details.
 echo ==============================
@@ -170,10 +139,6 @@ if errorlevel 1 echo ===^> %TARGET_NAME% built failed>>"%LOG_SUMMARY%" & exit /b
 echo ===^> %TARGET_NAME% built success>>"%LOG_SUMMARY%"
 exit /b 0
 
-:CopyIfExists
-if exist "%~1" copy /Y "%~1" "%~2" >nul 2>&1
-exit /b 0
-
 :TrackFailure
 if defined FAILED_BUILDS (
     set "FAILED_BUILDS=%FAILED_BUILDS% %~1"
@@ -182,22 +147,8 @@ if defined FAILED_BUILDS (
 )
 exit /b 0
 
-:ReadYamlVersion
-set "FILE=%~1"
-set "SECTION=%~2"
-set "OUT_VAR=%~3"
-set "RESULT="
-
-if exist "%YAML_HELPER%" (
-    for /f "usebackq tokens=* delims=" %%I in (`powershell -NoProfile -File "%YAML_HELPER%" -File "%FILE%" -Section "%SECTION%"`) do (
-        if not defined RESULT set "RESULT=%%~I"
-    )
-)
-
-set "%OUT_VAR%=%RESULT%"
-exit /b 0
-
 :ReadYamlList
+setlocal EnableExtensions EnableDelayedExpansion
 set "FILE=%~1"
 set "SECTION=%~2"
 set "LIST_KEY=%~3"
@@ -210,5 +161,21 @@ if exist "%YAML_HELPER%" (
     )
 )
 
-set "%OUT_VAR%=%RESULT%"
+endlocal & set "%OUT_VAR%=%RESULT%"
+exit /b 0
+
+:ReadYamlVersion
+setlocal EnableExtensions EnableDelayedExpansion
+set "FILE=%~1"
+set "SECTION=%~2"
+set "OUT_VAR=%~3"
+set "RESULT="
+
+if exist "%YAML_HELPER%" (
+    for /f "usebackq tokens=* delims=" %%I in (`powershell -NoProfile -File "%YAML_HELPER%" -File "%FILE%" -Section "%SECTION%"`) do (
+        if not defined RESULT set "RESULT=%%~I"
+    )
+)
+
+endlocal & set "%OUT_VAR%=%RESULT%"
 exit /b 0
