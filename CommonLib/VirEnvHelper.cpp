@@ -1,5 +1,9 @@
 #include "VirEnvHelper.h"
 
+// Uncomment the line below to enable performance timing
+// #define ENABLE_PERF_TIMING
+#include "PerformanceTimer.h"
+
 using namespace std;
 
 VirEnvHelper::VirEnvHelper() {
@@ -18,6 +22,8 @@ int VirEnvHelper::CM_LogErrF(const char* MsgChar) {
 
 void VirEnvHelper::shutdown() {
 	Log("RealSim shutdown \n");
+
+	PERF_SHUTDOWN();
 
 #ifdef RS_DSPACE
 	try {
@@ -231,6 +237,8 @@ int VirEnvHelper::initialization(const char** errorMsg, const char* configPathIn
 		return ERROR_INIT_SOCKET;
 	}
 
+	PERF_INIT("RealSimPerf.log");
+
 	return 0;
 }
 
@@ -321,6 +329,8 @@ int VirEnvHelper::runStep(double simTime, const char** errorMsg) {
 	//  add to CmVehicleToRemove for next timestep
 	//END
 
+	PERF_TIC("runStep_total");
+
 	string errorMsgStr;
 
 
@@ -333,6 +343,7 @@ int VirEnvHelper::runStep(double simTime, const char** errorMsg) {
 	// 			initialize available CM id queue and move traffic objects far away
 	// ===========================================================================
 	if (simTime < 0.05) {
+		PERF_TIC("init_cm_queue");
 		try {
 			if (CmAvailableCarId_queue.size() == 0) {
 				for (int iObj = 0; iObj < Traffic.nObjs; iObj++) {
@@ -370,15 +381,20 @@ int VirEnvHelper::runStep(double simTime, const char** errorMsg) {
 			printf("ERROR: initialize traffic object position failed!\n");
 			errorMsgStr = "RealSim: Initialize Traffic Objects Failed";
 			*errorMsg = errorMsgStr.c_str();
+			PERF_TOC("init_cm_queue");
+			PERF_TOC("runStep_total");
 			return ERROR_INIT_TRAFFIC;
 		}
 		catch (...) {
 			printf("UNKNOWN ERROR: initialize traffic object position failed!\n");
 			errorMsgStr = "RealSim: Initialize Traffic Objects Failed";
 			*errorMsg = errorMsgStr.c_str();
+			PERF_TOC("init_cm_queue");
+			PERF_TOC("runStep_total");
 			return ERROR_INIT_TRAFFIC;
 		}
 
+		PERF_TOC("init_cm_queue");
 
 	}
 
@@ -386,6 +402,7 @@ int VirEnvHelper::runStep(double simTime, const char** errorMsg) {
 		// ===========================================================================
 		// 			receive from RealSim
 		// ===========================================================================
+		PERF_TIC("receive_realsim");
 		try {
 
 			Msg_c.clearRecvStorage();
@@ -408,17 +425,23 @@ int VirEnvHelper::runStep(double simTime, const char** errorMsg) {
 			std::cout << e.what();
 			errorMsgStr = "RealSim: Receive from traffic simulator failed";
 			*errorMsg = errorMsgStr.c_str();
+			PERF_TOC("receive_realsim");
+			PERF_TOC("runStep_total");
 			return ERROR_STEP_RECV_REALSIM;
 		}
 		catch (...) {
 			errorMsgStr = "RealSim: Receive from traffic simulator failed";
 			*errorMsg = errorMsgStr.c_str();
+			PERF_TOC("receive_realsim");
+			PERF_TOC("runStep_total");
 			return ERROR_STEP_RECV_REALSIM;
 		}
+		PERF_TOC("receive_realsim");
 
 		// ===========================================================================
 		// 			map received car Id to Cm id
 		// ===========================================================================
+		PERF_TIC("map_ids");
 		try {
 			// for each received vehicle, map to cm id if needed
 			for (auto it : Msg_c.VehDataRecv_um) {
@@ -476,17 +499,23 @@ int VirEnvHelper::runStep(double simTime, const char** errorMsg) {
 			std::cout << e.what();
 			errorMsgStr = "RealSim: Map received traffic simualtor id to CM id failed";
 			*errorMsg = errorMsgStr.c_str();
+			PERF_TOC("map_ids");
+			PERF_TOC("runStep_total");
 			return ERROR_STEP_MAP_ID;
 		}
 		catch (...) {
 			errorMsgStr = "RealSim: Map received traffic simualtor id to CM id failed";
 			*errorMsg = errorMsgStr.c_str();
+			PERF_TOC("map_ids");
+			PERF_TOC("runStep_total");
 			return ERROR_STEP_MAP_ID;
 		}
+		PERF_TOC("map_ids");
 
 		// ===========================================================================
 		// 			clean up vehicles that already gone
 		// ===========================================================================
+		PERF_TIC("cleanup_vehicles");
 		try {
 			// remove those ids that not exists since last time step
 			for (auto& it : TrafficSimulatorId2Remove) {
@@ -527,17 +556,23 @@ int VirEnvHelper::runStep(double simTime, const char** errorMsg) {
 			std::cout << e.what();
 			errorMsgStr = "RealSim: Remove arrived vehicle id failed";
 			*errorMsg = errorMsgStr.c_str();
+			PERF_TOC("cleanup_vehicles");
+			PERF_TOC("runStep_total");
 			return ERROR_STEP_REMOVE_ID;
 		}
 		catch (...) {
 			errorMsgStr = "RealSim: Remove arrived vehicle id failed";
 			*errorMsg = errorMsgStr.c_str();
+			PERF_TOC("cleanup_vehicles");
+			PERF_TOC("runStep_total");
 			return ERROR_STEP_REMOVE_ID;
 		}
+		PERF_TOC("cleanup_vehicles");
 
 		// ===========================================================================
 		// 			move traffic position
 		// ===========================================================================
+		PERF_TIC("update_traffic_state");
 		try {
 			// update state
 			TrafficSimulatorId2Remove.clear(); // we would need to update vehicle in current simulation step
@@ -599,18 +634,24 @@ int VirEnvHelper::runStep(double simTime, const char** errorMsg) {
 			std::cout << e.what();
 			errorMsgStr = "RealSim: Update traffic object states failed";
 			*errorMsg = errorMsgStr.c_str();
+			PERF_TOC("update_traffic_state");
+			PERF_TOC("runStep_total");
 			return ERROR_STEP_UPDATE_STATE;
 		}
 		catch (...) {
 			errorMsgStr = "RealSim: Update traffic object states failed";
 			*errorMsg = errorMsgStr.c_str();
+			PERF_TOC("update_traffic_state");
+			PERF_TOC("runStep_total");
 			return ERROR_STEP_UPDATE_STATE;
 		}
+		PERF_TOC("update_traffic_state");
 
 		// ===========================================================================
 		// 			sync traffic signal light
 		// ===========================================================================
 		if (SYNCHRONIZE_TRAFFIC_SIGNAL) {
+			PERF_TIC("sync_signals");
 			try {
 				// loop over each signal light
 				for (auto it : Msg_c.TlsDataRecv_um) {
@@ -631,13 +672,18 @@ int VirEnvHelper::runStep(double simTime, const char** errorMsg) {
 				std::cout << e.what();
 				errorMsgStr = "RealSim: Sync traffic signal light failed";
 				*errorMsg = errorMsgStr.c_str();
+				PERF_TOC("sync_signals");
+				PERF_TOC("runStep_total");
 				return ERROR_STEP_SYNC_TRAFFIC_SIGNAL;
 			}
 			catch (...) {
 				errorMsgStr = "RealSim: Sync traffic signal light failed";
 				*errorMsg = errorMsgStr.c_str();
+				PERF_TOC("sync_signals");
+				PERF_TOC("runStep_total");
 				return ERROR_STEP_SYNC_TRAFFIC_SIGNAL;
 			}
+			PERF_TOC("sync_signals");
 		}
 	}
 
@@ -645,6 +691,7 @@ int VirEnvHelper::runStep(double simTime, const char** errorMsg) {
 	// 			sending out
 	// ===========================================================================
 	if (abs((simTime) * 10 - ceil((simTime) * 10 - 0.5)) < 1e-5) {
+		PERF_TIC("send_ego");
 		try {
 			// send ego states
 			VehFullData_t VehDataSend;
@@ -738,15 +785,21 @@ int VirEnvHelper::runStep(double simTime, const char** errorMsg) {
 			std::cout << e.what();
 			errorMsgStr = "RealSim: Send ego states failed";
 			*errorMsg = errorMsgStr.c_str();
+			PERF_TOC("send_ego");
+			PERF_TOC("runStep_total");
 			return ERROR_STEP_SEND_EGO;
 		}
 		catch (...) {
 			errorMsgStr = "RealSim: Send ego states failed";
 			*errorMsg = errorMsgStr.c_str();
+			PERF_TOC("send_ego");
+			PERF_TOC("runStep_total");
 			return ERROR_STEP_SEND_EGO;
 		}
+		PERF_TOC("send_ego");
 	}
 
+	PERF_TIC("refresh_visualization");
 	try {
 		// refresh XXXX Hz
 		// // int refreshRate = 0.1;
@@ -875,13 +928,20 @@ int VirEnvHelper::runStep(double simTime, const char** errorMsg) {
 		std::cout << e.what();
 		errorMsgStr = "RealSim: Refresh traffic visualization failed";
 		*errorMsg = errorMsgStr.c_str();
+		PERF_TOC("refresh_visualization");
+		PERF_TOC("runStep_total");
 		return ERROR_STEP_REFRESH_TRAFFIC;
 	}
 	catch (...) {
 		errorMsgStr = "RealSim: Refresh traffic visualization failed";
 		*errorMsg = errorMsgStr.c_str();
+		PERF_TOC("refresh_visualization");
+		PERF_TOC("runStep_total");
 		return ERROR_STEP_REFRESH_TRAFFIC;
 	}
+	PERF_TOC("refresh_visualization");
+
+	PERF_TOC("runStep_total");
 
 	return 0;
 }

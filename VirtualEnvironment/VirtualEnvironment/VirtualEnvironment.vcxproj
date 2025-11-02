@@ -28,6 +28,7 @@
   <ItemGroup>
     <ClInclude Include="..\..\CommonLib\ConfigHelper.h" />
     <ClInclude Include="..\..\CommonLib\MsgHelper.h" />
+    <ClInclude Include="..\..\CommonLib\PerformanceTimer.h" />
     <ClInclude Include="..\..\CommonLib\SocketHelper.h" />
     <ClInclude Include="..\..\CommonLib\VehDataMsgDefs.h" />
     <ClInclude Include="..\..\CommonLib\VirEnvHelper.h" />

@@ -50,5 +50,8 @@
     <ClInclude Include="..\..\CommonLib\ConfigHelper.h">
       <Filter>Source Files</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\CommonLib\PerformanceTimer.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>
