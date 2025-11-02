@@ -214,56 +214,58 @@ def run_simulink_job(model_path: str, input_dir: str, ipg_dir: str, output_dir: 
     os.makedirs(output_dir, exist_ok=True)
 
     # --- Launch SUMO & Traffic Layer (as in your MATLAB code) ---
-    ######### The following dir can be replace with any test directory #########
-    i81_tests_dir = r"C:\CM_Projects\CVXTEST\tests\UAtest"
-    if not os.path.isdir(i81_tests_dir):
-        log(f"⚠️ Warning: Directory not found: {i81_tests_dir} (continuing anyway)")
+    # Go to the SUMO file directory
+    test_dir = os.path.dirname(input_dir)
+    if not os.path.isdir(test_dir):
+        log(f"⚠️ Warning: Directory not found: {test_dir} (continuing anyway)")
 
     # SUMO GUI command: start "" sumo-gui -c "<input_dir>" ... --start
     sumo_cmd = [
         "cmd", "/c", "start", "", "sumo-gui",
         "-c", input_dir,
         "--remote-port", "1337",
-        #"--time-to-teleport", "-1",
-        #"--time-to-teleport.remove", "false",
-        #"--max-depart-delay", "-1",
+        "--time-to-teleport", "-1",
+        "--time-to-teleport.remove", "false",
+        "--max-depart-delay", "-1",
         "--step-length", "0.1",
         "--start"
     ]
-    log("Launching SUMO GUI…")
+    log("⚙️ Launching SUMO GUI…")
     try:
-        subprocess.Popen(sumo_cmd, cwd=i81_tests_dir)
+        subprocess.Popen(sumo_cmd, cwd=test_dir)
     except Exception as e:
         log(f"⚠️ Could not start SUMO GUI: {e}")
 
-    # TrafficLayer.exe
-    exe_path = os.path.normpath(os.path.join(i81_tests_dir, "..", "..", "TrafficLayer.exe"))
-    config_filename = r"C:\CM_Projects\CVXTEST\tests\UAtest\RS_config_release.yaml"
+    # Go to get TrafficLayer.exe and the relevant config.yaml file
+    exe_path = os.path.normpath(os.path.join(test_dir, "..", "..", "TrafficLayer.exe"))
+    config_filename = os.path.join(test_dir, "RS_config_release.yaml")
+
     tl_cmd = ["cmd", "/c", "start", "", exe_path, "-f", config_filename]
-    log("Launching TrafficLayer.exe…")
+    log("⚙️ Launching TrafficLayer.exe…")
     try:
-        subprocess.Popen(tl_cmd, cwd=i81_tests_dir)
+        subprocess.Popen(tl_cmd, cwd=test_dir)
     except Exception as e:
         log(f"⚠️ Could not start TrafficLayer.exe: {e}")
 
     time.sleep(3)  # let them come up
 
     # --- MATLAB Engine sequence ---
-    sim_src_dir = r"C:\CM_Projects\CVXTEST\CM13_proj\src_cm4sl"
+    # Go to the Simulink model directory
+    sim_src_dir = os.path.dirname(model_path)
     if not os.path.isdir(sim_src_dir):
         log(f"⚠️ Warning: Directory not found: {sim_src_dir} (continuing anyway)")
 
-    log("Starting MATLAB Engine…")
+    log("⚒️ Starting MATLAB Engine…")
     eng = matlab.engine.start_matlab("-desktop")
     #eng = matlab.engine.start_matlab()
     eng.open_system(model_path, nargout=0)
     eng.CM_Simulink(nargout=0)
-    print(f"LoadTestRun , {ipg_dir}")
+    log(f"LoadTestRun , {ipg_dir}")
     eng.cmguicmd(f"LoadTestRun {ipg_dir}", nargout=0)
 
     try:
         # Run simulation
-        log("Running Simulink simulation…")
+        log("⚙️ Running Simulink simulation…")
         simOut = eng.sim(model_path, nargout=1)
 
         log("Simulation finished successfully.")
