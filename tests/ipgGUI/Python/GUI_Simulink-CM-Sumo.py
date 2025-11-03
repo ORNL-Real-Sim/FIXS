@@ -1,4 +1,7 @@
-# sim_runner_ui.py
+################################################################################
+# -------- A GUI to run Real-Sim CarMaker-Simulink-Sumo co-simulation -------- #
+################################################################################
+
 # Packages: Python 3.9+, PyQt6
 from __future__ import annotations
 import sys
@@ -213,7 +216,7 @@ def run_simulink_job(model_path: str, input_dir: str, ipg_dir: str, output_dir: 
     # Ensure output dir exists
     os.makedirs(output_dir, exist_ok=True)
 
-    # --- Launch SUMO & Traffic Layer (as in your MATLAB code) ---
+    # --- Launch SUMO & Traffic Layer ---
     # Go to the SUMO file directory
     test_dir = os.path.dirname(input_dir)
     if not os.path.isdir(test_dir):

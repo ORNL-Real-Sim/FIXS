@@ -1,5 +1,6 @@
 ################################################################################
-### ---------- A GUI to run Real-Sim CarMaker-Sumo co-simulation ----------- ###
+# -------- A GUI to run Real-Sim CarMaker-Simulink-Sumo co-simulation -------- #
+# ---------- looping through a series of IPG testruns and sumo files --------- #
 ################################################################################
 
 # Packages: Python 3.9+, PyQt6
@@ -17,10 +18,23 @@ from PyQt6.QtWidgets import (
     QLabel, QLineEdit, QPushButton, QTextEdit, QMessageBox, QGridLayout
 )
 
+from guiUtils import enumerate_sumocfg, enumerate_ipgtestruns
+
+# -------- MATLAB engine detection --------
+# Note that here for 2024a, it can support Python 3.9 up to 3.11
+# For more details, please refer to https://pypi.org/project/matlabengine/
+MATLAB_AVAILABLE = False
+try:
+    import matlab.engine  # type: ignore
+    MATLAB_AVAILABLE = True
+except Exception:
+    MATLAB_AVAILABLE = False
+
+
 # ---------------- State ----------------
 @dataclass
 class UIState:
-    modelPath: str = ""     # TrafficLayer.exe file path
+    modelPath: str = ""     # Simulink model path
     inputDir: str = ""      # actually the SUMO .sumocfg file path
     ipgDir: str = ""        # IPG testrun file path
     outputDir: str = ""     # output folder
@@ -42,7 +56,7 @@ class RunnerWorker(QThread):
     def run(self):
         try:
             self.log("Starting simulation…")
-            run_cm_sumo_job(
+            run_simulink_job(
                 self.state.modelPath,
                 self.state.inputDir,   # SUMO .sumocfg path
                 self.state.ipgDir,     # IPG testrun file
@@ -69,24 +83,24 @@ class MainWindow(QMainWindow):
         central = QWidget(self)
         self.setCentralWidget(central)
 
-        lblModel = QLabel("Real-Sim TrafficLayer (.exe)")
+        lblModel = QLabel("Simulink model (.slx or .mdl)")
         self.edModel = QLineEdit(); self.edModel.setReadOnly(True)
 
-        lblTest = QLabel("IPG Testrun file (.txt)")
+        lblTest = QLabel("Directory of IPG Testrun files")
         self.edTest = QLineEdit(); self.edTest.setReadOnly(True)
 
-        lblIn = QLabel("Input SUMO configuration file (.sumocfg)")
+        lblIn = QLabel("Directory of input SUMO configuration files")
         self.edIn = QLineEdit(); self.edIn.setReadOnly(True)
 
         lblOut = QLabel("Output folder")
         self.edOut = QLineEdit(); self.edOut.setReadOnly(True)
 
-        btnPickModel = QPushButton("Browse TrafficLayer"); btnPickModel.clicked.connect(self.onPickModel)
-        btnPickTest  = QPushButton("Browse IPG Testrun");    btnPickTest.clicked.connect(self.onPickTestRun)
-        btnPickIn    = QPushButton("Browse…");               btnPickIn.clicked.connect(self.onPickFileIn)
-        btnPickOut   = QPushButton("Browse…");               btnPickOut.clicked.connect(self.onPickOut)
+        btnPickModel = QPushButton("Browse Simulink model");              btnPickModel.clicked.connect(self.onPickModel)
+        btnPickTest  = QPushButton("Browse IPG Testrun folder");          btnPickTest.clicked.connect(self.onPickTestRun)
+        btnPickIn    = QPushButton("Browse SUMO Configuration folder");   btnPickIn.clicked.connect(self.onPickFileIn)
+        btnPickOut   = QPushButton("Browse output folder");               btnPickOut.clicked.connect(self.onPickOut)
 
-        self.btnValidate = QPushButton("Validate"); self.btnValidate.clicked.connect(self.onValidate)
+        self.btnValidate = QPushButton("Validate");  self.btnValidate.clicked.connect(self.onValidate)
         self.btnRun = QPushButton("Run");            self.btnRun.clicked.connect(self.onRun)
         self.btnQuit = QPushButton("Quit");          self.btnQuit.clicked.connect(self.close)
 
@@ -112,17 +126,17 @@ class MainWindow(QMainWindow):
 
     # --- Pickers ---
     def onPickModel(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Select TrafficLayer", "", "TrafficLayer file(*.exe);; All Files (*)")
+        path = QFileDialog.getExistingDirectory(self, "Select Simulink model folder", "")
         if not path: return
         self.state.modelPath = path; self.edModel.setText(path); self.log(f"Selected model: {path}")
 
     def onPickTestRun(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Select IPG testrun", "", "All Files (*)")
+        path = QFileDialog.getExistingDirectory(self, "Select IPG testrun model folder", "")
         if not path: return
         self.state.ipgDir = path; self.edTest.setText(path); self.log(f"Selected testrun: {path}")
 
     def onPickFileIn(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Select SUMO config", "", "SUMO Config (*.sumocfg);;All Files (*)")
+        path = QFileDialog.getExistingDirectory(self, "Select SUMO configuration folder", "")
         if not path: return
         self.state.inputDir = path; self.edIn.setText(path); self.log(f"Selected input: {path}")
 
@@ -138,8 +152,8 @@ class MainWindow(QMainWindow):
             errs.append("Model path does not exist.")
         else:
             low = s.modelPath.lower()
-            if not (low.endswith(".exe")):
-                errs.append("Model must be a .exe file.")
+            if not (low.endswith(".slx") or low.endswith(".mdl")):
+                errs.append("Model must be a .slx or .mdl file.")
         if not s.inputDir:
             errs.append("Input folder is invalid.")
         if not s.outputDir:
@@ -181,13 +195,13 @@ class MainWindow(QMainWindow):
         QMessageBox.critical(self, "Run Error", msg)
 
 
-# ---------------- cosim-backed runner ----------------
-def run_cm_sumo_job(model_path: str, input_dir: str, ipg_dir: str, output_dir: str, log_cb=None):
+# ---------------- MATLAB-backed runner (port of your MATLAB function) ----------------
+def run_simulink_job(model_path: str, input_dir: str, ipg_dir: str, output_dir: str, log_cb=None):
     """
-    Python port to run Real-Sim Carmaker-Sumo co-sim on Windows.
+    Python port of your MATLAB 'run_simulink_job' for Windows.
     - Launches SUMO GUI and TrafficLayer.exe
-    - Opens CarMaker, loads IPG testrun (cmguicmd)
-    - Runs co-sim and save results
+    - Opens Simulink model, starts TM_Simulink, loads IPG testrun (cmguicmd)
+    - Runs sim(model_path), assigns base vars, saves simout.mat
     - Attempts cleanup similar to your taskkill-based approach
 
     log_cb: optional callable(str) for UI logging
@@ -199,73 +213,103 @@ def run_cm_sumo_job(model_path: str, input_dir: str, ipg_dir: str, output_dir: s
     if os.name != "nt":
         raise RuntimeError("This runner currently targets Windows (cmd/start/taskkill).")
 
+    if not MATLAB_AVAILABLE:
+        raise RuntimeError("MATLAB Engine for Python not found. Please install and ensure MATLAB is on this machine.")
+
     # Ensure output dir exists
     os.makedirs(output_dir, exist_ok=True)
 
-    # --- Launch SUMO & Traffic Layer (as in your MATLAB code) ---
+    # --- MATLAB Engine sequence ---
+    # Go to the Simulink model directory
+    sim_src_dir = os.path.dirname(model_path)
+    if not os.path.isdir(sim_src_dir):
+        log(f"⚠️ Warning: Directory not found: {sim_src_dir} (continuing anyway)")
+    log("⚒️ Starting MATLAB Engine…")
+    eng = matlab.engine.start_matlab("-desktop")
+    #eng = matlab.engine.start_matlab()
+
+    eng.open_system(model_path, nargout=0)
+    eng.CM_Simulink(nargout=0)
+
+    # --- Launch SUMO & Traffic Layer ---
     # Go to the SUMO file directory
+    if not os.path.isdir(input_dir):
+        log(f"⚠️ Warning: Directory not found: {input_dir} (continuing anyway)")
+    
+    sumo_files = enumerate_sumocfg(input_dir)
     test_dir = os.path.dirname(input_dir)
-    if not os.path.isdir(test_dir):
-        log(f"⚠️ Warning: Directory not found: {test_dir} (continuing anyway)")
 
-    # SUMO GUI command: start "" sumo-gui -c "<input_dir>" ... --start
-    sumo_cmd = [
-        "cmd", "/c", "start", "", "sumo-gui",
-        "-c", input_dir,
-        "--remote-port", "1337",
-        "--time-to-teleport", "-1",
-        "--time-to-teleport.remove", "false",
-        "--max-depart-delay", "-1",
-        "--step-length", "0.1",
-        "--start"
-    ]
-    log("⚙️ Launching SUMO GUI…")
-    try:
-        subprocess.Popen(sumo_cmd, cwd=test_dir)
-    except Exception as e:
-        log(f"⚠️ Could not start SUMO GUI: {e}")
+    for sumo_run in sumo_files:
+        # SUMO GUI command: start "" sumo-gui -c "<input_dir>" ... --start
+        sumo_cmd = [
+            "cmd", "/c", "start", "", "sumo-gui",
+            "-c", sumo_run,
+            "--remote-port", "1337",
+            "--time-to-teleport", "-1",
+            "--time-to-teleport.remove", "false",
+            "--max-depart-delay", "-1",
+            "--step-length", "0.1",
+            "--start"
+        ]
+        log("⚙️ Launching SUMO GUI…")
+        try:
+            subprocess.Popen(sumo_cmd, cwd=test_dir)
+        except Exception as e:
+            log(f"⚠️ Could not start SUMO GUI: {e}")
 
-    # Go to get TrafficLayer.exe and the relevant config.yaml file
-    config_filename = os.path.join(test_dir, "RS_config_release.yaml")
+        # TrafficLayer.exe
+        # Go to get TrafficLayer.exe and the relevant config.yaml file
+        exe_path = os.path.normpath(os.path.join(test_dir, "..", "..", "TrafficLayer.exe"))
+        config_filename = os.path.join(test_dir, "RS_config_release.yaml")
+        
+        tl_cmd = ["cmd", "/c", "start", "", exe_path, "-f", config_filename]
+        log("⚙️ Launching TrafficLayer.exe…")
+        try:
+            subprocess.Popen(tl_cmd, cwd=test_dir)
+        except Exception as e:
+            log(f"⚠️ Could not start TrafficLayer.exe: {e}")
 
-    tl_cmd = ["cmd", "/c", "start", "", model_path, "-f", config_filename]
-    log("⚙️ Launching TrafficLayer.exe…")
-    try:
-        subprocess.Popen(tl_cmd, cwd=test_dir)
-    except Exception as e:
-        log(f"⚠️ Could not start TrafficLayer.exe: {e}")
+        time.sleep(3)  # let them come up
 
-    time.sleep(5)  # let them come up
+        testrun_names = enumerate_ipgtestruns(ipg_dir)
+        for testrun in testrun_names:
+            log(f"LoadTestRun , {testrun}")
+            eng.cmguicmd(f"LoadTestRun {testrun}", nargout=0)
 
-    # --- IPG CarMaker starting sequence ---
-    # Check CarMaker root directory, load testrun, then start the simulation
-    cm_root = r"C:\IPG\carmaker\win64-13.1.2\bin\CM_Office.exe"
-    cm_cmd = [cm_root, "-cmd", f"LoadTestRun {ipg_dir}; StartSim"]
-    try:
-        log("⚒️ Starting CarMaker…")
-        log(f"LoadTestRun , {ipg_dir}")
-        log("⚙️ Running Carmaker simulation…")
-        subprocess.Popen(cm_cmd, cwd=test_dir)
-        log("Simulation finished successfully.")
-    except Exception as e:
-        log(f"⚠️ Could not start CarMaker: {e}")
-        log(f"⚠️ Check directory: {cm_root} and {ipg_dir}")
+            try:
+                # Run simulation
+                log("⚙️ Running Simulink simulation…")
+                simOut = eng.sim(model_path, nargout=1)
 
-    ### TODO ###
-    # Extract information as output json file in the output directory
-    out_json = os.path.join(output_dir, "output.json")
+                log("Simulation finished successfully.")
 
-    # --- Cleanup (mirrors your taskkill approach; ⚠️ kills all matching processes) ---
-    # If you'd prefer to only kill what *we* started, I can rework this to track PIDs.
-    log("Cleaning up helper terminals (cmd.exe / WindowsTerminal.exe)…")
-    try:
-        subprocess.run(["taskkill", "/F", "/IM", "cmd.exe"], capture_output=True, text=True)
-    except Exception as e:
-        log(f"⚠️ taskkill cmd.exe failed: {e}")
-    try:
-        subprocess.run(["taskkill", "/F", "/IM", "WindowsTerminal.exe"], capture_output=True, text=True)
-    except Exception as e:
-        log(f"⚠️ taskkill WindowsTerminal.exe failed: {e}")
+                # Provide variables to base workspace
+                eng.assignin('base', 'INPUT_DIR',  input_dir, nargout=0)
+                eng.assignin('base', 'OUTPUT_DIR', output_dir, nargout=0)
+                eng.assignin('base', 'SIM_OUT',    simOut,    nargout=0)
+
+                # Save simOut.mat
+                file_name = f"simout_{sumo_run}_{testrun}.mat"
+                out_mat = os.path.join(output_dir, file_name)
+                # put simOut into MATLAB workspace, then save from MATLAB side
+                eng.workspace['simOut'] = simOut
+                log(f'Saving "{out_mat}" …')
+                eng.save(out_mat, 'simOut', nargout=0)
+
+            except matlab.engine.MatlabExecutionError as mee:
+                raise RuntimeError(f"MATLAB error: {mee}")
+
+            # --- Cleanup (mirrors your taskkill approach; ⚠️ kills all matching processes) ---
+            # If you'd prefer to only kill what *we* started, I can rework this to track PIDs.
+            log("Cleaning up helper terminals (cmd.exe / WindowsTerminal.exe)…")
+            try:
+                subprocess.run(["taskkill", "/F", "/IM", "cmd.exe"], capture_output=True, text=True)
+            except Exception as e:
+                log(f"⚠️ taskkill cmd.exe failed: {e}")
+            try:
+                subprocess.run(["taskkill", "/F", "/IM", "WindowsTerminal.exe"], capture_output=True, text=True)
+            except Exception as e:
+                log(f"⚠️ taskkill WindowsTerminal.exe failed: {e}")
 
 
 # ---------------- Entrypoint ----------------
