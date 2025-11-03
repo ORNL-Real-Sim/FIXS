@@ -9,7 +9,7 @@ param(
 )
 
 $ScriptDir = $PSScriptRoot
-$RepoRoot = (Resolve-Path (Join-Path $ScriptDir '..\..")).Path
+$RepoRoot = (Resolve-Path (Join-Path $ScriptDir '..\..')).Path
 $DepsFile = Join-Path $RepoRoot 'dependencies.yaml'
 $YamlHelper = Join-Path $ScriptDir 'yaml_helper.ps1'
 $DetectToolPaths = Join-Path $ScriptDir 'detect_tool_paths.ps1'

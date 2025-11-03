@@ -12,7 +12,7 @@ param(
 
 # Resolve paths
 $ScriptDir = $PSScriptRoot
-$RepoRoot = (Resolve-Path (Join-Path $ScriptDir '..\..")).Path
+$RepoRoot = (Resolve-Path (Join-Path $ScriptDir '..\..')).Path
 $BuildDir = Join-Path $RepoRoot 'build'
 $DepsFile = Join-Path $RepoRoot 'dependencies.yaml'
 $OutputFile = Join-Path $BuildDir 'BUILD_INFO.txt'
