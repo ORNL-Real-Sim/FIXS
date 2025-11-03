@@ -104,7 +104,7 @@ REM ====================================
 REM Step 4a: Compile CarMaker Components
 REM ====================================
 echo [4a/7] Compiling CarMaker components...
-call "%~dp0\4a_carmaker_components.bat" inline
+call powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0\4a_Build-CarMakerComponents.ps1" -RunMode inline
 if %ERRORLEVEL% neq 0 (
     echo WARNING: CarMaker components build failed or skipped
 )
@@ -114,7 +114,7 @@ REM ====================================
 REM Step 4b: Compile dSPACE Libraries for CarMaker
 REM ====================================
 echo [4b/7] Compiling dSPACE libraries for CarMaker...
-call "%~dp0\4b_carmaker_dspace.bat" inline
+call powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0\4b_Build-CarMakerDSpace.ps1" -RunMode inline
 if %ERRORLEVEL% neq 0 (
     echo WARNING: dSPACE library build failed or skipped
 )
@@ -124,7 +124,7 @@ REM ====================================
 REM Step 5: Build RealSimSocket MEX
 REM ====================================
 echo [5/7] Building RealSimSocket MEX...
-call "%~dp0\5_mex_realsimsocket.bat" inline
+call powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0\5_Build-MexRealSimSocket.ps1" -RunMode inline
 if %ERRORLEVEL% neq 0 (
     echo WARNING: RealSimSocket MEX build failed or skipped
 )
@@ -144,7 +144,7 @@ set /a "DURATION_SEC=DURATION_SECONDS%%60"
 set "BUILD_DURATION=%DURATION_MIN%m %DURATION_SEC%s"
 
 echo [6/7] Generating BUILD_INFO.txt...
-call "%~dp0\6_build_info.bat" inline "%BUILD_START%" "%BUILD_DURATION%"
+call powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0\6_Build-Info.ps1" -RunMode inline -BuildStartTime "%BUILD_START%" -BuildDuration "%BUILD_DURATION%"
 echo.
 
 echo [7/7] Copying files to build directory...
