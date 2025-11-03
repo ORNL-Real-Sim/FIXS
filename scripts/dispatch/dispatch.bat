@@ -104,7 +104,7 @@ REM ====================================
 REM Step 4a: Compile CarMaker Components
 REM ====================================
 echo [4a/7] Compiling CarMaker components...
-call powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0\4a_Build-CarMakerComponents.ps1" -RunMode inline
+call powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0\4a_carmaker_components.ps1" -RunMode inline
 if %ERRORLEVEL% neq 0 (
     echo WARNING: CarMaker components build failed or skipped
 )
@@ -114,7 +114,7 @@ REM ====================================
 REM Step 4b: Compile dSPACE Libraries for CarMaker
 REM ====================================
 echo [4b/7] Compiling dSPACE libraries for CarMaker...
-call powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0\4b_Build-CarMakerDSpace.ps1" -RunMode inline
+call powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0\4b_carmaker_dspace.ps1" -RunMode inline
 if %ERRORLEVEL% neq 0 (
     echo WARNING: dSPACE library build failed or skipped
 )
@@ -124,30 +124,17 @@ REM ====================================
 REM Step 5: Build RealSimSocket MEX
 REM ====================================
 echo [5/7] Building RealSimSocket MEX...
-call powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0\5_Build-MexRealSimSocket.ps1" -RunMode inline
+call powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0\5_mex_realsim_socket.ps1" -RunMode inline
 if %ERRORLEVEL% neq 0 (
     echo WARNING: RealSimSocket MEX build failed or skipped
 )
 echo.
 
 REM ====================================
-REM Step 6: Generate BUILD_INFO.txt and Release Files
+REM Step 6: Copy Files to Build Directory
 REM ====================================
 
-REM Calculate build duration
-set "BUILD_END=%date% %time%"
-set "BUILD_END_SECONDS=%time:~0,2%%time:~3,2%%time:~6,2%"
-set /a "DURATION_SECONDS=BUILD_END_SECONDS-BUILD_START_SECONDS"
-if %DURATION_SECONDS% lss 0 set /a "DURATION_SECONDS+=86400"
-set /a "DURATION_MIN=DURATION_SECONDS/60"
-set /a "DURATION_SEC=DURATION_SECONDS%%60"
-set "BUILD_DURATION=%DURATION_MIN%m %DURATION_SEC%s"
-
-echo [6/7] Generating BUILD_INFO.txt...
-call powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0\6_Build-Info.ps1" -RunMode inline -BuildStartTime "%BUILD_START%" -BuildDuration "%BUILD_DURATION%"
-echo.
-
-echo [7/7] Copying files to build directory...
+echo [6/7] Copying files to build directory...
 
 REM Release executables
 echo Copying executables...
@@ -224,6 +211,23 @@ if exist "%SOURCE_PATH%\ProprietaryFiles\VISSIMserver\x64\Release\DriverModel_Re
     copy /Y "%SOURCE_PATH%\ProprietaryFiles\VISSIMserver\x64\Release\DriverModel_RealSim_v2021.dll" "%RELEASE_PATH%\" >nul
 )
 
+echo.
+
+REM ====================================
+REM Step 7: Generate BUILD_INFO.txt
+REM ====================================
+
+REM Calculate build duration
+set "BUILD_END=%date% %time%"
+set "BUILD_END_SECONDS=%time:~0,2%%time:~3,2%%time:~6,2%"
+set /a "DURATION_SECONDS=BUILD_END_SECONDS-BUILD_START_SECONDS"
+if %DURATION_SECONDS% lss 0 set /a "DURATION_SECONDS+=86400"
+set /a "DURATION_MIN=DURATION_SECONDS/60"
+set /a "DURATION_SEC=DURATION_SECONDS%%60"
+set "BUILD_DURATION=%DURATION_MIN%m %DURATION_SEC%s"
+
+echo [7/7] Generating BUILD_INFO.txt...
+call powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0\6_build_info.ps1" -RunMode inline -BuildStartTime "%BUILD_START%" -BuildDuration "%BUILD_DURATION%"
 echo.
 echo ==============================
 echo RealSim: Release Complete!

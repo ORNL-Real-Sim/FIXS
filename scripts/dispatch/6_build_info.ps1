@@ -1,4 +1,4 @@
-# ====================================
+﻿# ====================================
 # Generate BUILD_INFO.txt
 # Creates comprehensive build metadata file in build/ directory
 # ====================================
@@ -109,6 +109,8 @@ function Get-FileStatusLine {
 
 $CheckSymbol = [char]0x2713  # ✓
 $CrossSymbol = [char]0x2717  # ✗
+$TreeBranch = [char]0x251C + [char]0x2500 + [char]0x2500  # +--
+$TreeLine = [char]0x2502  # |
 
 # OS and hostname
 $OsVersion = (Get-CimInstance Win32_OperatingSystem).Caption
@@ -188,21 +190,32 @@ try {
 # Scan Build Directory
 # ====================================
 
+# Define expected components for each category
+$ExpectedCore = @('TrafficLayer.exe', 'VirtualEnvironment.lib')
+$ExpectedVissim = @('DriverModel_RealSim.dll', 'DriverModel_RealSim_v2021.dll')
+
 $CountCore = 0
 $CountVissim = 0
 $CountCm = 0
 $CountMatlab = 0
 $CountDsLib = 0
 
-if (Test-Path (Join-Path $BuildDir 'TrafficLayer.exe')) { $CountCore++ }
-if (Test-Path (Join-Path $BuildDir 'VirtualEnvironment.lib')) { $CountCore++ }
-if (Test-Path (Join-Path $BuildDir 'DriverModel_RealSim.dll')) { $CountVissim++ }
-if (Test-Path (Join-Path $BuildDir 'DriverModel_RealSim_v2021.dll')) { $CountVissim++ }
+# Count Core components
+foreach ($file in $ExpectedCore) {
+    if (Test-Path (Join-Path $BuildDir $file)) { $CountCore++ }
+}
+
+# Count VISSIM components
+foreach ($file in $ExpectedVissim) {
+    if (Test-Path (Join-Path $BuildDir $file)) { $CountVissim++ }
+}
 
 # Count CarMaker versions
+$ExpectedCm = 0
 if ($CarMakerVersions) {
     foreach ($version in $CarMakerVersions -split '\s+') {
         if ([string]::IsNullOrWhiteSpace($version)) { continue }
+        $ExpectedCm++
         $major = $version.Split('.')[0]
         if (Test-Path (Join-Path $BuildDir "CarMaker\CM$major")) {
             $CountCm++
@@ -223,11 +236,8 @@ if (Test-Path (Split-Path $mFilesPath -Parent)) {
     $CountMatlab += (Get-ChildItem $mFilesPath -ErrorAction SilentlyContinue).Count
 }
 
-# Build statistics
-$TotalComponents = 3 + 2  # Core + VISSIM
-if ($CarMakerVersions) {
-    $TotalComponents += ($CarMakerVersions -split '\s+' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count
-}
+# Build statistics - auto-calculate based on expected components
+$TotalComponents = $ExpectedCore.Count + $ExpectedVissim.Count + $ExpectedCm
 $BuiltComponents = $CountCore + $CountVissim + $CountCm
 $SkippedComponents = $TotalComponents - $BuiltComponents
 
@@ -370,41 +380,41 @@ if ($DspaceVer) { [void]$sb.AppendLine("  dSPACE:             C:\Program Files\d
 [void]$sb.AppendLine('build/')
 
 # Build directory tree
-if (Test-Path (Join-Path $BuildDir 'TrafficLayer.exe')) { [void]$sb.AppendLine('  ├── TrafficLayer.exe') }
-if (Test-Path (Join-Path $BuildDir 'VirtualEnvironment.lib')) { [void]$sb.AppendLine('  ├── VirtualEnvironment.lib') }
-if (Test-Path (Join-Path $BuildDir 'DriverModel_RealSim.dll')) { [void]$sb.AppendLine('  ├── DriverModel_RealSim.dll') }
-if (Test-Path (Join-Path $BuildDir 'DriverModel_RealSim_v2021.dll')) { [void]$sb.AppendLine('  ├── DriverModel_RealSim_v2021.dll') }
+if (Test-Path (Join-Path $BuildDir 'TrafficLayer.exe')) { [void]$sb.AppendLine('  +-- TrafficLayer.exe') }
+if (Test-Path (Join-Path $BuildDir 'VirtualEnvironment.lib')) { [void]$sb.AppendLine('  +-- VirtualEnvironment.lib') }
+if (Test-Path (Join-Path $BuildDir 'DriverModel_RealSim.dll')) { [void]$sb.AppendLine('  +-- DriverModel_RealSim.dll') }
+if (Test-Path (Join-Path $BuildDir 'DriverModel_RealSim_v2021.dll')) { [void]$sb.AppendLine('  +-- DriverModel_RealSim_v2021.dll') }
 
 if (Test-Path (Join-Path $BuildDir 'CommonLib')) {
-    [void]$sb.AppendLine('  ├── CommonLib/')
-    if (Test-Path (Join-Path $BuildDir 'CommonLib\RealSimSocket.mexw64')) { [void]$sb.AppendLine('  │   ├── RealSimSocket.mexw64') }
+    [void]$sb.AppendLine('  +-- CommonLib/')
+    if (Test-Path (Join-Path $BuildDir 'CommonLib\RealSimSocket.mexw64')) { [void]$sb.AppendLine('  |   +-- RealSimSocket.mexw64') }
 
     $mFilesPath = Join-Path $BuildDir 'CommonLib\*.m'
     if (Test-Path (Split-Path $mFilesPath -Parent)) {
         if ((Get-ChildItem $mFilesPath -ErrorAction SilentlyContinue).Count -gt 0) {
-            [void]$sb.AppendLine("  │   ├── *.m files ($CountMatlab files)")
+            [void]$sb.AppendLine("  |   +-- *.m files ($CountMatlab files)")
         }
     }
 
-    if (Test-Path (Join-Path $BuildDir 'CommonLib\libsumo')) { [void]$sb.AppendLine('  │   ├── libsumo/') }
+    if (Test-Path (Join-Path $BuildDir 'CommonLib\libsumo')) { [void]$sb.AppendLine('  |   +-- libsumo/') }
 
     if ($YamlMatlabDir) {
         $yamlMatlabFolder = Split-Path $YamlMatlabDir -Leaf
         if (Test-Path (Join-Path $BuildDir "CommonLib\$yamlMatlabFolder")) {
-            [void]$sb.AppendLine("  │   └── $yamlMatlabFolder/")
+            [void]$sb.AppendLine("  |   +-- $yamlMatlabFolder/")
         }
     }
 }
 
 if (Test-Path (Join-Path $BuildDir 'CarMaker')) {
-    [void]$sb.AppendLine('  └── CarMaker/')
+    [void]$sb.AppendLine('  +-- CarMaker/')
 
     if ($CarMakerVersions) {
         foreach ($version in $CarMakerVersions -split '\s+') {
             if ([string]::IsNullOrWhiteSpace($version)) { continue }
             $major = $version.Split('.')[0]
             if (Test-Path (Join-Path $BuildDir "CarMaker\CM$major")) {
-                [void]$sb.AppendLine("      ├── CM$major/")
+                [void]$sb.AppendLine("      +-- CM$major/")
             }
         }
     }
@@ -412,14 +422,14 @@ if (Test-Path (Join-Path $BuildDir 'CarMaker')) {
     $dsLibPath = Join-Path $BuildDir 'CarMaker\libRealSimDsLib_*.a'
     if (Test-Path (Split-Path $dsLibPath -Parent)) {
         Get-ChildItem $dsLibPath -ErrorAction SilentlyContinue | ForEach-Object {
-            [void]$sb.AppendLine("      ├── $($_.Name)")
+            [void]$sb.AppendLine("      +-- $($_.Name)")
         }
     }
 
     $pyPath = Join-Path $BuildDir 'CarMaker\*.py'
     if (Test-Path (Split-Path $pyPath -Parent)) {
         Get-ChildItem $pyPath -ErrorAction SilentlyContinue | ForEach-Object {
-            [void]$sb.AppendLine("      └── $($_.Name)")
+            [void]$sb.AppendLine("      +-- $($_.Name)")
         }
     }
 }
