@@ -640,7 +640,7 @@ int TrafficHelper::sendToSUMO(double simTime, MsgHelper Msg_c) {
 					}
 					else {
 						traci.vehicle.setSpeed(idStr, speed); // speed set at (k) essentially will be reflected at (k+1), not considered in the integration
-
+						std::cout << "Set SUMO id " << idStr << " to speed " << speed << std::endl;
 						/*
 						bit0: Regard safe speed
 						bit1 : Regard maximum acceleration
@@ -650,7 +650,7 @@ int TrafficHelper::sendToSUMO(double simTime, MsgHelper Msg_c) {
 						bit5 : Disregard right of way within intersections(only applies to foe vehicles that have entered the intersection).
 						*/
 
-						traci.vehicle.setSpeedMode(idStr, Config_c->SumoSetup.SpeedMode); // 000000 most checks off
+						//traci.vehicle.setSpeedMode(idStr, Config_c->SumoSetup.SpeedMode); // 000000 most checks off
 						//traci.vehicle.setSpeedMode(idStr, 0); // 000000 most checks off
 						//traci.vehicle.setSpeedMode(idStr, 24); // 011000
 						//traci.vehicle.setSpeedMode(idStr, 8); // 001000
