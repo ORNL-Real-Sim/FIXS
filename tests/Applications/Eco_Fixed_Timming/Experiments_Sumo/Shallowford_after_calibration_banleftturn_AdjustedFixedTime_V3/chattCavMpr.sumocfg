@@ -12,6 +12,7 @@
     <output>
         <edgedata-output value="EdgeData.xml"/>
         <fcd-output value="fcd.xml" samplingRate="1"/>
+        <precision value="6"/>
     </output>
     <time>
         <begin value="28800"/>

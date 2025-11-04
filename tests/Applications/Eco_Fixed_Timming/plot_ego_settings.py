@@ -42,7 +42,7 @@ SIGNAL_STATE_LABEL = {
 }
 
 SIMULATION_RESULTS_DIR = Path("simulation_results")
-DEFAULT_EXPERIMENT_SETTINGS = ["MachE_HIL_Eco", "MachE_Simulink_Eco_Kp10", "MachE_Simulink_Eco_Kp100", "Sumo_Eco"]
+DEFAULT_EXPERIMENT_SETTINGS = ["MachE_HIL_Eco", "MachE_Simulink_Eco", "Sumo_Eco"]
 EGO_VEHICLE_ID = "ego"
 OUTPUT_ROOT = SIMULATION_RESULTS_DIR / "plots"
 SIGNAL_CONFIG_PATH = Path("sumoSignalConfig_26.csv")
