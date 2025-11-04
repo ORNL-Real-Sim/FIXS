@@ -52,31 +52,4 @@ assignin('base', 'VehDataBus', VehDataBus);
 assignin('base', 'TrafficLayerIP', TrafficLayerIP);
 assignin('base', 'TrafficLayerPort', TrafficLayerPort);
 
-% load_system(simModelName)
-% open model
-
-% Load and run the Simulink model
-% uiopen('C:\GitSrc\XIL_EcoPilot\FIXS\tests\Applications\Eco_Fixed_Timming\Vehicles_24a\Vehicles\VehicleProjects\Bolt_EV\System\CAVE_MachE_Simulink_250904.slx',1)
-
-% VehicleOut = sim(simModelName); % alternatively can use 'sim' command
-% Time = VehicleOut.desired_speed.Time;
-% DesiredSpeed = VehicleOut.desired_speed.Data;
-% DesiredSpeed = DesiredSpeed(:);
-% ActualSpeed = VehicleOut.actual_speed.Data;
-% ActualSpeed = ActualSpeed(:);
-% MPGe = VehicleOut.MPGe.Data;
-% BatteryCurrent = VehicleOut.battery_current.Data;
-% BatteryPower = VehicleOut.battery_power.Data;
-% BatterySOC = VehicleOut.battery_soc.Data;
-% MotorSpeed = VehicleOut.motor_speed.Data;
-% MotorTorque = VehicleOut.motor_torque.Data;
-% ActualAcc = VehicleOut.VehAcc.Data;
-% VehSpdRef = VehicleOut.VehSpdRef.Data;
-% 
-% 
-% save('vehData', 'VehicleOut')
-% T = table(Time, DesiredSpeed, ActualSpeed, MPGe, BatteryCurrent, BatteryPower, BatterySOC, MotorSpeed, MotorTorque, ActualAcc, VehSpdRef,'VariableNames', {'Time', 'DesiredSpeed', 'ActualSpeed', 'MPGe', 'BatteryCurrent', 'BatteryPower','BatterySOC', 'MotorSpeed', 'MotorTorque', 'ActualAcc', 'VehSpdRef'});
-% % T = table(Time, DesiredSpeed, ActualSpeed, MPGe, BatteryCurrent, BatteryPower, BatterySOC, MotorSpeed, MotorTorque,'VariableNames', {'Time', 'DesiredSpeed', 'ActualSpeed', 'MPGe', 'BatteryCurrent', 'BatteryPower','BatterySOC', 'MotorSpeed', 'MotorTorque'});
-% 
-% writetable(T, [settingDir, '\ego_profile.csv']);
 
