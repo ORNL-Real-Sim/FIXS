@@ -162,6 +162,8 @@ foreach ($cmVersion in $CarMakerVersions -split '\s+') {
     if ([string]::IsNullOrWhiteSpace($cmVersion)) { continue }
 
     $carMakerInclude = Join-Path $CarMakerBase "win64-$cmVersion\include"
+    $carMakerCM4SL = Join-Path $CarMakerBase "win64-$cmVersion\CM4SL"
+    $originalBuildConfig = Join-Path $carMakerCM4SL "CM_BuildConfig.py"
 
     if (-not (Test-Path $carMakerInclude)) {
         Write-Error "CarMaker include path not found for version $cmVersion at $carMakerInclude"
@@ -217,6 +219,39 @@ foreach ($cmVersion in $CarMakerVersions -split '\s+') {
         }
 
         $CarMakerSuccessCount++
+
+        # Create modified CM_BuildConfig.py for RealSim
+        if (Test-Path $originalBuildConfig) {
+            Write-Host "Creating RealSim BuildConfig script for CarMaker $cmVersion ..."
+
+            $carMakerDir = Join-Path $RepoRoot 'CarMaker'
+            $rsBuildConfigName = "RS_CM${cmVersionSafe}_BuildConfig_${DspaceVersionSafe}.py"
+            $rsBuildConfigPath = Join-Path $carMakerDir $rsBuildConfigName
+
+            # Read original file as UTF8 without BOM
+            $content = Get-Content $originalBuildConfig -Raw -Encoding UTF8
+
+            # Modify CARMAKER_DIR path to point to actual installation
+            $content = $content -replace 'CARMAKER_DIR\s*=\s*"[^"]*"', "CARMAKER_DIR    = `"C:/IPG/carmaker/win64-$cmVersion`""
+
+            # Add RS defines to CM_DEFINES
+            # Find each CM_DEFINES = [ line and prepend RS defines to the existing content
+            $content = $content -replace '(CM_DEFINES\s*=\s*\[)(\s*")', '$1"RS_CAVE", "RS_DEBUG", "RS_DSPACE", $2'
+
+            # Add library to libs array in CM_BuildConfig.Initialize()
+            # Find: libs = [ "libdscandrv.so" ]
+            # Replace with: libs = [ "libdscandrv.so", "lib{outputName}.a" ]
+            $libName = "lib$outputName.a"
+            $content = $content -replace '(libs\s*=\s*\[\s*"libdscandrv\.so")\s*\]', "`$1, `"$libName`" ]"
+
+            # Write modified file as UTF8 without BOM
+            # Use .NET method to avoid BOM in PowerShell 5.1
+            [System.IO.File]::WriteAllText($rsBuildConfigPath, $content, (New-Object System.Text.UTF8Encoding $false))
+
+            Write-Host "Created: $rsBuildConfigName"
+        } else {
+            Write-Warning "Original CM_BuildConfig.py not found at $originalBuildConfig - skipping BuildConfig creation"
+        }
     }
 }
 

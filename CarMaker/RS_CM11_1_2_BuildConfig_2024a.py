@@ -16,6 +16,7 @@ from win32com.client import Dispatch, DispatchWithEvents
 
 import collections
 import os
+import io
 import re
 import sys
 import subprocess
@@ -26,7 +27,6 @@ import wx
 from collections import OrderedDict
 
 SOURCETYPE_SIMULINK_MODEL = 3
-
 
 
 
@@ -42,6 +42,7 @@ def CStr(obj):
         return ""
     else:
         return str(obj)
+
 
 def SplitString(strValue, semicolonSeparated = False, stripQuotes = False):
     res = []
@@ -78,8 +79,8 @@ def GetCM_Arch(cmdir):
     #return "dsrt"
     try:
         cmpu  = NormPath("%s/bin/cmplugutil.exe" %(cmdir))
-        dsver = subprocess.check_output([cmpu, "getDSVersion"])
-        vsstr = dsver.decode('ascii', 'ignore').partition(' ')[0]
+        dsver = subprocess.check_output([cmpu, "getDSVersion"], universal_newlines=True)
+        vsstr = dsver.strip()
     except:
         vsstr = ""
     if vsstr > "2020-A_X64":
@@ -87,10 +88,14 @@ def GetCM_Arch(cmdir):
     return "dsrt"
 
 
-CM_BUILD_CFG_NAME = "CarMaker Build Configuration"
-CARMAKER_DIR    = "C:/IPG/carmaker/win64-11.0.1"
-CARMAKER_VER    = "11.0.1"
-CARMAKER_NUMVER = 110001
+CM_BUILD_CFG_NAME   = "CarMaker Build Configuration"
+CM_BUILD_CFG_SCRIPT = "CM_BuildConfig.py"
+CM4SL_BLOCK_NAME    = "CarMaker"
+RMA_BUILD_CFG_NAME  = "RMA Slave Model Build Configuration (preliminary use)"
+
+CARMAKER_DIR    = "C:/IPG/carmaker/win64-11.1.2"
+CARMAKER_VER    = "11.1.2"
+CARMAKER_NUMVER = 110102
 
 ARCH  = GetCM_Arch(CARMAKER_DIR)
 ARCHF = "win32"
@@ -99,6 +104,7 @@ CARMAKER_BIN_DIR = "%s/bin"     %(CARMAKER_DIR)
 CARMAKER_LIB_DIR = "%s/lib-%s"  %(CARMAKER_DIR, ARCH)
 CARMAKER_INC_DIR = "%s/include" %(CARMAKER_DIR)
 CARMAKER_GUI_DIR = "%s/GUI"     %(CARMAKER_DIR)
+CARMAKER_PY_DIR  = "%s/Python"  %(CARMAKER_DIR)
 
 CARMAKER_LIB = "%s/libcarmaker4sl.a" %(CARMAKER_LIB_DIR)
 CAR_LIB      = "%s/libcar4sl.a"      %(CARMAKER_LIB_DIR)
@@ -112,22 +118,24 @@ APO_LIB        = "%s/libapo.a"          %(CARMAKER_LIB_DIR)
 INFO_LIB       = "%s/libinfofile.a"     %(CARMAKER_LIB_DIR)
 Z_LIB          = "%s/libz-%s.a"         %(CARMAKER_LIB_DIR, ARCH)
 URI_LIB        = "%s/liburiparser-%s.a" %(CARMAKER_LIB_DIR, ARCH)
+RMA_LIB        = "%s/librma.a"          %(CARMAKER_LIB_DIR)
 
+CM_CFLAGS   = ("-include", "ipgrt.h")
+RMA_CFLAGS  = ()
 if ARCH == 'dsrtlx':
-    CFLAGS  = ("-include", "ipgrt.h")
-    DEFINES = ("RS_CAVE", "RS_DEBUG", "RS_DSPACE", "DSPACE", "DSRTLX", "_DSRTLX", "CM_HIL",
-            "CM_NUMVER=%d" %(CARMAKER_NUMVER), "CM4SLDS")
+    CM_DEFINES = ["RS_CAVE", "RS_DEBUG", "RS_DSPACE", "DSPACE", "DSRTLX", "_DSRTLX"]
 else:
-    CFLAGS  = ("-include", "ipgrt.h")
-    DEFINES = ("RS_CAVE", "RS_DEBUG", "RS_DSPACE", "DSPACE", "DSRT", "_DSRT", "USE_IPGRT_FUNCS", "CM_HIL",
-            "CM_NUMVER=%d" %(CARMAKER_NUMVER), "CM4SLDS")
+    CM_DEFINES = ["RS_CAVE", "RS_DEBUG", "RS_DSPACE", "DSPACE", "DSRT", "_DSRT"]
+CM_DEFINES.extend(("CM_HIL", "CM_NUMVER=%d" %(CARMAKER_NUMVER), "CM4SLDS"))
+RMA_DEFINES = CM_DEFINES[:]
+RMA_DEFINES.append("RMA_CLIENT")
+if ARCH == 'dsrt':
+    CM_DEFINES.append("USE_IPGRT_FUNCS")
 
 SRC_DIRS  = ("src_cm4sl", "include")
 SRC_FILES = ("CM_Main.c", "CM_Vehicle.c", "User.c", "IO.c", "app_tmp.c")
 
 PROJECT_DIR = ""
-
-AppEvH = None
 
 PROP_COMPILER_DEFINES                  = "CompilerDefines"
 PROP_COMPILER_UNDEFINES                = "CompilerUndefines"
@@ -148,6 +156,14 @@ RelevantPropertyNames = (PROP_COMPILER_DEFINES,
                          PROP_SEARCH_PATHS,
                          PROP_CUSTOM_SOURCE_FILES,
                          PROP_CUSTOM_LIBRARIES)
+
+try:
+    pyvdir = ("python%d.%d" %(sys.version_info.major, sys.version_info.minor))
+    sys.path.append(NormPath(CARMAKER_PY_DIR + "/" + pyvdir))
+    import infofiles
+    Have_InfoFiles = True
+except:
+    Have_InfoFiles = False
 
 
 # =============================================================================
@@ -263,12 +279,13 @@ DDECALLBACK = WINFUNCTYPE(HDDEDATA, UINT, UINT, HCONV, HSZ, HSZ, HDDEDATA,
                           ULONG_PTR, ULONG_PTR)
 
 # =============================================================================
-# Project EventHandling
+# Event Handling
 # =============================================================================
 from win32com import client
 
-CONTROLLER = None
-ProjEvH_act = 0
+PrjCtrl = None
+
+AppEvH = None
 
 
 # =============================================================================
@@ -298,7 +315,7 @@ class DDEError:
         if idInst is None:
             RuntimeError.__init__(self, msg)
         else:
-            RuntimeError.__init__(self, "%s (err=%s)" % (msg, hex(DDE.GetLastError(idInst))))
+            RuntimeError.__init__(self, "%s (err=%s)" %(msg, hex(DDE.GetLastError(idInst))))
 
 # =============================================================================
 # Class: DDEClient
@@ -344,7 +361,7 @@ class DDEClient:
         hDdeData = DDE.ClientTransaction(LPBYTE(), 0, self._hConv, hszItem, CF_TEXT, XTYP_ADVSTOP if stop else XTYP_ADVSTART, TIMEOUT_ASYNC, LPDWORD())
         DDE.FreeStringHandle(self._idInst, hszItem)
         if not hDdeData:
-            raise DDEError("Unable to %s advise" % ("stop" if stop else "start"), self._idInst)
+            raise DDEError("Unable to %s advise" %("stop" if stop else "start"), self._idInst)
         DDE.FreeDataHandle(hDdeData)
 
     def execute(self, command, timeout=5000):
@@ -386,7 +403,7 @@ class DDEClient:
 
     def callback(self, value, item=None):
         """Callback function for advice."""
-        print(("%s: %s" % (item, value)))
+        print(("%s: %s" %(item, value)))
 
     def _callback(self, wType, uFmt, hConv, hsz1, hsz2, hDdeData, dwData1, dwData2):
         if wType == XTYP_ADVDATA:
@@ -412,15 +429,21 @@ class CM_BuildEvents:
         BRes = EArgs.Item("BuildResult")
         if BRes is None:
             return
-        if BRes.Success and BRes.Downloaded:
-            ConnectCM_GUI()
+        if BRes.Success:
+            if Have_InfoFiles:
+                RMA_ExtQuants_Create(self.ActiveApplication)
+            else:
+                RMA_ExtQuants_Create_Txt(self.ActiveApplication)
+            if BRes.Downloaded:
+                ConnectCM_GUI()
 
     def OnBuildStarted(self, x):
         EArgs = Dispatch(x)
         StartCM_GUI()
 
     def OnBuildStarting(self, x):
-        pass
+        EArgs = Dispatch(x)
+        RMA_Topology_Update(self.ActiveApplication)
 
     def OnQuitting(self):
         pass
@@ -430,22 +453,20 @@ class CM_BuildEvents:
 
 
 # =============================================================================
-# Class: BuildConfigSetInfo
+# Class: BuildConfigInfo
 # =============================================================================
-class BuildConfigSetInfo:
+class BuildConfigInfo:
     def __init__(self, bcs=None, name=""):
         self.AppProcCount = 0
-        self.SL_AppProcCount = 0
-        self.CM_AppProcCount = 0
         self.CreateOnCfgDesk = False
         self.DeleteOnCfgDesk = False
-        self.NameOnCfgDesk = ""
+        self.DisplayName = ""
         self.Properties = {}
         if bcs is None:
             self.Name = name
         else:
             self.Name = bcs.Name
-            self.NameOnCfgDesk = bcs.Name
+            self.DisplayName = bcs.Name
             for p in bcs.Properties:
                 if CStr(p.Value).count("COMObject") > 0:
                     elements = []
@@ -497,26 +518,35 @@ class BuildConfigSetInfo:
     def SetCPPCompOpts(self, strValue):
         self.Properties[PROP_CPP_COMPILER_OPTIONS] = strValue
 
-    def IsEqual(self, bcsi):
-        if self.Name != bcsi.Name:
+    def IsEqual(self, bci):
+        if self.Name != bci.Name:
             return False
-        return self.PropertiesAreEqual(bcsi)
+        return self.PropertiesAreEqual(bci)
 
-    def PropertiesAreEqual(self, bcsi):
-        if len(self.Properties) != len(bcsi.Properties):
+    def PropertiesAreEqual(self, bci):
+        if len(self.Properties) != len(bci.Properties):
             return False
         for item in list(self.Properties.items()):
             if item[0] == "Name":
                 continue
-            prop = bcsi.Properties.get(item[0])
+            prop = bci.Properties.get(item[0])
             if CStr(item[1]) != CStr(prop):
                 return False
         return True
 
-    def CloneProperties(self, obcsi):
+    def CloneProperties(self, obci):
         self.Properties.clear()
-        for propItem in list(obcsi.Properties.items()):
+        for propItem in list(obci.Properties.items()):
             self.Properties[propItem[0]] = propItem[1]
+
+    def UpdateWithBuildConfig(self, bcs):
+        self.SetCompDefines(bcs.COMPILER_DEFINES)
+        self.SetCompUnDefines(bcs.COMPILER_UNDEFINES)
+        self.SetSearchPaths(bcs.SEARCH_PATHS)
+        self.SetCustomLibraries(bcs.LIBRARIES)
+        self.SetCustomSrcFiles(bcs.SOURCE_FILES)
+        self.SetCCompOpts(bcs.COMPILER_OPTIONS)
+        self.SetCPPCompOpts(bcs.COMPILER_OPTIONS)
 
 
 # =============================================================================
@@ -531,7 +561,7 @@ class ApplProcInfo:
         self.ModelPath = None
 
 
-class CM_BuildConfig:
+class BuildConfig(object):
     def __init__(self):
         # Initialize the ConfigurationDesk application object.
         self.CfgDesk = None
@@ -539,20 +569,19 @@ class CM_BuildConfig:
         self.ActApp = None
 
         # Initialize Macro and Search Path template
-        self.CM_COMPILER_DEFINES   = ""
-        self.CM_COMPILER_UNDEFINES = ""
-        self.CM_COMPILER_OPTIONS   = ""
-        self.CM_COMPILER_OPT_SET   = ""
-        self.CM_INCLUDES           = ""
-        self.CM_USER_OPT_OPTIONS   = ""
-        self.CM_SOURCE_FILES       = ""
-        self.CM_LIBRARIES          = ""
-        self.CM_SEARCH_PATHS       = ""
+        self.COMPILER_DEFINES   = ""
+        self.COMPILER_UNDEFINES = ""
+        self.COMPILER_OPTIONS   = ""
+        self.COMPILER_OPT_SET   = ""
+        self.INCLUDES           = ""
+        self.USER_OPT_OPTIONS   = ""
+        self.SOURCE_FILES       = ""
+        self.LIBRARIES          = ""
+        self.SEARCH_PATHS       = ""
 
         # Initialize Collections for Build Configuration Informations
-        self.BldCfgSetInfos = collections.OrderedDict()
-        self.ApplProcInfos  = collections.OrderedDict()
-
+        self.BuildCfgInfos = collections.OrderedDict()
+        self.ApplProcInfos = collections.OrderedDict()
 
     def Initialize(self):
         try:
@@ -560,28 +589,36 @@ class CM_BuildConfig:
             self.CfgDesk = Dispatch("ConfigurationDesk.Application")
             self.CfgDesk.MainWindow.Visible = True
             if self.CfgDesk.ActiveApplication is None:
-                return "NoApp"
+                # No active application, nothing to do
+                return False
             self.ActApp = self.CfgDesk.ActiveApplication
-            self.CM_COMPILER_DEFINES = JoinStrings(DEFINES, " ")
-            self.CM_COMPILER_OPTIONS = JoinStrings(CFLAGS, " ")
-            srch = [ CARMAKER_INC_DIR ]
-            self.CM_SEARCH_PATHS = JoinPaths(srch, "; ")
-            libs = [ "libdscandrv.so", "libRealSimDsLib_2019b.a"  ]
-            self.CM_LIBRARIES = JoinPaths(libs, "; ")
-            # srcf = [ "MySource_File.c" ]
-            # self.CM_SOURCE_FILES = JoinPaths(srcf, "; ")
             return True
         except Exception as exc:
             ShowMsg("Error initializing: " + str(exc))
             return False
 
+    def GetApplProcInfosForBcs(self, bci):
+        res = []
+        for appi in list(self.ApplProcInfos.values()):
+            if appi.BcsName == bci.Name:
+                res.append(appi)
+        return res
+
+    def GetBuildConfigInfo(self, name, actApp=None):
+        if actApp is None:
+            actApp = self.ActApp
+        if name in self.BuildCfgInfos:
+            return self.BuildCfgInfos.get(name)
+        return None
 
     def ReadBuildConfigs(self, actApp=None):
         # Read Build Configuration Sets
         if actApp is None:
             actApp = self.ActApp
-        self.BldCfgSetInfos.clear()
+        self.BuildCfgInfos.clear()
         self.ApplProcInfos.clear()
+        if actApp is None:
+            return False
         # get access to all BuildConfiguration relations of active app
         relBC = actApp.Relations.Item("BuildConfiguration")
         # get 1st executable application in active BuildConfiguration relations
@@ -592,15 +629,15 @@ class CM_BuildConfig:
             if not bcs.IsOfRole("ApplicationProcessOptions"):
                 continue
             # read all Build Configuration Set informations
-            bcsi = BuildConfigSetInfo(bcs)
-            if bcsi.Name in self.BldCfgSetInfos:
-                self.BldCfgSetInfos.clear()
+            bci = BuildConfigInfo(bcs=bcs)
+            if bci.Name in self.BuildCfgInfos:
+                self.BuildCfgInfos.clear()
                 self.ApplProcInfos.clear()
                 return False
-            self.BldCfgSetInfos[bcsi.Name] = bcsi
+            self.BuildCfgInfos[bci.Name] = bci
             # scan all relations of this Build Configuration Set
             for proc in relBC.GetElements(bcs):
-                bcsi.AppProcCount += 1
+                bci.AppProcCount += 1
                 if relBC.GetElements(proc).Count <= 0:
                     continue
                 model = relBC.GetElements(proc).Item(0)
@@ -617,26 +654,15 @@ class CM_BuildConfig:
                         continue
                     appi.ModelPath = prop.Value
                 if appi.Name in self.ApplProcInfos:
-                    self.BldCfgSetInfos.clear()
+                    self.BuildCfgInfos.clear()
                     self.ApplProcInfos.clear()
                     return False
                 self.ApplProcInfos[appi.Name] = appi
-                bcsi.SL_AppProcCount += 1
-                if bcsi.Name == CM_BUILD_CFG_NAME:
-                    bcsi.CM_AppProcCount += 1
         return True
 
-
-    def CM_BuildConfigInfo(self, actApp=None):
-        if actApp is None:
-            actApp = self.ActApp
-        if CM_BUILD_CFG_NAME in self.BldCfgSetInfos:
-            return self.BldCfgSetInfos.get(CM_BUILD_CFG_NAME)
-        return None
-
-
-    def ApplyBuildConfig(self, bcsi=None):
+    def ApplyBuildConfig(self, bci=None):
         global PROJECT_DIR
+
         # get access to all BuildConfiguration relations of active app
         relBC = self.ActApp.Relations.Item("BuildConfiguration")
         # get 1st executable application in active BuildConfiguration relations
@@ -652,37 +678,39 @@ class CM_BuildConfig:
             for ap in relBC.GetElements(bcs):
                 dictAP[ap.Name] = ap
 
-        if not bcsi is None:
-            bcsi_set = collections.OrderedDict()
-            bcsi_set[bcsi.Name] = bcsi
+        bci_name = ""
+        if bci is not None:
+            bci_set = collections.OrderedDict()
+            bci_set[bci.Name] = bci
+            bci_name = bci.Name
         else:
-            bcsi_set = self.BldCfgSetInfos
-        for bcsi in list(bcsi_set.values()):
-            if bcsi.DeleteOnCfgDesk:
+            bci_set = self.BuildCfgInfos
+        for bci in list(bci_set.values()):
+            if bci.DeleteOnCfgDesk:
                 # Delete the Build Configuration Info
-                if bcsi.NameOnCfgDesk in dictBCS:
-                    relBC.RemoveElements(rootApp, [dictBCS[bcsi.NameOnCfgDesk]])
+                if bci.DisplayName in dictBCS:
+                    relBC.RemoveElements(rootApp, [dictBCS[bci.DisplayName]])
                 continue
             # Get the Application Processes to assign to the BCS
-            appisToAssign = self.GetApplProcInfosForBcs(bcsi)
+            appisToAssign = self.GetApplProcInfosForBcs(bci)
             # Get an existing BCS from CfgDesk or create a new one
             curBCS = None
-            if bcsi.CreateOnCfgDesk:
+            if bci.CreateOnCfgDesk:
                 curBCS = relBC.CreateDataObject(bcsType, rootApp)
-                curBCS.Name = bcsi.NameOnCfgDesk
+                curBCS.Name = bci.DisplayName
             else:
-                if bcsi.NameOnCfgDesk in dictBCS:
-                    curBCS = dictBCS[bcsi.NameOnCfgDesk]
+                if bci.DisplayName in dictBCS:
+                    curBCS = dictBCS[bci.DisplayName]
             # If a BCS was found or created, assign the Application Processes
             if curBCS is None:
                 continue
             for propName in RelevantPropertyNames:
-                curBCS.Properties[propName].Value = CStr(bcsi.Properties.get(propName))
+                curBCS.Properties[propName].Value = CStr(bci.Properties.get(propName))
             for appi in appisToAssign:
                 if appi.Name not in dictAP:
                     continue
-                spaths = bcsi.Properties.get(PROP_SEARCH_PATHS)
-                if curBCS.Name == CM_BUILD_CFG_NAME and appi.Model is not None:
+                spaths = bci.Properties.get(PROP_SEARCH_PATHS)
+                if curBCS.Name == bci_name and appi.Model is not None:
                     srch = [ CARMAKER_INC_DIR ]
                     if appi.ModelPath is not None:
                         mdir = os.path.dirname(appi.ModelPath)
@@ -696,42 +724,66 @@ class CM_BuildConfig:
                 relBC.AddElements(curBCS, [dictAP[appi.Name]])
         return True
 
-    def GetApplProcInfosForBcs(self, bcsi):
-        res = []
-        for appi in list(self.ApplProcInfos.values()):
-            if appi.BcsName == bcsi.Name:
-                res.append(appi)
-        return res
+
+class CM_BuildConfig(BuildConfig):
+    def Initialize(self):
+        if not super(CM_BuildConfig, self).Initialize():
+            return False
+        self.COMPILER_DEFINES = JoinStrings(CM_DEFINES, " ")
+        self.COMPILER_OPTIONS = JoinStrings(CM_CFLAGS, " ")
+        srch = [ CARMAKER_INC_DIR ]
+        self.SEARCH_PATHS = JoinPaths(srch, "; ")
+        libs = [ "libdscandrv.so", "libRealSimDsLib_2024a_CM11_1_2.a" ]
+        self.LIBRARIES = JoinPaths(libs, "; ")
+        # srcf = [ "MySource_File.c" ]
+        # self.SOURCE_FILES = JoinPaths(srcf, "; ")
+        return True
+
+
+class RMA_BuildConfig(BuildConfig):
+    def Initialize(self):
+        if not super(RMA_BuildConfig, self).Initialize():
+            return False
+        self.COMPILER_DEFINES = JoinStrings(RMA_DEFINES, " ")
+        self.COMPILER_OPTIONS = JoinStrings(RMA_CFLAGS, " ")
+        srch = [ CARMAKER_INC_DIR ]
+        self.SEARCH_PATHS = JoinPaths(srch, "; ")
+        # libs = [ "libmylib.so" ]
+        # self.LIBRARIES = JoinPaths(libs, "; ")
+        # srcf = [ "MySource_File.c" ]
+        # self.SOURCE_FILES = JoinPaths(srcf, "; ")
+        return True
 
 
 # =============================================================================
-# Class: MainController
+# Class: ProjectController
 # =============================================================================
-class MainController(object):
+class ProjectController(object):
     def __init__(self):
         # Initialize the ConfigurationDesk application object.
-        self.ConfigurationDeskApplication = None
+        self.CfgDesk = None
 
         # Initialize the project events object
-        self.ProjectEvents = None
+        self.PrjEvH = None
 
     def Initialize(self):
         # Start ConfigurationDesk and set it to the demo controller class.
-        self.ConfigurationDeskApplication = client.Dispatch("ConfigurationDesk.Application")
+        self.CfgDesk = client.Dispatch("ConfigurationDesk.Application")
 
         # ConfigurationDesk starts windowless if started via automation.
-        self.ConfigurationDeskApplication.MainWindow.Visible = True
+        self.CfgDesk.MainWindow.Visible = True
 
     def ConnectToEvents(self):
-        # The project events are accessible via the ICaProjectEvents interface. The events
-        # provider is the ICaProjectManagement object, the ProjectEvents class, which is
-        # defined below, must be used in the same way like the ApplicationEvents.
-        ProjectManagement = self.ConfigurationDeskApplication.ProjectManagement
-        self.ProjectEvents = client.DispatchWithEvents(ProjectManagement, ProjectEvents)
+        # The project events are accessible via the ICaProjectEvents interface.
+        # The events provider is the ICaProjectManagement object, the
+        # ProjectEvents class, which is defined below, must be used in the same
+        # way like the ApplicationEvents.
+        PrjMgmnt = self.CfgDesk.ProjectManagement
+        self.PrjEvH = client.DispatchWithEvents(PrjMgmnt, ProjectEvents)
 
     def Delete(self):
-        del self.ConfigurationDeskApplication
-        del self.ProjectEvents
+        del self.PrjEvH
+        del self.CfgDesk
 
 
 # =============================================================================
@@ -739,39 +791,65 @@ class MainController(object):
 # =============================================================================
 class ProjectEvents(object):
     def OnApplicationLoaded(self, args):
-        MakeCM_BuildConfig()
+        MakeBuildConfig()
 
     def OnProjectClosing(self, args):
         DeleteProjectEventHandler()
 
 
-def MakeCM_BuildConfig():
+def CreateProjectEventHandler():
+    global PrjCtrl
+
+    if PrjCtrl is not None:
+        DeleteProjectEventHandler()
+    try:
+        # Create the controller which helps to handle project settings.
+        PrjCtrl = ProjectController()
+        # Call the initialize function of the ProjectController.
+        PrjCtrl.Initialize()
+        # Connect to the events
+        PrjCtrl.ConnectToEvents()
+    except Exception as exc:
+        ShowMsg("Exception in script CM_BuildConfig.py: " + str(exc))
+
+
+def DeleteProjectEventHandler():
+    global PrjCtrl
+
+    if PrjCtrl is not None:
+        try:
+            PrjCtrl.Delete()
+        except Exception as exc:
+            ShowMsg("Exception in script CM_BuildConfig.py: " + str(exc))
+        PrjCtrl = None
+
+
+def MakeBuildConfig():
     global AppEvH
-    global ProjEvH_act
+
+    # CarMaker Build Configuration
     cmbc = CM_BuildConfig()
-    rv = cmbc.Initialize()
-    if cmbc is None or rv is False:
-        return
-    elif rv == "NoApp":
-        if ProjEvH_act == 0:
-            ProjectEventHandler()
-        else:
-            ShowMsg("No active application detected")
+    if cmbc is None or not cmbc.Initialize():
         return
     cmbc.ReadBuildConfigs()
-    cbci = cmbc.CM_BuildConfigInfo()
-    if cbci is None:
-        cbci = BuildConfigSetInfo(None, CM_BUILD_CFG_NAME)
-        cbci.CreateOnCfgDesk = True
-        cbci.NameOnCfgDesk   = CM_BUILD_CFG_NAME
-    cbci.SetCompDefines(cmbc.CM_COMPILER_DEFINES)
-    cbci.SetCompUnDefines(cmbc.CM_COMPILER_UNDEFINES)
-    cbci.SetSearchPaths(cmbc.CM_SEARCH_PATHS)
-    cbci.SetCustomLibraries(cmbc.CM_LIBRARIES)
-    cbci.SetCustomSrcFiles(cmbc.CM_SOURCE_FILES)
-    cbci.SetCCompOpts(cmbc.CM_COMPILER_OPTIONS)
-    cbci.SetCPPCompOpts(cmbc.CM_COMPILER_OPTIONS)
-    if cmbc.ApplyBuildConfig(cbci) is False:
+    cmbci = cmbc.GetBuildConfigInfo(CM_BUILD_CFG_NAME)
+    if cmbci is None:
+        cmbci = BuildConfigInfo(name=CM_BUILD_CFG_NAME)
+        cmbci.CreateOnCfgDesk = True
+        cmbci.DisplayName     = CM_BUILD_CFG_NAME
+    cmbci.UpdateWithBuildConfig(cmbc)
+    # RMA Build Configuration
+    rmabc = RMA_BuildConfig()
+    if rmabc is None or not rmabc.Initialize():
+        return
+    rmabc.ReadBuildConfigs()
+    rmabci = rmabc.GetBuildConfigInfo(RMA_BUILD_CFG_NAME)
+    if rmabci is None:
+        rmabci = BuildConfigInfo(name=RMA_BUILD_CFG_NAME)
+        rmabci.CreateOnCfgDesk = True
+        rmabci.DisplayName     = RMA_BUILD_CFG_NAME
+    rmabci.UpdateWithBuildConfig(rmabc)
+    if not cmbc.ApplyBuildConfig(cmbci) or not rmabc.ApplyBuildConfig(rmabci):
         ShowMsg("Failed to apply Build Configuration settings")
         return
     AppEvH = DispatchWithEvents("ConfigurationDesk.Application", CM_BuildEvents)
@@ -821,42 +899,195 @@ def ConnectCM_GUI():
             del cmdde
 
 
-def ProjectEventHandler():
-    global CONTROLLER
-    global ProjEvH_act
-
-    try:
-        # Create the controller which controls the signal chain handling examples in this script.
-        CONTROLLER = MainController()
-
-        # Call the initialize function of the DemoController to setup ConfigurationDesk.
-        CONTROLLER.Initialize()
-
-        # Connect to the events
-        CONTROLLER.ConnectToEvents()
-        ProjEvH_act = 1
-
-    except Exception as exc:
-        ShowMsg("Exception in script CM_BuildConfig.py: " + str(exc))
-
-
-def DeleteProjectEventHandler():
-    global CONTROLLER
-    global ProjEvH_act
-
-    if ProjEvH_act == 1:
+def ModelContains(mdl, name):
+    for i in range(mdl.GetCount()):
         try:
-            CONTROLLER.Delete()
+            sub = mdl.Item(i)
+            if sub.Name == name:
+                return True
+        except:
+            continue
+        if ModelContains(sub, name):
+            return True
+    return False
 
-        except Exception as exc:
-            ShowMsg("Exception in script CM_BuildConfig.py: " + str(exc))
 
-        ProjEvH_act = 0
+def FindSubModel(mdl, name):
+    for i in range(mdl.GetCount()):
+        try:
+            if mdl.Item(i).Name == name:
+                return mdl.Item(i)
+        except:
+            continue
+        sub = FindSubModel(mdl.Item(i), name)
+        if sub is not None:
+            return sub
+    return None
 
 
+def CreateRMA_Topology(dstdir, nd_tab, master_app):
+    fname   = "rma_topology.h"
+    dstname = os.path.join(dstdir, fname)
+    tmpldir = os.path.join(CARMAKER_DIR, "Misc-CfgDesk")
+    tmpl = os.path.join(tmpldir, fname + ".template")
+    try:
+        with io.open(tmpl, mode="rt", buffering=1, newline=None) as fin:
+            with io.open(dstname, mode="wt", buffering=1, newline=None) as fout:
+                ln = fin.readline()
+                while ln != "":
+                    if ln.strip() == "RMA_NODE_TABLE_NOT_DEFINED":
+                        fout.write(nd_tab)
+                    elif ln.strip() == "RMA_MASTER_APP_NOT_DEFINED":
+                        fout.write("#define RMA_MasterApp\t\"" + master_app + "\"\n")
+                    else:
+                        fout.write(ln)
+                    ln = fin.readline()
+    except Exception as exc:
+        ShowMsg("Error creating " + dstname + ": " + str(exc))
+        return False
+    return True
 
+
+def RMA_Topology_Update(app):
+    top = app.Components.Item("ModelTopology")
+    mstrmdl = None
+    nodetab = ""
+    for i in range(top.Count):
+        mdl = top.Item(i)
+        if not mdl.IsInApplication:
+            continue
+        if ModelContains(mdl, CM4SL_BLOCK_NAME):
+            if mstrmdl is not None:
+                print("CarMaker can't be distributed on different models")
+                return
+            mstrmdl = mdl
+        nodetab = nodetab + "    { \"" + mdl.Name + "\", " + str(i+1) + " },\n"
+    if mstrmdl is None:
+        return
+    for mdl in top:
+        if not mdl.IsInApplication:
+            continue
+        dstdir = os.path.dirname(mdl.Properties.Item("Model location").Value)
+        CreateRMA_Topology(dstdir, nodetab, mstrmdl.Name)
+
+
+def RMA_ExtQuants_Create(app):
+    global PROJECT_DIR
+
+    top = app.Components.Item("ModelTopology")
+    exttab = []
+    extqu = infofiles.IFile()
+    extqu.setstr("FileIdent", "CarMaker-ExternalQuantities 1")
+    extqu.settxt("Description", ["Remote Model Access Configuration",
+        "Automatically generated by " + CM_BUILD_CFG_SCRIPT,
+        "DO NOT EDIT THIS FILE!"])
+    extqu.setlong("BufferIdOffset", 2048)
+    extqufn = ""
+    for i in range(top.Count):
+        mdl = top.Item(i)
+        if not mdl.IsInApplication:
+            continue
+        prop = mdl.Properties.TryGetItem("Model location")
+        if prop is None:
+            continue
+        mdldir = os.path.dirname(prop.Value)
+        if ModelContains(mdl, CM4SL_BLOCK_NAME):
+            if PROJECT_DIR != "":
+                cfgdir = os.path.join(PROJECT_DIR, "Data", "Config")
+            else:
+                cfgdir = os.path.join(os.path.dirname(mdldir), "Data", "Config")
+            extqufn = os.path.join(cfgdir, "ExternalQuantities.info")
+            continue
+        exttab.append(mdl.Name + " " + str(i+1))
+        rmaqu = infofiles.IFile()
+        try:
+            rmaqu.read(os.path.join(mdldir, mdl.Name + "_rma.info"))
+            dstkey = mdl.Name + ".Model"
+            extqu.setstr(dstkey, mdl.Name)
+            extqu.addlinebefore("", dstkey)
+            for key in ["Version"]:
+                data = rmaqu.getstr(key)
+                if data is not None:
+                    extqu.setstr(mdl.Name + "." + key, data)
+            for key in ("Description", "DDict", "Read", "Write", "Param"):
+                data = rmaqu.gettxt(key)
+                if data is not None:
+                    extqu.settxt(mdl.Name + "." + key, data)
+        except:
+            continue
+        finally:
+            del rmaqu
+    extqu.settxt("Topology", exttab)
+    extqu.movekeybehind("Topology", "BufferIdOffset")
+    if extqufn != "":
+        extqu.write(extqufn)
+    del extqu
+
+
+def RMA_ExtQuants_Create_Txt(app):
+    global PROJECT_DIR
+
+    top = app.Components.Item("ModelTopology")
+    exttab = []
+    extmdls = []
+    extsrcs = []
+    extqufn = ""
+    for i in range(top.Count):
+        mdl = top.Item(i)
+        if not mdl.IsInApplication:
+            continue
+        prop = mdl.Properties.TryGetItem("Model location")
+        if prop is None:
+            continue
+        mdldir = os.path.dirname(prop.Value)
+        if ModelContains(mdl, CM4SL_BLOCK_NAME):
+            if PROJECT_DIR != "":
+                cfgdir = os.path.join(PROJECT_DIR, "Data", "Config")
+            else:
+                cfgdir = os.path.join(os.path.dirname(mdldir), "Data", "Config")
+            extqufn = os.path.join(cfgdir, "ExternalQuantities.info")
+            continue
+        exttab.append(mdl.Name + " " + str(i+1))
+        extmdls.append(mdl.Name)
+        extsrcs.append(os.path.join(mdldir, mdl.Name + "_rma.info"))
+
+    if len(exttab) <= 0 or len(extqufn) <= 0:
+        return
+    extfile = open(extqufn, "w")
+    extfile.writelines([
+        "FileIdent = CarMaker-ExternalQuantities 1\n",
+        "Description:\n",
+        "\tRemote Model Access Configuration\n"
+        "\tAutomatically generated by " + CM_BUILD_CFG_SCRIPT + "\n",
+        "\tDO NOT EDIT THIS FILE!\n",
+        "BufferIdOffset = 2048\n",
+        "Topology:\n"])
+    for i in range(len(exttab)):
+        extfile.write("\t" + exttab[i] + "\n")
+    for i in range(len(extmdls)):
+        mdl = extmdls[i]
+        src = extsrcs[i]
+        srcfile = open(extsrcs[i], "r")
+        lineno  = 0
+        extfile.write("\n")
+        for line in srcfile:
+            lineno = lineno + 1
+            if lineno == 1 and line.startswith("#INFOFILE"):
+                continue
+            if line.startswith("FileIdent"):
+                continue
+            if re.search(r"^[^\s=]+\s*=.*", line) is not None:
+                extfile.write(mdl + "." + line)
+            elif re.search(r"^[^\s:]+\s*:$", line) is not None:
+                extfile.write(mdl + "." + line)
+            else:
+                extfile.write(line)
+        srcfile.close()
+    extfile.close()
 
 
 # Main Program
-if __name__ == '__main__' and ProjEvH_act == 0:
-    MakeCM_BuildConfig()
+if __name__ == '__main__':
+    CreateProjectEventHandler()
+    if AppEvH is None:
+        MakeBuildConfig()
