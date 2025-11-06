@@ -13,6 +13,9 @@ set "RELEASE_PATH=%SOURCE_PATH%\build"
 set "DEPS_FILE=%SOURCE_PATH%\dependencies.yaml"
 set "YAML_HELPER=%SCRIPT_DIR%yaml_helper.ps1"
 
+REM Set build configuration for dispatch (component scripts will use this)
+set "RS_BUILD_CONFIG=Release"
+
 REM Set up shared log files
 set "RS_BUILD_LOG=%SCRIPT_DIR%build.log"
 set "RS_BUILD_SUMMARY=%SCRIPT_DIR%build_summary.log"

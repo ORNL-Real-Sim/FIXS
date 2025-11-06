@@ -38,6 +38,16 @@ $BuildResult = 0
 $FailedBuilds = @()
 $CarMakerVersions = $null
 
+# Configuration detection
+# When double-clicked: builds Debug only (change $StandaloneConfigs to build what you need)
+# When called from dispatch.bat: RS_BUILD_CONFIG will be set to Release
+if (-not $env:RS_BUILD_CONFIG) {
+    $StandaloneConfigs = @('Debug')
+    # To build both Debug and Release when double-clicked, change above line to: $StandaloneConfigs = @('Debug', 'Release')
+} else {
+    $StandaloneConfigs = @($env:RS_BUILD_CONFIG)
+}
+
 if (-not (Test-Path $RepoRoot)) {
     Write-Error "Repository root not found: $RepoRoot"
     Exit-Script 1
@@ -132,20 +142,22 @@ foreach ($version in $CarMakerVersions -split '\s+') {
     $cmProjPath = Join-Path $RepoRoot "ProprietaryFiles\CM${cmMajor}_proj"
 
     if (Test-Path $cmProjPath) {
-        # Build desktop CarMaker
-        $solutionPath = Join-Path $cmProjPath 'src\CarMaker.sln'
-        $result = Build-Solution "CarMaker$cmMajor" $solutionPath '/target:CarMaker /p:Configuration=Release'
-        if ($result -ne 0) {
-            $FailedBuilds += "CarMaker$cmMajor"
-            $BuildResult = 1
-        }
+        foreach ($config in $StandaloneConfigs) {
+            # Build desktop CarMaker
+            $solutionPath = Join-Path $cmProjPath 'src\CarMaker.sln'
+            $result = Build-Solution "CarMaker$cmMajor ($config)" $solutionPath "/target:CarMaker /p:Configuration=$config"
+            if ($result -ne 0) {
+                $FailedBuilds += "CarMaker$cmMajor ($config)"
+                $BuildResult = 1
+            }
 
-        # Build Simulink variant
-        $solutionPath = Join-Path $cmProjPath 'src_cm4sl\CarMaker for Simulink.sln'
-        $result = Build-Solution "CarMaker$cmMajor Simulink" $solutionPath '/p:Configuration=Release'
-        if ($result -ne 0) {
-            $FailedBuilds += "CarMaker$cmMajor Simulink"
-            $BuildResult = 1
+            # Build Simulink variant
+            $solutionPath = Join-Path $cmProjPath 'src_cm4sl\CarMaker for Simulink.sln'
+            $result = Build-Solution "CarMaker$cmMajor Simulink ($config)" $solutionPath "/p:Configuration=$config"
+            if ($result -ne 0) {
+                $FailedBuilds += "CarMaker$cmMajor Simulink ($config)"
+                $BuildResult = 1
+            }
         }
     } else {
         "CM${cmMajor}_proj folder not found, skipping CarMaker $cmMajor builds" | Out-File -FilePath $LogSummary -Append -Encoding UTF8

@@ -10,7 +10,7 @@ set "SCRIPT_DIR=%~dp0"
 set "RUN_MODE=%~1"
 
 for %%I in ("%SCRIPT_DIR%..\..") do set "REPO_ROOT=%%~fI"
-for %%I in ("%SCRIPT_DIR%.") do set "DISPATCH_DIR=%%~fI"
+set "DISPATCH_DIR=%SCRIPT_DIR%"
 
 REM Use shared log files if set by dispatch, otherwise create local ones
 if not defined RS_BUILD_LOG set "RS_BUILD_LOG=%DISPATCH_DIR%build.log"
@@ -42,6 +42,16 @@ if /I "%RUN_MODE%"=="inline" (
 set "STACK_CHANGED=0"
 set "BUILD_RESULT=0"
 set "FAILED_BUILDS="
+
+REM Configuration detection
+REM When double-clicked: builds both Debug and Release (change STANDALONE_CONFIGS to build only what you need)
+REM When called from dispatch.bat: RS_BUILD_CONFIG will be set to Release
+if not defined RS_BUILD_CONFIG (
+    set "STANDALONE_CONFIGS=Debug Release"
+    REM To build Debug only when double-clicked, change above line to: set "STANDALONE_CONFIGS=Debug"
+) else (
+    set "STANDALONE_CONFIGS=%RS_BUILD_CONFIG%"
+)
 
 if not defined REPO_ROOT (
     echo ERROR: Failed to resolve repository root from script directory.
@@ -76,17 +86,21 @@ if /I "%RUN_MODE%"=="standalone" (
 )
 
 REM Build TrafficLayer
-call :BuildSolution "TrafficLayer" ".\TrafficLayer\TrafficLayer.sln" "/p:Configuration=Release"
-if errorlevel 1 (
-    call :TrackFailure "TrafficLayer"
-    set "BUILD_RESULT=1"
+for %%C in (%STANDALONE_CONFIGS%) do (
+    call :BuildSolution "TrafficLayer (%%C)" ".\TrafficLayer\TrafficLayer.sln" "/p:Configuration=%%C"
+    if errorlevel 1 (
+        call :TrackFailure "TrafficLayer (%%C)"
+        set "BUILD_RESULT=1"
+    )
 )
 
 REM Build VirtualEnvironment
-call :BuildSolution "VirtualEnvironment" ".\VirtualEnvironment\VirtualEnvironment.sln" "/p:Configuration=Release"
-if errorlevel 1 (
-    call :TrackFailure "VirtualEnvironment"
-    set "BUILD_RESULT=1"
+for %%C in (%STANDALONE_CONFIGS%) do (
+    call :BuildSolution "VirtualEnvironment (%%C)" ".\VirtualEnvironment\VirtualEnvironment.sln" "/p:Configuration=%%C"
+    if errorlevel 1 (
+        call :TrackFailure "VirtualEnvironment (%%C)"
+        set "BUILD_RESULT=1"
+    )
 )
 
 echo.
