@@ -25,6 +25,7 @@ Publication list is upcoming...
 
 # Other links
 This README contains general information of the interface. For specific documentation of different simulators, check the following links:
+* ### [Build Instructions](doc/BUILD.md) - Comprehensive build system documentation
 * ### [Developer Guide](doc/DEVELOPER_GUIDE.md) - Repository structure, build scripts, and usage guide
 * ### [VISSIM Interface](doc/VISSIMdoc.md)
 * ### [SUMO Interface](doc/SUMOdoc.md)
@@ -32,7 +33,7 @@ This README contains general information of the interface. For specific document
 * ### [CARLA](doc/CARLAdoc.md)
 
 Current software versions used in FIXS development
-CM13.1.2, Carla 0.9.15, VISSIM 2022, SUMO 1.21, dSPACE/Matlab 2024a
+CM13.1.3, Carla 0.9.15, VISSIM 2022, SUMO 1.21, dSPACE/Matlab 2024a
 
 
 # Table of Contents
@@ -86,44 +87,42 @@ There are different mode of synchronization and opeartion of the Real-Sim interf
 SimulationModeParamter is a double variable that currently only used for mode binary 100, integer 4 and binary 101, integer 5
 
 ## Build
-This section is about how to build the source code, and then how to dispatch a released executable version.
 
-### Prerequisite
+Real-Sim FIXS uses a modular build system with automated tool detection. For detailed build instructions, see **[doc/BUILD.md](doc/BUILD.md)**.
 
-#### 1. Download and install Visual Studio 17 2022 community version. 
+### Quick Start
 
-#### 2. Download and install cmake
+**Prerequisites:**
+- Visual Studio 2022 (Community, Professional, or Enterprise)
+- CMake (version 3.10 or higher)
+- Optional: MATLAB 2024a, CarMaker 13.1.3/11.1.2, dSPACE ConfigurationDesk 2024-A
 
-#### 3. Several libraries need to be compiled first. You can use the ```compileExternalLibraries.bat``` to do the following steps automatically or manually execute the following steps. Make sure you have CMake installed and added to PATH
-
-* Build libevent (Currently this lib is not used, you can skip)\
-reference: https://github.com/libevent/libevent/blob/master/Documentation/Building.md#building-on-windows \
-Note: libevent source is already included in the CommonLib folder. Using the following command to build
-or "start libevent.sln" and build with menu in Visual Studio. 
-```
-cd .\CommonLib\libevent
-md build && cd build
-cmake -G "Visual Studio 17 2022" -DEVENT__DISABLE_MBEDTLS=ON ..   # Or use any generator you want to use. Run cmake --help for a list
-cmake --build . --config Release 
+**Full Release Build:**
+```batch
+dispatch.bat
 ```
 
-* Build yaml-cpp\
-  reference: https://github.com/jbeder/yaml-cpp \
-  Note: Build in Release version if also compiling Release version of `VirtualEnvironment.lib` and CarMaker executable. Build in Debug if compiling Debug version of `VirtualEnvironment.lib` and CarMaker executable**
+This single command automatically:
+- Detects installed tools (Visual Studio, MATLAB, dSPACE, CarMaker)
+- Reads versions from `dependencies.yaml`
+- Builds all components (TrafficLayer, VISSIM DLLs, CarMaker executables, dSPACE libraries, MEX files)
+- Packages everything into the `build/` directory
+
+**Development Builds:**
+
+For faster iteration during development, build individual components:
+```batch
+# Core components only
+scripts\dispatch\2_core_components.bat
+
+# VISSIM components only
+scripts\dispatch\3_vissim_components.bat
+
+# CarMaker components only (auto-generates BuildConfig files)
+powershell -ExecutionPolicy Bypass -File scripts\dispatch\4a_carmaker_components.ps1
 ```
-cd .\CommonLib\yaml-cpp
-md build && cd build
-cmake -G "Visual Studio 17 2022" ..   # Or use any generator you want to use. Run cmake --help for a list
-cmake --build . --config Release 
-```
 
-
-### Dispatch a release
-The source code uses ```msbuild``` as the default compiler, command ```msbuild``` must be known in the environmental variable before dispatching. The path to be added is ```%ProgramFiles(x86)%\Microsoft Visual Studio\2022\<YOUR_VS_EDITION>\MSBuild\Current\Bin```.
-
-Additionally, python >= 3.8 is required. It is recommended to create a dedicated conda environment and name it as ```realsimdev```.
-
-With the above, run ```dispatch.bat``` will dispatch released executables inside a ```build``` folder.
+For complete build system documentation including Debug/Release configurations, troubleshooting, and architecture details, see **[doc/BUILD.md](doc/BUILD.md)**.
 
 ## Compatibility to Previous Versions
 Here are potential compatibility issues with different versions
