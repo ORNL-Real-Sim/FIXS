@@ -13,8 +13,8 @@ for %%I in ("%SCRIPT_DIR%..\..") do set "REPO_ROOT=%%~fI"
 for %%I in ("%SCRIPT_DIR%.") do set "DISPATCH_DIR=%%~fI"
 
 REM Use shared log files if set by dispatch, otherwise create local ones
-if not defined RS_BUILD_LOG set "RS_BUILD_LOG=%DISPATCH_DIR%build.log"
-if not defined RS_BUILD_SUMMARY set "RS_BUILD_SUMMARY=%DISPATCH_DIR%build_summary.log"
+if not defined RS_BUILD_LOG set "RS_BUILD_LOG=%DISPATCH_DIR%\build.log"
+if not defined RS_BUILD_SUMMARY set "RS_BUILD_SUMMARY=%DISPATCH_DIR%\build_summary.log"
 set "LOG_OUTPUT=%RS_BUILD_LOG%"
 set "LOG_SUMMARY=%RS_BUILD_SUMMARY%"
 
@@ -42,6 +42,16 @@ if /I "%RUN_MODE%"=="inline" (
 set "STACK_CHANGED=0"
 set "BUILD_RESULT=0"
 set "FAILED_BUILDS="
+
+REM Configuration detection
+REM When double-clicked: builds both Debug and Release (change STANDALONE_CONFIGS to build only what you need)
+REM When called from dispatch.bat: RS_BUILD_CONFIG will be set to Release
+if not defined RS_BUILD_CONFIG (
+    set "STANDALONE_CONFIGS=Debug Release"
+    REM To build Debug only when double-clicked, change above line to: set "STANDALONE_CONFIGS=Debug"
+) else (
+    set "STANDALONE_CONFIGS=%RS_BUILD_CONFIG%"
+)
 
 if not defined REPO_ROOT (
     echo ERROR: Failed to resolve repository root from script directory.
@@ -77,17 +87,7 @@ if /I "%RUN_MODE%"=="standalone" (
 
 REM Build VISSIM server components if present
 if exist ".\ProprietaryFiles\VISSIMserver" (
-    call :BuildSolution "DriverModel_RealSim" ".\ProprietaryFiles\VISSIMserver\VISSIMserver.sln" "/target:DriverModel_RealSim /p:Configuration=Release"
-    if errorlevel 1 (
-        call :TrackFailure "DriverModel_RealSim"
-        set "BUILD_RESULT=1"
-    )
-
-    call :BuildSolution "DriverModel_RealSim_v2021" ".\ProprietaryFiles\VISSIMserver\VISSIMserver.sln" "/target:DriverModel_RealSim_v2021 /p:Configuration=Release"
-    if errorlevel 1 (
-        call :TrackFailure "DriverModel_RealSim_v2021"
-        set "BUILD_RESULT=1"
-    )
+    for %%C in (%STANDALONE_CONFIGS%) do call :BuildVISSIMForConfig %%C
 ) else (
     echo VISSIMserver folder not found, skipping VISSIM builds
     >>"%LOG_SUMMARY%" echo VISSIMserver folder not found, skipping VISSIM builds
@@ -114,14 +114,40 @@ if /I "%RUN_MODE%"=="standalone" (
 )
 exit /b %BUILD_RESULT%
 
+:BuildVISSIMForConfig
+set "CFG=%~1"
+call :BuildSolution "DriverModel_RealSim (%CFG%)" ".\ProprietaryFiles\VISSIMserver\VISSIMserver.sln" "/target:DriverModel_RealSim /p:Configuration=%CFG%"
+if errorlevel 1 (
+    call :TrackFailure "DriverModel_RealSim (%CFG%)"
+    set "BUILD_RESULT=1"
+)
+call :BuildSolution "DriverModel_RealSim_v2021 (%CFG%)" ".\ProprietaryFiles\VISSIMserver\VISSIMserver.sln" "/target:DriverModel_RealSim_v2021 /p:Configuration=%CFG%"
+if errorlevel 1 (
+    call :TrackFailure "DriverModel_RealSim_v2021 (%CFG%)"
+    set "BUILD_RESULT=1"
+)
+exit /b 0
+
 :BuildSolution
-set "TARGET_NAME=%~1" & set "SOLUTION_PATH=%~2" & set "MSBUILD_ARGS=%~3"
-if not exist "%SOLUTION_PATH%" echo ===^> %TARGET_NAME% skipped (solution not found)>>"%LOG_SUMMARY%" & exit /b 0
-echo Building %TARGET_NAME%...
-echo ===^> %TARGET_NAME% build started>>"%LOG_SUMMARY%"
-(call msbuild "%SOLUTION_PATH%" %MSBUILD_ARGS%) >>"%LOG_OUTPUT%" 2>&1
-if errorlevel 1 echo ===^> %TARGET_NAME% built failed>>"%LOG_SUMMARY%" & exit /b 1
-echo ===^> %TARGET_NAME% built success>>"%LOG_SUMMARY%"
+setlocal enabledelayedexpansion
+set "TARGET_NAME=%~1"
+set "SOLUTION_PATH=%~2"
+set "MSBUILD_ARGS=%~3"
+if not exist "!SOLUTION_PATH!" (
+    echo ===^> !TARGET_NAME! skipped ^(solution not found^)>>"!LOG_SUMMARY!"
+    endlocal
+    exit /b 0
+)
+echo Building !TARGET_NAME!...
+echo ===^> !TARGET_NAME! build started>>"!LOG_SUMMARY!"
+call msbuild "!SOLUTION_PATH!" !MSBUILD_ARGS! >>"!LOG_OUTPUT!" 2>&1
+if errorlevel 1 (
+    echo ===^> !TARGET_NAME! built failed>>"!LOG_SUMMARY!"
+    endlocal
+    exit /b 1
+)
+echo ===^> !TARGET_NAME! built success>>"!LOG_SUMMARY!"
+endlocal
 exit /b 0
 
 :TrackFailure
