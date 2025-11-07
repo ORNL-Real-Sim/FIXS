@@ -250,8 +250,8 @@ function Patch-UserScanCmdLine {
 function Patch-UserInitFirst {
     param([string]$Content)
 
-    # Check if already patched
-    if ($Content -match 'User_Init_First.*?VirEnv_c\s*==\s*NULL') {
+    # Check if already patched - look specifically within User_Init_First function
+    if ($Content -match '(?s)int\s+User_Init_First\s*\(void\)\s*\{[^}]*VirEnv_c\s*==\s*NULL[^}]*\}') {
         return @{Content=$Content; Success=$true; AlreadyPresent=$true}
     }
 
@@ -275,8 +275,8 @@ function Patch-UserInitFirst {
 function Patch-UserInit {
     param([string]$Content)
 
-    # Check if already patched
-    if ($Content -match 'User_Init\s*\(void\).*?newVirEnvHelper\(\)') {
+    # Check if already patched - look specifically within User_Init function (not User_Init_First!)
+    if ($Content -match '(?s)int\s+User_Init\s*\(void\)\s*\{[^}]*newVirEnvHelper\(\)[^}]*\}') {
         return @{Content=$Content; Success=$true; AlreadyPresent=$true}
     }
 
@@ -296,8 +296,8 @@ function Patch-UserInit {
 function Patch-UserTestRunStartAtEnd {
     param([string]$Content)
 
-    # Check if already patched
-    if ($Content -match 'User_TestRun_Start_atEnd.*?VirEnv_initialization') {
+    # Check if already patched - look specifically within User_TestRun_Start_atEnd function
+    if ($Content -match '(?s)int\s+User_TestRun_Start_atEnd\s*\(void\)\s*\{[^}]*VirEnv_initialization[^}]*\}') {
         return @{Content=$Content; Success=$true; AlreadyPresent=$true}
     }
 
@@ -321,8 +321,8 @@ function Patch-UserTestRunStartAtEnd {
 function Patch-UserCalc {
     param([string]$Content)
 
-    # Check if already patched
-    if ($Content -match 'User_Calc.*?VirEnv_runStep') {
+    # Check if already patched - look specifically within User_Calc function
+    if ($Content -match '(?s)int\s+User_Calc\s*\([^)]+\)\s*\{.*?VirEnv_runStep.*?return\s+0;\s*\}') {
         return @{Content=$Content; Success=$true; AlreadyPresent=$true}
     }
 
@@ -342,8 +342,8 @@ function Patch-UserCalc {
 function Patch-UserTestRunEnd {
     param([string]$Content)
 
-    # Check if already patched
-    if ($Content -match 'User_TestRun_End.*?VirEnv_shutdown') {
+    # Check if already patched - look specifically within User_TestRun_End function (not User_TestRun_End_First!)
+    if ($Content -match '(?s)int\s+User_TestRun_End\s*\(void\)\s*\{[^}]*VirEnv_shutdown[^}]*\}') {
         return @{Content=$Content; Success=$true; AlreadyPresent=$true}
     }
 
