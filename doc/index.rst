@@ -21,6 +21,9 @@ Real-Sim Documentation
    VISSIMdoc
    SUMOdoc
    CarMakerDoc
+   CARLAdoc
+   configuration
+   DEVELOPER_GUIDE
 
 .. toctree::
    :maxdepth: 3
