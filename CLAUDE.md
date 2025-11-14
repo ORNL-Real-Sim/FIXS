@@ -41,46 +41,66 @@ The system uses a client-server socket architecture:
 
 ## Build System
 
+Real-Sim FIXS uses a modular script-based build system with automated tool detection and version management. For comprehensive documentation, see [doc/BUILD.md](doc/BUILD.md).
+
 ### Prerequisites
 
-External libraries must be compiled first using:
+- **Visual Studio 2022** (Community, Professional, or Enterprise)
+- **CMake 3.10+** for building external libraries
+- **dependencies.yaml** - Central configuration file defining tool versions and paths
+- Optional: MATLAB 2024a, CarMaker 13.1.3/11.1.2, dSPACE ConfigurationDesk 2024-A
+
+External libraries (yaml-cpp, libevent) are automatically built by the dispatch system or can be built manually:
 ```
-compileExternalLibraries.bat
+scripts\dispatch\1_external_libraries.bat
 ```
 
-This builds:
-- libevent (event-driven socket library) in [CommonLib/libevent](CommonLib/libevent)
-- yaml-cpp (YAML parser) in [CommonLib/yaml-cpp](CommonLib/yaml-cpp)
-
-Both libraries use CMake with Visual Studio 16 2019 generator and build both Release and Debug configurations.
+Both libraries use CMake with Visual Studio 17 2022 generator and build both Release and Debug configurations.
 
 ### Building Components
 
-Build all components:
-```
-cd tests
-compileCodes.bat
-```
-
-This builds (in order):
-1. TrafficLayer.exe
-2. CoordMerge.exe (control layer)
-3. DriverModel_RealSim.dll and DriverModel_RealSim_v2021.dll (VISSIM interface)
-4. VirtualEnvironment.exe
-5. CarMaker projects (CM9, CM10, CM11)
-
-All builds use msbuild with Release configuration. The msbuild command must be in PATH (typically `%ProgramFiles(x86)%\Microsoft Visual Studio\2019\<EDITION>\MSBuild\Current\Bin`).
-
-### Release Dispatch
-
-Create a distributable release build:
+**Release Build (Full):**
 ```
 dispatch.bat
 ```
 
-Requires:
-- Conda environment named `realsimdev` with Python >= 3.8
-- Runs [dispatchRealSim.py](dispatchRealSim.py) which compiles all components and copies executables/libraries to `build/` folder
+Automatically builds all components and copies to `build/` directory:
+1. External libraries (yaml-cpp, libevent)
+2. TrafficLayer.exe, CoordMerge.exe, VirtualEnvironment.lib
+3. DriverModel_RealSim.dll and DriverModel_RealSim_v2021.dll (VISSIM interface)
+4. CarMaker executables for all versions in dependencies.yaml (CM11, CM13)
+5. dSPACE libraries (if dSPACE detected)
+6. RealSimSocket.mexw64 (if MATLAB detected)
+7. BUILD_INFO.txt with version metadata
+
+**Development Build (Individual Components):**
+
+For faster iteration, build specific components:
+```
+# Core components only
+scripts\dispatch\2_core_components.bat
+
+# VISSIM driver models only
+scripts\dispatch\3_vissim_components.bat
+
+# CarMaker (auto-generates BuildConfig files based on dependencies.yaml)
+powershell -ExecutionPolicy Bypass -File scripts\dispatch\4a_carmaker_components.ps1
+
+# dSPACE libraries
+powershell -ExecutionPolicy Bypass -File scripts\dispatch\4b_carmaker_dspace.ps1
+
+# MATLAB MEX file
+powershell -ExecutionPolicy Bypass -File scripts\dispatch\5_mex_realsim_socket.ps1
+```
+
+### Build System Features
+
+- **Automated tool detection**: [scripts/dispatch/detect_tool_paths.ps1](scripts/dispatch/detect_tool_paths.ps1) finds Visual Studio, MATLAB, dSPACE, and CarMaker installations
+- **Version management**: [dependencies.yaml](dependencies.yaml) defines all tool versions; scripts parse this to determine what to build
+- **BuildConfig auto-generation**: CarMaker BuildConfig Python files are dynamically generated for each CarMaker/MATLAB version combination
+- **Modular scripts**: Each subsystem has dedicated build script in [scripts/dispatch/](scripts/dispatch/)
+- **Build logs**: Detailed logs in `scripts/dispatch/build.log` and `scripts/dispatch/build_summary.log`
+- **Debug/Release**: Set `RS_BUILD_CONFIG` environment variable to switch between Debug and Release builds
 
 ## Configuration
 

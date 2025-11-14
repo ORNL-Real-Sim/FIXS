@@ -46,9 +46,10 @@ Table of Contents
 # Simulation Setups
 
 ## Setup CarMaker Office or CarMaker Simulink
-* Note: this tutorial is based on CM13.1.2 and Matlab/Simulink 2024a.\
+* Note: this tutorial is based on CM13.1.3 and Matlab/Simulink 2024a (CM11.1.2 also supported).\
   Make sure you followed the main page README.md, ensuring you have MS Visual Studio installed, and pre-required libs build.
 * Note: make sure your pre-required libs build Release/Debug is constant with your `VirtualEnvironment.lib` build and CarMaker executable build Release/Debug.
+* Note: For automated builds, see [BUILD.md](BUILD.md) - the dispatch system automatically handles CarMaker compilation for all versions defined in `dependencies.yaml`.
 
 ## Obtain CarMaker Executables
 1. RealSim contained compiled CarMaker executables, i.e., CarMaker.win64.exe for Office version, and libcarmaker4sl.mexw64 for Simulink version. Three different versions are supported, CarMaker 11, 10 and 9. Users can directly use these executables without need to recompile source codes. The executables are inside the corresponding folders ```CM11```, ```CM10```, ```CM9```.
@@ -299,6 +300,20 @@ RealSim comes with precompiled dSPACE library file that can be used directly und
 
 ### Compile dSPACE library
 
+**Option 1: Automated Build (Recommended)**
+
+The dispatch system automatically builds dSPACE libraries for all CarMaker versions when dSPACE is detected:
+```batch
+powershell -ExecutionPolicy Bypass -File scripts\dispatch\4b_carmaker_dspace.ps1
+```
+
+This script:
+- Detects dSPACE installation and version from `dependencies.yaml`
+- Builds version-specific libraries (e.g., `libRealSimDsLib_2024a_CM11_1_2.a`, `libRealSimDsLib_2024a_CM13_1_3.a`)
+- Copies libraries to `CommonLib/` and `build/CarMaker/`
+
+**Option 2: Manual Build**
+
 Use the `buildRS_2024a.bat` in the `\CommonLib` folder as example to create your dspace/CM version specific build.
 For 2024a, The `DsBuildLibrary.mk` file is under `%dSPACE ConfigurationDesk 2024-A (24.1)%\SCALEXIO\`.
 Tips: You can copy the `DsBuildLibrary.mk` into the CommonLib Folder and rename it as `DsBuildLibrary_2024a.mk`\
@@ -307,7 +322,7 @@ _Refer to the following dSPACE documentation https://www.dspace.com/en/inc/home/
 After successfully execute the `buildRS_XXXX.bat` file, you should have something appear on command line window like
 ```commandline
 ...
-C:\Program Files\Common Files\dSPACE\CFD Compiler 24.1\target\x86_64-linux-gnu\bin\x86_64-linux-gnu-ar.exe: creating libRealSimDsLib_2024a.a
+C:\Program Files\Common Files\dSPACE\CFD Compiler 24.1\target\x86_64-linux-gnu\bin\x86_64-linux-gnu-ar.exe: creating libRealSimDsLib_2024a_CM13_1_3.a
 a - SocketHelper.o64
 a - MsgHelper.o64
 a - VirEnvHelper.o64
@@ -349,11 +364,26 @@ char* RS_signalTable;
 
 Note: currently, it is only for SCALEXIO and configuration desk dSPACE implementation.
 
-1. Make sure both ```VirEnv_Wrapper.h``` and ```libRealSimDsLib2024a.a``` are under the ##YOUR CM Project##\include folder.
+1. Make sure both ```VirEnv_Wrapper.h``` and version-specific dSPACE library (e.g., ```libRealSimDsLib_2024a_CM13_1_3.a```) are under the ##YOUR CM Project##\include folder.
 
-2. The dSPACE build process will be similar to typical CM dSPACE build, which will involve a CM_BuildConifg.py. This script needs to be updated for RealSim implementation. 
-You can use the one inside \CarMaker folder. If want to modify your own:
-- Define macros `RS_DSPACE` and `RS_DEBUG` for dSPACE SACLEXIO build. To do this, you can add them in the CM_BuildConifg.py Archtecture part as follows:
+2. **BuildConfig Auto-Generation**
+
+The dispatch system automatically generates CarMaker BuildConfig Python files with correct dSPACE settings:
+```batch
+powershell -ExecutionPolicy Bypass -File scripts\dispatch\4a_carmaker_components.ps1
+```
+
+This generates `RS_CM{major}_{minor}_{patch}_BuildConfig_{matlab}.py` files with:
+- Correct MATLAB version paths (read from `dependencies.yaml`)
+- RealSim-specific defines (`RS_DSPACE`, `RS_DEBUG`)
+- Version-specific dSPACE library references (e.g., `libRealSimDsLib_2024a_CM13_1_3.a`)
+- Architecture-specific settings (dsrtlx, dsrt64, dsrt)
+
+**Manual BuildConfig Modification (Advanced)**
+
+If you need custom BuildConfig settings, you can manually create or edit `CM_BuildConfig.py`:
+
+- Define macros `RS_DSPACE` and `RS_DEBUG` for dSPACE SCALEXIO build:
 ```python
 if ARCH == 'dsrtlx':
   CM_DEFINES = ["RS_DSPACE", "RS_DEBUG", "DSPACE", "DSRTLX", "_DSRTLX"]
@@ -362,16 +392,16 @@ elif ARCH == 'dsrt64':
 else:
   CM_DEFINES = ["RS_DSPACE", "RS_DEBUG", "DSPACE", "DSRT", "_DSRT"]
 ```
-- Include the customized RealSim library `libRealSimDsLib_2024a.a`. To do this, add `libRealSimDsLib_2024a.a` to CM_BuildConifg.py, under `class CM_BuildConfig` follows:
+- Include the version-specific RealSim library (use correct version for your CarMaker):
 ```python
-libs = [ "libdscandrv.so", "libRealSimDsLib_2024a.a" ]
+libs = [ "libdscandrv.so", "libRealSimDsLib_2024a_CM13_1_3.a" ]
 ```
-- make sure the ```CM_SRC_DIR``` point to source folder where you store your simulink model and User.c
+- Make sure the ```CM_SRC_DIR``` points to source folder where you store your simulink model and User.c:
 ```python
 CM_SRC_DIR          = "src_cm4dspace_realsim"
 ```
 
-Alternatively, you could also skip the CM_BuildCOnfig.py modification, and manually edit them in the ConfigurationDesk->Build Configuration->Properties.
+Alternatively, you can skip the BuildConfig.py modification and manually edit settings in ConfigurationDesk->Build Configuration->Properties.
 ![CM_DS_BuildConfig_24a.png](img%2FCM_DS_BuildConfig_24a.png)
 
 3. set number of accepted overruns to be -1 in ConfigurationDesk:
