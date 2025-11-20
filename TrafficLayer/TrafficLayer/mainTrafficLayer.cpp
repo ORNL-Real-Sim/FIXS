@@ -10,6 +10,10 @@
 
 #include "RealSimVersion.h"
 
+// Uncomment the line below to enable performance timing
+// #define ENABLE_PERF_TIMING
+#include "PerformanceTimer.h"
+
 using namespace std;
 
 // Global shutdown state - single point of access for cleanup coordination
@@ -894,6 +898,8 @@ int main(int argc, char* argv[]) {
 	g_shutdown.enableRealSim = ENABLE_REALSIM;
 	g_shutdown.initialized = true;
 
+	PERF_INIT("TrafficLayerPerf.log");
+
 	bool isVeryFirstStep = true; 
 
 	bool isEgoExist = false;
@@ -902,10 +908,13 @@ int main(int argc, char* argv[]) {
 	//while (simTime <= tSimuEnd && ii < nT) {
 	while (!g_shutdown.shutdownRequested) {
 
+		PERF_TIC("main_loop");
+
 		///****************************************************
 		// RUN one-step simulation
 		///****************************************************
 
+		PERF_TIC("traffic_step");
 		if (ENABLE_REALSIM && !g_shutdown.trafficSimulatorClosed) {
 			try {
 				Traffic_c.runOneStepSimulation();
@@ -916,6 +925,8 @@ int main(int argc, char* argv[]) {
 				printf("\tInitiating graceful shutdown...\n");
 				g_shutdown.trafficSimulatorClosed = true;
 				g_shutdown.shutdownRequested = true;
+				PERF_TOC("traffic_step");
+				PERF_TOC("main_loop");
 				break;
 			}
 			catch (...) {
@@ -924,9 +935,16 @@ int main(int argc, char* argv[]) {
 				printf("\tInitiating graceful shutdown...\n");
 				g_shutdown.trafficSimulatorClosed = true;
 				g_shutdown.shutdownRequested = true;
+				PERF_TOC("traffic_step");
+				PERF_TOC("main_loop");
 				break;
 			}
 		}
+		PERF_TOC("traffic_step");
+#ifdef ENABLE_PERF_TIMING
+		// Log number of vehicles received from traffic simulator
+		PERF_LOG("t=%.2f vehicles_in_network=%d\n", simTime, (int)MsgServer_c.VehDataRecv_um.size());
+#endif
 
 		if (ENABLE_VEH_SIMULATOR && isVeryFirstStep) {
 			if (Sock_c.initConnection(TrafficLayerErrorFile) > 0) {
@@ -1044,6 +1062,7 @@ int main(int argc, char* argv[]) {
 		}
 
 		if (ENABLE_CLIENT) {
+			PERF_TIC("prepare_send");
 			try {
 				MsgClient_c.clearSendStorage();
 
@@ -1118,6 +1137,22 @@ int main(int argc, char* argv[]) {
 					float simTimeSend = simTime;
 					uint8_t simStateSend = 1;
 
+					PERF_TOC("prepare_send");
+					PERF_TIC("send_data");
+#ifdef ENABLE_PERF_TIMING
+					// Check send buffer status before send
+					int sndBufSize = 0;
+					int optLen = sizeof(sndBufSize);
+					getsockopt(actualClientSock[iC], SOL_SOCKET, SO_SNDBUF, (char*)&sndBufSize, &optLen);
+
+					// Calculate message size
+					int msgSize = MsgClient_c.VehDataSend_um[actualClientSock[iC]].size();
+					PERF_LOG("t=%.2f client=%d/%d sndBufSize=%d nVeh=%d nTls=%d nDet=%d\n",
+						simTime, iC, (int)actualClientSock.size(), sndBufSize, msgSize,
+						(int)MsgClient_c.TlsDataSend_um[actualClientSock[iC]].size(),
+						(int)MsgClient_c.DetDataSend_um[actualClientSock[iC]].size());
+#endif
+
 					if (ENABLE_EXT_DYN) {
 						if (isVeryFirstStep) {
 							if (Sock_c.sendData(actualClientSock[iC], iC, simTimeSend, simStateSend, MsgClient_c) < 0) {
@@ -1153,6 +1188,8 @@ int main(int argc, char* argv[]) {
 							break;
 						};
 					}
+
+					PERF_TOC("send_data");
 
 					if (ENABLE_VERBOSE) {
 						printf("send complete\n");
@@ -1344,7 +1381,11 @@ int main(int argc, char* argv[]) {
 
 		ii = ii + 1;
 
+		PERF_TOC("main_loop");
+
 	}
+
+	PERF_SHUTDOWN();
 
 	// Perform graceful cleanup after main loop exits
 	performCleanup(false);
