@@ -332,7 +332,7 @@ int VirEnvHelper::runStep(double simTime, const char** errorMsg) {
 	PERF_TIC("runStep_total");
 
 	string errorMsgStr;
-
+	
 
 	// run real sim step every 0.1 seconds and not do this step at simTime=0
 	int simStateRecv = 0;
@@ -403,6 +403,7 @@ int VirEnvHelper::runStep(double simTime, const char** errorMsg) {
 		// 			receive from RealSim
 		// ===========================================================================
 		PERF_TIC("receive_realsim");
+		PERF_LOG("receive_realsim triggered at simTime=%.2f\n", simTime);
 		try {
 
 			Msg_c.clearRecvStorage();
@@ -411,13 +412,25 @@ int VirEnvHelper::runStep(double simTime, const char** errorMsg) {
 				//Log("RealSim start receive data t=%f\n",simTime);
 				//Log("RealSim serverSock size %d\n", Sock_c.serverSock.size());
 				for (iS = 0; iS < Sock_c.serverSock.size(); iS++) {
+#ifdef ENABLE_PERF_TIMING
+					// Check socket buffer status before recv
+					u_long pendingBytes = 0;
+					int rcvbufSize = 0;
+					int optLen = sizeof(rcvbufSize);
+					ioctlsocket(Sock_c.serverSock[iS], FIONREAD, &pendingBytes);
+					getsockopt(Sock_c.serverSock[iS], SOL_SOCKET, SO_RCVBUF, (char*)&rcvbufSize, &optLen);
+#endif
+					PERF_TIC("recv_socket");
 					if (Sock_c.recvData(Sock_c.serverSock[iS], &simStateRecv, &simTimeRecv, Msg_c) < 0) {
 						*errorMsg = "RealSim: Receive from traffic simulator failed";
 						return ERROR_STEP_RECV_REALSIM;
 					}
-					else {
-						//Log("RealSim received data t=%f\n",simTime);
-					}
+					PERF_TOC("recv_socket");
+#ifdef ENABLE_PERF_TIMING
+					PERF_LOG("t=%.2f sock=%d/%d pendingBytes=%lu rcvbufSize=%d simTimeRecv=%.2f nVeh=%d nTls=%d nDet=%d\n",
+						simTime, iS, (int)Sock_c.serverSock.size(), pendingBytes, rcvbufSize, simTimeRecv,
+						(int)Msg_c.VehDataRecv_um.size(), (int)Msg_c.TlsDataRecv_um.size(), (int)Msg_c.DetDataRecv_um.size());
+#endif
 				}
 			}
 		}
