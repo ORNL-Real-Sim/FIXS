@@ -440,21 +440,20 @@ int main(int argc, char* argv[]) {
 	}
 	if (Config_c.SimulationSetup.SelectedTrafficSimulator.compare("VISSIM") == 0) {
 		ENABLE_VISSIM = true;
-		printf("Selected Traffic Simulator VISSIM\n\n");
+		printf("Traffic Simulator: VISSIM\n");
 	}
 	else {
 		ENABLE_VISSIM = false;
-		printf("Selected Traffic Simulator SUMO\n\n");
+		printf("Traffic Simulator: SUMO\n");
 		// Configure SUMO library path for runtime DLL loading
 		ConfigureSumoLibraryPath(Config_c);
 	}
 	if (Config_c.SimulationSetup.EnableVerboseLog) {
 		ENABLE_VERBOSE = true;
-		printf("Enable verbose logging\n\n");
+		printf("Verbose logging: Enabled\n");
 	}
 	else {
 		ENABLE_VERBOSE = false;
-		printf("No verbose logging\n\n");
 	}
 	if (Config_c.ApplicationSetup.EnableApplicationLayer) {
 		ENABLE_CLIENT = true;
@@ -491,7 +490,6 @@ int main(int argc, char* argv[]) {
 			serverPort.push_back(Config_c.SimulationSetup.TrafficSimulatorPort);
 			if (ENABLE_VISSIM) {
 				serverNames.push_back("vissimDriver");
-				printf("VISSIM driver model dll selected as server \n");
 			}
 		}
 		if (Config_c.XilSetup.DetectorSubscription.size() > 0) {
@@ -499,7 +497,6 @@ int main(int argc, char* argv[]) {
 			serverPort.push_back(Config_c.SimulationSetup.TrafficSimulatorPort+1);
 			if (ENABLE_VISSIM) {
 				serverNames.push_back("vissimSignal");
-				printf("VISSIM signal dll selected as server \n");
 			}
 		}
 	}
@@ -509,7 +506,6 @@ int main(int argc, char* argv[]) {
 			serverPort.push_back(Config_c.SimulationSetup.TrafficSimulatorPort);
 			if (ENABLE_VISSIM) {
 				serverNames.push_back("vissimDriver");
-				printf("VISSIM driver model dll selected as server \n");
 			}
 		}
 		if (Config_c.ApplicationSetup.DetectorSubscription.size() > 0) {
@@ -517,7 +513,6 @@ int main(int argc, char* argv[]) {
 			serverPort.push_back(Config_c.SimulationSetup.TrafficSimulatorPort+1);
 			if (ENABLE_VISSIM) {
 				serverNames.push_back("vissimSignal");
-				printf("VISSIM signal dll selected as server \n");
 			}
 		}
 	}
@@ -539,7 +534,6 @@ int main(int argc, char* argv[]) {
 				port_v = get<3>(Config_c.XilSetup.VehicleSubscription[i]);
 				for (int iP = 0; iP < port_v.size(); iP++) {
 					selfServerPortAll.push_back(port_v[iP]);
-					printf("\nTrafficLayer broadcast to client at port %d \n", port_v[iP]);
 				}
 			}
 			for (int i = 0; i < Config_c.XilSetup.SignalSubscription.size(); i++) {
@@ -563,7 +557,6 @@ int main(int argc, char* argv[]) {
 				port_v = get<3>(Config_c.ApplicationSetup.VehicleSubscription[i]);
 				for (int iP = 0; iP < port_v.size(); iP++) {
 					selfServerPortAll.push_back(port_v[iP]);
-					printf("\nTrafficLayer broadcast to client at port %d \n", port_v[iP]);
 				}
 			}
 			for (int i = 0; i < Config_c.ApplicationSetup.SignalSubscription.size(); i++) {
@@ -571,7 +564,6 @@ int main(int argc, char* argv[]) {
 				port_v = get<3>(Config_c.ApplicationSetup.SignalSubscription[i]);
 				for (int iP = 0; iP < port_v.size(); iP++) {
 					selfServerPortAll.push_back(port_v[iP]);
-					printf("\nTrafficLayer broadcast to client at port %d \n", port_v[iP]);
 				}
 			}
 			for (int i = 0; i < Config_c.ApplicationSetup.DetectorSubscription.size(); i++) {
@@ -602,9 +594,19 @@ int main(int argc, char* argv[]) {
 
 	for (int i = 0; i < selfServerPortUserInput.size(); i++) {
 		if (selfServerPortUserInput[i] == Config_c.SimulationSetup.TrafficSimulatorPort || selfServerPortUserInput[i] == Config_c.SimulationSetup.TrafficSimulatorPort+1) {
-			printf("ERROR: %d and %d are reserved port, please select other ports for Application Layer!!\n\n", Config_c.SimulationSetup.TrafficSimulatorPort, Config_c.SimulationSetup.TrafficSimulatorPort+1);
+			printf("ERROR: %d and %d are reserved ports, please select other ports for Application Layer!\n", Config_c.SimulationSetup.TrafficSimulatorPort, Config_c.SimulationSetup.TrafficSimulatorPort+1);
 			exit(-1);
 		}
+	}
+
+	// Print client ports summary
+	if (selfServerPortUserInput.size() > 0) {
+		printf("Client ports: ");
+		for (int i = 0; i < selfServerPortUserInput.size(); i++) {
+			if (i > 0) printf(", ");
+			printf("%d", selfServerPortUserInput[i]);
+		}
+		printf("\n");
 	}
 
 	double simTime = 0;
