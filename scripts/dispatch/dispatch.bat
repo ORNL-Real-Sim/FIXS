@@ -69,7 +69,7 @@ set "BUILD_START_SECONDS=%time:~0,2%%time:~3,2%%time:~6,2%"
 REM ====================================
 REM Step 1: Compile External Libraries
 REM ====================================
-echo [1/7] Checking external libraries...
+echo [1/8] Checking external libraries...
 if not exist "%SOURCE_PATH%\CommonLib\yaml-cpp\build" (
     echo External libraries not found. Compiling...
     call "%~dp0\1_external_libraries.bat"
@@ -85,7 +85,7 @@ echo.
 REM ====================================
 REM Step 2: Compile Core Components
 REM ====================================
-echo [2/7] Compiling core components (TrafficLayer, VirtualEnvironment)...
+echo [2/8] Compiling core components (TrafficLayer)...
 call "%~dp0\2_core_components.bat" inline
 if %ERRORLEVEL% neq 0 (
     echo ERROR: Failed to compile core components!
@@ -96,7 +96,7 @@ echo.
 REM ====================================
 REM Step 3: Compile VISSIM Components
 REM ====================================
-echo [3/7] Compiling VISSIM components...
+echo [3/8] Compiling VISSIM components...
 call "%~dp0\3_vissim_components.bat" inline
 if %ERRORLEVEL% neq 0 (
     echo WARNING: VISSIM components build failed or skipped
@@ -104,40 +104,50 @@ if %ERRORLEVEL% neq 0 (
 echo.
 
 REM ====================================
-REM Step 4a: Compile CarMaker Components
+REM Step 4: Compile VirtualEnvironment
 REM ====================================
-echo [4a/7] Compiling CarMaker components...
-call powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0\4a_carmaker_components.ps1" -RunMode inline
+echo [4/8] Compiling VirtualEnvironment...
+call "%~dp0\4_virtual_environment.bat" inline
+if %ERRORLEVEL% neq 0 (
+    echo WARNING: VirtualEnvironment build failed or skipped
+)
+echo.
+
+REM ====================================
+REM Step 5a: Compile CarMaker Components
+REM ====================================
+echo [5a/8] Compiling CarMaker components...
+call powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0\5a_carmaker_components.ps1" -RunMode inline
 if %ERRORLEVEL% neq 0 (
     echo WARNING: CarMaker components build failed or skipped
 )
 echo.
 
 REM ====================================
-REM Step 4b: Compile dSPACE Libraries for CarMaker
+REM Step 5b: Compile dSPACE Libraries for CarMaker
 REM ====================================
-echo [4b/7] Compiling dSPACE libraries for CarMaker...
-call powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0\4b_carmaker_dspace.ps1" -RunMode inline
+echo [5b/8] Compiling dSPACE libraries for CarMaker...
+call powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0\5b_carmaker_dspace.ps1" -RunMode inline
 if %ERRORLEVEL% neq 0 (
     echo WARNING: dSPACE library build failed or skipped
 )
 echo.
 
 REM ====================================
-REM Step 5: Build RealSimSocket MEX
+REM Step 6: Build RealSimSocket MEX
 REM ====================================
-echo [5/7] Building RealSimSocket MEX...
-call powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0\5_mex_realsim_socket.ps1" -RunMode inline
+echo [6/8] Building RealSimSocket MEX...
+call powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0\6_mex_realsim_socket.ps1" -RunMode inline
 if %ERRORLEVEL% neq 0 (
     echo WARNING: RealSimSocket MEX build failed or skipped
 )
 echo.
 
 REM ====================================
-REM Step 6: Copy Files to Build Directory
+REM Step 7: Copy Files to Build Directory
 REM ====================================
 
-echo [6/7] Copying files to build directory...
+echo [7/8] Copying files to build directory...
 
 REM Release executables
 echo Copying executables...
@@ -217,7 +227,7 @@ if exist "%SOURCE_PATH%\ProprietaryFiles\VISSIMserver\x64\Release\DriverModel_Re
 echo.
 
 REM ====================================
-REM Step 7: Generate BUILD_INFO.txt
+REM Step 8: Generate BUILD_INFO.txt
 REM ====================================
 
 REM Calculate build duration
@@ -229,8 +239,8 @@ set /a "DURATION_MIN=DURATION_SECONDS/60"
 set /a "DURATION_SEC=DURATION_SECONDS%%60"
 set "BUILD_DURATION=%DURATION_MIN%m %DURATION_SEC%s"
 
-echo [7/7] Generating BUILD_INFO.txt...
-call powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0\6_build_info.ps1" -RunMode inline -BuildStartTime "%BUILD_START%" -BuildDuration "%BUILD_DURATION%"
+echo [8/8] Generating BUILD_INFO.txt...
+call powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0\7_build_info.ps1" -RunMode inline -BuildStartTime "%BUILD_START%" -BuildDuration "%BUILD_DURATION%"
 echo.
 echo ==============================
 echo RealSim: Release Complete!
