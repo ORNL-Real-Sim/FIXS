@@ -22,7 +22,7 @@ Real-Sim Documentation
    SUMOdoc
    CarMakerDoc
    CARLAdoc
-   configuration
+   ContributionGuide
    DEVELOPER_GUIDE
 
 .. toctree::
