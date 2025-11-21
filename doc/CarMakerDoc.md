@@ -1,24 +1,12 @@
-RealSim CarMaker Documentation
-=======================
 Please start with reading through the documentation, and playwith included Examples.
 
-Contacts
-=======================
-Yunli Shao\
-realsimxil@gmail.com\
-Max Chen\
-chenm@ornl.gov\
-Anye Zhou\
-zhoua@ornl.gov
-
-Table of Contents
-=======================
+# Table of Contents
 <!-- TOC -->
 * [RealSim CarMaker Documentation](#realsim-carmaker-documentation)
 * [Contacts](#contacts)
 * [Table of Contents](#table-of-contents)
 * [Simulation Setups](#simulation-setups)
-  * [Setup CarMaker Office or CarMaker Simulink](#setup-carmaker-office-or-carmaker-simulink-)
+  * [Setup CarMaker Office or CarMaker Simulink](#setup-carmaker-office-or-carmaker-simulink)
   * [Obtain CarMaker Executables](#obtain-carmaker-executables)
     * [Pre required library](#pre-required-library)
     * [Compile Source Codes](#compile-source-codes)
