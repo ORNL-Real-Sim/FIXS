@@ -189,6 +189,6 @@ CM11_proj/tmp.obj
 
 TODO.md
 
-.venv/
-venv/
+**/nul
 
+.claude/

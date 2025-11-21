@@ -1,9 +1,9 @@
-(realsim-carmaker-documentation)=
-# RealSim CarMaker Documentation
+RealSim CarMaker Documentation
+=======================
 Please start with reading through the documentation, and playwith included Examples.
 
-(contacts)=
-## Contacts
+Contacts
+=======================
 Yunli Shao\
 realsimxil@gmail.com\
 Max Chen\
@@ -11,14 +11,14 @@ chenm@ornl.gov\
 Anye Zhou\
 zhoua@ornl.gov
 
-(table-of-contents)=
-## Table of Contents
+Table of Contents
+=======================
 <!-- TOC -->
 * [RealSim CarMaker Documentation](#realsim-carmaker-documentation)
 * [Contacts](#contacts)
 * [Table of Contents](#table-of-contents)
 * [Simulation Setups](#simulation-setups)
-  * [Setup CarMaker Office or CarMaker Simulink](#setup-carmaker-office-or-carmaker-simulink)
+  * [Setup CarMaker Office or CarMaker Simulink](#setup-carmaker-office-or-carmaker-simulink-)
   * [Obtain CarMaker Executables](#obtain-carmaker-executables)
     * [Pre required library](#pre-required-library)
     * [Compile Source Codes](#compile-source-codes)
@@ -43,24 +43,21 @@ zhoua@ornl.gov
     * [Simulink Simulation](#simulink-simulation)
 -->
 
-(simulation-setups)=
-## Simulation Setups
+# Simulation Setups
 
-(setup-carmaker-office-or-carmaker-simulink)=
-### Setup CarMaker Office or CarMaker Simulink
-* Note: this tutorial is based on CM13.1.2 and Matlab/Simulink 2024a.\
+## Setup CarMaker Office or CarMaker Simulink
+* Note: this tutorial is based on CM13.1.3 and Matlab/Simulink 2024a (CM11.1.2 also supported).\
   Make sure you followed the main page README.md, ensuring you have MS Visual Studio installed, and pre-required libs build.
 * Note: make sure your pre-required libs build Release/Debug is constant with your `VirtualEnvironment.lib` build and CarMaker executable build Release/Debug.
+* Note: For automated builds, see [BUILD.md](BUILD.md) - the dispatch system automatically handles CarMaker compilation for all versions defined in `dependencies.yaml`.
 
-(obtain-carmaker-executables)=
-### Obtain CarMaker Executables
+## Obtain CarMaker Executables
 1. RealSim contained compiled CarMaker executables, i.e., CarMaker.win64.exe for Office version, and libcarmaker4sl.mexw64 for Simulink version. Three different versions are supported, CarMaker 11, 10 and 9. Users can directly use these executables without need to recompile source codes. The executables are inside the corresponding folders ```CM11```, ```CM10```, ```CM9```.
 
 
 2. Another option is that users can modify the CarMaker User.c by themselves and include necessary source codes of RealSim. Corresponding Visual Studio project files are provided and users can use their own IDE as well.
    Here we use CarMaker/TruckMaker 13 as example. If you choose this method, continue reading.
-(pre-required-library)=
-#### Pre required library
+### Pre required library
 
 - VirtrualEnvironment.lib
 
@@ -81,8 +78,7 @@ Type in the location of where you build the yaml-cppd.lib. Then under C/C++ -> C
 ![VS2022_changeDebug.png](img%2FVS2022_changeDebug.png)\
 ![RuntimeLibsetup.png](img%2FRuntimeLibsetup.png)
 
-(compile-source-codes)=
-#### Compile Source Codes
+### Compile Source Codes
 
 - If you want to set up a project outside the cloned FIXS repo, you first need to create a **parent folder**. Copy the [CarMaker](../CarMaker)
   [CommonLib](../CommonLib) [tests](../tests) folders into the **parent folder**.
@@ -274,8 +270,7 @@ Build CarMaker for Simulink: CTRL + B
 
 After compiling, the executable should be in **src** or **src_cm4sl** folder. In **src**, it should be **CarMaker.win64.exe**; in **src_cm4sl**, it should be **libcarmaker4sl.mexw64**.
 
-(run-carmaker-office)=
-### Run CarMaker office
+## Run CarMaker office
 Open CarMaker Office, chose Application -> Application Configuration\
 Make sure select the compiled ```CarMaker.win64.exe```  in the `Command (executable)` and specify `Command line options`
 to the desired config.yaml file, and (optional) signal light sync table file
@@ -285,8 +280,7 @@ Using either relative path to the working directory or absolute path are OK
 
 ![CM_GUI_Config1.png](img%2FCM_GUI_Config1.png)
 
-(run-carmaker-simulink)=
-### Run CarMaker-Simulink
+## Run CarMaker-Simulink
 Open the CarMaker simulink model, double click `Edit Model Configuration`, if the compiled libcarmaker4sl.mexw64 is in the
 search directory (you can be checked by ```which libcarmaker4sl.mexw64``` inMatlab), you can leave the `Server application name` empty,
 otherwise you can type in the .mexw64 location manually. Then, specify command line options to the desired config.yaml file, and (optional) signal light sync table file
@@ -299,15 +293,26 @@ Using either relative path to the working directory or absolute path are OK
 
 ```CM11_proj\src_cm4sl\RealSimGeneric.mdl```  is a good example simulink model to develop user applications
 
-(setup-cm-dspace)=
-### Setup CM dSPACE
+## Setup CM dSPACE
 
-(obtain-dspace-library)=
-#### Obtain dSPACE library
+### Obtain dSPACE library
 RealSim comes with precompiled dSPACE library file that can be used directly under \CommonLib. If plan to use these libraries directly, can skip the next section  and go to [this section](#prepare-for-dspace-build-configuration-desk) directly. Otherwise, follow the next section to compile customized dSPACE library.
 
-(compile-dspace-library)=
-#### Compile dSPACE library
+### Compile dSPACE library
+
+**Option 1: Automated Build (Recommended)**
+
+The dispatch system automatically builds dSPACE libraries for all CarMaker versions when dSPACE is detected:
+```batch
+powershell -ExecutionPolicy Bypass -File scripts\dispatch\4b_carmaker_dspace.ps1
+```
+
+This script:
+- Detects dSPACE installation and version from `dependencies.yaml`
+- Builds version-specific libraries (e.g., `libRealSimDsLib_2024a_CM11_1_2.a`, `libRealSimDsLib_2024a_CM13_1_3.a`)
+- Copies libraries to `CommonLib/` and `build/CarMaker/`
+
+**Option 2: Manual Build**
 
 Use the `buildRS_2024a.bat` in the `\CommonLib` folder as example to create your dspace/CM version specific build.
 For 2024a, The `DsBuildLibrary.mk` file is under `%dSPACE ConfigurationDesk 2024-A (24.1)%\SCALEXIO\`.
@@ -317,7 +322,7 @@ _Refer to the following dSPACE documentation https://www.dspace.com/en/inc/home/
 After successfully execute the `buildRS_XXXX.bat` file, you should have something appear on command line window like
 ```commandline
 ...
-C:\Program Files\Common Files\dSPACE\CFD Compiler 24.1\target\x86_64-linux-gnu\bin\x86_64-linux-gnu-ar.exe: creating libRealSimDsLib_2024a.a
+C:\Program Files\Common Files\dSPACE\CFD Compiler 24.1\target\x86_64-linux-gnu\bin\x86_64-linux-gnu-ar.exe: creating libRealSimDsLib_2024a_CM13_1_3.a
 a - SocketHelper.o64
 a - MsgHelper.o64
 a - VirEnvHelper.o64
@@ -325,8 +330,7 @@ a - VirEnv_Wrapper.o64
 library successfully built.
 ```
 
-(prepare-userc)=
-#### Prepare User.c
+### Prepare User.c
 For dSPACE application, we also need to modify the User.c in source folder similar to CM_Office or CM for SimuLink.
 The only difference is shown below. The rest code change in User.c, including `User_ScanCmdLine`, `User_Init`,
 `User_TestRun_Start_atEnd`, `User_TestRun_End`,`User_Calc` should use the same modification for CM_Office and CM for Simulink.
@@ -356,16 +360,30 @@ char* RS_signalTable;
 
 
 
-(prepare-for-dspace-build-configuration-desk)=
-#### Prepare for dSPACE build (ConfigurationDesk)
+### Prepare for dSPACE build (ConfigurationDesk)
 
 Note: currently, it is only for SCALEXIO and configuration desk dSPACE implementation.
 
-1. Make sure both ```VirEnv_Wrapper.h``` and ```libRealSimDsLib2024a.a``` are under the ##YOUR CM Project##\include folder.
+1. Make sure both ```VirEnv_Wrapper.h``` and version-specific dSPACE library (e.g., ```libRealSimDsLib_2024a_CM13_1_3.a```) are under the ##YOUR CM Project##\include folder.
 
-2. The dSPACE build process will be similar to typical CM dSPACE build, which will involve a CM_BuildConifg.py. This script needs to be updated for RealSim implementation. 
-You can use the one inside \CarMaker folder. If want to modify your own:
-- Define macros `RS_DSPACE` and `RS_DEBUG` for dSPACE SACLEXIO build. To do this, you can add them in the CM_BuildConifg.py Archtecture part as follows:
+2. **BuildConfig Auto-Generation**
+
+The dispatch system automatically generates CarMaker BuildConfig Python files with correct dSPACE settings:
+```batch
+powershell -ExecutionPolicy Bypass -File scripts\dispatch\4a_carmaker_components.ps1
+```
+
+This generates `RS_CM{major}_{minor}_{patch}_BuildConfig_{matlab}.py` files with:
+- Correct MATLAB version paths (read from `dependencies.yaml`)
+- RealSim-specific defines (`RS_DSPACE`, `RS_DEBUG`)
+- Version-specific dSPACE library references (e.g., `libRealSimDsLib_2024a_CM13_1_3.a`)
+- Architecture-specific settings (dsrtlx, dsrt64, dsrt)
+
+**Manual BuildConfig Modification (Advanced)**
+
+If you need custom BuildConfig settings, you can manually create or edit `CM_BuildConfig.py`:
+
+- Define macros `RS_DSPACE` and `RS_DEBUG` for dSPACE SCALEXIO build:
 ```python
 if ARCH == 'dsrtlx':
   CM_DEFINES = ["RS_DSPACE", "RS_DEBUG", "DSPACE", "DSRTLX", "_DSRTLX"]
@@ -374,23 +392,22 @@ elif ARCH == 'dsrt64':
 else:
   CM_DEFINES = ["RS_DSPACE", "RS_DEBUG", "DSPACE", "DSRT", "_DSRT"]
 ```
-- Include the customized RealSim library `libRealSimDsLib_2024a.a`. To do this, add `libRealSimDsLib_2024a.a` to CM_BuildConifg.py, under `class CM_BuildConfig` follows:
+- Include the version-specific RealSim library (use correct version for your CarMaker):
 ```python
-libs = [ "libdscandrv.so", "libRealSimDsLib_2024a.a" ]
+libs = [ "libdscandrv.so", "libRealSimDsLib_2024a_CM13_1_3.a" ]
 ```
-- make sure the ```CM_SRC_DIR``` point to source folder where you store your simulink model and User.c
+- Make sure the ```CM_SRC_DIR``` points to source folder where you store your simulink model and User.c:
 ```python
 CM_SRC_DIR          = "src_cm4dspace_realsim"
 ```
 
-Alternatively, you could also skip the CM_BuildCOnfig.py modification, and manually edit them in the ConfigurationDesk->Build Configuration->Properties.
+Alternatively, you can skip the BuildConfig.py modification and manually edit settings in ConfigurationDesk->Build Configuration->Properties.
 ![CM_DS_BuildConfig_24a.png](img%2FCM_DS_BuildConfig_24a.png)
 
 3. set number of accepted overruns to be -1 in ConfigurationDesk:
 ![](img/DS_SCLX_NO_OVERRUN.png)
 
-(additional-instructions-for-rs-simulink-libraries)=
-##### Additional instructions for RS Simulink libraries
+#### Additional instructions for RS Simulink libraries
 **!!!The following steps are Optional and only needed if you are using RealSim Simulink blocks**
 Need a simulink initialization file similar to below:
 ```matlab
@@ -421,11 +438,9 @@ Best practice is to call this function as ```InitFcn``` in your Simulink model
   ![](img/DS_SCLX_Eth_4.png)
   ![](img/DS_SCLX_Eth_5.png)
 
-(setup-application)=
-## Setup Application
+# Setup Application
 
-(sumo)=
-### SUMO
+## SUMO
 The SUMO network files can be put at a different location than the RealSim folder and CarMaker folder. It is recommended to create a batch file for each different simulation runs and setups. This batch file can be inside the ##YOUR CM Project##\src_cm4sl folder or inside your SUMO network file folder. The corresponding path to RealSim, SumoApp, and CmProj need to be change accordingly. Also, example below runs the python script in a conda environment, it is up to the user to setup a python environment properly. The only non-standard python library is ```pyyaml```. Below is an example:
 ```batch
 set RealSimPath=..\..\
@@ -444,11 +459,9 @@ call conda deactivate
 pause
 ```
 
-(run-simulations)=
-## Run Simulations
+# Run Simulations
 
-(general-setups)=
-### General Setups
+## General Setups
 **Generate Traffic Objects**
 
 RealSimCarMakerSetup.py will modify an existing testrun file and add traffic objects to it. use ```RealSimCarMakerSetup.py --help``` to check all detailed arguments. Below is an example to read a "coordMerge_sumo" testrun and output a "coordMerge_sumo_rs_simulink" testrun with 10 cars and 10 trucks. Based on the version of testrun files, the script will search through CarMaker installation path and use existing vehicle .mobj files to create random traffic. ```RealSimCarMakerSetup.py --no-random-traffic``` can be set to disable random traffic, then all traffic objects will use the same vehicle.
@@ -519,29 +532,24 @@ CarMakerSetup:
 Note, in dSPACE implementation, CarMakerIP should be the IP of the host PC.
 
 
-(dspace)=
-### dSPACE
+## dSPACE
 Following the previous setup steps, dSPACE should already be ready to run.
 
 
-(examples)=
-### Examples
+## Examples
 The release comes with a CM11_proj folder and example SUMO applications, and Visual Studio projects to compile executables. The SUMO files are inside ```tests``` folder. The testruns can potentially be transferred to previous CarMaker versions by manually changing testrun heading to the desired version, for example,
 ```FileIdent = CarMaker-TestRun 11``` ==> ```FileIdent = CarMaker-TestRun 9```
 
 
 <!---
-(office-simulation)=
-### Office simulation
+## Office simulation
 run SUMO and Real-Sim with ```runCoordMergeSUMO.bat```, use CarMaker testrun ```coordMerge_rs```, make sure the GUI configuration is set properly, check [Office](#office)
 
-(simulink-simulation)=
-### Simulink simulation
+## Simulink simulation
 run SUMO and Real-Sim with ```runCoordMergeSUMO_simulink.bat```, use CarMaker testrun ```coordMerge_rs_simulink```, use Simulink file ```CM11_proj\src_cm4sl\RealSimGeneric.mdl``` make sure the configuration is set properly, check [Simulink](#simulink).
 -->
 
-(dspace-simulation)=
-### dSPACE Simulation
+## dSPACE Simulation
 1. Make sure the path of the variable ```RS_configFile``` in ```User.c``` is correct for your environment
 
 2. Open the ConfigurationDesk project ```RS_DS_CM11_noSimulinkRS_useManeuver``` which is inside the ```CM11_proj/ConfigDesk``` folder. The simulink file is ```RS_DS_CM11_noSimulinkRS_useManeuver.slx``` under ```CM11_proj\src_cm4sl_ds```. Compile the ConfigurationDesk project. See more details in [this section](#setup-cm-dspace)

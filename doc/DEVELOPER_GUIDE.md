@@ -46,7 +46,6 @@ Shared library code and utilities used across all simulators.
 - `MsgHelper` - Message serialization/deserialization for vehicle, signal, and detector data
 - `VehDataMsgDefs` - Vehicle message data structure definitions
 - `DeviceV2X` - V2X communication device interface *(not actively maintained)*
-- `RealSimCmHelper` - CarMaker-specific helper functions
 - `VirEnvHelper` / `VirEnv_Wrapper` - Virtual environment integration helpers
 - `TrafficHelper` - Traffic simulation utilities
 - `MathLibrary.h` - Mathematical utility functions *(legacy - not currently used)*
