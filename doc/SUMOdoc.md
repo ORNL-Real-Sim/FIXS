@@ -4,8 +4,7 @@
 Yunli Shao\
 realsimxil@gmail.com
 
-Table of Contents
-=======================
+## Table of Contents
 * [Simulation Setups](#simulation-setups)
 * [Specific Features for SUMO Co-simulation](#specific-features-for-sumo-co-simulation)
     * [Speed Limit](#speed-limit)
