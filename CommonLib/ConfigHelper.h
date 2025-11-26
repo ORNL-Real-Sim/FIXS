@@ -109,11 +109,37 @@ struct CarMakerSetup_t {
 
 };
 
+struct CarlaSetup_t {
+	bool EnableVerboseLog;
+
+	bool EnableCosimulation;
+
+	bool EnableExternalControl;
+
+	bool UseVehicleTypeAsBlueprint;
+
+	std::string CarlaServerIP;
+
+	int CarlaServerPort;
+
+	std::string CarlaClientIP;
+
+	int CarlaClientPort;
+
+	std::string CarlaMapName;
+
+	std::string CenteredViewId;
+
+	double TrafficRefreshRate;
+
+	std::vector<std::string> InterestedIds;
+
+};
 
 struct SumoSetup_t {
 
 	int SpeedMode;
-
+	int ExecutionOrder;
 };
 
 typedef struct SubscriptionVehicleList_t {
@@ -178,6 +204,7 @@ public:
 	XilSetup_t XilSetup;
 	CarMakerSetup_t CarMakerSetup;
 	SumoSetup_t SumoSetup;
+	CarlaSetup_t CarlaSetup;
 
 
 

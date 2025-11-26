@@ -170,3 +170,15 @@ CM*_proj/**/Release/*
 **/.vs/*
 tests/DelayedConnection/coordMerge.xml
 CM11_proj/tmp.obj
+
+# CARLA dependency bundle and local CMake build artifacts
+CommonLib/libcarla/
+VirCarlaEnv/build/
+VirCarlaEnv/VirCarlaEnv/CMakeFiles/
+VirCarlaEnv/VirCarlaEnv/CMakeCache.txt
+VirCarlaEnv/VirCarlaEnv/cmake_install.cmake
+VirCarlaEnv/VirCarlaEnv/*.ninja
+VirCarlaEnv/VirCarlaEnv/.ninja*
+VirCarlaEnv/VirCarlaEnv/Makefile
+VirCarlaEnv/VirCarlaEnv/compile_commands.json
+VirCarlaEnv/VirCarlaEnv/*.cmake

@@ -3,7 +3,10 @@
 //#include <any>
 #include <unordered_map>
 #include <vector>
-
+#include <string>
+#ifdef RS_DSPACE
+#include <cstdint>
+#endif
 // MESSAGE IDENTIFIER 1
 // Full vehicle data structure that will be shared between SUMO and other simulators
 // !!! This does not necessary mean all data directly communicated between simulators
@@ -43,9 +46,11 @@ typedef struct  {
 	int8_t activeLaneChange; // 1 to the left, -1 to the right, 0 stay on the lane, 
 
 
-	// variables not retrievable yet
+	// variables not retrievable from VISSIM yet
 	float length;
 	float width;
+	float height;
+	// variables not retrievable yet
 	float weight;
 
 

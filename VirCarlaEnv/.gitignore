@@ -1,0 +1,28 @@
+# Local build artifacts
+/build/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+*.cmake
+*.a
+*.o
+*.obj
+*.pdb
+*.ilk
+*.sln
+*.vcxproj*
+*.ninja
+.ninja*
+Makefile
+compile_commands.json
+
+# CARLA dependencies bundle
+CommonLib/libcarla/
+
+# CLion/VSCode etc
+.idea/
+.vscode/
+
+# Python cache
+__pycache__/
+*.pyc

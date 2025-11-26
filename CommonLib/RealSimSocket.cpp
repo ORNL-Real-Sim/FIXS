@@ -39,7 +39,7 @@
 #pragma comment (lib, "AdvApi32.lib")
 
 #define RECVBUFFERSIZE 1024
-#define SENDBUFFERSIZE 200
+#define SENDBUFFERSIZE 1024
 
 
 // s-function parameters

@@ -253,7 +253,7 @@ void SocketHelper::socketShutdown() {
 #else
 		shutdown(selfServerSock[iS], SHUT_RDWR);
 		shutdown(clientSock[iS], SHUT_RDWR);
-	#ifdef DSRTLX
+	#ifdef RS_DSPACE
 		close(selfServerSock[iS]);
 		close(clientSock[iS]);
 	#endif
@@ -265,7 +265,7 @@ void SocketHelper::socketShutdown() {
 		closesocket(serverSock[iS]);
 #else
 		shutdown(serverSock[iS], SHUT_RDWR);
-	#ifdef DSRTLX
+	#ifdef RS_DSPACE
 		close(serverSock[iS]);
 	#endif
 #endif	
@@ -401,7 +401,7 @@ int SocketHelper::initConnection(std::string errorLogName) {
 				printSocketErrorMessage(WSAGetLastError());
 #else
 				printf("Unable to connect to server! error\n");
-			#ifdef DSRTLX
+			#ifdef RS_DSPACE
 				close(serverSock[iS]);
 			#endif
 #endif
@@ -439,7 +439,7 @@ int SocketHelper::initConnection(std::string errorLogName) {
 				WSACleanup();
 #else
 				fprintf(stderr, "%s: \n", "socket() failed");
-			#ifdef DSRTLX
+			#ifdef RS_DSPACE
 				close(selfServerSock[iS]);
 			#endif
 #endif
@@ -470,7 +470,7 @@ int SocketHelper::initConnection(std::string errorLogName) {
 					f << "bind() failed! error: " << endl;
 					f.close();
 			}
-			#ifdef DSRTLX
+			#ifdef RS_DSPACE
 				close(selfServerSock[iS]);
 			#endif
 #endif
@@ -495,7 +495,7 @@ int SocketHelper::initConnection(std::string errorLogName) {
 					f.close();
 				}
 				fprintf(stderr, "%s:\n", "listen() failed");
-			#ifdef DSRTLX
+			#ifdef RS_DSPACE
 				close(selfServerSock[iS]);
 			#endif
 #endif
@@ -581,7 +581,7 @@ int SocketHelper::initConnection(std::string errorLogName) {
 							f.close();
 					}
 						fprintf(stderr, "%s: \n", "accept() failed");
-					#ifdef DSRTLX
+					#ifdef RS_DSPACE
 						close(clientSock[iS]);
 					#endif
 #endif
@@ -684,7 +684,7 @@ int SocketHelper::initConnection(std::string errorLogName) {
 							}
 							fprintf(stderr, "%s: \n", "accept() failed");
 							//exit(1);
-						#ifdef DSRTLX
+						#ifdef RS_DSPACE
 							close(clientSock[iS]);
 						#endif
 #endif
@@ -698,7 +698,7 @@ int SocketHelper::initConnection(std::string errorLogName) {
 						}
 
 						/* clientSock is connected to a client! */
-						printf("Handling VISSIM client #%d %s\n", iS + 1 - N_ACT_CLIENT, inet_ntoa(clientAddr[iS].sin_addr));
+						printf("Handling VISSIM client #%zu %s\n", iS + 1 - N_ACT_CLIENT, inet_ntoa(clientAddr[iS].sin_addr));
 
 						ClientConnected[iS] = 1;
 					}
@@ -747,7 +747,7 @@ int SocketHelper::initConnection(std::string errorLogName) {
 					}
 					printf("recv() failed with error code ");
 					//exit(EXIT_FAILURE);
-					#ifdef DSRTLX
+					#ifdef RS_DSPACE
 						close(clientSock[iS]);
 					#endif
 #endif
@@ -797,7 +797,7 @@ int SocketHelper::initConnection(std::string errorLogName) {
 					f.close();
 				}
 				printf("send failed with error:\n");
-				#ifdef DSRTLX
+				#ifdef RS_DSPACE
 					close(serverSock[iS]);
 				#endif
 #endif

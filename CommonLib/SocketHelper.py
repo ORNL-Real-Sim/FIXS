@@ -1,36 +1,44 @@
 from struct import unpack, pack
+from CommonLib.VehDataMsgDefs import VehData
+from CommonLib.MsgHelper import MsgHelper, MessageType
+from CommonLib.ConfigHelper import ConfigHelper
+import typing
 
 class SocketHelper:
-    MSG_HEADER_SIZE = 9
-    MSG_EACH_HEADER_SIZE = 3
 
     MSG_CODER = 'utf-8'
 
-    def __init__(self):
+    def __init__(self, config_helper: ConfigHelper, msg_helper: MsgHelper):
         # empty constructer
         aa = 1
+        self.config_helper = config_helper
+        self.msg_helper = msg_helper
+        self.msg_header_size = self.msg_helper.msg_header_size
+        self.msg_each_header_size = self.msg_helper.msg_each_header_size
 
-    def packHeader(self, simState, simTime, totalMsgSize):
-        buffer = pack('<BfI', simState, simTime, totalMsgSize)
+        # initialize lists to store sending data
+        self.vehicle_data_send_list: typing.List[VehData] = []
+        self.traffic_light_data_send_list = []
+        self.detector_data_send_list = []
 
-        return buffer
 
-    def depackHeader(self, buffer):
-        temp = unpack('<BfI', buffer)
-        simState = temp[0]
-        simTime = temp[1]
-        totalMsgSize = temp[2]
+        # initialize lists to store received data
+        self.vehicle_data_receive_list: typing.List[VehData] = []
+        self.traffic_light_data_receive_list = []
+        self.detector_data_receive_list = []
 
-        return simState, simTime, totalMsgSize
+    def clear_data(self):
+        self.vehicle_data_send_list.clear()
+        self.traffic_light_data_send_list.clear()
+        self.detector_data_send_list.clear()
 
-    def depackMsgType(self, buffer):
-        temp = unpack('<HB', buffer)
-        msgSize = temp[0]
-        msgType = temp[1]
+        self.vehicle_data_receive_list.clear()
+        self.traffic_light_data_receive_list.clear()
+        self.detector_data_receive_list.clear()
 
-        return msgSize, msgType
 
-    def packTrafficLightData(self, TrafficLightData):
+
+    def pack_traffic_light_data(self, TrafficLightData):
         # need to skip the size part and add after all have been written
         buffer = b''
 
@@ -53,8 +61,7 @@ class SocketHelper:
 
         return buffer
 
-
-    def depackDetectorData(self,buffer):
+    def depack_detector_data(self,buffer):
         nByte = len(buffer)
         sigLen = buffer[0]
         sigName = unpack('<{}s'.format(sigLen), buffer[1:(1+sigLen)])[0]
@@ -78,48 +85,81 @@ class SocketHelper:
 
         return DetDataRecv_v
 
-    def recvData(self, sock):
+    def recv_data(self, sock):
         # initialize return lists
-        VehDataRecv_v = []
-        TlsDataRecv_v = []
-        DetDataRecv_v = []
-
+        
+        
         # get header for entire message
-        recvBuffer = sock.recv(self.MSG_HEADER_SIZE)
-        simState, simTime, totalMsgSizeRecv = self.depackHeader(recvBuffer)
+        received_buffer = sock.recv(self.msg_header_size)
+        
 
-        msgProcessed = self.MSG_HEADER_SIZE
-
-        while (msgProcessed < totalMsgSizeRecv):
+        sim_state, sim_time, total_msg_size = self.msg_helper.depack_msg_header(received_buffer)
+        msg_processed_size = 0
+        msg_processed_size = msg_processed_size + self.msg_header_size
+        # total message size is the data to be received
+        # save received_buffer to local log for debugging
+        log_file_path = "received_header_buffer.log"
+        with open(log_file_path, 'ab') as log_file:  # 'ab' for appending binary data
+            log_file.write(received_buffer)
+            log_file.write(b'\n')
+        
+        while (msg_processed_size < total_msg_size):
             # get message type header
-            recvBuffer = sock.recv(self.MSG_EACH_HEADER_SIZE)
-            iMsgSizeRecv, iMsgTypeRecv = self.depackMsgType(recvBuffer)
+            received_buffer = sock.recv(self.msg_each_header_size)
+            msg_size, msg_type = self.msg_helper.depack_msg_type(received_buffer)
+
+            log_file_path = "received_each_header_buffer.log"
+            with open(log_file_path, 'ab') as log_file:  # 'ab' for appending binary data
+                log_file.write(received_buffer)
+                log_file.write(b'\n')
 
             # get message it self
-            recvBuffer = sock.recv(iMsgSizeRecv - self.MSG_EACH_HEADER_SIZE)
-            
+            received_buffer = sock.recv(msg_size - self.msg_each_header_size)
+
+            log_file_path = "received_msg_buffer.log"
+            with open(log_file_path, 'ab') as log_file:  # 'ab' for appending binary data
+                log_file.write(received_buffer)
+                log_file.write(b'\n')
+
             # unpack message based on type identifier
-            if iMsgTypeRecv == 1:
+            if msg_type == MessageType.vehicle_data:
+                aa = 1
+                vehicle_data_received = self.msg_helper.depack_veh_data(received_buffer)
+                self.vehicle_data_receive_list.append(vehicle_data_received)
+            elif msg_type == MessageType.traffic_light_data:               
                 aa = 1
 
-            elif iMsgTypeRecv == 2:               
+            elif msg_type == MessageType.detector_data:
+                # DetDataRecv_v = self.depackDetectorData(received_buffer) 
                 aa = 1
-
-            elif iMsgTypeRecv == 3:
-                DetDataRecv_v = self.depackDetectorData(recvBuffer) 
             else:
                 aa = 1
 
-            msgProcessed = msgProcessed + iMsgSizeRecv
-		    #msgProcessed = msgProcessed + iMsgSizeRecv
+            msg_processed_size = msg_processed_size + msg_size
 
-        return simState, simTime, VehDataRecv_v, TlsDataRecv_v, DetDataRecv_v
+        return sim_state, sim_time,
+        
 
+    def sendData(self, simState, simTime, sock):
+        byte_index = 0
+        total_msg_size = 0
+        total_msg_size = total_msg_size + self.msg_header_size
+        byte_index = byte_index + self.msg_header_size
+        vehicle_byte_index = 0
+        vehicle_data_buffer = bytearray(65536) 
+        # TODO: add traffic light and detector data
+        traffic_light_data_buffer = bytearray(8096)
+        detector_data_buffer = bytearray(8096)
+        data_buffer = bytearray(81728)
+        for vehicle_data in self.vehicle_data_send_list:
+            vehicle_data, vehicle_msg_size, vehicle_byte_index = self.msg_helper.pack_veh_data(vehicle_data_buffer, 
+                                                                                                   vehicle_byte_index, 
+                                                                                                   vehicle_data)
+            total_msg_size = total_msg_size + vehicle_msg_size
+        
+        data_buffer, byte_index = self.msg_helper.pack_msg_header(data_buffer, simState, simTime, total_msg_size)
+        data_buffer[byte_index:byte_index+vehicle_byte_index] = vehicle_data_buffer[0:vehicle_byte_index]
+        byte_index = byte_index + vehicle_byte_index
 
-    def sendData(self, simState, simTime, vehSendBuffer, tlsSendBuffer, detSendBuffer):
-        sendMsgSize = self.MSG_HEADER_SIZE + len(vehSendBuffer) + len(tlsSendBuffer) + len(detSendBuffer)
-        headerSendBuffer = self.packHeader(simState, simTime, sendMsgSize)
-            
-        buffer = headerSendBuffer + vehSendBuffer + tlsSendBuffer + detSendBuffer
-
-        return buffer
+        # send data
+        sock.sendall(data_buffer[0:byte_index])

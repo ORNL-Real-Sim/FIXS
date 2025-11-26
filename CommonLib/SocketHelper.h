@@ -39,7 +39,9 @@
 	#define SOCKET_ERROR (-1)
 //extern int close(int __fildes);
 
+#ifndef RS_SKIP_CARMAKER
 	#include <CarMaker.h>
+#endif
 
 #else
 	#include <winsock2.h>
@@ -147,14 +149,9 @@ public:
 
 	std::vector <struct sockaddr_in> selfServerAddr; /* Local a ddress */
 	std::vector <struct sockaddr_in> clientAddr; /* Client address */
-#ifndef WIN32
-	std::vector <size_t> clientAddrLen;            /* Length of client address data structure */
-#else
-	std::vector <int> clientAddrLen;            /* Length of client address data structure */
-#endif
+	std::vector <socklen_t> clientAddrLen;            /* Length of client address data structure */
 	std::vector <int> sendClientByte;
 	std::vector <int> recvClientMsgSize;                    /* Size of received message */
 	 
 
 };
-
