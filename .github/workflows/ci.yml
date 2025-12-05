@@ -1,0 +1,142 @@
+name: Real-Sim Simple CI
+
+#Stage 0 (Windows): build C++/CMake/MSBuild-driven pieces (external libs + core components).
+#Stage 1 (Linux): Python/tests/docs + future SUMO/Simulink integration.
+
+#Trigger:
+#Push to main, PR into main, or manual run.
+
+#Job 1: build_external_libs (Windows):
+#run:1_external_libraries.bat,2_core_components.bat inline
+
+#Job 2: stage1 (Ubuntu) – only if Windows job succeeded:
+#Install Python 3.11, Install Python deps if requirement files exist
+#Print structured placeholder logs for:Serialization compatibility tests,SUMO + Python scenarios,SUMO + Simulink scenarios,Build Sphinx docs
+
+#------------------------------------
+#lock tells GitHub when to run this workflow
+#So any change hitting main, or PR into main, will trigger the CI
+on:
+  #any commit pushed to the main branch.
+  push:
+    branches: [ main ]
+  #when a PR targets main
+  pull_request:
+    branches: [ main ]
+  #lets you click a button in the Actions tab to run it manually
+  workflow_dispatch:
+
+#currently 2 jobs
+#runs in parallel by default, Ubuntu waits for Windows to finish successfully before starting
+jobs:
+  #build_external_libs – runs on Windows
+  build_external_libs:
+    name: "Stage 0 · Build External Libraries + Core (Windows)"
+    #GitHub spins up a fresh Windows VM for this job
+    runs-on: windows-latest
+    
+    #every run: command in this job uses Windows cmd.exe by default (so you can use cd, call, .bat scripts with Windows syntax)
+    defaults:
+      run:
+        shell: cmd
+
+    #Uses the standard actions/checkout action
+    #Clones your repository onto the Windows VM
+    #then the working directory contains your repo file
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      #Ensures MSBuild (from Visual Studio Build Tools) is on PATH
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build external libraries (yaml-cpp)
+       #Moves into the scripts\dispatch directory within your repo, then Executes the batch script
+       #If any step fails (cmake configuration or build), it exits with non-zero code, and job fails
+        run: |
+          cd scripts\dispatch
+          call 1_external_libraries.bat
+
+      - name: Build core components (TrafficLayer)
+        run: |
+          cd scripts\dispatch
+          call 2_core_components.bat inline
+
+  #stage1 – runs on Ubuntu
+  stage1:
+    name: "Stage 1 · Interfaces & SUMO"
+    runs-on: ubuntu-latest
+    needs: build_external_libs   # Ensures Windows job runs first
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies (if requirement files exist)
+        run: |
+          if [ -f requirements.txt ]; then
+            echo "Installing from requirements.txt"
+            pip install -r requirements.txt
+          else
+            echo "No requirements.txt found, skipping."
+          fi
+
+          if [ -f doc/requirements_doc.txt ]; then
+            echo "Installing from doc/requirements_doc.txt"
+            pip install -r doc/requirements_doc.txt
+          else
+            echo "No doc/requirements_doc.txt found, skipping."
+          fi
+
+      - name: Run tests (if pytest + tests/ exist)
+        run: |
+          if [ -d tests ]; then
+            if python -m pytest --version >/dev/null 2>&1; then
+              echo "Running pytest..."
+              python -m pytest -q
+            else
+              echo "pytest not installed, skipping tests."
+            fi
+          else
+            echo "No tests/ directory, skipping tests."
+          fi
+
+      - name: Stage 1 · Unit Test Message & Serialization
+        run: |
+          echo "::group::Stage 1 :: Unit Test Message & Serialization"
+          echo "Goal: validate Python/Simulink/C++ server ↔ client serialization compatibility."
+          echo "TODO: link actual harness when available."
+          echo "::endgroup::"
+
+      - name: Stage 1 · Scenario SUMO + Python
+        run: |
+          echo "::group::Stage 1 :: Scenario SUMO + Python"
+          echo "Goal: run SUMO + Python control loop smoke test."
+          echo "TODO: call tests/SumoDriver scripts when SUMO CI is enabled."
+          echo "::endgroup::"
+
+      - name: Stage 1 · Scenario SUMO + Simulink
+        run: |
+          echo "::group::Stage 1 :: Scenario SUMO + Simulink"
+          echo "Goal: run SUMO + Simulink co-simulation smoke test."
+          echo "TODO: integrate MATLAB/Simulink CI hooks."
+          echo "::endgroup::"
+
+      - name: Build docs (if doc/ + sphinx exist)
+        run: |
+          if [ -d doc ]; then
+            if python -m sphinx --version >/dev/null 2>&1; then
+              echo "Building Sphinx HTML docs..."
+              python -m sphinx -b html doc _build/html -d _build/doctrees
+            else
+              echo "sphinx not installed, skipping docs build."
+            fi
+          else
+            echo "No doc/ directory, skipping docs."
+          fi
