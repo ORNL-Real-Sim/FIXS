@@ -1,40 +1,6 @@
 #include "ConfigHelper.h"
-#include <windows.h>
-#include <shlwapi.h>
-#pragma comment(lib, "shlwapi.lib")
 
 using namespace std;
-
-// Helper functions for path operations (C++14 compatible replacement for std::filesystem)
-namespace {
-	std::string getParentPath(const std::string& path) {
-		size_t pos = path.find_last_of("\\/");
-		return (pos != std::string::npos) ? path.substr(0, pos) : "";
-	}
-
-	std::string getCurrentDirectory() {
-		char buffer[MAX_PATH];
-		GetCurrentDirectoryA(MAX_PATH, buffer);
-		return std::string(buffer);
-	}
-
-	bool isRelativePath(const std::string& path) {
-		if (path.empty()) return true;
-		// Check for drive letter (e.g., "C:")
-		if (path.length() > 1 && path[1] == ':') return false;
-		// Check for UNC path or root path
-		if (path[0] == '\\' || path[0] == '/') return false;
-		return true;
-	}
-
-	std::string combinePaths(const std::string& base, const std::string& relative) {
-		char combined[MAX_PATH];
-		PathCombineA(combined, base.c_str(), relative.c_str());
-		char normalized[MAX_PATH];
-		PathCanonicalizeA(normalized, combined);
-		return std::string(normalized);
-	}
-}
 
 
 // Value-Defintions of the different String values
@@ -123,12 +89,6 @@ int ConfigHelper::getConfig(string configName) {
 	// }
 #endif
 
-	// Store the config file's directory for resolving relative paths
-	std::string configDir = getParentPath(configName);
-	if (configDir.empty()) {
-		configDir = getCurrentDirectory();
-	}
-
 	YAML::Node node;
 
 	YAML::Node config = YAML::LoadFile(configName);
@@ -142,14 +102,14 @@ int ConfigHelper::getConfig(string configName) {
 	}
 	else {
 		SimulationSetup.EnableRealSim = true;
-		if (!SuppressDefaultMessages) printf("\nWill enable real sim as default!\n");
+		printf("\nWill enable real sim as default!\n");
 	}
 	if (node["EnableVerboseLog"]) {
 		SimulationSetup.EnableVerboseLog = parserFlag(node, "EnableVerboseLog");
 	}
 	else {
 		SimulationSetup.EnableVerboseLog = false;
-		if (!SuppressDefaultMessages) printf("\nWill disable verbose log as default!\n");
+		printf("\nWill disable verbose log as default!\n");
 	}
 	if (node["SimulationEndTime"]) {
 		SimulationSetup.SimulationEndTime = parserDouble(node, "SimulationEndTime");
@@ -170,42 +130,42 @@ int ConfigHelper::getConfig(string configName) {
 	}
 	else {
 		SimulationSetup.SelectedTrafficSimulator = "SUMO";
-		if (!SuppressDefaultMessages) printf("\nTraffic Simulator not specified! Will use SUMO as default!\n");
+		printf("\nTraffic Simulator not specified! Will use SUMO as default!\n");
 	}
 	if (node["TrafficSimulatorIP"]) {
 		SimulationSetup.TrafficSimulatorIP = parserString(node, "TrafficSimulatorIP");
 	}
 	else {
 		SimulationSetup.TrafficSimulatorIP = "127.0.0.1";
-		if (!SuppressDefaultMessages) printf("\nTraffic Simulator IP not specified! Will use localhost 127.0.0.1 as default!\n");
+		printf("\nTraffic Simulator IP not specified! Will use localhost 127.0.0.1 as default!\n");
 	}
 	if (node["TrafficSimulatorPort"]) {
 		SimulationSetup.TrafficSimulatorPort = parserInteger(node, "TrafficSimulatorPort");
 	}
 	else {
 		SimulationSetup.TrafficSimulatorPort = 1337;
-		if (!SuppressDefaultMessages) printf("\nTraffic Simulator Port not specified! Will use 1337 as default!\n");
+		printf("\nTraffic Simulator Port not specified! Will use 1337 as default!\n");
 	}
 	if (node["SimulationMode"]) {
 		SimulationSetup.SimulationMode = parserInteger(node, "SimulationMode");
 	}
 	else {
 		SimulationSetup.SimulationMode = 0;
-		if (!SuppressDefaultMessages) printf("\nSimulation mode not specified! Will use Mode 0 as default!\n");
-	}
+		printf("\nSimulation mode not specified! Will use Mode 0 as default!\n");
+}
 	if (node["SimulationModeParameter"]) {
 		SimulationSetup.SimulationModeParameter = parserDouble(node, "SimulationModeParameter");
 	}
 	else {
 		SimulationSetup.SimulationModeParameter = 0;
-		if (!SuppressDefaultMessages) printf("\nSimulation mode parameter not specified! Will use Parameter=0 as default!\n");
+		printf("\nSimulation mode parameter not specified! Will use Parameter=0 as default!\n");
 	}
 	if (node["VehicleMessageField"]) {
 		parserStringVector(node, "VehicleMessageField", SimulationSetup.VehicleMessageField);
 	}
 	else {
 		SimulationSetup.VehicleMessageField = { "id", "type", "speed", "positionX", "positionY", "positionZ", "heading", "color", "linkId", "laneId", "distanceTravel", "acceleration", "speedDesired", "acceleartionDesired", "hasPrecedingVehicle", "precedingVehicleId", "precedingVehicleDistance", "precedingVehicleSpeed", "signalLightDistance", "signalLightColor", "speedLimit", "speedLimitNext", "speedLimitChangeDistance", "linkIdNext", "grade" , "activeLaneChange", "signalLightId", "signalLightHeadId", "lightIndicators"};
-		if (!SuppressDefaultMessages) printf("\nWill use all available vehicle message field!\n");
+		printf("\nWill use all available vehicle message field!\n");
 	}
 
 
@@ -214,24 +174,17 @@ int ConfigHelper::getConfig(string configName) {
 	//  Store Vehicle Message Field to an unordered_set
 	// -------------------
 	std::unordered_set <std::string> VehicleMessageField_set;
-	if (!SuppressDefaultMessages) {
-		printf("Vehicle message selected:");
-		for (size_t i = 0; i < SimulationSetup.VehicleMessageField.size(); i++) {
-			VehicleMessageField_set.insert(SimulationSetup.VehicleMessageField[i]);
-			printf("\t%s", SimulationSetup.VehicleMessageField[i].c_str());
-		}
-		printf("\n\n");
-	}
-	else {
-		for (size_t i = 0; i < SimulationSetup.VehicleMessageField.size(); i++) {
-			VehicleMessageField_set.insert(SimulationSetup.VehicleMessageField[i]);
-		}
+	printf("Vehicle message selected:");
+	for (size_t i = 0; i < SimulationSetup.VehicleMessageField.size(); i++) {
+		VehicleMessageField_set.insert(SimulationSetup.VehicleMessageField[i]);
+		printf("\t%s", SimulationSetup.VehicleMessageField[i].c_str());
 	}
 
 	// -------------------
 	//  SANITY CHECK: Vehicle Message Field
 	// -------------------
 	// currently, mandate messages are id, speed, one of speedDesired or accelerationDesired
+	printf("\n\n");
 	if (VehicleMessageField_set.find("id") == VehicleMessageField_set.end()) {
 		printf("ERROR: Must select 'id' as part of VehicleMessageField\n");
 		exit(-1);
@@ -270,7 +223,7 @@ int ConfigHelper::getConfig(string configName) {
 		XilSetup.AsServer = parserFlag(node, "AsServer");
 	}else{
 		XilSetup.AsServer = false;
-		if (!SuppressDefaultMessages) printf("\nXil not specified as server or client! Will set Xil as client!\n");
+		printf("\nXil not specified as server or client! Will set Xil as client!\n");
 	}
 
 	parserSubscription(node, "VehicleSubscription", XilSetup.VehicleSubscription);
@@ -437,37 +390,23 @@ int ConfigHelper::getConfig(string configName) {
 	}
 	else {
 		SumoSetup.ExecutionOrder = 1;
-		if (!SuppressDefaultMessages) printf("\nSumo Execution Order not specified! Will use 1 as default!\n");
+		printf("\nSumo Execution Order not specified! Will use 1 as default!\n");
 	}
-	if (node["EnableAutoLaunch"]) {
-		SumoSetup.EnableAutoLaunch = parserFlag(node, "EnableAutoLaunch");
+	if (node["EgoID"]) {
+		SumoSetup.EgoID = node["EgoID"].as<std::string>();
 	}
 	else {
-		SumoSetup.EnableAutoLaunch = false;
+		SumoSetup.EgoID = "ego";
+		printf("\nSumo EgoID not specified! Will use 'ego' as default!\n");
 	}
-	if (node["SumoConfigFile"]) {
-		SumoSetup.SumoConfigFile = parserString(node, "SumoConfigFile");
+	if (node["EgoInsertTime"]) {
+		SumoSetup.EgoInsertTime = node["EgoInsertTime"].as<double>();
+	}
+	else {
+		SumoSetup.EgoInsertTime = 28985.0;
+		printf("\nSumo EgoInsertTime not specified! Will use 28985.0 as default!\n");
+	}
 
-		// Convert relative path to absolute path (relative to config file directory)
-		if (!SumoSetup.SumoConfigFile.empty() && isRelativePath(SumoSetup.SumoConfigFile)) {
-			SumoSetup.SumoConfigFile = combinePaths(configDir, SumoSetup.SumoConfigFile);
-		}
-	}
-	else {
-		SumoSetup.SumoConfigFile = "";
-	}
-	if (node["NumClients"]) {
-		SumoSetup.NumClients = parserInteger(node, "NumClients");
-	}
-	else {
-		SumoSetup.NumClients = 1;
-	}
-	if (node["RuntimeLibraryPath"]) {
-		SumoSetup.RuntimeLibraryPath = parserString(node, "RuntimeLibraryPath");
-	}
-	else {
-		SumoSetup.RuntimeLibraryPath = "";
-	}
 
 
 	// ===========================================================================
@@ -479,7 +418,7 @@ int ConfigHelper::getConfig(string configName) {
 	}
 	else {
 		CarlaSetup.EnableVerboseLog = false;
-		if (!SuppressDefaultMessages) printf("\nWill disable verbose log as default!\n");
+		printf("\nWill disable verbose log as default!\n");
 	}
 	if (node["EnableCosimulation"]) {
 		CarlaSetup.EnableCosimulation = parserFlag(node, "EnableCosimulation");
@@ -488,31 +427,11 @@ int ConfigHelper::getConfig(string configName) {
 		CarlaSetup.EnableCosimulation = false;
 	}
 
-	//if (node["EnableEgoSimulink"]) {
-	//	CarlaSetup.EnableEgoSimulink = parserFlag(node, "EnableEgoSimulink");
-	//}
-	//else {
-	//	CarlaSetup.EnableEgoSimulink = false;
-	//}
-	if (node["EnableExternalControl"]) {
-		CarlaSetup.EnableExternalControl = parserFlag(node, "EnableExternalControl");
+	if (node["EnableEgoSimulink"]) {
+		CarlaSetup.EnableEgoSimulink = parserFlag(node, "EnableEgoSimulink");
 	}
 	else {
-		CarlaSetup.EnableExternalControl = false;
-	}
-	if (node["UseVehicleTypeAsBlueprint"]) {
-		CarlaSetup.UseVehicleTypeAsBlueprint = parserFlag(node, "UseVehicleTypeAsBlueprint");
-	}
-	else {
-		CarlaSetup.UseVehicleTypeAsBlueprint = false;
-	}
-
-	if (node["CenteredViewId"]) {
-		CarlaSetup.CenteredViewId = parserString(node, "CenteredViewId");
-	}
-	else {
-		CarlaSetup.CenteredViewId = "ego";
-		if (!SuppressDefaultMessages) printf("\nCentered View Id not specified! Will use ego as default!\n");
+		CarlaSetup.EnableEgoSimulink = false;
 	}
 
 	if (node["CarlaServerIP"]) {
@@ -567,7 +486,7 @@ int ConfigHelper::getConfig(string configName) {
 	}
 	else {
 		CarlaSetup.CarlaMapName = "Town01";
-		if (!SuppressDefaultMessages) printf("\nCarla Map not specified! Will use Town01 as default!\n");
+		printf("\nCarla Map not specified! Will use Town01 as default!\n");
 	}
 	if (node["TrafficRefreshRate"]) {
 		CarlaSetup.TrafficRefreshRate = parserDouble(node, "TrafficRefreshRate");
@@ -582,7 +501,7 @@ int ConfigHelper::getConfig(string configName) {
 	}
 	else {
 		CarlaSetup.InterestedIds = {"ego"};
-		if (!SuppressDefaultMessages) printf("\nDefault to track actor with id ego\n");
+		printf("\nDefault to track actor with id ego\n");
 	}
 
 	return 0;
@@ -756,7 +675,7 @@ void ConfigHelper::parserSubscription(YAML::Node rootnode, std::string name, Sub
 				break;
 
 			case intersection:
-				if (att.compare("id") == 0 || att.compare("name") == 0) {
+				if (att.compare("id") == 0 || att.compare("name") == 0 || att.compare("all") == 0) {
 					extractSubscriptionAttributes(attnode, type, att, attMap);
 				}
 				else {
@@ -1009,6 +928,8 @@ void ConfigHelper::getVehSubscriptionList(Subscription_t VehSub, std::unordered_
 }
 
 void ConfigHelper::getSigSubscriptionList(Subscription_t SigSub) {
+	SubscriptionSignalList.signalId_v.clear();
+	SubscriptionSignalList.subAllSignalFlag = false;
 
 	// type, attribute, ip, port
 	// string, SubAttMap_t, vector <string>, vector <int>
@@ -1018,52 +939,72 @@ void ConfigHelper::getSigSubscriptionList(Subscription_t SigSub) {
 		vector <string> idlist;
 		if (type.compare("intersection") == 0) {
 			SubAttMap_t att = get<1>(SigSub[iSub]);
-			if (att.find("name") != att.end()) {
-				idlist = att["name"];
-				for (size_t i = 0; i < idlist.size(); i++) {
-					if (SubscriptionSignalList.signalId_v.find(idlist[i]) == SubscriptionSignalList.signalId_v.end()) {
-						SubscriptionSignalList.signalId_v.insert(idlist[i]);
-					}
+
+			bool subAll = false;
+			if (att.find("all") != att.end() && !att["all"].empty()) {
+				string v = att["all"][0];
+				if (v == "true" || v == "True" || v == "TRUE" || v == "1") {
+					subAll = true;
 				}
 			}
+
+			if (subAll) {
+				SubscriptionSignalList.subAllSignalFlag = true;
+			}
+
+			vector<string> idlist;
+
+			if (att.find("name") != att.end()) {
+				idlist = att["name"];
+			}
+			else if (att.find("id") != att.end()) {
+				idlist = att["id"];
+			}
+
+
+			for (size_t i = 0; i < idlist.size(); i++) {
+				if (SubscriptionSignalList.signalId_v.find(idlist[i]) == SubscriptionSignalList.signalId_v.end()) {
+					SubscriptionSignalList.signalId_v.insert(idlist[i]);
+				}
+			}
+
 
 			// get port map
 			vector <int> port_v;
 			port_v = get<3>(SigSub[iSub]);
 
-			for (auto it : port_v) {
-				// if already has this socket port, then no need to initialize
-				if (SocketPort2SubscriptionList_um.find(it) != SocketPort2SubscriptionList_um.end()) {
+			for (auto port : port_v) {
 
-				}
-				else {
+
+				if (SocketPort2SubscriptionList_um.find(port) == SocketPort2SubscriptionList_um.end()) {
 					SubscriptionAllList_t subAllList;
-					SocketPort2SubscriptionList_um[it] = subAllList;
+					SocketPort2SubscriptionList_um[port] = subAllList;
 				}
+
+
+				if (subAll) {
+					SocketPort2SubscriptionList_um[port].SignalList.subAllSignalFlag = true;
+				}
+
 
 				for (size_t i = 0; i < idlist.size(); i++) {
-					if (SocketPort2SubscriptionList_um[it].SignalList.signalId_v.find(idlist[i]) == SocketPort2SubscriptionList_um[it].SignalList.signalId_v.end()) {
-						SocketPort2SubscriptionList_um[it].SignalList.signalId_v.insert(idlist[i]);
+					if (SocketPort2SubscriptionList_um[port].SignalList.signalId_v.find(idlist[i]) ==
+						SocketPort2SubscriptionList_um[port].SignalList.signalId_v.end()) {
+						SocketPort2SubscriptionList_um[port].SignalList.signalId_v.insert(idlist[i]);
 					}
 				}
 			}
-
 		}
 		else {
 			// ERROR HANDLING
-
 		}
-
-		
 	}
 
-	////if (CarMakerSetup.EnableCosimulation && CarMakerSetup.SynchronizeTrafficSignal){
-	//if (CarMakerSetup.SynchronizeTrafficSignal) {
-	//	SubscriptionSignalList.subAllSignalFlag = true;
-	//}
-	//else {
-	//	SubscriptionSignalList.subAllSignalFlag = false;
-	//}
+	if (SubscriptionSignalList.subAllSignalFlag) {
+		for (auto& kv : SocketPort2SubscriptionList_um) {
+			kv.second.SignalList.subAllSignalFlag = true;
+		}
+	}
 }
 
 void ConfigHelper::getDetSubscriptionList(Subscription_t DetSub) {

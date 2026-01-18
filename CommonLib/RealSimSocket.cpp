@@ -38,8 +38,8 @@
 #pragma comment (lib, "Mswsock.lib")
 #pragma comment (lib, "AdvApi32.lib")
 
-#define RECVBUFFERSIZE 1024
-#define SENDBUFFERSIZE 1024
+#define RECVBUFFERSIZE 2048
+#define SENDBUFFERSIZE 2048
 
 
 // s-function parameters

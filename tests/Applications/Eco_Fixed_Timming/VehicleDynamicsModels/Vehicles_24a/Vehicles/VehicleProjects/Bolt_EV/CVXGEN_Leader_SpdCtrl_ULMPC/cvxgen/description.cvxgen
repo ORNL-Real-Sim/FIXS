@@ -1,0 +1,62 @@
+# Produced by CVXGEN, 2022-12-01 16:21:35 -0500.
+# CVXGEN is Copyright (C) 2006-2017 Jacob Mattingley, jem@cvxgen.com.
+# The code in this file is Copyright (C) 2006-2017 Jacob Mattingley.
+# CVXGEN, or solvers produced by CVXGEN, cannot be used for commercial
+# applications without prior written permission from Jacob Mattingley.
+
+# Filename: description.cvxgen.
+# Description: A description of the CVXGEN problem.
+
+# Simplified ULMPC for CDA Leader Car Speed Control
+dimensions
+  n = 1;    # States
+  m = 1;    # Inputs
+  Hp = 20;  # Hp*Ts<=#200ms #(ultra local)
+  Hc = 1;
+end
+
+parameters
+  # Physical constraints limit
+  vmax
+  vmin
+  deltav_max
+  deltav_min
+  # TCC command limit
+  vcmd_max         # should be more conservative than vmax
+  vcmd_min         # should be more conservative than vmin
+  delta_vcmd_max   # should be more conservative than deltav_max
+  delta_vcmd_min   # should be more conservative than deltav_min
+
+  # System matrix
+  A (n,n)       # X(k+1) = A_k*X(k) + B_k*u(k) + d_k
+  B (n,m)       # vx can measurement
+  d_k (n,1)
+
+  # Cost Function and Reference Values
+  Q (n,n)       psd       # penalize both X_sumo_r and V_sumo_r
+  R             psd
+  v_ref[t], t = 1..Hp+1
+
+  # last step v_cmd
+  v_cmd_last
+
+  # Current state (continously updated)
+  x[0] (n)
+end
+
+variables
+  # Optimal inputs and associated states
+  u[t] (m), t = 0..Hp           # input: delta_vcmd
+  x[t] (n), t = 1..Hp+1         # state: v
+end
+
+minimize
+  sum[t=0..Hc-1](quad(u[t], R)) + sum[t=1..Hp+1](quad(x[t]-v_ref[t], Q))
+subject to
+  x[t+1] == A*x[t]+B*u[t]+d_k,                      t = 0..Hp
+  vmin <= x[t]<= vmax,                              t = 1..Hp+1           # extrally added constraints for physical speed   limit
+  deltav_min <= x[t+1]-x[t] <= deltav_max,          t = 0..Hp             # extrally added constraints for physical acc/dec limit
+  delta_vcmd_min <= u[t] <= delta_vcmd_max,         t = 0..Hc-1           # virtual command signal change rate limit is needed, or you car (low-pass filter) cannot repond to spike input
+  u[t] == 0,                                        t = Hc..Hp
+  vcmd_min <= v_cmd_last + u[0] <= vcmd_max                               # virtual command signal magnitude limit, because your car has speed limit
+end

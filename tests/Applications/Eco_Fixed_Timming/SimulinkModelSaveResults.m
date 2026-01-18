@@ -1,4 +1,6 @@
-settingDir = 'C:\Users\hg25079\Documents\GitHub\FIXS\tests\Applications\Eco_Fixed_Timming\Experiments_Sumo\Shallowford_after_calibration_banleftturn_AdjustedFixedTime_V3\MPR\0%_10Hz_w_vehDyn_29119.31\';
+% File: realsim_script.m
+
+settingDir = 'C:\Users\yusun\Projects\XIL_Oct\tests\Applications\Eco_Fixed_Timming\Experiments_Sumo\Shallowford_after_calibration_banleftturn_AdjustedFixedTime_V3\MPR\0%_10Hz_w0_vehDyn_28985\';
 
 VehicleOut = out;
 Time = VehicleOut.desired_speed.Time;

@@ -114,9 +114,7 @@ struct CarlaSetup_t {
 
 	bool EnableCosimulation;
 
-	bool EnableExternalControl;
-
-	bool UseVehicleTypeAsBlueprint;
+	bool EnableEgoSimulink;
 
 	std::string CarlaServerIP;
 
@@ -128,8 +126,6 @@ struct CarlaSetup_t {
 
 	std::string CarlaMapName;
 
-	std::string CenteredViewId;
-
 	double TrafficRefreshRate;
 
 	std::vector<std::string> InterestedIds;
@@ -140,12 +136,8 @@ struct SumoSetup_t {
 
 	int SpeedMode;
 	int ExecutionOrder;
-
-	// Auto-launch SUMO configuration
-	bool EnableAutoLaunch;
-	std::string SumoConfigFile;
-	int NumClients;
-	std::string RuntimeLibraryPath;
+	std::string EgoID;
+	double EgoInsertTime;
 };
 
 typedef struct SubscriptionVehicleList_t {
@@ -187,9 +179,6 @@ public:
 	ConfigHelper();
 
 	int getConfig(std::string configName);
-
-	// Flag to suppress "Will use X as default" messages during config parsing
-	bool SuppressDefaultMessages = true;
 
 	bool parserFlag(YAML::Node node, std::string name);
 	std::string parserString(YAML::Node node, std::string name);

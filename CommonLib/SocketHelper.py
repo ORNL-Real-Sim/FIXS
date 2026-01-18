@@ -1,5 +1,6 @@
 from struct import unpack, pack
 from CommonLib.VehDataMsgDefs import VehData
+from CommonLib.VehDataMsgDefs import TrafficLightData
 from CommonLib.MsgHelper import MsgHelper, MessageType
 from CommonLib.ConfigHelper import ConfigHelper
 import typing
@@ -27,7 +28,7 @@ class SocketHelper:
 
         # initialize lists to store received data
         self.vehicle_data_receive_list: typing.List[VehData] = []
-        self.traffic_light_data_receive_list = []
+        self.traffic_light_data_receive_list: typing.List[TrafficLightData] = []
         self.detector_data_receive_list = []
 
     def clear_data(self):
@@ -131,6 +132,8 @@ class SocketHelper:
                 self.vehicle_data_receive_list.append(vehicle_data_received)
             elif msg_type == MessageType.traffic_light_data:               
                 aa = 1
+                tls = self.msg_helper.depack_traffic_light_data(received_buffer)
+                self.traffic_light_data_receive_list.append(tls)
 
             elif msg_type == MessageType.detector_data:
                 # DetDataRecv_v = self.depackDetectorData(received_buffer) 

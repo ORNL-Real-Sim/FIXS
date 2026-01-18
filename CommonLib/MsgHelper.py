@@ -1,6 +1,6 @@
 from re import M
 from typing import List
-
+from struct import unpack
 from numpy import byte
 from CommonLib.VehDataMsgDefs import VehData, TrafficLightData, DetectorData
 import struct
@@ -11,8 +11,7 @@ class MessageType:
     traffic_light_data = 2
     detector_data = 3
 
-#   VehicleMessageField: [id, type, vehicleClass, speed, acceleration, positionX, positionY, positionZ, heading,
-#     color, linkId, laneId, distanceTravel, speedDesired, grade, length, width, height]
+
 
 class MsgHelper:
     
@@ -393,19 +392,87 @@ class MsgHelper:
         
         return byte_data, msg_size, byte_index
 
-    def depack_traffic_light_data(self, byte_data: bytes)-> TrafficLightData:
-        traffic_light_data = TrafficLightData()
-        byte_index = 0
-        if self.traffic_light_msg_field_valid.get('id'):
-            traffic_light_data.id, byte_index = MsgHelper.unpack_uint32(byte_data, byte_index)
-        if self.traffic_light_msg_field_valid.get('name'):
-            str_data, str_len, byte_index, uint8Arr = MsgHelper.depack_string(byte_data, byte_index)
-            traffic_light_data.name = str_data
-        if self.traffic_light_msg_field_valid.get('state'):
-            str_data, str_len, byte_index, uint8Arr = MsgHelper.depack_string(byte_data, byte_index)
-            traffic_light_data.state = str_data
+    # def depack_traffic_light_data(self, byte_data: bytes)-> TrafficLightData:
+    #     traffic_light_data = TrafficLightData()
+    #     byte_index = 0
+    #     if self.traffic_light_msg_field_valid.get('id'):
+    #         traffic_light_data.id, byte_index = MsgHelper.unpack_uint32(byte_data, byte_index)
+    #     if self.traffic_light_msg_field_valid.get('name'):
+    #         str_data, str_len, byte_index, uint8Arr = MsgHelper.depack_string(byte_data, byte_index)
+    #         traffic_light_data.name = str_data
+    #     if self.traffic_light_msg_field_valid.get('state'):
+    #         str_data, str_len, byte_index, uint8Arr = MsgHelper.depack_string(byte_data, byte_index)
+    #         traffic_light_data.state = str_data
 
-        return traffic_light_data
+    #     return traffic_light_data
+
+
+
+
+    import struct
+
+    def depack_traffic_light_data(self, byte_data: bytes):
+        """
+        byte_data 是 payload（已经去掉了 msgSize(uint16)+identifier(uint8) 之后的部分）
+        C++ payload: [nameLen][name][id(uint16)][stateLen][state]
+        """
+        idx = 0
+
+        # nameLen
+        if len(byte_data) < 1:
+            return TrafficLightData(id="UNKNOWN", name="", state="")
+
+        name_len = byte_data[idx]
+        idx += 1
+
+        # name
+        if len(byte_data) < idx + name_len:
+            return TrafficLightData(id="UNKNOWN", name="", state="")
+
+        name = byte_data[idx:idx + name_len].decode("ascii", errors="ignore")
+        idx += name_len
+
+        # id (uint16 little-endian)
+        if len(byte_data) < idx + 2:
+            return TrafficLightData(id="UNKNOWN", name=name, state="")
+
+        (tls_id_u16,) = struct.unpack_from("<H", byte_data, idx)
+        idx += 2
+
+        # stateLen
+        if len(byte_data) < idx + 1:
+            return TrafficLightData(id=str(tls_id_u16), name=name, state="")
+
+        state_len = byte_data[idx]
+        idx += 1
+
+        # state
+        if len(byte_data) < idx + state_len:
+            state_bytes = byte_data[idx:]
+        else:
+            state_bytes = byte_data[idx:idx + state_len]
+
+        state = state_bytes.decode("ascii", errors="ignore")
+
+        # 你 Python 的 TrafficLightData 要求 id/name/state 都是字符串：
+        tls = TrafficLightData(
+            id=str(tls_id_u16),   # 或者 f"{name}_{tls_id_u16}"
+            name=name,
+            state=state
+        )
+
+        # 可选：保存数值 id 方便你后续做映射
+        try:
+            tls.id_u16 = tls_id_u16
+            tls.state_len = state_len
+            tls.name_len = name_len
+        except Exception:
+            pass
+
+        return tls
+
+
+
     
     def pack_traffic_light_data(self, byte_data: bytearray, byte_index, traffic_light_data: TrafficLightData):
         # Calculate nMsgSize based on traffic_light_msg_field_valid flags and traffic_light_data field lengths
@@ -520,12 +587,14 @@ class MsgHelper:
     
         # Read the length of the string
         strLen = struct.unpack('B', byte_data[byte_index:byte_index+1])[0]
+        if strLen > 50:
+            raise ValueError("Max characters of id, linkId, type, precedingVehicleId, linkIdNext must be smaller than 50")
 
         byte_index += 1
 
         # Initialize a string of size 50 and a uint8 array of size 50
-        str_data = [''] * strLen
-        uint8Arr = [0] * strLen
+        str_data = [''] * 50
+        uint8Arr = [0] * 50
 
         # Read characters from byte_data according to strLen
         for i in range(strLen):
@@ -599,7 +668,6 @@ def test_pack_string():
     
     unpacked_str, str_len, byte_index, uint8Arr = msg_helper.depack_string(packed_data, 0)
     print("Unpacked string:", unpacked_str)
-    
 if __name__ == "__main__":
     test_pack_simple_message()
     test_pack_string()
