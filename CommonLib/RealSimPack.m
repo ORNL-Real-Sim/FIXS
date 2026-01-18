@@ -72,7 +72,7 @@ classdef RealSimPack < matlab.System & RealSimMsgClass & matlab.system.mixin.Pro
 % %             try
 
                 % initialize ByteData
-                ByteData = zeros(1024, 1, 'uint8');
+                ByteData = zeros(2048, 1, 'uint8');
                 
                 % parser ByteData
                 [ByteData, nMsgSize] = obj.packVehData(simState, t, ByteData, VehDataBus);
@@ -98,7 +98,7 @@ classdef RealSimPack < matlab.System & RealSimMsgClass & matlab.system.mixin.Pro
         function [sz1, sz2] = getOutputSizeImpl(obj)
             % Maximum length of linear indices and element vector is the
             % number of elements in the input
-            sz1 = [1024 1]; sz2 = [1 1]; 
+            sz1 = [2048 1]; sz2 = [1 1]; 
         end
         
         function [fz1, fz2] = isOutputFixedSizeImpl(~)

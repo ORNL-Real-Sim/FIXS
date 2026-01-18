@@ -1,4 +1,4 @@
-#include "TrafficHelper.h"
+﻿#include "TrafficHelper.h"
 
 
 //const unsigned short selfServerPort[NSERVER] = { 420 };
@@ -357,33 +357,142 @@ int TrafficHelper::sendToTrafficSimulator(double simTime, MsgHelper Msg_c) {
 }
 
 
-int TrafficHelper::addEgoVehicle(double simTime) {
+void TrafficHelper::fillTrafficLightStates(MsgHelper& msg)
+{
+	
+	msg.TlsDataRecv_um.clear();
 
-	if (SUMO_OR_VISSIM.compare("SUMO") == 0) {
-		if (ENABLE_VEH_SIMULATOR) {
-			// !!!!check if what received is ego vehicle 
-			// use default type if not specified!!
-			string idStr = Config_c->CarMakerSetup.EgoId;
-			// if ego not exist yet, add it
-			string typeStr = Config_c->CarMakerSetup.EgoType;
 
-			// if is empty
-			if (typeStr.size() == 0) {
-				traci.vehicle.add(idStr, "");
-			}
-			else {
-				traci.vehicle.add(idStr, "", typeStr);
-			}
-			traci.vehicle.setColor(idStr, libsumo::TraCIColor(255, 0, 0));
+	std::vector<std::string> tlsIds = traci.trafficlights.getIDList();
+
+	for (const auto& tlsId : tlsIds) {
+		TrafficLightData_t t;
+		t.name = tlsId;
+
+
+		t.id = static_cast<uint16_t>(std::hash<std::string>{}(tlsId) & 0xFFFF);
+
+
+		try {
+			t.state = traci.trafficlights.getRedYellowGreenState(tlsId);
+		}
+		catch (...) {
+			t.state = "";
 		}
 
-		return 1;
+		msg.TlsDataRecv_um[tlsId] = std::move(t);
 	}
-	else {
+}
+
+
+
+
+void TrafficHelper::updateEgoLoopRoute()
+{
+	if (SUMO_OR_VISSIM.compare("SUMO") != 0)
+		return;
+
+	const std::string egoId = "ego";
+
+	// --- check existence ---
+	std::vector<std::string> idList = traci.vehicle.getIDList();
+	if (std::find(idList.begin(), idList.end(), egoId) == idList.end())
+		return;
+
+	std::string curEdge = traci.vehicle.getRoadID(egoId);
+	//std::cout << "[DBG] curEdge = " << curEdge << std::endl;
+
+	/*
+	static const std::vector<std::string> loopEdges = {
+		"-2801", "-280", "-307", "-327", "-3271", "-281", "-315", "-3151", "-321", "-300", "-2851", "-285", "-290", "-298", "-295",
+		"-312", "-293", "-297", "-288", "-2881", "-286", "-302", "-3221", "-322", "-313", "-284", "-2841", "-328", "-304", "-2801"
+	};
+	*/
+
+	static bool wasOn2801 = false;
+
+
+	if (curEdge != "-2801") {
+		wasOn2801 = false;     
+		return;                
+	}
+
+	if (!wasOn2801) {
+		wasOn2801 = true;
+
+		traci.vehicle.setRouteID(egoId, "route1");
+
+		auto newRoute = traci.vehicle.getRoute(egoId);
+		std::cout << "[EGO LOOP RESET ON ENTER] road=" << curEdge
+			<< " routeID=route1"
+			<< " newRouteSize=" << newRoute.size()
+			<< " first=" << (newRoute.empty() ? "EMPTY" : newRoute.front())
+			<< " last=" << (newRoute.empty() ? "EMPTY" : newRoute.back())
+			<< std::endl;
+
+		VehicleId2EdgeList_um[egoId] = newRoute;
+
+	}
+}
+
+
+
+
+
+
+int TrafficHelper::addEgoVehicle(double simTime) {
+
+	printf("[addEgoVehicle] called at t = %.3f, id = %s\n",
+		simTime, Config_c->SumoSetup.EgoID.c_str());
+
+	if (SUMO_OR_VISSIM.compare("SUMO") != 0) {
 		return 0;
 	}
 
+	std::string idStr = Config_c->SumoSetup.EgoID;   //  Config_c->CarMakerSetup.EgoId;
+	std::string typeStr = Config_c->CarMakerSetup.EgoType;
+	if (typeStr.empty()) {
+		typeStr = "EGO_TYPE";   
+	}
+
+	std::string routeId = "route1";   
+
+	try {
+		// Python:
+		//   vehID='ego', routeID='route1',
+		//   departPos='1', departLane='0', departSpeed='0.1'
+		traci.vehicle.add(
+			idStr,          // vehID
+			routeId,        // routeID
+			typeStr,        // typeID
+			"now",
+			"0",
+			"1",
+			"0.1"
+		);
+		printf("[addEgoVehicle] vehicle.add() succeeded\n");
+		traci.vehicle.setColor(idStr, libsumo::TraCIColor(255, 0, 0, 255));
+
+		int speedMode = Config_c->SumoSetup.SpeedMode;
+		traci.vehicle.setSpeedMode(idStr, speedMode);
+
+
+		// double maxAcc = 2.0;  
+		// traci.vehicletype.setAccel(idStr, maxAcc);
+		// traci.vehicletype.setDecel(idStr, maxAcc);
+
+		return 1;
+	}
+	catch (const std::exception& e) {
+		printf("Error: addEgoVehicle failed: %s\n", e.what());
+		return -1;
+	}
+	catch (...) {
+		printf("Error: addEgoVehicle unknown exception\n");
+		return -1;
+	}
 }
+
 
 int TrafficHelper::addEgoVehicleFromXY(double simTime, std::string vehicleId, std::string vehicleType, double positionX, double positionY) {
 
@@ -612,8 +721,7 @@ int TrafficHelper::sendToSUMO(double simTime, MsgHelper Msg_c) {
 				}
 			}
 			// if carla is enabled and the reveiced id is within the interested ids
-			else if (ENABLE_CARLA&&ENABLE_CARLA_EXTERNAL_CONTROL&&find(Config_c->CarlaSetup.InterestedIds.begin(), Config_c->CarlaSetup.InterestedIds.end(), idStr) != Config_c->CarlaSetup.InterestedIds.end()) {
-				
+			else if (ENABLE_CARLA && find(Config_c->CarlaSetup.InterestedIds.begin(), Config_c->CarlaSetup.InterestedIds.end(), idStr) != Config_c->CarlaSetup.InterestedIds.end()) {
 				double positionX = (double)Msg_c.VehDataSend_um[0][iV].positionX;
 				double positionY = (double)Msg_c.VehDataSend_um[0][iV].positionY;
 				double positionZ = (double)Msg_c.VehDataSend_um[0][iV].positionZ;
@@ -640,7 +748,7 @@ int TrafficHelper::sendToSUMO(double simTime, MsgHelper Msg_c) {
 					}
 					else {
 						traci.vehicle.setSpeed(idStr, speed); // speed set at (k) essentially will be reflected at (k+1), not considered in the integration
-						std::cout << "Set SUMO id " << idStr << " to speed " << speed << std::endl;
+
 						/*
 						bit0: Regard safe speed
 						bit1 : Regard maximum acceleration
@@ -650,7 +758,7 @@ int TrafficHelper::sendToSUMO(double simTime, MsgHelper Msg_c) {
 						bit5 : Disregard right of way within intersections(only applies to foe vehicles that have entered the intersection).
 						*/
 
-						//traci.vehicle.setSpeedMode(idStr, Config_c->SumoSetup.SpeedMode); // 000000 most checks off
+						traci.vehicle.setSpeedMode(idStr, Config_c->SumoSetup.SpeedMode); // 000000 most checks off
 						//traci.vehicle.setSpeedMode(idStr, 0); // 000000 most checks off
 						//traci.vehicle.setSpeedMode(idStr, 24); // 011000
 						//traci.vehicle.setSpeedMode(idStr, 8); // 001000
@@ -855,6 +963,19 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 	/**simTime = Simulation::getTime();*/
 	*simTime = traci.simulation.getTime();
 	VehIdInSimulator = traci.vehicle.getIDList();
+
+	if (subscribeAllVehicle.first) {
+		
+		static std::unordered_set<std::string> allVehSubscribed_us;
+
+		for (const std::string& vid : VehIdInSimulator) {
+			if (allVehSubscribed_us.find(vid) == allVehSubscribed_us.end()) {
+
+				traci.vehicle.subscribe(vid, VehDataSubscribeList, 0, tSimuEnd);
+				allVehSubscribed_us.insert(vid);
+			}
+		}
+	}
 	
 	int nVeh = VehIdInSimulator.size(); // number of vehicles
 
@@ -990,132 +1111,46 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 		// ===========================================================================
 		// 			GET SUBSCRIBED VEHICLE
 		// ===========================================================================
-		libsumo::ContextSubscriptionResults VehicleSubscribeRaw;
-		VehicleSubscribeRaw = traci.vehicle.getAllContextSubscriptionResults();
+		if (subscribeAllVehicle.first) {
+			
+			libsumo::SubscriptionResults VehSubRes = traci.vehicle.getAllSubscriptionResults();
 
-		//{
-		//int i = 0;
-		//for (auto& it : vehicleSubscribeId_v) {
-		//	if (vehicleHasSubscribed_v[i]) {
-		for (auto& it : VehicleSubscribeRaw) {
-			//string id = it.first;
-			libsumo::SubscriptionResults VehDataSubscribeResults = it.second;
+			for (auto& it : VehSubRes) {
+				std::string tempvehId = it.first;
 
-			for (auto& iter : VehDataSubscribeResults) {
-
-				string tempvehId = iter.first;
+				
+				if (processedVehId_us.find(tempvehId) != processedVehId_us.end())
+					continue;
+				processedVehId_us.insert(tempvehId);
 
 				VehFullData_t CurVehData;
+				this->parserSumoSubscription(it.second, tempvehId, CurVehData);
 
-				if (processedVehId_us.find(tempvehId) == processedVehId_us.end()) {
-					processedVehId_us.insert(tempvehId);
-				}
-				else {
-					continue;
-				}
-
-				this->parserSumoSubscription(iter.second, tempvehId, CurVehData);
-				//libsumo::TraCIResults VehDataSubscribeTraciResults = VehDataSubscribeResults[tempvehId]
-
-				//=================
-				// save to Msg_c recv buffer
-				//=================
-				//Msg_c.VehDataRecvAll_v.push_back(CurVehData);
 				VehDataRecv_um_tmp[tempvehId] = CurVehData;
 
 				if (ENABLE_VERBOSE) {
 					float speed = CurVehData.speed;
-					printf("recv SUMO veh id %s veh speed %.4f\n", tempvehId.c_str(), speed);
-
-					FILE* f = fopen(MasterLogName.c_str(), "a");
-					fprintf(f, "recv SUMO veh id %s veh speed %.4f\n", tempvehId.c_str(), speed);
-					fclose(f);
-
-				}
-
-			}
-		}
-
-	/*		i++;
-
-		}
-		}*/
-
-		// ===========================================================================
-		// 			GET SUBSCRIBED point
-		// ===========================================================================
-		libsumo::ContextSubscriptionResults PointSubscribeRaw;
-		PointSubscribeRaw = traci.poi.getAllContextSubscriptionResults();
-
-		for (auto& it : PointSubscribeRaw) {
-			string poiName = it.first;
-			libsumo::SubscriptionResults VehDataSubscribeResults = it.second;
-
-			for (auto& iter : VehDataSubscribeResults) {
-
-				string tempvehId = iter.first;
-
-				VehFullData_t CurVehData;
-
-				if (processedVehId_us.find(tempvehId) == processedVehId_us.end()) {
-					processedVehId_us.insert(tempvehId);
-				}
-				else {
-					continue;
-				}
-
-				this->parserSumoSubscription(iter.second, tempvehId, CurVehData);
-				//libsumo::TraCIResults VehDataSubscribeTraciResults = VehDataSubscribeResults[tempvehId]
-
-				//=================
-				// save to Msg_c recv buffer
-				//=================
-				//Msg_c.VehDataRecvAll_v.push_back(CurVehData);
-				VehDataRecv_um_tmp[tempvehId] = CurVehData;
-
-				if (ENABLE_VERBOSE) {
-					float speed = CurVehData.speed;
-					printf("recv SUMO veh id %s veh speed %.4f\n", tempvehId.c_str(), speed);
-
-					FILE* f = fopen(MasterLogName.c_str(), "a");
-					fprintf(f, "recv SUMO veh id %s veh speed %.4f\n", tempvehId.c_str(), speed);
-					fclose(f);
+					printf("recv SUMO veh(id=%s) speed %.4f\n", tempvehId.c_str(), speed);
 				}
 			}
 		}
+		else {
+			libsumo::ContextSubscriptionResults VehicleSubscribeRaw;
+			VehicleSubscribeRaw = traci.vehicle.getAllContextSubscriptionResults();
 
-
-		// ===========================================================================
-		// 			GET SUBSCRIBED EDGE
-		// ===========================================================================
-		libsumo::ContextSubscriptionResults EdgeSubscribeRaw;
-		EdgeSubscribeRaw = traci.edge.getAllContextSubscriptionResults();
-
-
-		if (edgeHasSubscribed) {
-			nVehSend = 0;
-
-			int temp = 1;
-
-			for (auto & it: EdgeSubscribeRaw) {
+			//{
+			//int i = 0;
+			//for (auto& it : vehicleSubscribeId_v) {
+			//	if (vehicleHasSubscribed_v[i]) {
+			for (auto& it : VehicleSubscribeRaw) {
+				//string id = it.first;
 				libsumo::SubscriptionResults VehDataSubscribeResults = it.second;
 
-				auto iter = VehDataSubscribeResults.begin();
-				nVehSend = min((int)VehDataSubscribeResults.size(), 200);
+				for (auto& iter : VehDataSubscribeResults) {
 
-				vector <string> tempVehIdList;
-				//tempVehIdList.push_back(egoIdVec[iC]);
-				for (int iV = 0; iV < VehDataSubscribeResults.size(); iV++) {
-					//if (iter->first != egoIdVec[iC]) {
-					tempVehIdList.push_back(iter->first);
-					//}
-					iter++;
-				}
+					string tempvehId = iter.first;
 
-				for (int iV = 0; iV < nVehSend; iV++) {
 					VehFullData_t CurVehData;
-
-					string tempvehId = tempVehIdList[iV];
 
 					if (processedVehId_us.find(tempvehId) == processedVehId_us.end()) {
 						processedVehId_us.insert(tempvehId);
@@ -1124,18 +1159,11 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 						continue;
 					}
 
-					this->parserSumoSubscription(VehDataSubscribeResults[tempvehId], tempvehId, CurVehData);
+					this->parserSumoSubscription(iter.second, tempvehId, CurVehData);
 					//libsumo::TraCIResults VehDataSubscribeTraciResults = VehDataSubscribeResults[tempvehId]
 
-
-
-					//Msg_c.packVehData(CurVehData, tempVehDataBuffer[iC], &tempVehDataByte[iC]);
-					//tempVehDataSend_v.push_back(CurVehData);
-
-					//tempVehIdSend_v.push_back(tempvehId);
-
 					//=================
-					// save to Msg_c recv buffer          
+					// save to Msg_c recv buffer
 					//=================
 					//Msg_c.VehDataRecvAll_v.push_back(CurVehData);
 					VehDataRecv_um_tmp[tempvehId] = CurVehData;
@@ -1150,14 +1178,131 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 
 					}
 
-					//}
-					/*VehData_t iVehFullData;
-					Sock_c.depackVehData(tempVehDataBuffer[iC]+3, &iVehFullData);*/
 				}
 			}
-			//nVehSend = tempVehIdSend_v.size();
-		}
 
+			/*		i++;
+
+				}
+				}*/
+
+				// ===========================================================================
+				// 			GET SUBSCRIBED point
+				// ===========================================================================
+			libsumo::ContextSubscriptionResults PointSubscribeRaw;
+			PointSubscribeRaw = traci.poi.getAllContextSubscriptionResults();
+
+			for (auto& it : PointSubscribeRaw) {
+				string poiName = it.first;
+				libsumo::SubscriptionResults VehDataSubscribeResults = it.second;
+
+				for (auto& iter : VehDataSubscribeResults) {
+
+					string tempvehId = iter.first;
+
+					VehFullData_t CurVehData;
+
+					if (processedVehId_us.find(tempvehId) == processedVehId_us.end()) {
+						processedVehId_us.insert(tempvehId);
+					}
+					else {
+						continue;
+					}
+
+					this->parserSumoSubscription(iter.second, tempvehId, CurVehData);
+					//libsumo::TraCIResults VehDataSubscribeTraciResults = VehDataSubscribeResults[tempvehId]
+
+					//=================
+					// save to Msg_c recv buffer
+					//=================
+					//Msg_c.VehDataRecvAll_v.push_back(CurVehData);
+					VehDataRecv_um_tmp[tempvehId] = CurVehData;
+
+					if (ENABLE_VERBOSE) {
+						float speed = CurVehData.speed;
+						printf("recv SUMO veh id %s veh speed %.4f\n", tempvehId.c_str(), speed);
+
+						FILE* f = fopen(MasterLogName.c_str(), "a");
+						fprintf(f, "recv SUMO veh id %s veh speed %.4f\n", tempvehId.c_str(), speed);
+						fclose(f);
+					}
+				}
+			}
+
+
+			// ===========================================================================
+			// 			GET SUBSCRIBED EDGE
+			// ===========================================================================
+			libsumo::ContextSubscriptionResults EdgeSubscribeRaw;
+			EdgeSubscribeRaw = traci.edge.getAllContextSubscriptionResults();
+
+
+			if (edgeHasSubscribed) {
+				nVehSend = 0;
+
+				int temp = 1;
+
+				for (auto& it : EdgeSubscribeRaw) {
+					libsumo::SubscriptionResults VehDataSubscribeResults = it.second;
+
+					auto iter = VehDataSubscribeResults.begin();
+					nVehSend = min((int)VehDataSubscribeResults.size(), 200);
+
+					vector <string> tempVehIdList;
+					//tempVehIdList.push_back(egoIdVec[iC]);
+					for (int iV = 0; iV < VehDataSubscribeResults.size(); iV++) {
+						//if (iter->first != egoIdVec[iC]) {
+						tempVehIdList.push_back(iter->first);
+						//}
+						iter++;
+					}
+
+					for (int iV = 0; iV < nVehSend; iV++) {
+						VehFullData_t CurVehData;
+
+						string tempvehId = tempVehIdList[iV];
+
+						if (processedVehId_us.find(tempvehId) == processedVehId_us.end()) {
+							processedVehId_us.insert(tempvehId);
+						}
+						else {
+							continue;
+						}
+
+						this->parserSumoSubscription(VehDataSubscribeResults[tempvehId], tempvehId, CurVehData);
+						//libsumo::TraCIResults VehDataSubscribeTraciResults = VehDataSubscribeResults[tempvehId]
+
+
+
+						//Msg_c.packVehData(CurVehData, tempVehDataBuffer[iC], &tempVehDataByte[iC]);
+						//tempVehDataSend_v.push_back(CurVehData);
+
+						//tempVehIdSend_v.push_back(tempvehId);
+
+						//=================
+						// save to Msg_c recv buffer          
+						//=================
+						//Msg_c.VehDataRecvAll_v.push_back(CurVehData);
+						VehDataRecv_um_tmp[tempvehId] = CurVehData;
+
+						if (ENABLE_VERBOSE) {
+							float speed = CurVehData.speed;
+							printf("recv SUMO veh id %s veh speed %.4f\n", tempvehId.c_str(), speed);
+
+							FILE* f = fopen(MasterLogName.c_str(), "a");
+							fprintf(f, "recv SUMO veh id %s veh speed %.4f\n", tempvehId.c_str(), speed);
+							fclose(f);
+
+						}
+
+						//}
+						/*VehData_t iVehFullData;
+						Sock_c.depackVehData(tempVehDataBuffer[iC]+3, &iVehFullData);*/
+					}
+				}
+				//nVehSend = tempVehIdSend_v.size();
+			}
+		}
 
 		// !!!temporary fix
 		// if doing vehicle simulator, e.g., CarMaker, only send limited number of vehicles
@@ -1364,6 +1509,7 @@ void TrafficHelper::parserSumoSubscription(libsumo::TraCIResults VehDataSubscrib
 		//vector <libsumo::TraCIConnection> nextLinkList = traci.vehicle.getNextLinks(vehId);
 		//int aa = 1;
 	}
+	
 
 	//libsumo::TraCIResults VehDataSubscribeTraciResults = VehDataSubscribeResults[tempvehId];
 	std::shared_ptr<libsumo::TraCIString> tempStringPtr;

@@ -70,7 +70,7 @@ class SumoEnvMultiAgent:
         self.subscribed_vehicles = []
         self.speed_min = 0
         self.speed_max = 21
-        self.max_acc = 2.0
+        self.max_acc = 4.0
         self.prev_acc = 0.01
 
         # initialize the socket connections
@@ -114,7 +114,7 @@ class SumoEnvMultiAgent:
         xmlTree.write(os.path.join(output_dir, self.sumo_route))
 
     def change_config_directory(self):
-        file_name = f'{int(self.penetration_rate*100)}%_{int(1/self.step_length)}Hz' + f'{"_w" if self.enable_vehicle_dynamics else "_wo"}_vehDyn'
+        file_name = f'{int(self.penetration_rate*100)}%_{int(1/self.step_length)}Hz' + f'{"_w" if self.enable_vehicle_dynamics else "_wo"}_vehDyn_Test'
         output_dir = os.path.join(self.sumo_folder, self.working_directory, file_name)
 
         # Making Results Directory
@@ -152,6 +152,8 @@ class SumoEnvMultiAgent:
         for tl_id in self.tl_ids:
             self.phase_tracking_dict[tl_id].get_remaining_green()
             self.spat_statuses[tl_id] = self.phase_tracking_dict[tl_id].spat_status
+            if tl_id == '10':
+                print(self.spat_statuses[tl_id])
     
     def insert_ego_safely(self):
 
@@ -164,12 +166,13 @@ class SumoEnvMultiAgent:
             depart="now",  # explicit time in seconds (string or int is fine)
             departPos='free',
             departLane='best',
-            departSpeed='max',
+            departSpeed='0.1',
         )
         traci.vehicle.setColor('ego', (255, 0, 0, 255))
         traci.vehicle.setSpeedMode('ego', 31)
         traci.vehicle.setDecel('ego', self.max_acc)
         traci.vehicle.setAccel('ego', self.max_acc)
+        # traci.vehicle.setLaneChangeMode('ego', 512) #512：Prohibit automatic lane changing；597（default）：SUMO automatic lane changing
     
     def reset(self, replace_veh_id=''):
         # If ego is currently in the network, remove it and step once so removal takes effect
@@ -276,10 +279,10 @@ class SumoEnvMultiAgent:
         # start sumo-gui -c .\chattCavMpr.sumocfg --remote-port 1337 --step-length 1 --netstate-dump chatt.xml --netstate-dump.precision 10 --num-clients 2  --begin 28800 --end 33000
         # the files are in setting_dir
         if gui:
-            os.system(f'start C:\\Users\\RVDP\\Desktop\\sumo-1.24.0\\bin\\sumo-gui -c {self.sumo_config} --remote-port {self.sumo_port} --step-length {self.step_length} --num-clients {num_clients} --time-to-teleport -1 --collision.action warn --collision.check-junctions false')
+            os.system(f'start sumo-gui -c {self.sumo_config} --remote-port {self.sumo_port} --step-length {self.step_length} --num-clients {num_clients} --time-to-teleport -1 --collision.action warn --collision.check-junctions false')
         else:
-            os.system(f'start C:\\Users\\RVDP\\Desktop\\sumo-1.24.0\\bin\\sumo -c {self.sumo_config} --remote-port {self.sumo_port} --step-length {self.step_length} --num-clients {num_clients}')
-  
+            os.system(f'start sumo -c {self.sumo_config} --remote-port {self.sumo_port} --step-length {self.step_length} --num-clients {num_clients}')
+
     def start_subscription(self, vehicle_dynamics=False, eco_driving=False, replace_veh_id=''):
 
         veh_ids_controlled_by_FIXS = ['ego']
@@ -352,27 +355,29 @@ class SumoEnvMultiAgent:
                     traci.vehicle.setRoute('ego', self.edges)
                     
             eco_speed_dic = {key: veh.get_eco_speed_subscribe(
-                                                        self.phase_tracking_dict,
-                                                        self.spat_statuses,
-                                                        results_df.loc[key, 'next_tls'],
-                                                        results_df.loc[key, 'travel_direction'],
-                                                        results_df.loc[key, 'orginal_desire_spd'],
-                                                        results_df.loc[key, 'speed'],
-                                                        results_df.loc[key, 'acceleration'],
-                                                        results_df.loc[key, 'lead_dist'],
-                                                        results_df.loc[key, 'speed_lead'],
-                                                        results_df.loc[key, 'control'],
-                                                        results_df.loc[key, 'dist2Stop'],
-                                                        results_df.loc[key, 't1s'],
-                                                        results_df.loc[key, 't1e'],
-                                                        results_df.loc[key, 't2s'],
-                                                        results_df.loc[key, 't2e'],
-                                                        results_df.loc[key, 'r1s'],
-                                                        results_df.loc[key, 'curr_status']) for index, (key, veh) in enumerate(self.cav_object_dict.items()) if key in (list_cav_back_to_sumo + list_cav_control)}
+                                                            self.phase_tracking_dict,
+                                                            self.spat_statuses,
+                                                            results_df.loc[key, 'next_tls'],
+                                                            results_df.loc[key, 'travel_direction'],
+                                                            results_df.loc[key, 'orginal_desire_spd'],
+                                                            results_df.loc[key, 'speed'],
+                                                            results_df.loc[key, 'acceleration'],
+                                                            results_df.loc[key, 'lead_dist'],
+                                                            results_df.loc[key, 'speed_lead'],
+                                                            results_df.loc[key, 'control'],
+                                                            results_df.loc[key, 'dist2Stop'],
+                                                            results_df.loc[key, 't1s'],
+                                                            results_df.loc[key, 't1e'],
+                                                            results_df.loc[key, 't2s'],
+                                                            results_df.loc[key, 't2e'],
+                                                            results_df.loc[key, 'r1s'],
+                                                            results_df.loc[key, 'curr_status'],
+                                                            set_speed_internally=False
+                                                            ) for index, (key, veh) in enumerate(self.cav_object_dict.items()) if key in (list_cav_back_to_sumo + list_cav_control)}
             
-            self.apply_vehicle_control(eco_speed_dic, smooth=True)
+            self.apply_vehicle_control(eco_speed_dic, smooth=True, exclude_veh_ids=veh_ids_controlled_by_FIXS)
             traci.simulationStep()
-            self.apply_vehicle_control_FIXS(eco_speed_dic, vehicle_dynamics=vehicle_dynamics, eco_driving=eco_driving, control_veh_ids=veh_ids_controlled_by_FIXS)
+            self.apply_vehicle_control_FIXS(eco_speed_dic, vehicle_dynamics=vehicle_dynamics, eco_driving=eco_driving, control_veh_ids=veh_ids_controlled_by_FIXS, warmup=False)
             
             self.cav_object_dict = {key: value for key, value in self.cav_object_dict.items() if key in (list_cav_back_to_sumo + list_cav_control)}
 
@@ -438,10 +443,10 @@ class SumoEnvMultiAgent:
         self.socket_helper.clear_data()
 
 
-    def apply_vehicle_control(self, eco_speed_dic, smooth=False):
+    def apply_vehicle_control(self, eco_speed_dic, smooth=False, exclude_veh_ids = ['ego']):
         # to handle the case of a single vehicle
         for veh_id, eco_speed in eco_speed_dic.items():
-            if eco_speed is not None:
+            if eco_speed is not None and veh_id not in exclude_veh_ids:
                 if smooth:
                     traci.vehicle.slowDown(veh_id, eco_speed, self.step_length)
                 else:
@@ -489,7 +494,7 @@ if __name__ == "__main__":
     parser.add_argument("--vehicleDynamicsPort", type=str, help="Specify port of vehicle dynamics", default=420)
 
     # the following parameters are for CAV settings
-    parser.add_argument("--penetrationRate", type=float, help="the market penetration rate of cav", default=0.1)
+    parser.add_argument("--penetrationRate", type=float, help="the market penetration rate of cav", default=0.0)
     parser.add_argument("--stepLength", type=float, help="the step length of the simulation", default=0.1)
     parser.add_argument("--ecoDriving", action="store_true", help="Use the eco driving controller", default=True)
     
@@ -501,7 +506,7 @@ if __name__ == "__main__":
     parser.add_argument("--sumoConfig", type=str, help="Specify sumo config file", default='chattCavMpr.sumocfg')
     parser.add_argument("--sumoNet", type=str, help="Specify sumo net file", default=os.environ["SUMO_NET_PATH"])
     parser.add_argument("--sumoRoute", type=str, help="Specify sumo route file", default='chattCavMpr.rou.xml')
-    parser.add_argument("--workingDirectory", type=str, help="Specify working directory", default='MPR')
+    parser.add_argument("--workingDirectory", type=str, help="Specify working directory", default='MPR_2')
     args = parser.parse_args()
     traffic_layer_config = args.trafficlayerConfig
     traffic_layer_ip = args.trafficlayerIp
@@ -561,4 +566,4 @@ if __name__ == "__main__":
     print('Starting subscription')
     print('Enable vehicle dynamics: ', enable_vehicle_dynamics)
     print('Use eco driving controller: ', eco_driving)
-    senv.start_subscription(eco_driving=eco_driving, vehicle_dynamics=vehicle_dynamics, replace_veh_id='4.66')
+    senv.start_subscription(eco_driving=eco_driving, vehicle_dynamics=vehicle_dynamics, replace_veh_id='4.68')

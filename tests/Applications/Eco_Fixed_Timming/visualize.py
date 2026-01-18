@@ -46,11 +46,11 @@ data_dic_with_dynamics_after_calibration, data_dic_without_dynamics_after_calibr
 #     100.0: data_dic_without_dynamics_after_calibration[100.0]
 # }
 
-# plot_ego_eval_two_conditions_compared_to_base(data_dic_with_dynamics_after_calibration, 
-#                                               data_dic_without_dynamics_after_calibration, 
-#                                               condition_1_label = 'Simulink Vehicle Dynamics', 
-#                                               condition_2_label = 'SUMO Default Dynamics', 
-#                                               simulink=True)
+plot_ego_eval_two_conditions_compared_to_base(data_dic_with_dynamics_after_calibration, 
+                                              data_dic_without_dynamics_after_calibration, 
+                                              condition_1_label = 'Simulink Vehicle Dynamics', 
+                                              condition_2_label = 'SUMO Default Dynamics', 
+                                              simulink=True)
 
 # plot_ego_eval_two_conditions_merged(data_dic_with_dynamics_after_calibration, 
 #                              data_dic_without_dynamics_after_calibration, 
@@ -101,13 +101,13 @@ plot_space_time_diagram_two_conditions(data_dic_with_dynamics_after_calibration,
 #                                                 condition_2_label = 'SUMO Default Dynamics',
 #                                                 output_dir = OUTPUT_DIR,
 #                                                 mode = 'ego')
-# plot_speed_acc_distribution_comparison_ego_upstream(data_dic_with_dynamics_after_calibration,
-#                                                 data_dic_without_dynamics_after_calibration,
-#                                                 condition_1_label = 'Simulink Vehicle Dynamics',
-#                                                 condition_2_label = 'SUMO Default Dynamics',
-#                                                 output_dir = OUTPUT_DIR,
-#                                                 upstream_max_vehicles_count=2,
-#                                                 mode = 'upstream')
+plot_speed_acc_distribution_comparison_ego_upstream(data_dic_with_dynamics_after_calibration,
+                                                data_dic_without_dynamics_after_calibration,
+                                                condition_1_label = 'Simulink Vehicle Dynamics',
+                                                condition_2_label = 'SUMO Default Dynamics',
+                                                output_dir = OUTPUT_DIR,
+                                                upstream_max_vehicles_count=2,
+                                                mode = 'upstream')
 # plot_speed_acc_distribution_comparison_ego_upstream(data_dic_with_dynamics_after_calibration,
 #                                                 data_dic_without_dynamics_after_calibration,
 #                                                 condition_1_label = 'Simulink Vehicle Dynamics',

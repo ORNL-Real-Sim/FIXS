@@ -205,7 +205,7 @@ int main(int argc, char* argv[]) {
 	// ENABLE_CARLA: CARLA simulator
 	bool ENABLE_VEH_SIMULATOR = false;
 	bool ENABLE_CARLA = false;
-	bool ENABLE_CARLA_EXTERNAL_CONTROL = false;
+
 	vector <int> selfServerPortAll = {};
 	vector <string> serverAddr = {};
 	vector <int> serverPort = {};
@@ -262,7 +262,7 @@ int main(int argc, char* argv[]) {
 
 	ENABLE_VEH_SIMULATOR = Config_c.CarMakerSetup.EnableCosimulation;
 	ENABLE_CARLA = Config_c.CarlaSetup.EnableCosimulation;
-	ENABLE_CARLA_EXTERNAL_CONTROL = Config_c.CarlaSetup.EnableExternalControl;
+
 	if (ENABLE_VERBOSE) {
 		//FILE* f = fopen(MasterLogName.c_str(), "a");
 		//fprintf(f, "\n============================================");
@@ -356,7 +356,6 @@ int main(int argc, char* argv[]) {
 				port_v = get<3>(Config_c.ApplicationSetup.SignalSubscription[i]);
 				for (int iP = 0; iP < port_v.size(); iP++) {
 					selfServerPortAll.push_back(port_v[iP]);
-					printf("\nTrafficLayer broadcast to client at port %d \n", port_v[iP]);
 				}
 			}
 			for (int i = 0; i < Config_c.ApplicationSetup.DetectorSubscription.size(); i++) {
@@ -373,7 +372,6 @@ int main(int argc, char* argv[]) {
 	// number of ports equal to size of Sock_c.clientSock
 	// map each port to an element of Sock_c.clientSock
 	selfServerPortUserInput = selfServerPortAll;
-	sort(selfServerPortUserInput.begin(), selfServerPortUserInput.end());
 	auto it = unique(selfServerPortUserInput.begin(), selfServerPortUserInput.end());
 	selfServerPortUserInput.resize(distance(selfServerPortUserInput.begin(), it));
 	for (int i = 0; i < selfServerPortUserInput.size(); i++) {
@@ -530,7 +528,6 @@ int main(int argc, char* argv[]) {
 
 	Traffic_c.ENABLE_VEH_SIMULATOR = ENABLE_VEH_SIMULATOR;
 	Traffic_c.ENABLE_CARLA = ENABLE_CARLA;
-	Traffic_c.ENABLE_CARLA_EXTERNAL_CONTROL = ENABLE_CARLA_EXTERNAL_CONTROL;
 	/********************************************
 	* Message Setups
 	*********************************************/
@@ -553,6 +550,8 @@ int main(int argc, char* argv[]) {
 	bool isEgoExist = false;
 	bool isInitialTimeFinished = false;
 
+	bool egoInsertedByTrafficLayer = false;
+	double EgoInsertTime = Config_c.SumoSetup.EgoInsertTime;
 	//while (simTime <= tSimuEnd && ii < nT) {
 	while (1) {
 
@@ -560,7 +559,9 @@ int main(int argc, char* argv[]) {
 		// RUN one-step simulation
 		///****************************************************
 		
-		
+
+		Traffic_c.runOneStepSimulation();
+
 
 		if (ENABLE_VEH_SIMULATOR && isVeryFirstStep) {
 			if (Sock_c.initConnection(TrafficLayerErrorFile) > 0) {
@@ -587,13 +588,34 @@ int main(int argc, char* argv[]) {
 			printf("===========SimTime %f==============\n", simTime);
 		}
 
-		// run sumo unitial initial time finished
-		if ((Config_c.SimulationSetup.SimulationMode == 4 || Config_c.SimulationSetup.SimulationMode == 5) && !isInitialTimeFinished) {
-			Traffic_c.runSimulation(Config_c.SimulationSetup.SimulationModeParameter);
-			isInitialTimeFinished = true;
+
+		if (!egoInsertedByTrafficLayer && simTime >= EgoInsertTime) {
+			int ret = Traffic_c.addEgoVehicle(simTime);
+			egoInsertedByTrafficLayer = true;
+			printf("[main] tried to insert ego at simTime = %.3f, ret = %d\n", simTime, ret);
 		}
 
-		if ((Config_c.SimulationSetup.SimulationMode == 1 || Config_c.SimulationSetup.SimulationMode == 2) && !isEgoExist) {
+		
+
+
+		// run sumo unitial initial time finished
+		//if ((Config_c.SimulationSetup.SimulationMode == 4 || Config_c.SimulationSetup.SimulationMode == 5) && !isInitialTimeFinished) {
+			//Traffic_c.runSimulation(Config_c.SimulationSetup.SimulationModeParameter);
+			//isInitialTimeFinished = true;
+		//}
+
+		// if ((Config_c.SimulationSetup.SimulationMode == 1 || Config_c.SimulationSetup.SimulationMode == 2) && !isEgoExist) {
+		/*if (!isEgoExist) {
+
+			if (!egoInsertedByTrafficLayer && simTime >= 28985.0) {
+				Traffic_c.addEgoVehicle(simTime);
+				egoInsertedByTrafficLayer = true;
+
+				if (!ENABLE_VERBOSE) {
+					printf("[TrafficLayer] Insert ego at t=%.1f s\n", simTime);
+				}
+			}
+
 			if (Traffic_c.checkIfEgoExist(&simTime)) {
 				// continue the code to sync VISSIM/SUMO with clients
 				isEgoExist = true;
@@ -601,7 +623,7 @@ int main(int argc, char* argv[]) {
 				// otherwise just continue running the simulation
 				continue;
 			}
-		}
+		}*/
 
 		// if veryFirstStep and vehicle simulator, add the ego vehicle
 		if (isVeryFirstStep && ENABLE_VEH_SIMULATOR) {
@@ -633,6 +655,9 @@ int main(int argc, char* argv[]) {
 					exit(1);
 				}
 			}
+
+			Traffic_c.fillTrafficLightStates(MsgServer_c);
+			Traffic_c.updateEgoLoopRoute();
 
 			if (ENABLE_VERBOSE) {
 				for (auto& it : MsgServer_c.VehDataRecv_um) {
@@ -702,7 +727,20 @@ int main(int argc, char* argv[]) {
 							}
 						}
 						else {
-							MsgClient_c.VehDataSend_um[actualClientSock[iC]].push_back(it.second);
+							const std::string& vehId = it.second.id;
+							const int SIMULINK_PORT = 420;
+							const int PYTHON_PORT = 430;
+
+
+							if (curPort == SIMULINK_PORT) {
+								if (vehId.compare(Config_c.SumoSetup.EgoID) == 0) {
+									MsgClient_c.VehDataSend_um[actualClientSock[iC]].push_back(it.second);
+								}
+							}
+							
+							else {
+								MsgClient_c.VehDataSend_um[actualClientSock[iC]].push_back(it.second);
+							}
 						}
 					}
 					for (auto it : MsgServer_c.TlsDataRecv_um) {
@@ -963,7 +1001,7 @@ int main(int argc, char* argv[]) {
 		}
 
 		ii = ii + 1;
-		Traffic_c.runOneStepSimulation();
+
 	}
 
 	Traffic_c.close();

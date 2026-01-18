@@ -42,6 +42,9 @@ public:
 	int addEgoVehicle(double simTime);
 	int addEgoVehicleFromXY(double simTime, std::string vehicleId, std::string vehicleType, double positionX, double positionY);
 	int checkIfEgoExist(double* simTime);
+	void updateEgoLoopRoute();
+	void fillTrafficLightStates(MsgHelper& msg);
+
 
 	int getSimulationTime(double* simTime);
 
@@ -140,7 +143,6 @@ public:
 	bool ENABLE_VEH_SIMULATOR = false;
 
 	bool ENABLE_CARLA = false;
-	bool ENABLE_CARLA_EXTERNAL_CONTROL = false;
 
 	double tSimuEnd = 90000;
 

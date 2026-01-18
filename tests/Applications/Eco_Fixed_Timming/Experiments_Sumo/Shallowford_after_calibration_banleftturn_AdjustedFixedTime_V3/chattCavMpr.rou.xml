@@ -31,6 +31,11 @@
     <vType id="CAV" color="0,255,0,255" minGap="2.99" accel="2.56266" decel="4.45227" emergencyDecel="8.54336" sigma="0.99486" tau="1.17543" probability="0.2" vClass="passenger">
             <param key="has.glosa.device" value="true" />
     </vType>
+    <vType id="EGO_TYPE" color="255,0,0,255" minGap="2.99" accel="2.56266" decel="4.45227" emergencyDecel="8.54336" sigma="0.99486" tau="1.17543" probability="0.2" vClass="passenger">
+            <param key="has.glosa.device" value="true" />     
+    </vType>
+    <route id="route1"
+           edges="-2801 -280 -307 -327 -3271 -281 -315 -3151 -321 -300 -2851 -285 -290 -298 -295 -312 -293 -297 -288 -2881 -286 -302 -3221 -322 -313 -284 -2841 -328 -304 -2801"/>   
 
     <vTypeDistribution id="car" vTypes="HDV CAV" />
 

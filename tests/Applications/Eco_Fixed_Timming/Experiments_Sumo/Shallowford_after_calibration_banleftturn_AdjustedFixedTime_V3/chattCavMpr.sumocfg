@@ -1,5 +1,5 @@
-<?xml version="1.0" ?>
-<configuration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/duarouterConfiguration.xsd">
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/sumoConfiguration.xsd">
     <random>
         <seed value="101"/>
     </random>
@@ -11,7 +11,8 @@
 
     <output>
         <edgedata-output value="EdgeData.xml"/>
-        <fcd-output value="fcd.xml" samplingRate="1"/>
+        <fcd-output value="fcd.xml"/>
+        <fcd-output.acceleration value="true"/>  
         <precision value="6"/>
     </output>
     <time>
@@ -21,7 +22,7 @@
     </time>
 
     <gui_only>
-        <start value="t"/>
+        <start value="true"/>
         <quit-on-end value="true"/>
     </gui_only>
     <report>

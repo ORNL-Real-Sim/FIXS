@@ -114,9 +114,7 @@ struct CarlaSetup_t {
 
 	bool EnableCosimulation;
 
-	bool EnableExternalControl;
-
-	bool UseVehicleTypeAsBlueprint;
+	bool EnableEgoSimulink;
 
 	std::string CarlaServerIP;
 
@@ -128,8 +126,6 @@ struct CarlaSetup_t {
 
 	std::string CarlaMapName;
 
-	std::string CenteredViewId;
-
 	double TrafficRefreshRate;
 
 	std::vector<std::string> InterestedIds;
@@ -140,6 +136,8 @@ struct SumoSetup_t {
 
 	int SpeedMode;
 	int ExecutionOrder;
+	std::string EgoID;
+	double EgoInsertTime;
 };
 
 typedef struct SubscriptionVehicleList_t {

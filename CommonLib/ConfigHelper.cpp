@@ -392,6 +392,22 @@ int ConfigHelper::getConfig(string configName) {
 		SumoSetup.ExecutionOrder = 1;
 		printf("\nSumo Execution Order not specified! Will use 1 as default!\n");
 	}
+	if (node["EgoID"]) {
+		SumoSetup.EgoID = node["EgoID"].as<std::string>();
+	}
+	else {
+		SumoSetup.EgoID = "ego";
+		printf("\nSumo EgoID not specified! Will use 'ego' as default!\n");
+	}
+	if (node["EgoInsertTime"]) {
+		SumoSetup.EgoInsertTime = node["EgoInsertTime"].as<double>();
+	}
+	else {
+		SumoSetup.EgoInsertTime = 28985.0;
+		printf("\nSumo EgoInsertTime not specified! Will use 28985.0 as default!\n");
+	}
+
+
 
 	// ===========================================================================
 	// 			READ Carla Setup section
@@ -411,31 +427,11 @@ int ConfigHelper::getConfig(string configName) {
 		CarlaSetup.EnableCosimulation = false;
 	}
 
-	//if (node["EnableEgoSimulink"]) {
-	//	CarlaSetup.EnableEgoSimulink = parserFlag(node, "EnableEgoSimulink");
-	//}
-	//else {
-	//	CarlaSetup.EnableEgoSimulink = false;
-	//}
-	if (node["EnableExternalControl"]) {
-		CarlaSetup.EnableExternalControl = parserFlag(node, "EnableExternalControl");
+	if (node["EnableEgoSimulink"]) {
+		CarlaSetup.EnableEgoSimulink = parserFlag(node, "EnableEgoSimulink");
 	}
 	else {
-		CarlaSetup.EnableExternalControl = false;
-	}
-	if (node["UseVehicleTypeAsBlueprint"]) {
-		CarlaSetup.UseVehicleTypeAsBlueprint = parserFlag(node, "UseVehicleTypeAsBlueprint");
-	}
-	else {
-		CarlaSetup.UseVehicleTypeAsBlueprint = false;
-	}
-
-	if (node["CenteredViewId"]) {
-		CarlaSetup.CenteredViewId = parserString(node, "CenteredViewId");
-	}
-	else {
-		CarlaSetup.CenteredViewId = "ego";
-		printf("\nCentered View Id not specified! Will use ego as default!\n");
+		CarlaSetup.EnableEgoSimulink = false;
 	}
 
 	if (node["CarlaServerIP"]) {
@@ -679,7 +675,7 @@ void ConfigHelper::parserSubscription(YAML::Node rootnode, std::string name, Sub
 				break;
 
 			case intersection:
-				if (att.compare("id") == 0 || att.compare("name") == 0) {
+				if (att.compare("id") == 0 || att.compare("name") == 0 || att.compare("all") == 0) {
 					extractSubscriptionAttributes(attnode, type, att, attMap);
 				}
 				else {
@@ -932,6 +928,8 @@ void ConfigHelper::getVehSubscriptionList(Subscription_t VehSub, std::unordered_
 }
 
 void ConfigHelper::getSigSubscriptionList(Subscription_t SigSub) {
+	SubscriptionSignalList.signalId_v.clear();
+	SubscriptionSignalList.subAllSignalFlag = false;
 
 	// type, attribute, ip, port
 	// string, SubAttMap_t, vector <string>, vector <int>
@@ -941,52 +939,72 @@ void ConfigHelper::getSigSubscriptionList(Subscription_t SigSub) {
 		vector <string> idlist;
 		if (type.compare("intersection") == 0) {
 			SubAttMap_t att = get<1>(SigSub[iSub]);
-			if (att.find("name") != att.end()) {
-				idlist = att["name"];
-				for (size_t i = 0; i < idlist.size(); i++) {
-					if (SubscriptionSignalList.signalId_v.find(idlist[i]) == SubscriptionSignalList.signalId_v.end()) {
-						SubscriptionSignalList.signalId_v.insert(idlist[i]);
-					}
+
+			bool subAll = false;
+			if (att.find("all") != att.end() && !att["all"].empty()) {
+				string v = att["all"][0];
+				if (v == "true" || v == "True" || v == "TRUE" || v == "1") {
+					subAll = true;
 				}
 			}
+
+			if (subAll) {
+				SubscriptionSignalList.subAllSignalFlag = true;
+			}
+
+			vector<string> idlist;
+
+			if (att.find("name") != att.end()) {
+				idlist = att["name"];
+			}
+			else if (att.find("id") != att.end()) {
+				idlist = att["id"];
+			}
+
+
+			for (size_t i = 0; i < idlist.size(); i++) {
+				if (SubscriptionSignalList.signalId_v.find(idlist[i]) == SubscriptionSignalList.signalId_v.end()) {
+					SubscriptionSignalList.signalId_v.insert(idlist[i]);
+				}
+			}
+
 
 			// get port map
 			vector <int> port_v;
 			port_v = get<3>(SigSub[iSub]);
 
-			for (auto it : port_v) {
-				// if already has this socket port, then no need to initialize
-				if (SocketPort2SubscriptionList_um.find(it) != SocketPort2SubscriptionList_um.end()) {
+			for (auto port : port_v) {
 
-				}
-				else {
+
+				if (SocketPort2SubscriptionList_um.find(port) == SocketPort2SubscriptionList_um.end()) {
 					SubscriptionAllList_t subAllList;
-					SocketPort2SubscriptionList_um[it] = subAllList;
+					SocketPort2SubscriptionList_um[port] = subAllList;
 				}
+
+
+				if (subAll) {
+					SocketPort2SubscriptionList_um[port].SignalList.subAllSignalFlag = true;
+				}
+
 
 				for (size_t i = 0; i < idlist.size(); i++) {
-					if (SocketPort2SubscriptionList_um[it].SignalList.signalId_v.find(idlist[i]) == SocketPort2SubscriptionList_um[it].SignalList.signalId_v.end()) {
-						SocketPort2SubscriptionList_um[it].SignalList.signalId_v.insert(idlist[i]);
+					if (SocketPort2SubscriptionList_um[port].SignalList.signalId_v.find(idlist[i]) ==
+						SocketPort2SubscriptionList_um[port].SignalList.signalId_v.end()) {
+						SocketPort2SubscriptionList_um[port].SignalList.signalId_v.insert(idlist[i]);
 					}
 				}
 			}
-
 		}
 		else {
 			// ERROR HANDLING
-
 		}
-
-		
 	}
 
-	////if (CarMakerSetup.EnableCosimulation && CarMakerSetup.SynchronizeTrafficSignal){
-	//if (CarMakerSetup.SynchronizeTrafficSignal) {
-	//	SubscriptionSignalList.subAllSignalFlag = true;
-	//}
-	//else {
-	//	SubscriptionSignalList.subAllSignalFlag = false;
-	//}
+	if (SubscriptionSignalList.subAllSignalFlag) {
+		for (auto& kv : SocketPort2SubscriptionList_um) {
+			kv.second.SignalList.subAllSignalFlag = true;
+		}
+	}
 }
 
 void ConfigHelper::getDetSubscriptionList(Subscription_t DetSub) {

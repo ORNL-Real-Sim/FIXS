@@ -129,7 +129,7 @@ class SumoEnvMultiAgent:
         xmlTree.write(os.path.join(output_dir, self.sumo_route))
 
     def change_config_directory(self):
-        file_name = f'{int(self.penetration_rate*100)}%_{int(1/self.step_length)}Hz' + f'{"_w" if self.enable_vehicle_dynamics else "_wo"}_vehDyn' + f'_{self.add_ego_time}'
+        file_name = f'{int(self.penetration_rate*100)}%_{int(1/self.step_length)}Hz' + f'{"_w" if self.enable_vehicle_dynamics else "_wo"}_vehDyn_Test' + f'_{self.add_ego_time}' 
         output_dir = os.path.join(self.sumo_folder, self.working_directory, file_name)
 
         # Making Results Directory
@@ -142,6 +142,7 @@ class SumoEnvMultiAgent:
         shutil.copy(os.path.join(self.sumo_folder, self.sumo_net), output_dir)
         shutil.copy(os.path.join(self.sumo_folder, "updated_signal.xml"), output_dir)
         shutil.copy(os.path.join(self.sumo_folder, "Edge.add.xml"), output_dir)
+        shutil.copy(os.path.join(self.sumo_folder, "sumoSignalConfig_26.csv"), output_dir)
         # MPR
         self.change_cav_mpr(output_dir)
 
@@ -179,19 +180,21 @@ class SumoEnvMultiAgent:
             depart="now",  # explicit time in seconds (string or int is fine)
             departPos='free',
             departLane='first',
-            departSpeed='0',
+            departSpeed='0.1',
         )
         traci.vehicle.setColor('ego', (255, 0, 0, 255))
         traci.vehicle.setSpeedMode('ego', 31)
         traci.vehicle.setDecel('ego', self.max_acc)
         traci.vehicle.setAccel('ego', self.max_acc)
-        traci.vehicle.setLaneChangeMode('ego', 512)
+        traci.vehicle.setLaneChangeMode('ego', 512) #512：Prohibit automatic lane changing；597（default）：SUMO automatic lane changing
+
+        
         # get the available views
-        view_ids = traci.gui.getIDList()
-        # set the view to track the ego vehicle
-        traci.gui.trackVehicle(view_ids[0],'ego')
-        # set the zoom level
-        traci.gui.setZoom(view_ids[0], 500)
+        # view_ids = traci.gui.getIDList()
+        # # set the view to track the ego vehicle
+        # traci.gui.trackVehicle(view_ids[0],'ego')
+        # # set the zoom level
+        # traci.gui.setZoom(view_ids[0], 500)
 
     def reset(self):
         # If ego is currently in the network, remove it and step once so removal takes effect
@@ -433,7 +436,9 @@ class SumoEnvMultiAgent:
                                                             results_df.loc[key, 't2s'],
                                                             results_df.loc[key, 't2e'],
                                                             results_df.loc[key, 'r1s'],
-                                                            results_df.loc[key, 'curr_status']) for index, (key, veh) in enumerate(self.cav_object_dict.items()) if key in (list_cav_back_to_sumo + list_cav_control)}
+                                                            results_df.loc[key, 'curr_status'],
+                                                            set_speed_internally=False
+                                                            ) for index, (key, veh) in enumerate(self.cav_object_dict.items()) if key in (list_cav_back_to_sumo + list_cav_control)}
                 
                 self.apply_vehicle_control(eco_speed_dic, smooth=True, exclude_veh_ids=veh_ids_controlled_by_FIXS)
                 
@@ -456,14 +461,17 @@ class SumoEnvMultiAgent:
         :return:
         """
         try:
-            sim_state, sim_time = self.socket_helper.recv_data(self.socket2FIXS)
+            sim_state, sim_time = self.socket_helper.recv_data(self.socket2FIXS) #MsgServer_C
         except (socket.timeout, socket.error, ConnectionResetError, BrokenPipeError) as e:
             print(f"ERROR: Lost connection to FIXS server: {e}")
             print("The TrafficLayer may have been closed. Initiating shutdown...")
             raise RuntimeError("Connection to FIXS lost") from e
+        # ori_speed_dic = {veh_data.id: veh_data.speed for veh_data in self.socket_helper.vehicle_data_receive_list if veh_data.id and veh_data.id.strip() != ""}
+
         ori_speed_dic = {veh_data.id:veh_data.speed for veh_data in self.socket_helper.vehicle_data_receive_list}
 
         for veh_id, ori_speed in ori_speed_dic.items():
+
             eco_speed = eco_speed_dic.get(veh_id, None)
             if eco_speed is not None and veh_id in control_veh_ids:
                 if eco_driving:
@@ -480,7 +488,7 @@ class SumoEnvMultiAgent:
                 veh_data = VehData(id='ego', speedDesired=self.speed_max)
                 self.socket_helper.vehicle_data_send_list.append(veh_data)
             try:
-                self.socket_helper.sendData(sim_state, sim_time, self.socket2simulink)
+                self.socket_helper.sendData(sim_state, sim_time, self.socket2simulink)  #MsgClient_C
                 self.socket_helper.clear_data()
                 # receive data from the client (the actual vehicle data after the vehidle dynamics model)
                 self.socket_helper.recv_data(self.socket2simulink)
@@ -494,6 +502,7 @@ class SumoEnvMultiAgent:
         speed_desired_eco = -1
         speed_desired_simulink = -1
         for idx in range(len(self.socket_helper.vehicle_data_send_list)):
+
             speed_desired_eco = eco_speed_dic[veh_id]
             if not vehicle_dynamics or not self.enable_vehicle_dynamics:
                 # if not applying vehicle dynamics, set the speedDesired to the eco_speed
@@ -503,8 +512,9 @@ class SumoEnvMultiAgent:
                 if speed_desired_eco is not None and eco_driving:
                     self.socket_helper.vehicle_data_send_list[idx].speedDesired = speed_desired_eco
                 else:
+                    
                     self.socket_helper.vehicle_data_send_list[idx].speedDesired = ori_speed_dic[veh_id]
-
+                    
             else:
                 speed_desired_simulink = self.socket_helper.vehicle_data_receive_list[idx].speedDesired
                 # if applying vehicle dynamics, set the speedDesired to the speedDesired from the simulink
@@ -526,7 +536,7 @@ class SumoEnvMultiAgent:
         self.socket_helper.clear_data()
 
 
-    def apply_vehicle_control(self, eco_speed_dic, smooth=False, exclude_veh_ids = []):
+    def apply_vehicle_control(self, eco_speed_dic, smooth=False, exclude_veh_ids = ['ego']):
         # to handle the case of a single vehicle
         for veh_id, eco_speed in eco_speed_dic.items():
             if eco_speed is not None and veh_id not in exclude_veh_ids:
@@ -648,6 +658,8 @@ class SumoEnvMultiAgent:
         return config
 def run_traffic_layer(traffic_layer_path, traffic_layer_config):
     os.system(f'start cmd /k {traffic_layer_path} -f {traffic_layer_config}')
+
+
 if __name__ == "__main__":
     start_time = time.time()
     parser = argparse.ArgumentParser()
@@ -675,7 +687,7 @@ if __name__ == "__main__":
     parser.add_argument("--sumoConfig", type=str, help="Specify sumo config file", default='chattCavMpr.sumocfg')
     parser.add_argument("--sumoNet", type=str, help="Specify sumo net file", default=os.environ["SUMO_NET_PATH"])
     parser.add_argument("--sumoRoute", type=str, help="Specify sumo route file", default='chattCavMpr.rou.xml')
-    parser.add_argument("--workingDirectory", type=str, help="Specify working directory", default='MPR')
+    parser.add_argument("--workingDirectory", type=str, help="Specify working directory", default='MPR_1')
     args = parser.parse_args()
     traffic_layer_config = args.trafficlayerConfig
     traffic_layer_ip = args.trafficlayerIp
@@ -711,7 +723,7 @@ if __name__ == "__main__":
     # 4.77 : 29172.53
     # 4.82 : 29196.72
     # 4.85 : 29211.23
-    add_ego_time = 29119.31
+    add_ego_time = 29128.9
     senv = SumoEnvMultiAgent(sumo_folder = sumo_folder, # path to the folder containing the sumo files
                              sumo_config = sumo_config, # file name of the sumo config file
                              sumo_net = sumo_net, # file name of the sumo net file
@@ -734,9 +746,10 @@ if __name__ == "__main__":
                              add_ego_time = add_ego_time
                              )
 
-    senv.run_sumo(num_clients=2, seed=100, gui=True)
+    senv.run_sumo(num_clients=2, seed=101, gui=True)
     time.sleep(2)
     run_traffic_layer('TrafficLayer.exe', os.environ["CONFIG_PATH"])
+
     time.sleep(2)
     senv.setup_connections()
     print('Starting subscription')
