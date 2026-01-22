@@ -138,6 +138,11 @@ struct SumoSetup_t {
 	int ExecutionOrder;
 	std::string EgoID;
 	double EgoInsertTime;
+
+	std::string EgoDepart;
+	std::string EgoDepartLane;
+	std::string EgoDepartPos;
+	std::string EgoDepartSpeed;
 };
 
 typedef struct SubscriptionVehicleList_t {

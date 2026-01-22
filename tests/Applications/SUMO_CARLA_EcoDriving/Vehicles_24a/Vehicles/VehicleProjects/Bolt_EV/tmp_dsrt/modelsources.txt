@@ -1,4 +1,0 @@
-  tmp.c
-tmp_dsrtvdf.c
-tmp_dsrtmf.c
-

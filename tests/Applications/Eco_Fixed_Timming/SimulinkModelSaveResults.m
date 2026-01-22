@@ -14,12 +14,12 @@ BatteryPower = VehicleOut.battery_power.Data;
 BatterySOC = VehicleOut.battery_soc.Data;
 MotorSpeed = VehicleOut.motor_speed.Data;
 MotorTorque = VehicleOut.motor_torque.Data;
-ActualAcc = VehicleOut.VehAcc.Data;
+% ActualAcc = VehicleOut.VehAcc.Data;
 
 
 save('vehData', 'VehicleOut')
-T = table(Time, DesiredSpeed, ActualSpeed, MPGe, BatteryCurrent, BatteryPower, BatterySOC, MotorSpeed, MotorTorque, ActualAcc,'VariableNames', {'Time', 'DesiredSpeed', 'ActualSpeed', 'MPGe', 'BatteryCurrent', 'BatteryPower','BatterySOC', 'MotorSpeed', 'MotorTorque', 'ActualAcc'});
-% T = table(Time, DesiredSpeed, ActualSpeed, MPGe, BatteryCurrent, BatteryPower, BatterySOC, MotorSpeed, MotorTorque,'VariableNames', {'Time', 'DesiredSpeed', 'ActualSpeed', 'MPGe', 'BatteryCurrent', 'BatteryPower','BatterySOC', 'MotorSpeed', 'MotorTorque'});
+% T = table(Time, DesiredSpeed, ActualSpeed, MPGe, BatteryCurrent, BatteryPower, BatterySOC, MotorSpeed, MotorTorque, ActualAcc,'VariableNames', {'Time', 'DesiredSpeed', 'ActualSpeed', 'MPGe', 'BatteryCurrent', 'BatteryPower','BatterySOC', 'MotorSpeed', 'MotorTorque', 'ActualAcc'});
+T = table(Time, DesiredSpeed, ActualSpeed, MPGe, BatteryCurrent, BatteryPower, BatterySOC, MotorSpeed, MotorTorque,'VariableNames', {'Time', 'DesiredSpeed', 'ActualSpeed', 'MPGe', 'BatteryCurrent', 'BatteryPower','BatterySOC', 'MotorSpeed', 'MotorTorque'});
 
 writetable(T, [settingDir, '\ego_profile.csv']);
 

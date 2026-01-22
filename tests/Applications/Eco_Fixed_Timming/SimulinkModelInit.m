@@ -13,7 +13,7 @@ format compact;
 % Different Vehicle Model, if different, need change!!!!!
 
 addpath(genpath('.\\Vehicles_24a'))
-configPath = 'C:\Users\yusun\Projects\XIL_Oct\tests\Applications\SUMO_CARLA_EcoDriving\MLK_Sumo_Scenario\config_Sumo.yaml';
+configPath = 'C:\Users\yusun\Projects\XIL_Oct\tests\Applications\Eco_Fixed_Timming\Experiments_Sumo\Shallowford_after_calibration_banleftturn_AdjustedFixedTime_V3\config_Sumo.yaml';
 
 
 
@@ -70,13 +70,13 @@ BatteryPower = VehicleOut.battery_power.Data;
 BatterySOC = VehicleOut.battery_soc.Data;
 MotorSpeed = VehicleOut.motor_speed.Data;
 MotorTorque = VehicleOut.motor_torque.Data;
-ActualAcc = VehicleOut.VehAcc.Data;
-VehSpdRef = VehicleOut.VehSpdRef.Data;
-
+% ActualAcc = VehicleOut.VehAcc.Data;
+% VehSpdRef = VehicleOut.VehSpdRef.Data;
+settingDir = 'C:\Users\yusun\Projects\XIL_Oct\tests\Applications\Eco_Fixed_Timming\Experiments_Sumo\Shallowford_after_calibration_banleftturn_AdjustedFixedTime_V3\MPR_7\10%_10Hz_with_vehDyn_E_Mache_Test0119\';
 
 save('vehData', 'VehicleOut')
-T = table(Time, DesiredSpeed, ActualSpeed, MPGe, BatteryCurrent, BatteryPower, BatterySOC, MotorSpeed, MotorTorque, ActualAcc, VehSpdRef,'VariableNames', {'Time', 'DesiredSpeed', 'ActualSpeed', 'MPGe', 'BatteryCurrent', 'BatteryPower','BatterySOC', 'MotorSpeed', 'MotorTorque', 'ActualAcc', 'VehSpdRef'});
-% T = table(Time, DesiredSpeed, ActualSpeed, MPGe, BatteryCurrent, BatteryPower, BatterySOC, MotorSpeed, MotorTorque,'VariableNames', {'Time', 'DesiredSpeed', 'ActualSpeed', 'MPGe', 'BatteryCurrent', 'BatteryPower','BatterySOC', 'MotorSpeed', 'MotorTorque'});
+% T = table(Time, DesiredSpeed, ActualSpeed, MPGe, BatteryCurrent, BatteryPower, BatterySOC, MotorSpeed, MotorTorque, ActualAcc, VehSpdRef,'VariableNames', {'Time', 'DesiredSpeed', 'ActualSpeed', 'MPGe', 'BatteryCurrent', 'BatteryPower','BatterySOC', 'MotorSpeed', 'MotorTorque', 'ActualAcc', 'VehSpdRef'});
+T = table(Time, DesiredSpeed, ActualSpeed, MPGe, BatteryCurrent, BatteryPower, BatterySOC, MotorSpeed, MotorTorque,'VariableNames', {'Time', 'DesiredSpeed', 'ActualSpeed', 'MPGe', 'BatteryCurrent', 'BatteryPower','BatterySOC', 'MotorSpeed', 'MotorTorque'});
 
 writetable(T, [settingDir, '\ego_profile.csv']);
 

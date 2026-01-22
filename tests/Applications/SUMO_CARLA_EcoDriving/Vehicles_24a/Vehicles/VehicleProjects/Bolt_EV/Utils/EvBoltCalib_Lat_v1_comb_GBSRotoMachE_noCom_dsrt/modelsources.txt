@@ -1,5 +1,0 @@
-  EvBoltCalib_Lat_v1_comb_GBSRotoMachE_noCom.c
-EvBoltCalib_Lat_v1_comb_GBSRotoMachE_noCom_dsrtvdf.c
-EvBoltCalib_Lat_v1_comb_GBSRotoMachE_noCom_dsrtmf.c
-EvBoltCalib_Lat_v1_comb_GBSRotoMachE_noCom_dsmpb_bd.c
-
