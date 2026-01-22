@@ -462,13 +462,13 @@ int TrafficHelper::addEgoVehicle(double simTime) {
 		//   vehID='ego', routeID='route1',
 		//   departPos='1', departLane='0', departSpeed='0.1'
 		traci.vehicle.add(
-			idStr,          // vehID
-			routeId,        // routeID
-			typeStr,        // typeID
-			"now",
-			"0",
-			"1",
-			"0.1"
+			idStr,
+			routeId,
+			typeStr,
+			Config_c->SumoSetup.EgoDepart,
+			Config_c->SumoSetup.EgoDepartLane,
+			Config_c->SumoSetup.EgoDepartPos,
+			Config_c->SumoSetup.EgoDepartSpeed
 		);
 		printf("[addEgoVehicle] vehicle.add() succeeded\n");
 		traci.vehicle.setColor(idStr, libsumo::TraCIColor(255, 0, 0, 255));

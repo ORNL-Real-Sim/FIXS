@@ -133,7 +133,7 @@ class SumoEnvMultiAgent:
         xmlTree.write(os.path.join(output_dir, self.sumo_route))
 
     def change_config_directory(self):
-        file_name = f'{int(self.penetration_rate*100)}%_{int(1/self.step_length)}Hz' + f'{"_with" if self.enable_vehicle_dynamics else "_without"}_vehDyn_E_Test0118'
+        file_name = f'{int(self.penetration_rate*100)}%_{int(1/self.step_length)}Hz' + f'{"_with" if self.enable_vehicle_dynamics else "_without"}_vehDyn_E_Mache_Test0119'
         output_dir = os.path.join(self.sumo_folder, self.working_directory, file_name)
 
         # Making Results Directory
@@ -196,8 +196,8 @@ class SumoEnvMultiAgent:
             routeID='route1',
             # typeID='CAV',  # '' uses DEFAULT_VEHTYPE (or change to an existing vType, e.g. 'CAV')
             # depart="now",  # explicit time in seconds (string or int is fine)
-            departPos=str(1),
             departLane='0',
+            departPos=str(1),
             departSpeed=str(0.1),
         )
         traci.vehicle.setColor('ego', (255, 0, 0, 255))
@@ -570,7 +570,7 @@ class SumoEnvMultiAgent:
         elif "id" in results_df.columns:
             results_df = results_df.set_index("id")
         else:
-            raise ValueError("results_df 中找不到 veh_id 或 id 列！")
+            raise ValueError("results_df can't find veh_id or id！")
         
         list_cav_back_to_sumo = results_df[(results_df['veh_type'] == 'CAV') & (results_df['control'] == 'False')].index.tolist()
         list_cav_control = results_df[(results_df['veh_type'] == 'EGO_TYPE') | (results_df['control'] == 'True')].index.tolist()
@@ -811,7 +811,7 @@ if __name__ == "__main__":
 
     senv.run_sumo(num_clients=1, seed=101, gui=True)
     time.sleep(2)
-    run_traffic_layer('TrafficLayer0116.exe', os.environ["CONFIG_PATH"])
+    run_traffic_layer('TrafficLayer0122.exe', os.environ["CONFIG_PATH"])
     time.sleep(2)
     senv.setup_connections()
     print('Starting subscription')

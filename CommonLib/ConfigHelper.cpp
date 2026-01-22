@@ -407,6 +407,40 @@ int ConfigHelper::getConfig(string configName) {
 		printf("\nSumo EgoInsertTime not specified! Will use 28985.0 as default!\n");
 	}
 
+	// ---- Ego depart parameters (TraCI vehicle.add) ----
+	if (node["EgoDepart"]) {
+		SumoSetup.EgoDepart = parserString(node, "EgoDepart");
+	}
+	else {
+		SumoSetup.EgoDepart = "now";
+		printf("\nSumo EgoDepart not specified! Will use 'now' as default!\n");
+	}
+
+	if (node["EgoDepartLane"]) {
+		SumoSetup.EgoDepartLane = parserString(node, "EgoDepartLane");
+	}
+	else {
+		SumoSetup.EgoDepartLane = "0";
+		printf("\nSumo EgoDepartLane not specified! Will use '0' as default!\n");
+	}
+
+	if (node["EgoDepartPos"]) {
+		SumoSetup.EgoDepartPos = parserString(node, "EgoDepartPos");
+	}
+	else {
+		SumoSetup.EgoDepartPos = "1";
+		printf("\nSumo EgoDepartPos not specified! Will use '1' as default!\n");
+	}
+
+	if (node["EgoDepartSpeed"]) {
+		SumoSetup.EgoDepartSpeed = parserString(node, "EgoDepartSpeed");
+	}
+	else {
+		SumoSetup.EgoDepartSpeed = "0.1";
+		printf("\nSumo EgoDepartSpeed not specified! Will use '0.1' as default!\n");
+	}
+
+
 
 
 	// ===========================================================================
