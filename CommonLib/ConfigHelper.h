@@ -188,6 +188,9 @@ public:
 
 	int getConfig(std::string configName);
 
+	// Flag to suppress "Will use X as default" messages during config parsing
+	bool SuppressDefaultMessages = true;
+
 	bool parserFlag(YAML::Node node, std::string name);
 	std::string parserString(YAML::Node node, std::string name);
 	double parserDouble(YAML::Node node, std::string name);

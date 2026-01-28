@@ -2,8 +2,7 @@
 setlocal EnableExtensions EnableDelayedExpansion
 
 REM ====================================
-REM Build Core RealSim Components
-REM Builds: TrafficLayer
+REM Build VirtualEnvironment Component
 REM ====================================
 
 set "SCRIPT_DIR=%~dp0"
@@ -20,7 +19,7 @@ set "LOG_SUMMARY=%RS_BUILD_SUMMARY%"
 
 REM Handle optional window request
 if /I "%RUN_MODE%"=="window" (
-    start "RS FIXS Core Build" cmd /k "%~f0" inline
+    start "RS FIXS VirtualEnvironment Build" cmd /k "%~f0" inline
     exit /b 0
 )
 
@@ -75,21 +74,21 @@ set "STACK_CHANGED=1"
 
 REM Only initialize logs in standalone mode
 if /I "%RUN_MODE%"=="standalone" (
-    >"%LOG_SUMMARY%" echo Core Components Build Results
+    >"%LOG_SUMMARY%" echo VirtualEnvironment Build Results
     >>"%LOG_SUMMARY%" echo ================================
     >>"%LOG_SUMMARY%" echo.
     if exist "%LOG_OUTPUT%" del "%LOG_OUTPUT%" >nul 2>&1
 ) else (
     >>"%LOG_SUMMARY%" echo.
-    >>"%LOG_SUMMARY%" echo Core Components Build
+    >>"%LOG_SUMMARY%" echo VirtualEnvironment Build
     >>"%LOG_SUMMARY%" echo ----------------------
 )
 
-REM Build TrafficLayer
+REM Build VirtualEnvironment
 for %%C in (%STANDALONE_CONFIGS%) do (
-    call :BuildSolution "TrafficLayer (%%C)" ".\TrafficLayer\TrafficLayer.sln" "/p:Configuration=%%C"
+    call :BuildSolution "VirtualEnvironment (%%C)" ".\VirtualEnvironment\VirtualEnvironment.sln" "/p:Configuration=%%C"
     if errorlevel 1 (
-        call :TrackFailure "TrafficLayer (%%C)"
+        call :TrackFailure "VirtualEnvironment (%%C)"
         set "BUILD_RESULT=1"
     )
 )
@@ -97,10 +96,10 @@ for %%C in (%STANDALONE_CONFIGS%) do (
 echo.
 echo ==============================
 if defined FAILED_BUILDS (
-    echo Core build completed with failures!
+    echo VirtualEnvironment build completed with failures!
     echo Failed builds: %FAILED_BUILDS%
 ) else (
-    echo All core components built successfully!
+    echo VirtualEnvironment built successfully!
 )
 echo Check %LOG_SUMMARY% for summary and %LOG_OUTPUT% for details.
 echo ==============================
