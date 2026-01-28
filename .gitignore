@@ -189,6 +189,14 @@ CM11_proj/tmp.obj
 
 TODO.md
 
+# User-provided proprietary scenarios - track folder structure but ignore contents
+/tests/UserScenarios/*
+!/tests/UserScenarios/.gitkeep
+!/tests/UserScenarios/README.md
+
+# Active debug configuration (per-worktree, for VS debugging)
+/TrafficLayer/.active_config
+
 **/nul
 
 .claude/

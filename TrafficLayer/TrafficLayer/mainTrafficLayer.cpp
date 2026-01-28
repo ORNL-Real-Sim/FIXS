@@ -10,6 +10,10 @@
 
 #include "RealSimVersion.h"
 
+// Uncomment the line below to enable performance timing
+// #define ENABLE_PERF_TIMING
+#include "PerformanceTimer.h"
+
 using namespace std;
 
 // Global shutdown state - single point of access for cleanup coordination
@@ -282,6 +286,84 @@ static void show_usage(std::string name)
 		<< std::endl;
 }
 
+#ifdef WIN32
+// Find all YAML files in a directory recursively (Windows implementation)
+void findYamlFilesRecursive(const std::string& directory, std::vector<std::string>& yamlFiles) {
+	WIN32_FIND_DATAA findData;
+	std::string searchPath = directory + "\\*";
+	HANDLE hFind = FindFirstFileA(searchPath.c_str(), &findData);
+
+	if (hFind == INVALID_HANDLE_VALUE) {
+		return;
+	}
+
+	do {
+		std::string fileName = findData.cFileName;
+		if (fileName == "." || fileName == "..") continue;
+
+		std::string fullPath = directory + "\\" + fileName;
+
+		if (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+			// Recursively search subdirectories
+			findYamlFilesRecursive(fullPath, yamlFiles);
+		}
+		else {
+			// Check if file has .yaml or .yml extension
+			size_t dotPos = fileName.find_last_of('.');
+			if (dotPos != std::string::npos) {
+				std::string ext = fileName.substr(dotPos);
+				if (ext == ".yaml" || ext == ".yml") {
+					yamlFiles.push_back(fullPath);
+				}
+			}
+		}
+	} while (FindNextFileA(hFind, &findData));
+
+	FindClose(hFind);
+}
+#else
+// Find all YAML files in a directory recursively (POSIX implementation)
+#include <dirent.h>
+#include <sys/stat.h>
+void findYamlFilesRecursive(const std::string& directory, std::vector<std::string>& yamlFiles) {
+	DIR* dir = opendir(directory.c_str());
+	if (!dir) return;
+
+	struct dirent* entry;
+	while ((entry = readdir(dir)) != nullptr) {
+		std::string fileName = entry->d_name;
+		if (fileName == "." || fileName == "..") continue;
+
+		std::string fullPath = directory + "/" + fileName;
+
+		struct stat statbuf;
+		if (stat(fullPath.c_str(), &statbuf) == 0) {
+			if (S_ISDIR(statbuf.st_mode)) {
+				// Recursively search subdirectories
+				findYamlFilesRecursive(fullPath, yamlFiles);
+			}
+			else if (S_ISREG(statbuf.st_mode)) {
+				// Check if file has .yaml or .yml extension
+				size_t dotPos = fileName.find_last_of('.');
+				if (dotPos != std::string::npos) {
+					std::string ext = fileName.substr(dotPos);
+					if (ext == ".yaml" || ext == ".yml") {
+						yamlFiles.push_back(fullPath);
+					}
+				}
+			}
+		}
+	}
+	closedir(dir);
+}
+#endif
+
+std::vector<std::string> findYamlFiles(const std::string& directory) {
+	std::vector<std::string> yamlFiles;
+	findYamlFilesRecursive(directory, yamlFiles);
+	return yamlFiles;
+}
+
 int main(int argc, char* argv[]) {
 
 	printf("==================================================\n");
@@ -365,7 +447,10 @@ int main(int argc, char* argv[]) {
 		}
 	}
 
-	string configPath = ".\\ecodrivingConfig.yaml";
+	string configPath;
+	bool configSpecified = false;
+
+	// Parse command-line arguments
 	for (int i = 1; i < argc; i++) {
 		string arg = argv[i];
 		if (arg == "-h" || arg == "--help") {
@@ -375,6 +460,7 @@ int main(int argc, char* argv[]) {
 		else if (arg == "-f" || arg == "--file") {
 			if (i + 1 < argc) {
 				configPath = argv[++i];
+				configSpecified = true;
 			}
 			else {
 				std::cerr << "--path option requires one argument." << std::endl;
@@ -385,6 +471,43 @@ int main(int argc, char* argv[]) {
 			printf("Check options\n");
 			show_usage(argv[0]);
 			return 0;
+		}
+	}
+
+	// Auto-discover config if not specified
+	if (!configSpecified) {
+		// First, check for TrafficLayer/.active_config file
+		std::ifstream activeConfigFile("TrafficLayer/.active_config");
+		if (activeConfigFile.good()) {
+			std::getline(activeConfigFile, configPath);
+			activeConfigFile.close();
+			printf("Using config from TrafficLayer/.active_config: %s\n", configPath.c_str());
+		}
+		else {
+			// Auto-discover in tests/UserScenarios/
+			std::vector<std::string> yamlFiles = findYamlFiles("tests/UserScenarios");
+
+			if (yamlFiles.empty()) {
+				printf("ERROR: No configuration specified and no YAML found in tests/UserScenarios/\n");
+				printf("Options:\n");
+				printf("  - Use: -f path/to/config.yaml\n");
+				printf("  - Add scenario to tests/UserScenarios/\n");
+				printf("  - Create TrafficLayer/.active_config with path to your config\n");
+				return -1;
+			}
+			else if (yamlFiles.size() == 1) {
+				configPath = yamlFiles[0];
+				printf("Auto-discovered config: %s\n", configPath.c_str());
+			}
+			else {
+				printf("ERROR: Multiple YAML files found in tests/UserScenarios/\n");
+				printf("Please create TrafficLayer/.active_config file with one of these paths:\n");
+				for (const auto& yaml : yamlFiles) {
+					printf("  - %s\n", yaml.c_str());
+				}
+				printf("\nExample: echo tests/UserScenarios/issue_85/config.yaml > TrafficLayer/.active_config\n");
+				return -1;
+			}
 		}
 	}
 
@@ -777,6 +900,8 @@ int main(int argc, char* argv[]) {
 	g_shutdown.enableRealSim = ENABLE_REALSIM;
 	g_shutdown.initialized = true;
 
+	PERF_INIT("TrafficLayerPerf.log");
+
 	bool isVeryFirstStep = true; 
 
 	bool isEgoExist = false;
@@ -785,10 +910,13 @@ int main(int argc, char* argv[]) {
 	//while (simTime <= tSimuEnd && ii < nT) {
 	while (!g_shutdown.shutdownRequested) {
 
+		PERF_TIC("main_loop");
+
 		///****************************************************
 		// RUN one-step simulation
 		///****************************************************
 
+		PERF_TIC("traffic_step");
 		if (ENABLE_REALSIM && !g_shutdown.trafficSimulatorClosed) {
 			try {
 				Traffic_c.runOneStepSimulation();
@@ -799,6 +927,8 @@ int main(int argc, char* argv[]) {
 				printf("\tInitiating graceful shutdown...\n");
 				g_shutdown.trafficSimulatorClosed = true;
 				g_shutdown.shutdownRequested = true;
+				PERF_TOC("traffic_step");
+				PERF_TOC("main_loop");
 				break;
 			}
 			catch (...) {
@@ -807,9 +937,16 @@ int main(int argc, char* argv[]) {
 				printf("\tInitiating graceful shutdown...\n");
 				g_shutdown.trafficSimulatorClosed = true;
 				g_shutdown.shutdownRequested = true;
+				PERF_TOC("traffic_step");
+				PERF_TOC("main_loop");
 				break;
 			}
 		}
+		PERF_TOC("traffic_step");
+#ifdef ENABLE_PERF_TIMING
+		// Log number of vehicles received from traffic simulator
+		PERF_LOG("t=%.2f vehicles_in_network=%d\n", simTime, (int)MsgServer_c.VehDataRecv_um.size());
+#endif
 
 		if (ENABLE_VEH_SIMULATOR && isVeryFirstStep) {
 			if (Sock_c.initConnection(TrafficLayerErrorFile) > 0) {
@@ -927,6 +1064,7 @@ int main(int argc, char* argv[]) {
 		}
 
 		if (ENABLE_CLIENT) {
+			PERF_TIC("prepare_send");
 			try {
 				MsgClient_c.clearSendStorage();
 
@@ -1001,6 +1139,22 @@ int main(int argc, char* argv[]) {
 					float simTimeSend = simTime;
 					uint8_t simStateSend = 1;
 
+					PERF_TOC("prepare_send");
+					PERF_TIC("send_data");
+#ifdef ENABLE_PERF_TIMING
+					// Check send buffer status before send
+					int sndBufSize = 0;
+					int optLen = sizeof(sndBufSize);
+					getsockopt(actualClientSock[iC], SOL_SOCKET, SO_SNDBUF, (char*)&sndBufSize, &optLen);
+
+					// Calculate message size
+					int msgSize = MsgClient_c.VehDataSend_um[actualClientSock[iC]].size();
+					PERF_LOG("t=%.2f client=%d/%d sndBufSize=%d nVeh=%d nTls=%d nDet=%d\n",
+						simTime, iC, (int)actualClientSock.size(), sndBufSize, msgSize,
+						(int)MsgClient_c.TlsDataSend_um[actualClientSock[iC]].size(),
+						(int)MsgClient_c.DetDataSend_um[actualClientSock[iC]].size());
+#endif
+
 					if (ENABLE_EXT_DYN) {
 						if (isVeryFirstStep) {
 							if (Sock_c.sendData(actualClientSock[iC], iC, simTimeSend, simStateSend, MsgClient_c) < 0) {
@@ -1036,6 +1190,8 @@ int main(int argc, char* argv[]) {
 							break;
 						};
 					}
+
+					PERF_TOC("send_data");
 
 					if (ENABLE_VERBOSE) {
 						printf("send complete\n");
@@ -1227,7 +1383,11 @@ int main(int argc, char* argv[]) {
 
 		ii = ii + 1;
 
+		PERF_TOC("main_loop");
+
 	}
+
+	PERF_SHUTDOWN();
 
 	// Perform graceful cleanup after main loop exits
 	performCleanup(false);
