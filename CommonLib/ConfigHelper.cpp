@@ -110,14 +110,14 @@ int ConfigHelper::getConfig(string configName) {
 	}
 	else {
 		SimulationSetup.EnableRealSim = true;
-		printf("\nWill enable real sim as default!\n");
+		if (!SuppressDefaultMessages) printf("\nWill enable real sim as default!\n");
 	}
 	if (node["EnableVerboseLog"]) {
 		SimulationSetup.EnableVerboseLog = parserFlag(node, "EnableVerboseLog");
 	}
 	else {
 		SimulationSetup.EnableVerboseLog = false;
-		printf("\nWill disable verbose log as default!\n");
+		if (!SuppressDefaultMessages) printf("\nWill disable verbose log as default!\n");
 	}
 	if (node["SimulationEndTime"]) {
 		SimulationSetup.SimulationEndTime = parserDouble(node, "SimulationEndTime");
@@ -138,42 +138,42 @@ int ConfigHelper::getConfig(string configName) {
 	}
 	else {
 		SimulationSetup.SelectedTrafficSimulator = "SUMO";
-		printf("\nTraffic Simulator not specified! Will use SUMO as default!\n");
+		if (!SuppressDefaultMessages) printf("\nTraffic Simulator not specified! Will use SUMO as default!\n");
 	}
 	if (node["TrafficSimulatorIP"]) {
 		SimulationSetup.TrafficSimulatorIP = parserString(node, "TrafficSimulatorIP");
 	}
 	else {
 		SimulationSetup.TrafficSimulatorIP = "127.0.0.1";
-		printf("\nTraffic Simulator IP not specified! Will use localhost 127.0.0.1 as default!\n");
+		if (!SuppressDefaultMessages) printf("\nTraffic Simulator IP not specified! Will use localhost 127.0.0.1 as default!\n");
 	}
 	if (node["TrafficSimulatorPort"]) {
 		SimulationSetup.TrafficSimulatorPort = parserInteger(node, "TrafficSimulatorPort");
 	}
 	else {
 		SimulationSetup.TrafficSimulatorPort = 1337;
-		printf("\nTraffic Simulator Port not specified! Will use 1337 as default!\n");
+		if (!SuppressDefaultMessages) printf("\nTraffic Simulator Port not specified! Will use 1337 as default!\n");
 	}
 	if (node["SimulationMode"]) {
 		SimulationSetup.SimulationMode = parserInteger(node, "SimulationMode");
 	}
 	else {
 		SimulationSetup.SimulationMode = 0;
-		printf("\nSimulation mode not specified! Will use Mode 0 as default!\n");
-}
+		if (!SuppressDefaultMessages) printf("\nSimulation mode not specified! Will use Mode 0 as default!\n");
+	}
 	if (node["SimulationModeParameter"]) {
 		SimulationSetup.SimulationModeParameter = parserDouble(node, "SimulationModeParameter");
 	}
 	else {
 		SimulationSetup.SimulationModeParameter = 0;
-		printf("\nSimulation mode parameter not specified! Will use Parameter=0 as default!\n");
+		if (!SuppressDefaultMessages) printf("\nSimulation mode parameter not specified! Will use Parameter=0 as default!\n");
 	}
 	if (node["VehicleMessageField"]) {
 		parserStringVector(node, "VehicleMessageField", SimulationSetup.VehicleMessageField);
 	}
 	else {
 		SimulationSetup.VehicleMessageField = { "id", "type", "speed", "positionX", "positionY", "positionZ", "heading", "color", "linkId", "laneId", "distanceTravel", "acceleration", "speedDesired", "acceleartionDesired", "hasPrecedingVehicle", "precedingVehicleId", "precedingVehicleDistance", "precedingVehicleSpeed", "signalLightDistance", "signalLightColor", "speedLimit", "speedLimitNext", "speedLimitChangeDistance", "linkIdNext", "grade" , "activeLaneChange", "signalLightId", "signalLightHeadId", "lightIndicators"};
-		printf("\nWill use all available vehicle message field!\n");
+		if (!SuppressDefaultMessages) printf("\nWill use all available vehicle message field!\n");
 	}
 
 
@@ -182,17 +182,24 @@ int ConfigHelper::getConfig(string configName) {
 	//  Store Vehicle Message Field to an unordered_set
 	// -------------------
 	std::unordered_set <std::string> VehicleMessageField_set;
-	printf("Vehicle message selected:");
-	for (size_t i = 0; i < SimulationSetup.VehicleMessageField.size(); i++) {
-		VehicleMessageField_set.insert(SimulationSetup.VehicleMessageField[i]);
-		printf("\t%s", SimulationSetup.VehicleMessageField[i].c_str());
+	if (!SuppressDefaultMessages) {
+		printf("Vehicle message selected:");
+		for (size_t i = 0; i < SimulationSetup.VehicleMessageField.size(); i++) {
+			VehicleMessageField_set.insert(SimulationSetup.VehicleMessageField[i]);
+			printf("\t%s", SimulationSetup.VehicleMessageField[i].c_str());
+		}
+		printf("\n\n");
+	}
+	else {
+		for (size_t i = 0; i < SimulationSetup.VehicleMessageField.size(); i++) {
+			VehicleMessageField_set.insert(SimulationSetup.VehicleMessageField[i]);
+		}
 	}
 
 	// -------------------
 	//  SANITY CHECK: Vehicle Message Field
 	// -------------------
 	// currently, mandate messages are id, speed, one of speedDesired or accelerationDesired
-	printf("\n\n");
 	if (VehicleMessageField_set.find("id") == VehicleMessageField_set.end()) {
 		printf("ERROR: Must select 'id' as part of VehicleMessageField\n");
 		exit(-1);
@@ -231,7 +238,7 @@ int ConfigHelper::getConfig(string configName) {
 		XilSetup.AsServer = parserFlag(node, "AsServer");
 	}else{
 		XilSetup.AsServer = false;
-		printf("\nXil not specified as server or client! Will set Xil as client!\n");
+		if (!SuppressDefaultMessages) printf("\nXil not specified as server or client! Will set Xil as client!\n");
 	}
 
 	parserSubscription(node, "VehicleSubscription", XilSetup.VehicleSubscription);
@@ -398,7 +405,7 @@ int ConfigHelper::getConfig(string configName) {
 	}
 	else {
 		SumoSetup.ExecutionOrder = 1;
-		printf("\nSumo Execution Order not specified! Will use 1 as default!\n");
+		if (!SuppressDefaultMessages) printf("\nSumo Execution Order not specified! Will use 1 as default!\n");
 	}
 	if (node["EnableAutoLaunch"]) {
 		SumoSetup.EnableAutoLaunch = parserFlag(node, "EnableAutoLaunch");
@@ -446,7 +453,7 @@ int ConfigHelper::getConfig(string configName) {
 	}
 	else {
 		CarlaSetup.EnableVerboseLog = false;
-		printf("\nWill disable verbose log as default!\n");
+		if (!SuppressDefaultMessages) printf("\nWill disable verbose log as default!\n");
 	}
 	if (node["EnableCosimulation"]) {
 		CarlaSetup.EnableCosimulation = parserFlag(node, "EnableCosimulation");
@@ -479,7 +486,7 @@ int ConfigHelper::getConfig(string configName) {
 	}
 	else {
 		CarlaSetup.CenteredViewId = "ego";
-		printf("\nCentered View Id not specified! Will use ego as default!\n");
+		if (!SuppressDefaultMessages) printf("\nCentered View Id not specified! Will use ego as default!\n");
 	}
 
 	if (node["CarlaServerIP"]) {
@@ -534,7 +541,7 @@ int ConfigHelper::getConfig(string configName) {
 	}
 	else {
 		CarlaSetup.CarlaMapName = "Town01";
-		printf("\nCarla Map not specified! Will use Town01 as default!\n");
+		if (!SuppressDefaultMessages) printf("\nCarla Map not specified! Will use Town01 as default!\n");
 	}
 	if (node["TrafficRefreshRate"]) {
 		CarlaSetup.TrafficRefreshRate = parserDouble(node, "TrafficRefreshRate");
@@ -549,7 +556,7 @@ int ConfigHelper::getConfig(string configName) {
 	}
 	else {
 		CarlaSetup.InterestedIds = {"ego"};
-		printf("\nDefault to track actor with id ego\n");
+		if (!SuppressDefaultMessages) printf("\nDefault to track actor with id ego\n");
 	}
 
 	return 0;

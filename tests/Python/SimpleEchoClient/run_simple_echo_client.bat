@@ -22,7 +22,7 @@ timeout /t 2 /nobreak
 
 :skip_sumo
 echo Starting TrafficLayer.exe...
-start cmd /c %RealSimPath%\TrafficLayer\x64\Debug\TrafficLayer.exe -f %configFilename%
+start cmd /c %RealSimPath%\TrafficLayer\x64\Release\TrafficLayer.exe -f %configFilename%
 
 echo Waiting for TrafficLayer to initialize...
 timeout /t 3 /nobreak
@@ -30,11 +30,11 @@ timeout /t 3 /nobreak
 echo Starting Python Echo Client...
 REM Initialize conda if not already initialized
 if exist "%USERPROFILE%\miniconda3\Scripts\activate.bat" (
-    call %USERPROFILE%\miniconda3\Scripts\activate.bat realsim
+    call %USERPROFILE%\miniconda3\Scripts\activate.bat realsim_dev
 ) else if exist "%USERPROFILE%\anaconda3\Scripts\activate.bat" (
-    call %USERPROFILE%\anaconda3\Scripts\activate.bat realsim
+    call %USERPROFILE%\anaconda3\Scripts\activate.bat realsim_dev
 ) else (
-    call conda activate realsim
+    call conda activate realsim_dev
 )
 python %TestPath%\simple_echo_client.py
 

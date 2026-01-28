@@ -196,3 +196,7 @@ TODO.md
 
 # Active debug configuration (per-worktree, for VS debugging)
 /TrafficLayer/.active_config
+
+**/nul
+
+.claude/
