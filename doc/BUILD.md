@@ -48,6 +48,10 @@ The Real-Sim FIXS build system uses a modular script-based architecture that aut
    - Required for building all C++ components
    - Must have C++ desktop development workload installed
    - MSBuild must be in PATH (automatically detected by build scripts)
+   - **C++ Standard**: The project uses mixed C++ standards for compatibility:
+     - **TrafficLayer**: C++17 (uses `std::filesystem` for runtime library discovery)
+     - **All other components**: C++14 (VirtualEnvironment, DriverModel, SC_DLL, CarMaker projects)
+     - C++14 is required for compatibility with CarMaker SDK and dSPACE toolchain
 
 2. **CMake** (version 3.10 or higher)
    - Required for building external libraries (yaml-cpp, libevent)
