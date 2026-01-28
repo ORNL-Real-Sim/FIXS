@@ -11,16 +11,19 @@ Real-Sim Documentation
 
    getting-started
    installation
-   usage
-   faq
-   about
    setupGuide
    ConfigSetup
-   contact
-   acknowledgements
+   usage
+   faq
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Simulator Guides
+
    VISSIMdoc
    SUMOdoc
    CarMakerDoc
+   CARLAdoc
 
 .. toctree::
    :maxdepth: 3
@@ -35,6 +38,21 @@ Real-Sim Documentation
 
    api/index
    changelog
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Development
+
+   DEVELOPER_GUIDE
+   ContributionGuide
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Project Info
+
+   about
+   contact
+   acknowledgements
 
 Indices and tables
 ------------------
