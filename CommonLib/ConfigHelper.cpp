@@ -1,7 +1,40 @@
 #include "ConfigHelper.h"
-#include <filesystem>
+#include <windows.h>
+#include <shlwapi.h>
+#pragma comment(lib, "shlwapi.lib")
 
 using namespace std;
+
+// Helper functions for path operations (C++14 compatible replacement for std::filesystem)
+namespace {
+	std::string getParentPath(const std::string& path) {
+		size_t pos = path.find_last_of("\\/");
+		return (pos != std::string::npos) ? path.substr(0, pos) : "";
+	}
+
+	std::string getCurrentDirectory() {
+		char buffer[MAX_PATH];
+		GetCurrentDirectoryA(MAX_PATH, buffer);
+		return std::string(buffer);
+	}
+
+	bool isRelativePath(const std::string& path) {
+		if (path.empty()) return true;
+		// Check for drive letter (e.g., "C:")
+		if (path.length() > 1 && path[1] == ':') return false;
+		// Check for UNC path or root path
+		if (path[0] == '\\' || path[0] == '/') return false;
+		return true;
+	}
+
+	std::string combinePaths(const std::string& base, const std::string& relative) {
+		char combined[MAX_PATH];
+		PathCombineA(combined, base.c_str(), relative.c_str());
+		char normalized[MAX_PATH];
+		PathCanonicalizeA(normalized, combined);
+		return std::string(normalized);
+	}
+}
 
 
 // Value-Defintions of the different String values
@@ -91,10 +124,9 @@ int ConfigHelper::getConfig(string configName) {
 #endif
 
 	// Store the config file's directory for resolving relative paths
-	std::filesystem::path configPath(configName);
-	std::filesystem::path configDir = configPath.parent_path();
+	std::string configDir = getParentPath(configName);
 	if (configDir.empty()) {
-		configDir = std::filesystem::current_path();
+		configDir = getCurrentDirectory();
 	}
 
 	YAML::Node node;
@@ -417,14 +449,8 @@ int ConfigHelper::getConfig(string configName) {
 		SumoSetup.SumoConfigFile = parserString(node, "SumoConfigFile");
 
 		// Convert relative path to absolute path (relative to config file directory)
-		if (!SumoSetup.SumoConfigFile.empty()) {
-			std::filesystem::path sumoPath(SumoSetup.SumoConfigFile);
-			if (sumoPath.is_relative()) {
-				sumoPath = configDir / sumoPath;
-				// Normalize to remove redundant . and ..
-				sumoPath = sumoPath.lexically_normal();
-				SumoSetup.SumoConfigFile = sumoPath.string();
-			}
+		if (!SumoSetup.SumoConfigFile.empty() && isRelativePath(SumoSetup.SumoConfigFile)) {
+			SumoSetup.SumoConfigFile = combinePaths(configDir, SumoSetup.SumoConfigFile);
 		}
 	}
 	else {

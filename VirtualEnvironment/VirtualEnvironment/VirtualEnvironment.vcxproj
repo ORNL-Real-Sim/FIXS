@@ -135,7 +135,7 @@
       <ConformanceMode>true</ConformanceMode>
       <AdditionalIncludeDirectories>C:\IPG\carmaker\win64-13.1.3\include\Car;C:\IPG\carmaker\win64-13.1.3\include;..\..\CommonLib;..\..\CommonLib\libsumo;..\..\CommonLib\yaml-cpp\include;..\..\CommonLib\yaml-cpp\build\include</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
-      <LanguageStandard>stdcpp17</LanguageStandard>
+      <LanguageStandard>stdcpp14</LanguageStandard>
     </ClCompile>
     <Link>
       <SubSystem>
@@ -161,7 +161,7 @@
       <AdditionalIncludeDirectories>C:\IPG\carmaker\win64-13.1.3\include\Car;C:\IPG\carmaker\win64-13.1.3\include;..\..\CommonLib;..\..\CommonLib\libsumo;..\..\CommonLib\yaml-cpp\include;..\..\CommonLib\yaml-cpp\build\include</AdditionalIncludeDirectories>
       <WholeProgramOptimization>false</WholeProgramOptimization>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
-      <LanguageStandard>stdcpp17</LanguageStandard>
+      <LanguageStandard>stdcpp14</LanguageStandard>
     </ClCompile>
     <Link>
       <SubSystem>
