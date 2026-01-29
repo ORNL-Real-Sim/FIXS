@@ -96,7 +96,8 @@ class SumoEnvMultiAgent:
         msg_helper.set_vehicle_message_field(config_helper.simulation_setup['VehicleMessageField'])
         self.socket_helper = SocketHelper(config_helper=config_helper, msg_helper=msg_helper)
         
-    
+        self._last_print_time = -1e9
+
         self.sumo_ip = sumo_ip
         self.sumo_port = sumo_port
 
@@ -133,7 +134,7 @@ class SumoEnvMultiAgent:
         xmlTree.write(os.path.join(output_dir, self.sumo_route))
 
     def change_config_directory(self):
-        file_name = f'{int(self.penetration_rate*100)}%_{int(1/self.step_length)}Hz' + f'{"_with" if self.enable_vehicle_dynamics else "_without"}_vehDyn_E_Mache_Test0119'
+        file_name = f'{int(self.penetration_rate*100)}%_{int(1/self.step_length)}Hz' + f'{"_with" if self.enable_vehicle_dynamics else "_without"}_vehDyn_test0128'
         output_dir = os.path.join(self.sumo_folder, self.working_directory, file_name)
 
         # Making Results Directory
@@ -257,8 +258,6 @@ class SumoEnvMultiAgent:
 
         is_internal = (road_id.startswith(":"))  # SUMO junction/internal edge
 
-        # --- 1) travel_direction：junction 且 link_next 为空时，沿用上一帧方向 ---
-        # 需要一个 dict 存每辆车上一帧的方向
         if not hasattr(self, "prev_travel_dir"):
             self.prev_travel_dir = {}
         prev_dir = self.prev_travel_dir.get(veh_id, "NSB")
@@ -305,7 +304,7 @@ class SumoEnvMultiAgent:
                 # has_next_tls = len(next_tls) >= 1
 
 
-                if next_tls in self.tl_ids:
+                if next_tls in self.tl_ids and (link_next in self.wb or link_next in self.eb):
                     control = 'True'
 
                 elif is_next_last:
@@ -364,33 +363,7 @@ class SumoEnvMultiAgent:
 
         self._sockets_initialized = True
     
-    # def setup_connections(self):
-        
-    #     self.socket2FIXS = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    #     self.socket2FIXS.connect((self.traffic_layer_ip, int(self.traffic_layer_port)))
-    #     print('Connected to FIXS server')
 
-    #     if self.enable_vehicle_dynamics:
-    #         socket2simulink = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-
-    #         # Enable socket reuse to avoid "Address already in use" errors
-    #         socket2simulink.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-
-    #         print('Waiting for vehicle dynamics client to connect...')
-    #         # bind the socket to the port and listen for incoming connections
-    #         print(f'Binding to ip {self.vehicle_dynamics_ip} port {self.vehicle_dynamics_port}')
-    #         socket2simulink.bind((self.vehicle_dynamics_ip, int(self.vehicle_dynamics_port)))
-    #         socket2simulink.listen(1)
-    #         # if a connection is established, accept it
-    #         self.socket2simulink, _ = socket2simulink.accept()
-
-    #         # Configure the accepted connection with similar options
-    #         self.socket2simulink.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-    #         self.socket2simulink.settimeout(30.0)
-    #         linger_struct = struct.pack('ii', 1, 5)
-    #         self.socket2simulink.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, linger_struct)
-
-    #         print('Connected by vehicle dynamics client')
             
     # def run_sumo(self, num_clients, gui=False):
     #     # start sumo-gui -c .\chattCavMpr.sumocfg --remote-port 1337 --step-length 1 --netstate-dump chatt.xml --netstate-dump.precision 10 --num-clients 2  --begin 28800 --end 33000
@@ -462,6 +435,9 @@ class SumoEnvMultiAgent:
                 # self.cav_object_dict = {key: value for key, value in self.cav_object_dict.items() if key in (list_cav_back_to_sumo + list_cav_control)}      
         except Exception as e:
             print(f'Error occurred: {e}')
+            import traceback
+            traceback.print_exc()
+            raise    
         finally:
             self.close()
 
@@ -475,10 +451,15 @@ class SumoEnvMultiAgent:
         :param vehicle_dynamics: apply vehicle dynamics
         :param eco_driving: apply eco driving
         :return:
-        """
+        """ 
+
+
         sim_state, sim_time = self.socket_helper.recv_data(self.socket2FIXS)
 
-        print('FIXS simulation time: ', sim_time)
+        if sim_time - self._last_print_time >= 10.0:
+            print(f'FIXS simulation time: {sim_time}')
+            self._last_print_time = sim_time
+
 
 
         # print("Received vehicle data (full info):")
@@ -745,7 +726,7 @@ if __name__ == "__main__":
     parser.add_argument("--vehicleDynamicsPort", type=str, help="Specify port of vehicle dynamics", default=420)
 
     # the following parameters are for CAV settings
-    parser.add_argument("--penetrationRate", type=float, help="the market penetration rate of cav", default=0.1)
+    parser.add_argument("--penetrationRate", type=float, help="the market penetration rate of cav", default=0.5)
     parser.add_argument("--stepLength", type=float, help="the step length of the simulation", default=0.1)
     parser.add_argument("--ecoDriving", action="store_true", help="Use the eco driving controller", default=True)
     
@@ -811,7 +792,7 @@ if __name__ == "__main__":
 
     senv.run_sumo(num_clients=1, seed=101, gui=True)
     time.sleep(2)
-    run_traffic_layer('TrafficLayer0122.exe', os.environ["CONFIG_PATH"])
+    run_traffic_layer('TrafficLayer0129.exe', os.environ["CONFIG_PATH"])
     time.sleep(2)
     senv.setup_connections()
     print('Starting subscription')

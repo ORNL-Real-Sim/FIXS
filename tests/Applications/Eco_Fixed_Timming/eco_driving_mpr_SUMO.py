@@ -131,6 +131,7 @@ class SumoEnvMultiAgent:
         shutil.copy(os.path.join(self.sumo_folder, self.sumo_net), output_dir)
         shutil.copy(os.path.join(self.sumo_folder, "updated_signal.xml"), output_dir)
         shutil.copy(os.path.join(self.sumo_folder, "Edge.add.xml"), output_dir)
+        shutil.copy(os.path.join(self.sumo_folder, "sumoSignalConfig_26.csv"), output_dir)
         # MPR
         self.change_cav_mpr(output_dir)
 

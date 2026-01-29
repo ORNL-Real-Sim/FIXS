@@ -477,9 +477,9 @@ int TrafficHelper::addEgoVehicle(double simTime) {
 		traci.vehicle.setSpeedMode(idStr, speedMode);
 
 
-		// double maxAcc = 2.0;  
-		// traci.vehicletype.setAccel(idStr, maxAcc);
-		// traci.vehicletype.setDecel(idStr, maxAcc);
+		double maxAcc = 2.0;  
+		traci.vehicletype.setAccel(typeStr, maxAcc);
+		traci.vehicletype.setDecel(typeStr, maxAcc);
 
 		return 1;
 	}

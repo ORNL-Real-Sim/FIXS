@@ -2,6 +2,7 @@
 #include <fstream>
 #include <unordered_map>
 #include <unordered_set>
+#include <conio.h>
 
 
 //#include "TraCIAPI.h"
@@ -593,10 +594,12 @@ int main(int argc, char* argv[]) {
 			int ret = Traffic_c.addEgoVehicle(simTime);
 			egoInsertedByTrafficLayer = true;
 			printf("[main] tried to insert ego at simTime = %.3f, ret = %d\n", simTime, ret);
+			printf("Ego inserted at time %f\n", simTime);
+			fflush(stdout);
 		}
 
-		
 
+		
 
 		// run sumo unitial initial time finished
 		//if ((Config_c.SimulationSetup.SimulationMode == 4 || Config_c.SimulationSetup.SimulationMode == 5) && !isInitialTimeFinished) {
@@ -870,8 +873,14 @@ int main(int argc, char* argv[]) {
 					// save received message into Msg_c recv storages
 					if (Sock_c.recvData(actualClientSock[iC], &simStateRecv, &simTimeRecv, MsgClient_c) < 0) {
 						if (WSAGetLastError() != WSAEINTR && WSAGetLastError() != WSAEFAULT) {
-							printf("ERROR: receive from client fails\n");
+							//printf("ERROR: receive from client fails\n");
+							int err = WSAGetLastError();
+							printf("ERROR: receive from client fails, WSA=%d\n", err);
+
 						}
+						printf("Paused. Press any key...\n");
+						fflush(stdout);
+						_getch();
 						Sock_c.socketShutdown();
 						exit(-1);
 					};
