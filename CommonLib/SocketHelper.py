@@ -242,29 +242,8 @@ class SocketHelper:
     #                                                                                                vehicle_byte_index, 
     #                                                                                                vehicle_data)
     #         total_msg_size = total_msg_size + vehicle_msg_size
-
-    #                     # ✅ 关键检查：车辆buffer是否溢出
-    #         if vehicle_byte_index > len(vehicle_data_buffer):
-    #             raise RuntimeError(
-    #                 f"vehicle_data_buffer overflow: vehicle_byte_index={vehicle_byte_index} > {len(vehicle_data_buffer)} "
-    #                 f"(nVeh={len(self.vehicle_data_send_list)})"
-    #             )
-
-    #         # ✅ 关键检查：总包大小是否超出 data_buffer
-    #         if total_msg_size > len(data_buffer):
-    #             raise RuntimeError(
-    #                 f"data_buffer overflow: total_msg_size={total_msg_size} > {len(data_buffer)} "
-    #                 f"(vehicle_byte_index={vehicle_byte_index}, nVeh={len(self.vehicle_data_send_list)})"
-    #         )
         
     #     data_buffer, byte_index = self.msg_helper.pack_msg_header(data_buffer, simState, simTime, total_msg_size)
-
-    #     # ✅ 再检查一次 copy 是否会越界
-    #     if byte_index + vehicle_byte_index > len(data_buffer):
-    #         raise RuntimeError(
-    #             f"data_buffer overflow on copy: {byte_index}+{vehicle_byte_index} > {len(data_buffer)}"
-    #         )
-
     #     data_buffer[byte_index:byte_index+vehicle_byte_index] = vehicle_data_buffer[0:vehicle_byte_index]
     #     byte_index = byte_index + vehicle_byte_index
 
@@ -272,27 +251,59 @@ class SocketHelper:
     #     sock.sendall(data_buffer[0:byte_index])
 
 
+    # def sendData(self, simState, simTime, sock):
+    #     vehicle_byte_index = 0
+    #     vehicle_data_buffer = bytearray(524288)
+
+    #     for vehicle_data in self.vehicle_data_send_list:
+    #         vehicle_data, vehicle_msg_size, vehicle_byte_index = self.msg_helper.pack_veh_data(
+    #             vehicle_data_buffer, vehicle_byte_index, vehicle_data
+    #         )
+
+    #         if vehicle_byte_index > len(vehicle_data_buffer):
+    #             raise RuntimeError(...)
+
+
+    #     total_msg_size = self.msg_header_size + vehicle_byte_index
+
+    #     data_buffer = bytearray(total_msg_size)
+    #     data_buffer, byte_index = self.msg_helper.pack_msg_header(data_buffer, simState, simTime, total_msg_size)
+
+
+    #     assert byte_index == self.msg_header_size
+
+    #     data_buffer[byte_index:byte_index + vehicle_byte_index] = vehicle_data_buffer[:vehicle_byte_index]
+    #     sock.sendall(data_buffer)
+
     def sendData(self, simState, simTime, sock):
-        vehicle_byte_index = 0
-        vehicle_data_buffer = bytearray(65536)
 
-        for vehicle_data in self.vehicle_data_send_list:
-            vehicle_data, vehicle_msg_size, vehicle_byte_index = self.msg_helper.pack_veh_data(
-                vehicle_data_buffer, vehicle_byte_index, vehicle_data
-            )
+        vehicle_payload = bytearray()
 
-            if vehicle_byte_index > len(vehicle_data_buffer):
-                raise RuntimeError(...)
+        for veh in self.vehicle_data_send_list:
+
+            n = self.msg_helper.calc_veh_msg_size_bytes(veh)
+
+            tmp = bytearray(n)
+            tmp, msg_size_or_payload_size, used = self.msg_helper.pack_veh_data(tmp, 0, veh)
 
 
-        total_msg_size = self.msg_header_size + vehicle_byte_index
+            if used != n:
+                raise RuntimeError(f"pack_veh_data size mismatch: expected {n}, got used={used}")
+
+            vehicle_payload.extend(tmp[:used])
+
+
+        total_msg_size = self.msg_header_size + len(vehicle_payload)
 
         data_buffer = bytearray(total_msg_size)
-        data_buffer, byte_index = self.msg_helper.pack_msg_header(data_buffer, simState, simTime, total_msg_size)
+        data_buffer, hdr_used = self.msg_helper.pack_msg_header(data_buffer, simState, simTime, total_msg_size)
 
 
-        assert byte_index == self.msg_header_size
+        if hdr_used != self.msg_header_size:
+            raise RuntimeError(f"msg_header_size mismatch: expected {self.msg_header_size}, got {hdr_used}")
 
-        data_buffer[byte_index:byte_index + vehicle_byte_index] = vehicle_data_buffer[:vehicle_byte_index]
+        data_buffer[hdr_used:hdr_used + len(vehicle_payload)] = vehicle_payload
+
         sock.sendall(data_buffer)
+
 

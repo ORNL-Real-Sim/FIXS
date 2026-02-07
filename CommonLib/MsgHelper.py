@@ -218,6 +218,50 @@ class MsgHelper:
             veh_data.height, byte_index = MsgHelper.unpack_float(byte_data, byte_index)
             
         return  veh_data
+    
+
+    def calc_veh_msg_size_bytes(self, veh_data: VehData) -> int:
+        """
+        calculate the Msgsize of single vehicle information
+        """
+        msg_size = (
+            round(self.vehicle_msg_field_valid.get('id', 0) * (1 + len(veh_data.id))
+                + self.vehicle_msg_field_valid.get('type', 0) * (1 + len(veh_data.type))
+                + self.vehicle_msg_field_valid.get('vehicleClass', 0) * (1 + len(veh_data.vehicleClass))
+                + self.vehicle_msg_field_valid.get('speed', 0) * 4
+                + self.vehicle_msg_field_valid.get('acceleration', 0) * 4
+                + self.vehicle_msg_field_valid.get('positionX', 0) * 4
+                + self.vehicle_msg_field_valid.get('positionY', 0) * 4
+                + self.vehicle_msg_field_valid.get('positionZ', 0) * 4
+                + self.vehicle_msg_field_valid.get('heading', 0) * 4
+                + self.vehicle_msg_field_valid.get('color', 0) * 4
+                + self.vehicle_msg_field_valid.get('linkId', 0) * (1 + len(veh_data.linkId))
+                + self.vehicle_msg_field_valid.get('laneId', 0) * 4
+                + self.vehicle_msg_field_valid.get('distanceTravel', 0) * 4
+                + self.vehicle_msg_field_valid.get('speedDesired', 0) * 4
+                + self.vehicle_msg_field_valid.get('accelerationDesired', 0) * 4
+                + self.vehicle_msg_field_valid.get('hasPrecedingVehicle', 0) * 1
+                + self.vehicle_msg_field_valid.get('precedingVehicleId', 0) * (1 + len(veh_data.precedingVehicleId))
+                + self.vehicle_msg_field_valid.get('precedingVehicleDistance', 0) * 4
+                + self.vehicle_msg_field_valid.get('precedingVehicleSpeed', 0) * 4
+                + self.vehicle_msg_field_valid.get('signalLightId', 0) * (1 + len(veh_data.signalLightId))
+                + self.vehicle_msg_field_valid.get('signalLightHeadId', 0) * 4
+                + self.vehicle_msg_field_valid.get('signalLightDistance', 0) * 4
+                + self.vehicle_msg_field_valid.get('signalLightColor', 0) * 1
+                + self.vehicle_msg_field_valid.get('speedLimit', 0) * 4
+                + self.vehicle_msg_field_valid.get('speedLimitNext', 0) * 4
+                + self.vehicle_msg_field_valid.get('speedLimitChangeDistance', 0) * 4
+                + self.vehicle_msg_field_valid.get('linkIdNext', 0) * (1 + len(veh_data.linkIdNext))
+                + self.vehicle_msg_field_valid.get('grade', 0) * 4
+                + self.vehicle_msg_field_valid.get('activeLaneChange', 0) * 1
+                + self.vehicle_msg_field_valid.get('length', 0) * 4
+                + self.vehicle_msg_field_valid.get('width', 0) * 4
+                + self.vehicle_msg_field_valid.get('height', 0) * 4)
+        )
+        veh_msg_size = round(msg_size) + self.msg_each_header_size  # each-header=3 bytes
+        return int(veh_msg_size)
+
+
 
     def pack_veh_data(self, byte_data: bytearray, byte_index, veh_data: VehData):
         # Calculate nMsgSize based on vehicle_msg_field_valid flags and veh_data field lengths
@@ -454,14 +498,13 @@ class MsgHelper:
 
         state = state_bytes.decode("ascii", errors="ignore")
 
-        # 你 Python 的 TrafficLightData 要求 id/name/state 都是字符串：
+
         tls = TrafficLightData(
-            id=str(tls_id_u16),   # 或者 f"{name}_{tls_id_u16}"
+            id=str(tls_id_u16),   
             name=name,
             state=state
         )
 
-        # 可选：保存数值 id 方便你后续做映射
         try:
             tls.id_u16 = tls_id_u16
             tls.state_len = state_len
