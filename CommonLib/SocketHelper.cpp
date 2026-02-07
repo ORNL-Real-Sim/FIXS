@@ -1014,7 +1014,93 @@ int SocketHelper::recvData(int sock, int* simState, float* simTime, MsgHelper& M
 }
 
 
+int SocketHelper::sendData(int sock, int iClient, float simTimeSend, uint8_t simStateSend, MsgHelper Msg_c)
+{
 
+	std::vector<char> tempVeh;
+	std::vector<char> tempTls;
+	std::vector<char> tempDet;
+
+	tempVeh.reserve(64 * 1024);   
+	tempTls.reserve(8 * 1024);
+	tempDet.reserve(8 * 1024);
+
+	int tempVehDataByte = 0;
+	int tempTlsDataByte = 0;
+	int tempDetDataByte = 0;
+
+	// Vehicle
+	if (Msg_c.VehDataSend_um.size() > 0) {
+		for (size_t iV = 0; iV < Msg_c.VehDataSend_um[sock].size(); iV++) {
+
+			const int kPerVehReserve = 1024;
+
+			if ((int)tempVeh.size() < tempVehDataByte + kPerVehReserve) {
+				tempVeh.resize(tempVehDataByte + kPerVehReserve);
+			}
+			Msg_c.packVehData(Msg_c.VehDataSend_um[sock][iV], tempVeh.data(), &tempVehDataByte);
+		}
+	}
+
+	// Tls
+	if (Msg_c.TlsDataSend_um.size() > 0) {
+		for (size_t iT = 0; iT < Msg_c.TlsDataSend_um[sock].size(); iT++) {
+			const int kPerTlsReserve = 256;
+			if ((int)tempTls.size() < tempTlsDataByte + kPerTlsReserve) {
+				tempTls.resize(tempTlsDataByte + kPerTlsReserve);
+			}
+			Msg_c.packTrafficLightData(Msg_c.TlsDataSend_um[sock][iT], tempTls.data(), &tempTlsDataByte);
+		}
+	}
+
+	// Detector
+	if (Msg_c.DetDataSend_um.size() > 0) {
+		for (size_t iD = 0; iD < Msg_c.DetDataSend_um[sock].size(); iD++) {
+			const int kPerDetReserve = 256;
+			if ((int)tempDet.size() < tempDetDataByte + kPerDetReserve) {
+				tempDet.resize(tempDetDataByte + kPerDetReserve);
+			}
+			Msg_c.packDetectorData(Msg_c.DetDataSend_um[sock][iD], tempDet.data(), &tempDetDataByte);
+		}
+	}
+
+	// Total
+	const int totalSize = MSG_HEADER_SIZE + tempVehDataByte + tempTlsDataByte + tempDetDataByte;
+
+	std::vector<char> sendBuffer(totalSize);
+	int iByte = 0;
+	Msg_c.packHeader(simStateSend, simTimeSend, totalSize, sendBuffer.data(), &iByte);
+
+	int offset = MSG_HEADER_SIZE;
+	if (tempVehDataByte > 0) {
+		memcpy(sendBuffer.data() + offset, tempVeh.data(), tempVehDataByte);
+		offset += tempVehDataByte;
+	}
+	if (tempTlsDataByte > 0) {
+		memcpy(sendBuffer.data() + offset, tempTls.data(), tempTlsDataByte);
+		offset += tempTlsDataByte;
+	}
+	if (tempDetDataByte > 0) {
+		memcpy(sendBuffer.data() + offset, tempDet.data(), tempDetDataByte);
+		offset += tempDetDataByte;
+	}
+
+	// sendAll
+	if (sendAll(sock, sendBuffer.data(), totalSize) < 0) {
+#ifdef WIN32
+		fprintf(stderr, "%s: %d\n", "send() failed", WSAGetLastError());
+#else
+		fprintf(stderr, "%s:\n", "send() failed");
+#endif
+		return -1;
+	}
+
+	return 0;
+}
+
+
+
+/*
 int SocketHelper::sendData(int sock, int iClient, float simTimeSend, uint8_t simStateSend, MsgHelper Msg_c) {
 	// for each socket, send only the message relevant to that socket
 
@@ -1022,7 +1108,7 @@ int SocketHelper::sendData(int sock, int iClient, float simTimeSend, uint8_t sim
 
 	// initialize send data buffer
 	//char tempVehDataBuffer[8096];
-	char* tempVehDataBuffer = new char[65536];
+	char* tempVehDataBuffer = new char[524288];
 	int tempVehDataByte = 0;
 
 	char* tempTlsDataBuffer = new char[8096];
@@ -1032,7 +1118,7 @@ int SocketHelper::sendData(int sock, int iClient, float simTimeSend, uint8_t sim
 	int tempDetDataByte = 0;
 
 	int sendMsgSize = 0;
-	char* sendBuffer = new char[81728];
+	char* sendBuffer = new char[540480];
 
 	// Pack vehicle and detector data
 	if (Msg_c.VehDataSend_um.size() > 0) {
@@ -1092,3 +1178,4 @@ int SocketHelper::sendData(int sock, int iClient, float simTimeSend, uint8_t sim
 	return 0;
 
 }
+*/
