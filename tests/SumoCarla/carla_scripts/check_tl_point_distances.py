@@ -103,6 +103,9 @@ def main() -> int:
     client.set_timeout(args.carla_timeout)
     world = client.get_world()
 
+    print(client.get_available_maps())
+    world = client.load_world("Town01")
+
     actors = world.get_actors().filter("traffic.traffic_light*")
     if len(actors) == 0:
         print("ERROR: No CARLA traffic light actors found. Is the correct map loaded?")
