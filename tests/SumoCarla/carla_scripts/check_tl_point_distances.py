@@ -106,6 +106,11 @@ def main() -> int:
     print(client.get_available_maps())
     world = client.load_world("Town01")
 
+    world = client.get_world()
+    print("Map:", world.get_map().name)
+    tls = world.get_actors().filter("traffic.traffic_light*")
+    print("TrafficLight actors:", len(tls))
+
     actors = world.get_actors().filter("traffic.traffic_light*")
     if len(actors) == 0:
         print("ERROR: No CARLA traffic light actors found. Is the correct map loaded?")
