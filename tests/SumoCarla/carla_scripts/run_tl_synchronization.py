@@ -23,6 +23,7 @@ class tlSynchronization(object):
 
         self.sumo = sumo_simulation
         self.carla = carla_simulation
+        self.tls_manager = tls_manager
 
         settings = self.carla.world.get_settings()
         settings.synchronous_mode = True
