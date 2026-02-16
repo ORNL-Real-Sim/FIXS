@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!-- generated on 2025-10-14 23:12:50 by Eclipse SUMO GUI Version 1.21.0
+<sumoConfiguration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/sumoConfiguration.xsd">
+
+    <input>
+        <net-file value="D:\ORNL\OneDrive - Oak Ridge National Laboratory\ORNL\Project\RealTwin_RealSim_Deployment\Data\MLK\mlk_xil\SUMO Files\MLK_final_elevation_20251009.net.xml"/>
+        <route-files value="D:\ORNL\OneDrive - Oak Ridge National Laboratory\ORNL\Project\RealTwin_RealSim_Deployment\Data\MLK\mlk_xil\SUMO Files\routes_8_9AM_v3.rou.xml"/>
+    </input>
+
+    <output>
+        <fcd-output value="D:\ORNL\OneDrive - Oak Ridge National Laboratory\ORNL\Project\RealTwin_RealSim_Deployment\Data\MLK\mlk_xil\SUMO Files\fcd.xml"/>
+        <summary-output value="D:\ORNL\OneDrive - Oak Ridge National Laboratory\ORNL\Project\RealTwin_RealSim_Deployment\Data\MLK\mlk_xil\SUMO Files\simulation_summary.xml"/>
+        <tripinfo-output value="D:\ORNL\OneDrive - Oak Ridge National Laboratory\ORNL\Project\RealTwin_RealSim_Deployment\Data\MLK\mlk_xil\SUMO Files\tripinfo.xml"/>
+    </output>
+
+    <time>
+        <begin value="28800"/>
+        <end value="32400"/>
+    </time>
+
+    <processing>
+        <ignore-route-errors value="true"/>
+        <time-to-teleport value="30"/>
+    </processing>
+
+    <report>
+        <verbose value="true"/>
+        <log value="D:\ORNL\OneDrive - Oak Ridge National Laboratory\ORNL\Project\RealTwin_RealSim_Deployment\Data\MLK\mlk_xil\SUMO Files\simulation.log"/>
+        <no-step-log value="true"/>
+    </report>
+
+</sumoConfiguration>
+-->
+
+<summary xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/summary_file.xsd">
+</summary>
