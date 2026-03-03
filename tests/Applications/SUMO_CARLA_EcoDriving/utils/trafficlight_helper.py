@@ -12,9 +12,31 @@
 # ==================================================================================================
 
 import collections
-import carla  # pylint: disable=import-error
 import math
 
+try:
+    import carla  # pylint: disable=import-error
+except ModuleNotFoundError:
+    from dataclasses import dataclass
+
+    @dataclass
+    class _Location:
+        x: float
+        y: float
+        z: float
+
+    @dataclass
+    class _Rotation:
+        pitch: float = 0.0
+        yaw: float = 0.0
+        roll: float = 0.0
+
+    class _CarlaShim:
+        Location = _Location
+        Rotation = _Rotation
+
+    carla = _CarlaShim()
+    
 # Conditional import for unreal module
 try:
     import unreal
