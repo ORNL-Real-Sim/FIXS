@@ -1567,7 +1567,7 @@ void TrafficHelper::parserSumoSubscription(libsumo::TraCIResults VehDataSubscrib
 	//=================
 	// get preceding vehicle
 	//=================
-	pair<string, double> leaderIdNSpeed = traci.vehicle.getLeader(vehId, 1000);
+	pair<string, double> leaderIdNSpeed = traci.vehicle.getLeader(vehId, 200.0);
 	CurVehData.precedingVehicleId = get<0>(leaderIdNSpeed);
 	CurVehData.precedingVehicleDistance = get<1>(leaderIdNSpeed);
 	CurVehData.hasPrecedingVehicle = 0;
@@ -1584,7 +1584,8 @@ void TrafficHelper::parserSumoSubscription(libsumo::TraCIResults VehDataSubscrib
 
 	if (nextTlsList.size() > 0) {
 		CurVehData.signalLightId = nextTlsList[0].id;
-		CurVehData.signalLightHeadId = nextTlsList[0].tlIndex;
+		CurVehData.signalLightHeadId = nextTlsList.size();
+		//CurVehData.signalLightHeadId = nextTlsList[0].tlIndex;
 		CurVehData.signalLightDistance = nextTlsList[0].dist;
 		char tlsState = nextTlsList[0].state;
 		CurVehData.signalLightColor = 0;
@@ -1633,8 +1634,9 @@ void TrafficHelper::parserSumoSubscription(libsumo::TraCIResults VehDataSubscrib
 	//=================
 	// retrieve current speed limit
 	tempDoublePtr = static_pointer_cast<libsumo::TraCIDouble> (VehDataSubscribeTraciResults[libsumo::VAR_ALLOWED_SPEED]);
-	tempDoublePtr2 = static_pointer_cast<libsumo::TraCIDouble> (VehDataSubscribeTraciResults[libsumo::VAR_SPEED_FACTOR]);
-	CurVehData.speedLimit = tempDoublePtr->value / tempDoublePtr2->value;
+	//tempDoublePtr2 = static_pointer_cast<libsumo::TraCIDouble> (VehDataSubscribeTraciResults[libsumo::VAR_SPEED_FACTOR]);
+	//CurVehData.speedLimit = tempDoublePtr->value / tempDoublePtr2->value;
+	CurVehData.speedLimit = tempDoublePtr->value;
 
 	// retrieve next speed limit
 	vector <string> edgeRouteList = VehicleId2EdgeList_um[vehId];

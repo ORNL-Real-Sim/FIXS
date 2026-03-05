@@ -1,6 +1,6 @@
 % File: realsim_script.m
 
-settingDir = 'C:\Users\yusun\Projects\XIL_Oct\tests\Applications\Eco_Fixed_Timming\Experiments_Sumo\Shallowford_after_calibration_banleftturn_AdjustedFixedTime_V3\MPR\0%_10Hz_w0_vehDyn_28985\';
+settingDir = 'C:\Users\yusun\Projects\XIL_Oct\tests\Applications\Eco_Fixed_Timming\Experiments_Sumo\Shallowford_after_calibration_banleftturn_AdjustedFixedTime_V3\MPR_10\50%_10Hz_with_vehDyn_E_D\';
 
 VehicleOut = out;
 Time = VehicleOut.desired_speed.Time;
@@ -12,8 +12,8 @@ MPGe = VehicleOut.MPGe.Data;
 BatteryCurrent = VehicleOut.battery_current.Data;
 BatteryPower = VehicleOut.battery_power.Data;
 BatterySOC = VehicleOut.battery_soc.Data;
-MotorSpeed = VehicleOut.motor_speed.Data;
-MotorTorque = VehicleOut.motor_torque.Data;
+% MotorSpeed = VehicleOut.motor_speed.Data;
+% MotorTorque = VehicleOut.motor_torque.Data;
 % ActualAcc = VehicleOut.VehAcc.Data;
 
 

@@ -1,7 +1,7 @@
 % File: realsim_script.m
 
 
-simModelName = 'EV_longitude';% 
+simModelName = 'CAVE_MachE_Simulink_250904_Test';% 
 
 % Clear workspace and console
 disp(['Current folder: ', pwd]);
@@ -12,7 +12,7 @@ format compact;
 
 % Different Vehicle Model, if different, need change!!!!!
 
-addpath(genpath('.\\EV'))
+addpath(genpath('.\\Vehicles_24a'))
 configPath = 'C:\Users\yusun\Projects\XIL_Oct\tests\Applications\Eco_Fixed_Timming\Experiments_Sumo\Shallowford_after_calibration_banleftturn_AdjustedFixedTime_V3\config_Sumo.yaml';
 
 
@@ -56,7 +56,7 @@ load_system(simModelName)
 open model
 
 %Load and run the Simulink model
-uiopen('C:\Users\yusun\Projects\XIL_Oct\tests\Applications\Eco_Fixed_Timming\VehicleDynamicsModels\EV\main\System\EV_longitude.slx',1)
+uiopen('C:\Users\yusun\Projects\XIL_Oct\tests\Applications\Eco_Fixed_Timming\VehicleDynamicsModels\Vehicles_24a\Vehicles\VehicleProjects\Bolt_EV\System\CAVE_MachE_Simulink_250904_Test.slx',1)
 
 VehicleOut = sim(simModelName); % alternatively can use 'sim' command
 Time = VehicleOut.desired_speed.Time;
@@ -72,7 +72,7 @@ MotorSpeed = VehicleOut.motor_speed.Data;
 MotorTorque = VehicleOut.motor_torque.Data;
 % ActualAcc = VehicleOut.VehAcc.Data;
 % VehSpdRef = VehicleOut.VehSpdRef.Data;
-settingDir = 'C:\Users\yusun\Projects\XIL_Oct\tests\Applications\Eco_Fixed_Timming\Experiments_Sumo\Shallowford_after_calibration_banleftturn_AdjustedFixedTime_V3\MPR_7\50%_10Hz_with_vehDyn_E_D\';
+settingDir = 'C:\Users\yusun\Projects\XIL_Oct\tests\Applications\Eco_Fixed_Timming\Experiments_Sumo\Shallowford_after_calibration_banleftturn_AdjustedFixedTime_V3\MPR_10\0%_10Hz_with_vehDyn_SP_test0302\';
 
 save('vehData', 'VehicleOut')
 % T = table(Time, DesiredSpeed, ActualSpeed, MPGe, BatteryCurrent, BatteryPower, BatterySOC, MotorSpeed, MotorTorque, ActualAcc, VehSpdRef,'VariableNames', {'Time', 'DesiredSpeed', 'ActualSpeed', 'MPGe', 'BatteryCurrent', 'BatteryPower','BatterySOC', 'MotorSpeed', 'MotorTorque', 'ActualAcc', 'VehSpdRef'});

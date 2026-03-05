@@ -134,7 +134,7 @@ class SumoEnvMultiAgent:
         xmlTree.write(os.path.join(output_dir, self.sumo_route))
 
     def change_config_directory(self):
-        file_name = f'{int(self.penetration_rate*100)}%_{int(1/self.step_length)}Hz' + f'{"_with" if self.enable_vehicle_dynamics else "_without"}_vehDyn_test0128'
+        file_name = f'{int(self.penetration_rate*100)}%_{int(1/self.step_length)}Hz' + f'{"_with" if self.enable_vehicle_dynamics else "_without"}_vehDyn_test0302'
         output_dir = os.path.join(self.sumo_folder, self.working_directory, file_name)
 
         # Making Results Directory
@@ -213,7 +213,7 @@ class SumoEnvMultiAgent:
         # the files are in setting_dir
         if gui:
             # os.system(f'start sumo-gui -c {self.sumo_config} --seed {seed} --remote-port {self.sumo_port} --step-length {self.step_length} --num-clients {num_clients} --time-to-teleport 200 --collision.action warn --collision.check-junctions false')
-            os.system(f'start sumo-gui -c {self.sumo_config} --seed {seed} --remote-port {self.sumo_port} --step-length {self.step_length} --num-clients {num_clients} --netstate-dump.precision 10  --begin 28800 --end 32400')
+            os.system(f'start sumo-gui -c {self.sumo_config} --seed {seed} --remote-port {self.sumo_port} --step-length {self.step_length} --num-clients {num_clients} --netstate-dump.precision 10 --time-to-teleport 150  --begin 28800 --end 32400')
         else:
             os.system(f'start sumo -c {self.sumo_config} --seed {seed} --remote-port {self.sumo_port} --step-length {self.step_length} --num-clients {num_clients}')
 
@@ -251,7 +251,7 @@ class SumoEnvMultiAgent:
                 print('Subscription Error')
                 continue
 
-    def get_travel_direction(self, veh_id, veh_type, road_id, route_edges, next_tls):
+    def get_travel_direction(self, veh_id, veh_type, road_id, route_edges, nextTls, next_tls):
 
         road_id = "" if road_id is None else str(road_id)
         link_next = "" if route_edges is None else str(route_edges)
@@ -295,16 +295,16 @@ class SumoEnvMultiAgent:
         # else:
         #     control = 'False'
 
-
-        is_next_last = link_next in ['-304','-2801']
+        is_next_last = route_edges in ['-304','-2801', '-295']
+        # is_next_last = link_next in ['-304','-2801', '-295']
 
         if veh_type == 'CAV' or veh_id == 'ego':
             if travel_direction in ['EB', 'WB']:
 
-                # has_next_tls = len(next_tls) >= 1
+                if nextTls >= 2:
 
 
-                if next_tls in self.tl_ids and (link_next in self.wb or link_next in self.eb):
+                # if next_tls in self.tl_ids and (link_next in self.wb or link_next in self.eb):
                     control = 'True'
 
                 elif is_next_last:
@@ -498,19 +498,23 @@ class SumoEnvMultiAgent:
         else:
             results_df = pd.DataFrame(columns=["veh_id"]).set_index("veh_id")
         results_df["veh_id"] = results_df["veh_id"].astype(str)
+        results_df = results_df.set_index("veh_id", drop=False)
 
         if "veh_type" not in results_df.columns and "type" in results_df.columns:
             results_df["veh_type"] = results_df["type"]
 
-        results_df[['travel_direction', 'control']] = results_df.apply(lambda row: self.get_travel_direction(row['veh_id'], row['type'],row['linkId'], row['linkIdNext'], row['signalLightId']), axis=1, result_type='expand')
+        results_df[['travel_direction', 'control']] = results_df.apply(lambda row: self.get_travel_direction(row['veh_id'], row['type'],row['linkId'], row['linkIdNext'],row['signalLightHeadId'], row['signalLightId']), axis=1, result_type='expand')
         results_df['orginal_desire_spd'] = results_df['speedLimit'] * 2.23694
-                # get lead vehicle's speed
+        # get lead vehicle's speed
         results_df['speed'] = results_df['speed'] * 2.23694
         # results_df['leader'] = results_df['veh_id'].apply(lambda x: traci.vehicle.getLeader(x, dist=200.0) if x is not None else None)
         results_df['leader_id'] = results_df['precedingVehicleId']
 
-        results_df['leader_id'] = results_df['leader_id'].where(results_df['leader_id'].notnull(),'None')
+        # results_df['leader_id'] = results_df['leader_id'].where(results_df['leader_id'].notnull(),'None')
         results_df['leader_id'] = results_df['leader_id'].astype(str)
+        results_df.loc[results_df['precedingVehicleId'].isnull(), 'leader_id'] = None
+        results_df = results_df.join(results_df['speed'], on='leader_id', rsuffix='_lead')
+
 
         results_df.loc[results_df['precedingVehicleDistance'] == -1,
                     'precedingVehicleDistance'] = np.nan
@@ -520,13 +524,13 @@ class SumoEnvMultiAgent:
 
 
 
-        results_df['lead_dist'] = np.where(results_df['precedingVehicleDistance'].notnull(), results_df['precedingVehicleDistance'] * 3.28084, 500 * 3.28084)  # m → ft500 * 3.28084  # 如果没有前车，就给一个很大的默认距离)
+        results_df['lead_dist'] = np.where(results_df['precedingVehicleDistance'].notnull(), results_df['precedingVehicleDistance'] * 3.28084, 500 * 3.28084)  # m → ft500 * 3.28084
         
         
         results_df['lead_dist'] = np.where(results_df['lead_dist'] < 0.5, 0.5, results_df['lead_dist'])
 
-
-        results_df['speed_lead'] = np.where(results_df['precedingVehicleId'].notnull(), results_df['precedingVehicleSpeed'], self.speed_max * 2.23694)
+        results_df['speed_lead'] = np.where(results_df['leader_id'].notnull(), results_df['speed_lead'], self.speed_max * 2.23694)
+        # results_df['speed_lead'] = np.where(results_df['leader_id'].notnull(), results_df['precedingVehicleSpeed'], self.speed_max * 2.23694)
         # get the distance to the stop bar
         results_df['dist2Stop'] = np.where(results_df['signalLightId'].notnull() & (results_df['signalLightId'].astype(str).str.strip() != ''), results_df['signalLightDistance'] * 3.28084, 10000.0)
 
@@ -614,18 +618,21 @@ class SumoEnvMultiAgent:
                 sim_ego_map = {vd.id: vd for vd in recv_from_simulink}  
                 send_list_all_updated = [sim_ego_map.get(vd.id, vd) for vd in send_list_original]
                 self.socket_helper.vehicle_data_send_list = send_list_all_updated
+
+                ego_vd = self.socket_helper.vehicle_data_receive_list[0]
+                ego_id = ego_vd.id
             except (socket.timeout, socket.error, ConnectionResetError, BrokenPipeError) as e:
                 print(f"ERROR: Lost connection to vehicle dynamics: {e}")
                 raise RuntimeError("Connection to vehicle dynamics lost") from e
 
-        
 
-        if len(self.socket_helper.vehicle_data_receive_list) > 0:
-            ego_vd = self.socket_helper.vehicle_data_receive_list[0]
-            ego_id = ego_vd.id
-        else:
-            ego_vd = None
-            ego_id = None
+
+        # if len(self.socket_helper.vehicle_data_receive_list) > 0:
+        #     ego_vd = self.socket_helper.vehicle_data_receive_list[0]
+        #     ego_id = ego_vd.id
+        # else:
+        #     ego_vd = None
+        #     ego_id = None
         send_map = {vd.id: vd for vd in self.socket_helper.vehicle_data_send_list}
 
 
@@ -720,13 +727,13 @@ if __name__ == "__main__":
     parser.add_argument("--trafficlayerIp", type=str, help="Specify Ip of traffic layer", default='127.0.0.1')
     parser.add_argument("--trafficlayerPort", type=str, help="Specify port of traffic layer", default=430)
     parser.add_argument("--vehicleDynamics", action="store_true", help="use the vehicle dynamics", default=False)
-    parser.add_argument("--enableVehicleDynamics", action="store_true", help="use the vehicle dynamics", default=False)
+    parser.add_argument("--enableVehicleDynamics", action="store_true", help="use the vehicle dynamics", default=True)
     parser.add_argument("--vehicleDynamicsIp", type=str, help="Specify Ip of vehicle dynamics", default='127.0.0.1')
     # parser.add_argument("--vehicleDynamicsIp", type=str, help="Specify Ip of vehicle dynamics", default='192.168.140.11')
     parser.add_argument("--vehicleDynamicsPort", type=str, help="Specify port of vehicle dynamics", default=420)
 
     # the following parameters are for CAV settings
-    parser.add_argument("--penetrationRate", type=float, help="the market penetration rate of cav", default=0.5)
+    parser.add_argument("--penetrationRate", type=float, help="the market penetration rate of cav", default=0.0)
     parser.add_argument("--stepLength", type=float, help="the step length of the simulation", default=0.1)
     parser.add_argument("--ecoDriving", action="store_true", help="Use the eco driving controller", default=True)
     
@@ -738,7 +745,7 @@ if __name__ == "__main__":
     parser.add_argument("--sumoConfig", type=str, help="Specify sumo config file", default='chattCavMpr.sumocfg')
     parser.add_argument("--sumoNet", type=str, help="Specify sumo net file", default=os.environ["SUMO_NET_PATH"])
     parser.add_argument("--sumoRoute", type=str, help="Specify sumo route file", default='chattCavMpr.rou.xml')
-    parser.add_argument("--workingDirectory", type=str, help="Specify working directory", default='MPR_7')
+    parser.add_argument("--workingDirectory", type=str, help="Specify working directory", default='MPR_10')
     args = parser.parse_args()
     traffic_layer_config = args.trafficlayerConfig
     traffic_layer_ip = args.trafficlayerIp
@@ -792,7 +799,7 @@ if __name__ == "__main__":
 
     senv.run_sumo(num_clients=1, seed=101, gui=True)
     time.sleep(2)
-    run_traffic_layer('TrafficLayer0129.exe', os.environ["CONFIG_PATH"])
+    run_traffic_layer('TrafficLayer0223.exe', os.environ["CONFIG_PATH"])
     time.sleep(2)
     senv.setup_connections()
     print('Starting subscription')

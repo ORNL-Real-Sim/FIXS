@@ -118,7 +118,7 @@ class SumoEnvMultiAgent:
         xmlTree.write(os.path.join(output_dir, self.sumo_route))
 
     def change_config_directory(self):
-        file_name = f'{int(self.penetration_rate*100)}%_{int(1/self.step_length)}Hz' + f'{"_with" if self.enable_vehicle_dynamics else "_without"}_vehDyn_E_test0120'
+        file_name = f'{int(self.penetration_rate*100)}%_{int(1/self.step_length)}Hz' + f'{"_with" if self.enable_vehicle_dynamics else "_without"}_vehDyn_SP_test0302'
         output_dir = os.path.join(self.sumo_folder, self.working_directory, file_name)
 
         # Making Results Directory
@@ -167,7 +167,7 @@ class SumoEnvMultiAgent:
             routeID='route1',
             # typeID='CAV',  # '' uses DEFAULT_VEHTYPE (or change to an existing vType, e.g. 'CAV')
             # depart="now",  # explicit time in seconds (string or int is fine)
-            departPos=str(1),
+            departPos=str(0),
             departLane='0',
             departSpeed=str(0.1),
         )
@@ -183,7 +183,7 @@ class SumoEnvMultiAgent:
         # the files are in setting_dir
         if gui:
             # os.system(f'start sumo-gui -c {self.sumo_config} --seed {seed} --remote-port {self.sumo_port} --step-length {self.step_length} --num-clients {num_clients} --time-to-teleport 200 --collision.action warn --collision.check-junctions false')
-            os.system(f'start sumo-gui -c {self.sumo_config} --seed {seed} --remote-port {self.sumo_port} --step-length {self.step_length} --num-clients {num_clients} --netstate-dump.precision 10  --begin 28800 --end 32400')
+            os.system(f'start sumo-gui -c {self.sumo_config} --seed {seed} --remote-port {self.sumo_port} --step-length {self.step_length} --num-clients {num_clients} --netstate-dump.precision 10 --time-to-teleport 150  --begin 28800 --end 32400')
         else:
             os.system(f'start sumo -c {self.sumo_config} --seed {seed} --remote-port {self.sumo_port} --step-length {self.step_length} --num-clients {num_clients}')
 
@@ -358,6 +358,7 @@ class SumoEnvMultiAgent:
 
 
 
+
             # elif sim_time == 28985:
         
         if self.enable_vehicle_dynamics:
@@ -407,8 +408,8 @@ class SumoEnvMultiAgent:
 
 
 
-                ego_speed = traci.vehicle.getSpeed("ego")  # 单位是 m/s
-                print(f"ego speed at time {sim_time}: {ego_speed} m/s")
+                # ego_speed = traci.vehicle.getSpeed("ego")  # 单位是 m/s
+                # print(f"ego speed at time {sim_time}: {ego_speed} m/s")
 
 
 
@@ -553,9 +554,9 @@ class SumoEnvMultiAgent:
         
         self.socket_helper.sendData(sim_state, sim_time, self.socket2FIXS)
 
-        print(f"[t={sim_time}]=== FINAL SEND LIST TO FIXS ===")
-        for v in self.socket_helper.vehicle_data_send_list:
-            print(v.id, v.speedDesired)
+        # print(f"[t={sim_time}]=== FINAL SEND LIST TO FIXS ===")
+        # for v in self.socket_helper.vehicle_data_send_list:
+        #     print(v.id, v.speedDesired)
 
 
         self.socket_helper.clear_data()
@@ -607,8 +608,8 @@ if __name__ == "__main__":
     parser.add_argument("--trafficlayerConfig", type=str, help="Path to the Configuration file", default=os.environ["CONFIG_PATH"])
     parser.add_argument("--trafficlayerIp", type=str, help="Specify Ip of traffic layer", default='127.0.0.1')
     parser.add_argument("--trafficlayerPort", type=str, help="Specify port of traffic layer", default=430)
-    parser.add_argument("--vehicleDynamics", action="store_true", help="use the vehicle dynamics", default=False)
-    parser.add_argument("--enableVehicleDynamics", action="store_true", help="use the vehicle dynamics", default=False)
+    parser.add_argument("--vehicleDynamics", action="store_true", help="use the vehicle dynamics", default=True)
+    parser.add_argument("--enableVehicleDynamics", action="store_true", help="use the vehicle dynamics", default=True)
     parser.add_argument("--vehicleDynamicsIp", type=str, help="Specify Ip of vehicle dynamics", default='127.0.0.1')
     # parser.add_argument("--vehicleDynamicsIp", type=str, help="Specify Ip of vehicle dynamics", default='192.168.140.11')
     parser.add_argument("--vehicleDynamicsPort", type=str, help="Specify port of vehicle dynamics", default=420)
@@ -626,7 +627,7 @@ if __name__ == "__main__":
     parser.add_argument("--sumoConfig", type=str, help="Specify sumo config file", default='chattCavMpr.sumocfg')
     parser.add_argument("--sumoNet", type=str, help="Specify sumo net file", default=os.environ["SUMO_NET_PATH"])
     parser.add_argument("--sumoRoute", type=str, help="Specify sumo route file", default='chattCavMpr.rou.xml')
-    parser.add_argument("--workingDirectory", type=str, help="Specify working directory", default='MPR')
+    parser.add_argument("--workingDirectory", type=str, help="Specify working directory", default='MPR_10')
     args = parser.parse_args()
     traffic_layer_config = args.trafficlayerConfig
     traffic_layer_ip = args.trafficlayerIp
