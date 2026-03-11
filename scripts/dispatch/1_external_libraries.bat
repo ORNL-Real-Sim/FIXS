@@ -37,4 +37,5 @@ cmake -G "%CMAKE_GENERATOR%" ..
 cmake --build . --config Release
 cmake --build . --config Debug
 
-pause
+REM Only pause if not called from dispatch
+if not "%1"=="inline" pause
