@@ -160,7 +160,13 @@ switch ($Tool.ToLower()) {
     "visual_studio" { $result = Find-VisualStudio }
     "matlab" { $result = Find-Matlab }
     "dspace" { $result = Find-DSpace }
-    "carmaker" { $result = Find-CarMaker -RequestedVersion $args[0] }
+    "carmaker" {
+        $requestedVersion = ""
+        if ($args.Count -gt 0 -and $null -ne $args[0]) {
+            $requestedVersion = [string]$args[0]
+        }
+        $result = Find-CarMaker -RequestedVersion $requestedVersion
+    }
     default { $result = $null }
 }
 

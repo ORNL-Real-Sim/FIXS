@@ -80,7 +80,14 @@ function Read-YamlList {
 $CarMakerVersions = Read-YamlList $DepsFile 'carmaker' 'versions'
 
 if (-not $CarMakerVersions) {
-    Write-Error 'CarMaker versions not found in dependencies.yaml'
+    $msg = 'CarMaker versions not found in dependencies.yaml'
+    if ($RunMode -eq 'inline') {
+        Write-Warning "$msg; skipping CarMaker component build."
+        '' | Out-File -FilePath $LogSummary -Append -Encoding UTF8
+        "SKIPPED: $msg" | Out-File -FilePath $LogSummary -Append -Encoding UTF8
+        Exit-Script 0
+    }
+    Write-Error $msg
     Exit-Script 1
 }
 

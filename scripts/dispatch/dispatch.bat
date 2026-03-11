@@ -45,14 +45,14 @@ if not defined MATLAB_VERSION (
     echo ERROR: MATLAB version not found in dependencies.yaml
     exit /b 1
 )
-if not defined CARMAKER_VERSIONS (
-    echo ERROR: CarMaker versions not found in dependencies.yaml
-    exit /b 1
-)
 
 echo Using versions from dependencies.yaml:
 echo   MATLAB: %MATLAB_VERSION%
-echo   CarMaker: %CARMAKER_VERSIONS%
+if defined CARMAKER_VERSIONS (
+    echo   CarMaker: %CARMAKER_VERSIONS%
+) else (
+    echo   CarMaker: [not configured - CarMaker steps may be skipped]
+)
 echo.
 
 REM Clean and create build directory
@@ -192,22 +192,26 @@ if exist "%SOURCE_PATH%\CommonLib\RealSimSocket.mexw64" (
 
 REM Release CarMaker files
 echo Copying CarMaker files...
-for %%v in (%CARMAKER_VERSIONS%) do (
-    for /f "tokens=1 delims=." %%m in ("%%v") do (
-        set "CM_VERSION_SAFE=%%v"
-        set "CM_VERSION_SAFE=!CM_VERSION_SAFE:.=_!"
+if defined CARMAKER_VERSIONS (
+    for %%v in (%CARMAKER_VERSIONS%) do (
+        for /f "tokens=1 delims=." %%m in ("%%v") do (
+            set "CM_VERSION_SAFE=%%v"
+            set "CM_VERSION_SAFE=!CM_VERSION_SAFE:.=_!"
 
-        if exist "%SOURCE_PATH%\ProprietaryFiles\CM%%m_proj\src\CarMaker.win64.exe" (
-            if not exist "%RELEASE_PATH%\CarMaker\CM%%m" mkdir "%RELEASE_PATH%\CarMaker\CM%%m"
-            copy /Y "%SOURCE_PATH%\ProprietaryFiles\CM%%m_proj\src\CarMaker.win64.exe" "%RELEASE_PATH%\CarMaker\CM%%m\" >nul
-            copy /Y "%SOURCE_PATH%\ProprietaryFiles\CM%%m_proj\src_cm4sl\libcarmaker4sl.mexw64" "%RELEASE_PATH%\CarMaker\CM%%m\" >nul
+            if exist "%SOURCE_PATH%\ProprietaryFiles\CM%%m_proj\src\CarMaker.win64.exe" (
+                if not exist "%RELEASE_PATH%\CarMaker\CM%%m" mkdir "%RELEASE_PATH%\CarMaker\CM%%m"
+                copy /Y "%SOURCE_PATH%\ProprietaryFiles\CM%%m_proj\src\CarMaker.win64.exe" "%RELEASE_PATH%\CarMaker\CM%%m\" >nul
+                copy /Y "%SOURCE_PATH%\ProprietaryFiles\CM%%m_proj\src_cm4sl\libcarmaker4sl.mexw64" "%RELEASE_PATH%\CarMaker\CM%%m\" >nul
 
-            REM Copy corresponding dSPACE library to CarMaker folder
-            for %%f in ("%SOURCE_PATH%\CommonLib\libRealSimDsLib_*_CM!CM_VERSION_SAFE!.a") do (
-                copy /Y "%%f" "%RELEASE_PATH%\CarMaker\CM%%m\" >nul 2>&1
+                REM Copy corresponding dSPACE library to CarMaker folder
+                for %%f in ("%SOURCE_PATH%\CommonLib\libRealSimDsLib_*_CM!CM_VERSION_SAFE!.a") do (
+                    copy /Y "%%f" "%RELEASE_PATH%\CarMaker\CM%%m\" >nul 2>&1
+                )
             )
         )
     )
+) else (
+    echo WARNING: CarMaker versions not configured, skipping CarMaker artifact copy
 )
 
 REM Copy CarMaker utility files

@@ -72,7 +72,16 @@ $MatlabVersion = Read-YamlVersion $DepsFile 'matlab'
 $VsVersion = Read-YamlVersion $DepsFile 'visual_studio'
 
 if (-not $MatlabVersion) {
-    Write-Error 'MATLAB version not found in dependencies.yaml'
+    $msg = 'MATLAB version not found in dependencies.yaml'
+    if ($RunMode -eq 'inline') {
+        Write-Warning "$msg; skipping RealSimSocket MEX build."
+        if ($UseLogging) {
+            '' | Out-File -FilePath $LogSummary -Append -Encoding UTF8
+            "SKIPPED: $msg" | Out-File -FilePath $LogSummary -Append -Encoding UTF8
+        }
+        Exit-Script 0
+    }
+    Write-Error $msg
     Exit-Script 1
 }
 
@@ -95,7 +104,16 @@ if ($env:MATLAB_ROOT) {
 }
 
 if (-not $MatlabInstall) {
-    Write-Error 'Could not locate MATLAB installation'
+    $msg = 'Could not locate MATLAB installation'
+    if ($RunMode -eq 'inline') {
+        Write-Warning "$msg; skipping RealSimSocket MEX build."
+        if ($UseLogging) {
+            '' | Out-File -FilePath $LogSummary -Append -Encoding UTF8
+            "SKIPPED: $msg" | Out-File -FilePath $LogSummary -Append -Encoding UTF8
+        }
+        Exit-Script 0
+    }
+    Write-Error $msg
     Write-Error 'Please set MATLAB_ROOT environment variable or add install_path to dependencies.yaml'
     Exit-Script 1
 }
@@ -106,7 +124,16 @@ Write-Host "MATLAB root: $MatlabInstall"
 
 $MexBat = Join-Path $MatlabInstall 'bin\mex.bat'
 if (-not (Test-Path $MexBat)) {
-    Write-Error "Unable to locate mex.bat at: $MexBat"
+    $msg = "Unable to locate mex.bat at: $MexBat"
+    if ($RunMode -eq 'inline') {
+        Write-Warning "$msg; skipping RealSimSocket MEX build."
+        if ($UseLogging) {
+            '' | Out-File -FilePath $LogSummary -Append -Encoding UTF8
+            "SKIPPED: $msg" | Out-File -FilePath $LogSummary -Append -Encoding UTF8
+        }
+        Exit-Script 0
+    }
+    Write-Error $msg
     Exit-Script 1
 }
 

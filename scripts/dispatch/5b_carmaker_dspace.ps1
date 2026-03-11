@@ -104,7 +104,16 @@ if (Test-Path $DetectToolPaths) {
 }
 
 if (-not $DspaceInstall) {
-    Write-Error 'Could not auto-detect dSPACE installation'
+    $msg = 'Could not auto-detect dSPACE installation'
+    if ($RunMode -eq 'inline') {
+        Write-Warning "$msg; skipping dSPACE CarMaker libraries build."
+        if ($UseLogging) {
+            '' | Out-File -FilePath $LogSummary -Append -Encoding UTF8
+            "SKIPPED: $msg" | Out-File -FilePath $LogSummary -Append -Encoding UTF8
+        }
+        Exit-Script 0
+    }
+    Write-Error $msg
     Write-Error 'Please ensure dSPACE ConfigurationDesk is installed'
     Exit-Script 1
 }
@@ -112,7 +121,16 @@ if (-not $DspaceInstall) {
 Write-Host "Auto-detected dSPACE at: $DspaceInstall"
 
 if (-not $CarMakerVersions) {
-    Write-Error 'CarMaker versions not found in dependencies.yaml'
+    $msg = 'CarMaker versions not found in dependencies.yaml'
+    if ($RunMode -eq 'inline') {
+        Write-Warning "$msg; skipping dSPACE CarMaker libraries build."
+        if ($UseLogging) {
+            '' | Out-File -FilePath $LogSummary -Append -Encoding UTF8
+            "SKIPPED: $msg" | Out-File -FilePath $LogSummary -Append -Encoding UTF8
+        }
+        Exit-Script 0
+    }
+    Write-Error $msg
     Exit-Script 1
 }
 
@@ -156,6 +174,7 @@ if ($UseLogging) {
 
 $CarMakerSuccessCount = 0
 $CarMakerFailCount = 0
+$CarMakerSkipCount = 0
 
 # Build for each CarMaker version
 foreach ($cmVersion in $CarMakerVersions -split '\s+') {
@@ -166,9 +185,12 @@ foreach ($cmVersion in $CarMakerVersions -split '\s+') {
     $originalBuildConfig = Join-Path $carMakerCM4SL "CM_BuildConfig.py"
 
     if (-not (Test-Path $carMakerInclude)) {
-        Write-Error "CarMaker include path not found for version $cmVersion at $carMakerInclude"
-        $CarMakerFailCount++
-        $BuildResult = 1
+        $skipMsg = "CarMaker include path not found for version $cmVersion at $carMakerInclude"
+        Write-Warning "$skipMsg; skipping this CarMaker version."
+        if ($UseLogging) {
+            "===> SKIPPED: $skipMsg" | Out-File -FilePath $LogSummary -Append -Encoding UTF8
+        }
+        $CarMakerSkipCount++
         continue
     }
 
@@ -256,7 +278,7 @@ foreach ($cmVersion in $CarMakerVersions -split '\s+') {
 }
 
 Write-Host ''
-Write-Host "CarMaker build summary: $CarMakerSuccessCount succeeded, $CarMakerFailCount failed"
+Write-Host "CarMaker build summary: $CarMakerSuccessCount succeeded, $CarMakerFailCount failed, $CarMakerSkipCount skipped"
 
 if ($CarMakerFailCount -ne 0) {
     Write-Host 'ERROR: One or more CarMaker library builds failed.'
