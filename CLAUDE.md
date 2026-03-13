@@ -50,12 +50,12 @@ Real-Sim FIXS uses a modular script-based build system with automated tool detec
 - **dependencies.yaml** - Central configuration file defining tool versions and paths
 - Optional: MATLAB 2024a, CarMaker 13.1.3/11.1.2, dSPACE ConfigurationDesk 2024-A
 
-External libraries (yaml-cpp, libevent) are automatically built by the dispatch system or can be built manually:
+The external library (yaml-cpp) is automatically built by the dispatch system or can be built manually:
 ```
 scripts\dispatch\1_external_libraries.bat
 ```
 
-Both libraries use CMake with Visual Studio 17 2022 generator and build both Release and Debug configurations.
+yaml-cpp uses CMake with Visual Studio 17 2022 generator and builds both Release and Debug configurations.
 
 ### Building Components
 
@@ -65,7 +65,7 @@ dispatch.bat
 ```
 
 Automatically builds all components and copies to `build/` directory:
-1. External libraries (yaml-cpp, libevent)
+1. External libraries (yaml-cpp)
 2. TrafficLayer.exe, CoordMerge.exe, VirtualEnvironment.lib
 3. DriverModel_RealSim.dll and DriverModel_RealSim_v2021.dll (VISSIM interface)
 4. CarMaker executables for all versions in dependencies.yaml (CM11, CM13)
@@ -148,6 +148,40 @@ Tests are organized by scenario (CoordMerge, DelayedConnection, Elevation, etc.)
 2. **Adding message fields**: Update VehDataMsgDefs.h and corresponding pack/unpack logic in MsgHelper
 3. **Creating new controllers**: Add to ControlLayer following CoordMerge pattern
 4. **Testing changes**: Use existing test scenarios or create new one with config.yaml
+
+### Branch Strategy
+
+- All development branches off **`dev`**, not `main`
+- PRs target **`dev`**; `main` is updated only via release PRs from `dev`
+- Branch naming: `<type>/<issue_number>_<short_desc>` — e.g., `maintenance/128_unify_fixs_branding`
+
+### ProprietaryFiles Submodule Workflow
+
+`ProprietaryFiles` ([ORNL-Real-Sim/ProprietaryFiles](https://github.com/ORNL-Real-Sim/ProprietaryFiles)) is a **private** submodule containing CarMaker/VISSIM/dSPACE integration code that cannot be made public. The public FIXS repo stores only a commit hash pointer — no proprietary content is exposed.
+
+**When your changes touch `ProprietaryFiles`:**
+
+```bash
+# Step 1: Create a matching branch in the private repo
+cd ProprietaryFiles
+git checkout -b maintenance/NNN_short_desc
+# make your changes, commit, push
+git push origin maintenance/NNN_short_desc
+
+# Step 2: Back in the FIXS worktree, stage the updated submodule pointer
+cd ..
+git add ProprietaryFiles
+git commit -m "chore: bump ProprietaryFiles to maintenance/NNN"
+git push origin maintenance/NNN_short_desc
+
+# Step 3: Open PR in FIXS (public) — shows only the hash change
+# Step 4: After FIXS PR merges to dev, open a PR in ProprietaryFiles to merge its branch to main
+```
+
+**Rules:**
+- Never commit directly to `ProprietaryFiles/main` — it is branch-protected (requires PR + review)
+- Always use a named branch in ProprietaryFiles that mirrors the FIXS issue branch
+- The FIXS PR description should reference the ProprietaryFiles branch/PR for context (internal reviewers can check it; external contributors see only the hash)
 
 ## Important Notes
 
