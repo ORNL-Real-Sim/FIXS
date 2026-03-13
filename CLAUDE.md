@@ -174,14 +174,17 @@ git add ProprietaryFiles
 git commit -m "chore: bump ProprietaryFiles to maintenance/NNN"
 git push origin maintenance/NNN_short_desc
 
-# Step 3: Open PR in FIXS (public) — shows only the hash change
-# Step 4: After FIXS PR merges to dev, open a PR in ProprietaryFiles to merge its branch to main
+# Step 3: Open PR in FIXS (public) targeting dev — shows only the hash change
+# Step 4: Open companion PR in ProprietaryFiles targeting dev
+# Step 5: After both devs are merged, release PRs merge dev→main in both repos together
 ```
 
 **Rules:**
-- Never commit directly to `ProprietaryFiles/main` — it is branch-protected (requires PR + review)
+- Never commit directly to `ProprietaryFiles/main` or `ProprietaryFiles/dev` — both are branch-protected (require PR + review; admins may bypass)
 - Always use a named branch in ProprietaryFiles that mirrors the FIXS issue branch
-- The FIXS PR description should reference the ProprietaryFiles branch/PR for context (internal reviewers can check it; external contributors see only the hash)
+- Feature PRs in ProprietaryFiles target **`dev`** (not `main`); `main` is updated only via release PRs from `dev`
+- The FIXS PR description should reference the ProprietaryFiles companion PR for context (internal reviewers can check it; external contributors see only the hash)
+- Use the same PR template as FIXS (identical `.github/pull_request_template.md`)
 
 ## Important Notes
 
