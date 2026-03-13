@@ -22,7 +22,8 @@ dispatch.bat
 ```
 
 This single command will:
-- Build external libraries (yaml-cpp, libevent)
+- Generate the version header (RealSimVersion.h) from git tags
+- Build external libraries (yaml-cpp)
 - Build core components (TrafficLayer, VirtualEnvironment)
 - Build VISSIM driver model DLLs
 - Build CarMaker executables for all detected versions
@@ -55,7 +56,7 @@ The Real-Sim FIXS build system uses a modular script-based architecture that aut
      - C++14 is required for compatibility with CarMaker SDK and dSPACE toolchain
 
 2. **CMake** (version 3.10 or higher)
-   - Required for building external libraries (yaml-cpp, libevent)
+   - Required for building external libraries (yaml-cpp)
    - Must be in PATH
    - Download from: https://cmake.org/download/
 
@@ -121,11 +122,16 @@ dispatch.bat
 
 The release build process executes the following steps:
 
+0. **Version Header** (`generate_version.ps1`)
+   - Generates `CommonLib/RealSimVersion.h` from git tags
+   - Falls back to existing header or default (0.0.0) if git is unavailable
+   - Output: `CommonLib/RealSimVersion.h` (auto-generated, not committed)
+
 1. **External Libraries** (`1_external_libraries.bat`)
    - yaml-cpp (YAML configuration parser)
-   - libevent (not currently used, but available)
    - Built in both Debug and Release configurations
-   - Output: `CommonLib/yaml-cpp/build/`, `CommonLib/libevent/build/`
+   - Output: `CommonLib/yaml-cpp/build/`
+   - Note: libevent was removed in issue #131 as it was confirmed unused
 
 2. **Core Components** (`2_core_components.bat`)
    - `TrafficLayer.exe` - Main interface executable
@@ -255,7 +261,7 @@ Each component has its own build script in `scripts/dispatch/`:
 ```batch
 scripts\dispatch\1_external_libraries.bat
 ```
-Builds yaml-cpp and libevent. Only needed once or after clean builds.
+Builds yaml-cpp. Only needed once or after clean builds.
 
 #### 2. Core Components Only
 ```batch
@@ -356,29 +362,40 @@ msbuild TrafficLayer\TrafficLayer.sln /p:Configuration=Debug /p:Platform=x64
 
 ### External Libraries Debug Build
 
-External libraries (yaml-cpp, libevent) are built in both Debug and Release configurations automatically:
-- Release: `yaml-cpp.lib`, `event.lib`
-- Debug: `yaml-cppd.lib`, `eventd.lib`
+yaml-cpp is built in both Debug and Release configurations automatically:
+- Release: `yaml-cpp.lib`
+- Debug: `yaml-cppd.lib`
 
-When building components in Debug mode, make sure to link against Debug libraries (`yaml-cppd.lib`).
+When building components in Debug mode, make sure to link against the Debug library (`yaml-cppd.lib`).
 
 ## Build System Architecture
 
 ### Script Organization
 
 ```
-scripts/dispatch/
-├── dispatch.bat                     # Main orchestrator
-├── detect_tool_paths.ps1            # Auto-detection of tools
-├── yaml_helper.ps1                  # Parse dependencies.yaml
-├── 1_external_libraries.bat         # Build yaml-cpp, libevent
-├── 2_core_components.bat            # Build TrafficLayer, VirtualEnvironment
-├── 3_vissim_components.bat          # Build VISSIM DLLs
-├── 4a_carmaker_components.ps1       # Build CarMaker executables
-├── 4b_carmaker_dspace.ps1           # Build dSPACE libraries
-├── 5_mex_realsim_socket.ps1         # Build MATLAB MEX file
-└── 6_build_info.ps1                 # Generate BUILD_INFO.txt
+scripts/
+├── generate_version.ps1             # Generate RealSimVersion.h from git tags
+├── build_libsumo.ps1                # STANDALONE: Build libsumo DLLs from SUMO source
+├── build_sumo_executables.ps1       # STANDALONE: Build SUMO executables from source
+└── dispatch/
+    ├── dispatch.bat                 # Main orchestrator
+    ├── detect_tool_paths.ps1        # Auto-detection of tools
+    ├── yaml_helper.ps1              # Parse dependencies.yaml
+    ├── 1_external_libraries.bat     # Build yaml-cpp
+    ├── 2_core_components.bat        # Build TrafficLayer, VirtualEnvironment
+    ├── 3_vissim_components.bat      # Build VISSIM DLLs
+    ├── 4a_carmaker_components.ps1   # Build CarMaker executables
+    ├── 4b_carmaker_dspace.ps1       # Build dSPACE libraries
+    ├── 5_mex_realsim_socket.ps1     # Build MATLAB MEX file
+    └── 6_build_info.ps1             # Generate BUILD_INFO.txt
 ```
+
+### Standalone Utility Scripts
+
+Two scripts in `scripts/` are standalone utilities not called by `dispatch.bat`:
+
+- **`build_libsumo.ps1`**: Builds libsumo DLLs from SUMO source. Use this when the SUMO version in `dependencies.yaml` changes and you need to rebuild the vendored libsumo binaries in `CommonLib/libsumo/`.
+- **`build_sumo_executables.ps1`**: Builds the full SUMO application suite (sumo.exe, sumo-gui.exe, etc.) from source. Most users should download a pre-built SUMO release instead.
 
 ### Tool Auto-Detection
 
@@ -542,7 +559,6 @@ To perform a clean build:
    - `CarMaker/CM*/src*/libcarmaker4sl.mexw64`
 3. Optionally delete external library builds:
    - `CommonLib/yaml-cpp/build/`
-   - `CommonLib/libevent/build/`
 4. Run `dispatch.bat`
 
 ### Common Build Order Issues
