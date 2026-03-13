@@ -65,7 +65,7 @@
 
 #define MAXPENDING 5    /* Maximum outstanding connection requests */
 
-// RealSim header size and each message header size
+// FIXS header size and each message header size
 #define MSG_HEADER_SIZE 9
 #define MSG_EACH_HEADER_SIZE 3
 

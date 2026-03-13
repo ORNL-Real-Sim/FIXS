@@ -340,7 +340,7 @@ int SocketHelper::initConnection(std::string errorLogName) {
 	==============================*/
 	if (ENABLE_SERVER) {
 #ifdef RS_DEBUG
-		Log("RealSim start server task\n");	
+		Log("FIXS start server task\n");
 #endif
 		for (int iS = 0; iS < NSERVER; iS++) {
 			memset(&serverAddr[iS], 0, sizeof(serverAddr[iS]));   /* Zero out structure */
@@ -381,7 +381,7 @@ int SocketHelper::initConnection(std::string errorLogName) {
 				// placeholder
 			}
 #ifdef RS_DEBUG
-			Log("RealSim start server connection\n");	
+			Log("FIXS start server connection\n");
 #endif
 			// Connect to server.
 			if (connect(serverSock[iS], (struct sockaddr*)&serverAddr[iS], sizeof(serverAddr[iS])) < 0) {
@@ -408,7 +408,7 @@ int SocketHelper::initConnection(std::string errorLogName) {
 				return -1;
 			}
 #ifdef RS_DEBUG
-			Log("RealSim server connected\n");	
+			Log("FIXS server connected\n");
 #endif
 
 		}
@@ -806,10 +806,10 @@ int SocketHelper::initConnection(std::string errorLogName) {
 		}
 	}
 
-	cout << "RealSim Initialized" << endl;
+	cout << "FIXS Initialized" << endl;
 #ifdef RS_DEBUG
-	Log("RealSim Initialized\n");	
-#endif 
+	Log("FIXS Initialized\n");
+#endif
 
 	return 0;
 }

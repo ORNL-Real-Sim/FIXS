@@ -31,7 +31,7 @@ typedef typename std::vector <std::tuple < std::string, SubAttMap_t, std::vector
 
 
 struct SimulationSetup_t {
-	bool EnableRealSim;
+	bool EnableFIXS;
 
 	bool EnableVerboseLog;
 

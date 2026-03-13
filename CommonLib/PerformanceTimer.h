@@ -26,7 +26,7 @@ private:
 
 public:
 	// Initialize performance logging (call once at startup)
-	static void init(const std::string& logPath = "RealSimPerf.log") {
+	static void init(const std::string& logPath = "FIXSPerf.log") {
 		if (!perfLogFile.is_open()) {
 			perfLogPath = logPath;
 			// Use std::ios::out to truncate file (reset on each init)

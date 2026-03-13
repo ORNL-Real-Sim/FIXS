@@ -22,7 +22,7 @@ SimulationSetup:
     # Master Switch to turn on/off RealSim interface
     # if turned off, VISSIM will run without RealSim
     # currently has no effect to SUMO
-    EnableRealSim: true
+    EnableFIXS: true
     
     # Whether or not to save verbose log during the simulation. skip log for performance
     EnableVerboseLog: false

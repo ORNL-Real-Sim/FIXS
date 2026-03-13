@@ -21,7 +21,7 @@ int VirEnvHelper::CM_LogErrF(const char* MsgChar) {
 }
 
 void VirEnvHelper::shutdown() {
-	Log("RealSim shutdown \n");
+	Log("FIXS shutdown \n");
 
 	PERF_SHUTDOWN();
 
@@ -36,10 +36,10 @@ void VirEnvHelper::shutdown() {
 	}
 	catch (const std::exception& e) {
 		std::cout << e.what();
-		Log("Warning: RealSim shutdown failed\n");
+		Log("Warning: FIXS shutdown failed\n");
 	}
 	catch (...) {
-		Log("Warning: RealSim shutdown failed\n");
+		Log("Warning: FIXS shutdown failed\n");
 	}
 //#else
 	//try {
@@ -115,13 +115,13 @@ int VirEnvHelper::initialization(const char** errorMsg, const char* configPathIn
 
 	fstream f(CmErrorFile, std::fstream::in | std::fstream::out | std::fstream::app);
 	f << endl << "=============================================" << endl;
-	f << "RealSim CarMaker Starts at  " << str << endl;
+	f << "FIXS CarMaker Starts at  " << str << endl;
 	f.close();
 
 	configPath = configPathInput;
 #ifndef RS_DSPACE
 	if (Config_c.getConfig(configPath) < 0) {
-		errorMsgStr = "RealSim: Read Configuration Yaml File Failed";
+		errorMsgStr = "FIXS: Read Configuration Yaml File Failed";
 		*errorMsg = errorMsgStr.c_str();
 		return ERROR_INIT_READ_CONFIG;
 	}
@@ -133,7 +133,7 @@ int VirEnvHelper::initialization(const char** errorMsg, const char* configPathIn
 	SYNCHRONIZE_TRAFFIC_SIGNAL = Config_c.CarMakerSetup.SynchronizeTrafficSignal;
 #else
 
-	Log("RealSim read config\n");
+	Log("FIXS read config\n");
 
 	// reparser to common variables as the non dSPACE version
 	ENABLE_REALSIM = Config_s.EnableCosimulation;
@@ -142,7 +142,7 @@ int VirEnvHelper::initialization(const char** errorMsg, const char* configPathIn
 
 	Msg_c.VehicleMessageField_v = Config_s.VehicleMessageField_v;
 
-	Log("RealSim message field: ");
+	Log("FIXS message field: ");
 	for (unsigned int i = 0; i < Msg_c.VehicleMessageField_v.size(); i++) {
 		Msg_c.VehicleMessageField_set.insert(Msg_c.VehicleMessageField_v[i]);
 		Log("%s, ", Msg_c.VehicleMessageField_v[i].c_str());
@@ -153,7 +153,7 @@ int VirEnvHelper::initialization(const char** errorMsg, const char* configPathIn
 
 	// check if vehicle class is defined
 	if (Msg_c.VehicleMessageField_set.find("vehicleClass") == Msg_c.VehicleMessageField_set.end() || Msg_c.VehicleMessageField_set.find("heading") == Msg_c.VehicleMessageField_set.end() || Msg_c.VehicleMessageField_set.find("grade") == Msg_c.VehicleMessageField_set.end()) {
-		*errorMsg = "RealSim: Must subscribe: id, speed, vehicleClass, heading, grade, speedDesired/accelerationDesired";
+		*errorMsg = "FIXS: Must subscribe: id, speed, vehicleClass, heading, grade, speedDesired/accelerationDesired";
 		//*errorMsg = const_cast<char*>(errorMsgStr.c_str());
 		return ERROR_INIT_MSG_FIELD;
 	}
@@ -201,43 +201,43 @@ int VirEnvHelper::initialization(const char** errorMsg, const char* configPathIn
 		Sock_c.disableServerTrigger();
 		Sock_c.disableWaitClientTrigger();
 #ifdef RS_DEBUG
-		Log("RealSim serverAddr[0] %s\n", serverAddr[0].c_str());
-		Log("RealSim serverPort[0] %d\n", serverPort[0]);
+		Log("FIXS serverAddr[0] %s\n", serverAddr[0].c_str());
+		Log("FIXS serverPort[0] %d\n", serverPort[0]);
 #endif
 		//Log("RealSim init socket size exit %d\n", Sock_c.serverSock.size());
 
 		if (ENABLE_REALSIM) {
 #ifdef RS_DEBUG
-			Log("RealSim socket initConnection\n");
+			Log("FIXS socket initConnection\n");
 #endif
 			if (Sock_c.initConnection(CmErrorFile) > 0) {
-				printf("Connect to RealSim failed! Make sure start TrafficLayer first\n");
-				*errorMsg = "RealSim: Initialize Socket Failed";
+				printf("Connect to FIXS failed! Make sure start TrafficLayer first\n");
+				*errorMsg = "FIXS: Initialize Socket Failed";
 #ifdef RS_DEBUG
-				Log("RealSim socket initConnection failed");
+				Log("FIXS socket initConnection failed");
 #endif
 				return ERROR_INIT_SOCKET;
 			}
 		}
 #ifdef RS_DEBUG
-		Log("RealSim socket initConnection succeed\n");
+		Log("FIXS socket initConnection succeed\n");
 #endif
 	}
 	catch (const std::exception& e) {
 		Sock_c.socketShutdown();
 		std::cout << e.what();
-		printf("ERROR: initialize RealSim socket failed!\n");
+		printf("ERROR: initialize FIXS socket failed!\n");
 		*errorMsg = "RealSim: Initialize Socket Failed";
 		return ERROR_INIT_SOCKET;
 	}
 	catch (...) {
 		Sock_c.socketShutdown();
-		printf("UNKNOWN ERROR: initialize RealSim socket failed!\n");
+		printf("UNKNOWN ERROR: initialize FIXS socket failed!\n");
 		*errorMsg = "RealSim: Initialize Socket Failed";
 		return ERROR_INIT_SOCKET;
 	}
 
-	PERF_INIT("RealSimPerf.log");
+	PERF_INIT("FIXSPerf.log");
 
 	return 0;
 }
@@ -379,7 +379,7 @@ int VirEnvHelper::runStep(double simTime, const char** errorMsg) {
 		catch (const std::exception& e) {
 			std::cout << e.what();
 			printf("ERROR: initialize traffic object position failed!\n");
-			errorMsgStr = "RealSim: Initialize Traffic Objects Failed";
+			errorMsgStr = "FIXS: Initialize Traffic Objects Failed";
 			*errorMsg = errorMsgStr.c_str();
 			PERF_TOC("init_cm_queue");
 			PERF_TOC("runStep_total");
@@ -387,7 +387,7 @@ int VirEnvHelper::runStep(double simTime, const char** errorMsg) {
 		}
 		catch (...) {
 			printf("UNKNOWN ERROR: initialize traffic object position failed!\n");
-			errorMsgStr = "RealSim: Initialize Traffic Objects Failed";
+			errorMsgStr = "FIXS: Initialize Traffic Objects Failed";
 			*errorMsg = errorMsgStr.c_str();
 			PERF_TOC("init_cm_queue");
 			PERF_TOC("runStep_total");
@@ -422,7 +422,7 @@ int VirEnvHelper::runStep(double simTime, const char** errorMsg) {
 #endif
 					PERF_TIC("recv_socket");
 					if (Sock_c.recvData(Sock_c.serverSock[iS], &simStateRecv, &simTimeRecv, Msg_c) < 0) {
-						*errorMsg = "RealSim: Receive from traffic simulator failed";
+						*errorMsg = "FIXS: Receive from traffic simulator failed";
 						return ERROR_STEP_RECV_REALSIM;
 					}
 					PERF_TOC("recv_socket");
@@ -436,14 +436,14 @@ int VirEnvHelper::runStep(double simTime, const char** errorMsg) {
 		}
 		catch (const std::exception& e) {
 			std::cout << e.what();
-			errorMsgStr = "RealSim: Receive from traffic simulator failed";
+			errorMsgStr = "FIXS: Receive from traffic simulator failed";
 			*errorMsg = errorMsgStr.c_str();
 			PERF_TOC("receive_realsim");
 			PERF_TOC("runStep_total");
 			return ERROR_STEP_RECV_REALSIM;
 		}
 		catch (...) {
-			errorMsgStr = "RealSim: Receive from traffic simulator failed";
+			errorMsgStr = "FIXS: Receive from traffic simulator failed";
 			*errorMsg = errorMsgStr.c_str();
 			PERF_TOC("receive_realsim");
 			PERF_TOC("runStep_total");
@@ -510,14 +510,14 @@ int VirEnvHelper::runStep(double simTime, const char** errorMsg) {
 		}
 		catch (const std::exception& e) {
 			std::cout << e.what();
-			errorMsgStr = "RealSim: Map received traffic simualtor id to CM id failed";
+			errorMsgStr = "FIXS: Map received traffic simualtor id to CM id failed";
 			*errorMsg = errorMsgStr.c_str();
 			PERF_TOC("map_ids");
 			PERF_TOC("runStep_total");
 			return ERROR_STEP_MAP_ID;
 		}
 		catch (...) {
-			errorMsgStr = "RealSim: Map received traffic simualtor id to CM id failed";
+			errorMsgStr = "FIXS: Map received traffic simualtor id to CM id failed";
 			*errorMsg = errorMsgStr.c_str();
 			PERF_TOC("map_ids");
 			PERF_TOC("runStep_total");
@@ -567,14 +567,14 @@ int VirEnvHelper::runStep(double simTime, const char** errorMsg) {
 		}
 		catch (const std::exception& e) {
 			std::cout << e.what();
-			errorMsgStr = "RealSim: Remove arrived vehicle id failed";
+			errorMsgStr = "FIXS: Remove arrived vehicle id failed";
 			*errorMsg = errorMsgStr.c_str();
 			PERF_TOC("cleanup_vehicles");
 			PERF_TOC("runStep_total");
 			return ERROR_STEP_REMOVE_ID;
 		}
 		catch (...) {
-			errorMsgStr = "RealSim: Remove arrived vehicle id failed";
+			errorMsgStr = "FIXS: Remove arrived vehicle id failed";
 			*errorMsg = errorMsgStr.c_str();
 			PERF_TOC("cleanup_vehicles");
 			PERF_TOC("runStep_total");
@@ -645,14 +645,14 @@ int VirEnvHelper::runStep(double simTime, const char** errorMsg) {
 		}
 		catch (const std::exception& e) {
 			std::cout << e.what();
-			errorMsgStr = "RealSim: Update traffic object states failed";
+			errorMsgStr = "FIXS: Update traffic object states failed";
 			*errorMsg = errorMsgStr.c_str();
 			PERF_TOC("update_traffic_state");
 			PERF_TOC("runStep_total");
 			return ERROR_STEP_UPDATE_STATE;
 		}
 		catch (...) {
-			errorMsgStr = "RealSim: Update traffic object states failed";
+			errorMsgStr = "FIXS: Update traffic object states failed";
 			*errorMsg = errorMsgStr.c_str();
 			PERF_TOC("update_traffic_state");
 			PERF_TOC("runStep_total");
@@ -683,14 +683,14 @@ int VirEnvHelper::runStep(double simTime, const char** errorMsg) {
 			}
 			catch (const std::exception& e) {
 				std::cout << e.what();
-				errorMsgStr = "RealSim: Sync traffic signal light failed";
+				errorMsgStr = "FIXS: Sync traffic signal light failed";
 				*errorMsg = errorMsgStr.c_str();
 				PERF_TOC("sync_signals");
 				PERF_TOC("runStep_total");
 				return ERROR_STEP_SYNC_TRAFFIC_SIGNAL;
 			}
 			catch (...) {
-				errorMsgStr = "RealSim: Sync traffic signal light failed";
+				errorMsgStr = "FIXS: Sync traffic signal light failed";
 				*errorMsg = errorMsgStr.c_str();
 				PERF_TOC("sync_signals");
 				PERF_TOC("runStep_total");
@@ -782,10 +782,10 @@ int VirEnvHelper::runStep(double simTime, const char** errorMsg) {
 					if (send(Sock_c.serverSock[iS], sendServerBuffer, Sock_c.sendServerByte[iS], 0) != Sock_c.sendServerByte[iS]) {
 						char buff[1000];
 #ifdef WIN32
-						snprintf(buff, sizeof(buff), "RealSim: Send failed, %d", WSAGetLastError());
+						snprintf(buff, sizeof(buff), "FIXS: Send failed, %d", WSAGetLastError());
 						fprintf(stderr, "%s: %d\n", "send() failed", WSAGetLastError());
 #else
-						snprintf(buff, sizeof(buff), "RealSim: Send failed, %d, %s", errno, strerror(errno));
+						snprintf(buff, sizeof(buff), "FIXS: Send failed, %d, %s", errno, strerror(errno));
 						fprintf(stderr, "%s: \n", "send() failed");
 #endif
 						* errorMsg = buff;
@@ -796,14 +796,14 @@ int VirEnvHelper::runStep(double simTime, const char** errorMsg) {
 		}
 		catch (const std::exception& e) {
 			std::cout << e.what();
-			errorMsgStr = "RealSim: Send ego states failed";
+			errorMsgStr = "FIXS: Send ego states failed";
 			*errorMsg = errorMsgStr.c_str();
 			PERF_TOC("send_ego");
 			PERF_TOC("runStep_total");
 			return ERROR_STEP_SEND_EGO;
 		}
 		catch (...) {
-			errorMsgStr = "RealSim: Send ego states failed";
+			errorMsgStr = "FIXS: Send ego states failed";
 			*errorMsg = errorMsgStr.c_str();
 			PERF_TOC("send_ego");
 			PERF_TOC("runStep_total");
@@ -939,14 +939,14 @@ int VirEnvHelper::runStep(double simTime, const char** errorMsg) {
 	}
 	catch (const std::exception& e) {
 		std::cout << e.what();
-		errorMsgStr = "RealSim: Refresh traffic visualization failed";
+		errorMsgStr = "FIXS: Refresh traffic visualization failed";
 		*errorMsg = errorMsgStr.c_str();
 		PERF_TOC("refresh_visualization");
 		PERF_TOC("runStep_total");
 		return ERROR_STEP_REFRESH_TRAFFIC;
 	}
 	catch (...) {
-		errorMsgStr = "RealSim: Refresh traffic visualization failed";
+		errorMsgStr = "FIXS: Refresh traffic visualization failed";
 		*errorMsg = errorMsgStr.c_str();
 		PERF_TOC("refresh_visualization");
 		PERF_TOC("runStep_total");

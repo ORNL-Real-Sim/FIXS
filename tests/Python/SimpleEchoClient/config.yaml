@@ -8,7 +8,7 @@
 SimulationSetup:
 
     # Master Switch to turn on/off RealSim interface
-    EnableRealSim: true
+    EnableFIXS: true
 
     # Whether or not to save verbose log during the simulation
     EnableVerboseLog: false

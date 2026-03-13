@@ -555,7 +555,7 @@ int main(int argc, char* argv[]) {
 	vector <int> actualClientSock;
 
 	// config Traffic Layer setup variables
-	if (Config_c.SimulationSetup.EnableRealSim) {
+	if (Config_c.SimulationSetup.EnableFIXS) {
 		ENABLE_REALSIM = true;
 	}
 	else {

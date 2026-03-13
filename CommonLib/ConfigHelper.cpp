@@ -137,12 +137,16 @@ int ConfigHelper::getConfig(string configName) {
 	// 			READ Simulation Setup section
 	// ===========================================================================
 	node = config["SimulationSetup"];
-	if (node["EnableRealSim"]) {
-		SimulationSetup.EnableRealSim = parserFlag(node, "EnableRealSim");
+	if (node["EnableFIXS"]) {
+		SimulationSetup.EnableFIXS = parserFlag(node, "EnableFIXS");
+	}
+	else if (node["EnableRealSim"]) {
+		// Legacy key: accept "EnableRealSim" for backward compatibility
+		SimulationSetup.EnableFIXS = parserFlag(node, "EnableRealSim");
 	}
 	else {
-		SimulationSetup.EnableRealSim = true;
-		if (!SuppressDefaultMessages) printf("\nWill enable real sim as default!\n");
+		SimulationSetup.EnableFIXS = true;
+		if (!SuppressDefaultMessages) printf("\nWill enable FIXS as default!\n");
 	}
 	if (node["EnableVerboseLog"]) {
 		SimulationSetup.EnableVerboseLog = parserFlag(node, "EnableVerboseLog");
@@ -951,7 +955,7 @@ void ConfigHelper::getVehSubscriptionList(Subscription_t VehSub, std::unordered_
 						//int len = (int) pointSubscribeId_v.size();
 						ss << pointSubscribeId_v.size();
 						//string poiName = "RealSimPOI_" + to_string(pointSubscribeId_v.size());
-						string poiName = "RealSimPOI_" + ss.str();
+						string poiName = "FIXS_POI_" + ss.str();
 
 						pointSubscribeId_v[poiName] = make_tuple(strtod(xlist[i].c_str(), NULL), strtod(ylist[i].c_str(), NULL), strtod(zlist[i].c_str(), NULL), strtod(rlist[i].c_str(), NULL));
 					}
@@ -967,7 +971,7 @@ void ConfigHelper::getVehSubscriptionList(Subscription_t VehSub, std::unordered_
 							//int len = (int) pointSubscribeId_v.size();
 							ss << pointSubscribeId_v.size();
 							//string poiName = "RealSimPOI_" + to_string(pointSubscribeId_v.size());
-							string poiName = "RealSimPOI_" + ss.str();
+							string poiName = "FIXS_POI_" + ss.str();
 
 							SocketPort2SubscriptionList_um[it].VehicleList.pointSubscribeId_v[poiName] = make_tuple(strtod(xlist[i].c_str(), NULL), strtod(ylist[i].c_str(), NULL), strtod(zlist[i].c_str(), NULL), strtod(rlist[i].c_str(), NULL));
 						}

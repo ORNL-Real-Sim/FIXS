@@ -4,7 +4,7 @@ SimulationSetup:
     # Master Switch to turn on/off RealSim interface
     # if turned off, VISSIM will just run without RealSim
     # SUMO needs to run without traci
-  EnableRealSim: true
+  EnableFIXS: true
 
     # Whether or not to save verbose log during the simulation. skip log can potentially speed up
   EnableVerboseLog: false

@@ -1009,7 +1009,7 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 					int 	b,
 					int 	a = 255*/
 				libsumo::TraCIColor color(255,0,255); // use magenta as color
-				string type = "RealSim";
+				string type = "FIXS";
 				int layer = 999; // put it as a very high layer
 				string imgFile = ""; // no image file
 				double width = 0; // width	float	width of rendered image in meters
