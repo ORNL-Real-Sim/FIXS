@@ -98,14 +98,42 @@ GitHub-specific configuration (workflows, issue templates, CI/CD).
 
 ---
 
+## Known Limitations and Technical Debt
+
+This section documents known rough edges in the codebase for contributors.
+
+### C++ Core
+- **`TrafficHelper.cpp` (~1743 lines)** — Monolithic; SUMO and VISSIM paths are interleaved rather than separated. Tracked in milestone 0.8.0.
+- **`mainTrafficLayer.cpp` (~1396 lines)** — Main function is too large; refactor tracked in issue [#113](https://github.com/ORNL-Real-Sim/FIXS/issues/113).
+- **`ConfigHelper.cpp` (~1169 lines)** — Contains several dead `// TODO: add code` branches and commented-out error message blocks.
+- **C++ headers have no Doxygen comments** — `ConfigHelper.h`, `SocketHelper.h`, `MsgHelper.h` have zero doc comments; C++ API autodoc deferred until comments are added (see issue [#137](https://github.com/ORNL-Real-Sim/FIXS/issues/137)).
+- **`EnableFIXS` / `EnableRealSim`** — The config key was renamed (`EnableRealSim` → `EnableFIXS`) with backward compat parsing. Old configs still work but contributors should use `EnableFIXS`.
+
+### Python CommonLib
+- **No docstrings** — `ConfigHelper.py`, `MsgHelper.py`, `SocketHelper.py` lack docstrings; Python autodoc on RTD will be empty until added (issue [#137](https://github.com/ORNL-Real-Sim/FIXS/issues/137)).
+- **`MsgHelper.py` (~28k lines)** — Very large; likely has unused code paths.
+
+### Build System
+- **Script numbering in `scripts/dispatch/`** — Scripts were renumbered in PR #135 but individual component scripts (4a, 4b, 5, 6) don't follow a clean linear sequence.
+- **`generate_version.ps1`** — Now called by `dispatch.bat` (added in PR #135), but requires git tags to be present; will produce a fallback version string if no tags exist.
+
+### Tests
+- **No CI** — Python unit tests under `tests/Python/unit/` run locally but there is no GitHub Actions workflow to run them automatically. Tracked in issue [#57](https://github.com/ORNL-Real-Sim/FIXS/issues/57).
+- **Integration tests require simulators** — All scenario tests under `tests/` (SUMO, VISSIM, CarMaker) require the respective simulator installed. Only `tests/Python/unit/` is simulator-free.
+
+### ProprietaryFiles Submodule
+- **VISSIM driver TODO stubs** — `DriverModel_FIXS_Common.h` has 8 `// TODO #129:` stubs for unimplemented message field handlers (signal table missing, connection-failed paths, speed-limit errors).
+
+---
+
 ## Dependency Management
 
 ### `dependencies.yaml`
-Central configuration file tracking external simulator and library versions used by RS_FIXS:
+Central configuration file tracking external simulator and library versions used by FIXS:
 - **SUMO** - Traffic simulation (currently v1.22.0)
 - **CARLA** - Virtual environment simulator
 - **CarMaker** - IPG Automotive HIL platform
-- **yaml-cpp** / **libevent** - C++ libraries
+- **yaml-cpp** - C++ YAML configuration parser
 
 This file serves as the single source of truth for external dependency versions.
 

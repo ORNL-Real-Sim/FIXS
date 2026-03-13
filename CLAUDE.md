@@ -199,3 +199,34 @@ git push origin maintenance/NNN_short_desc
 - VISSIM-specific: [doc/VISSIMdoc.md](doc/VISSIMdoc.md)
 - SUMO-specific: [doc/SUMOdoc.md](doc/SUMOdoc.md)
 - CarMaker-specific: [doc/CarMakerDoc.md](doc/CarMakerDoc.md)
+
+---
+
+## Repo Health Observations (Claude-internal)
+
+*Honest notes for Claude to reason about when assisting — not for user-facing docs.*
+
+### High-priority debt
+- **`TrafficHelper.cpp` (~1743 lines)** — SUMO and VISSIM logic is fully interleaved; tracked in milestone 0.8.0. Avoid adding to it; route new functionality to helper sub-files instead.
+- **`mainTrafficLayer.cpp` (~1396 lines)** — The main() function does too much directly. Issue #113 tracks a refactor. Prefer adding logic in helper classes, not directly in main.
+- **`ConfigHelper.cpp` (~1169 lines)** — Has dead `// TODO: add code` branches and commented-out error blocks; safe to clean up but not urgent.
+- **`MsgHelper.py` (~28k lines)** — Almost certainly has dead code paths. Any changes there should be narrow and tested; full audit deferred.
+
+### No automated CI
+- Python unit tests run locally only (`tests/Python/unit/`). Issue #57 tracks GitHub Actions setup. When suggesting test commands, always direct to `python -m pytest tests/Python/unit/ -v` — this is the one simulator-free path.
+
+### Branding transition in progress
+- `EnableRealSim` → `EnableFIXS` config key rename is backward-compatible (both parsed); contributors should use `EnableFIXS` in new configs. `FIXS_VERSION_*` macros coexist with `REALSIM_VERSION_*` aliases — use `FIXS_VERSION_*` going forward.
+
+### ProprietaryFiles submodule
+- `DriverModel_FIXS_Common.h` has 8 `// TODO #129:` stubs for unimplemented message handlers (signal table, connection-failed paths, speed-limit errors). These are in ProprietaryFiles/main which is branch-protected; changes require a PR to ProprietaryFiles/dev first.
+- External contributors see `ProprietaryFiles/` as an inaccessible submodule — don't ask them to modify it.
+
+### Documentation gaps (issue #137)
+- RTD `doc/BUILD.md` and `doc/CarlaDoc.md` are orphaned from the TOC — they build but aren't linked in `index.rst`.
+- Python CommonLib (`ConfigHelper.py`, `MsgHelper.py`, `SocketHelper.py`) has zero docstrings; Sphinx autodoc will produce empty pages until added.
+- C++ headers (`ConfigHelper.h`, `SocketHelper.h`, `MsgHelper.h`) have no Doxygen comments; C++ API doc is deferred until issue #137 is addressed.
+
+### Build system
+- `generate_version.ps1` requires git tags to exist; falls back to a placeholder version string otherwise. Mention this when helping with release tagging.
+- Script numbering in `scripts/dispatch/` (4a, 4b, 5, 6) is non-linear — a known rough edge, not a bug.
