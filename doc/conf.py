@@ -32,6 +32,10 @@ myst_enable_extensions = [
     "linkify",       # auto-detect links
 ]
 
+# Ensure anchors are generated for headings up to H5 so manual Markdown links
+# (e.g., `[Section](#section-name)`) remain stable across RTD builds.
+myst_heading_anchors = 5
+
 #Options for HTML output
 html_theme = "sphinx_rtd_theme"
 html_theme_options = {

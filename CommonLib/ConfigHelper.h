@@ -140,6 +140,12 @@ struct SumoSetup_t {
 
 	int SpeedMode;
 	int ExecutionOrder;
+
+	// Auto-launch SUMO configuration
+	bool EnableAutoLaunch;
+	std::string SumoConfigFile;
+	int NumClients;
+	std::string RuntimeLibraryPath;
 };
 
 typedef struct SubscriptionVehicleList_t {
@@ -181,6 +187,9 @@ public:
 	ConfigHelper();
 
 	int getConfig(std::string configName);
+
+	// Flag to suppress "Will use X as default" messages during config parsing
+	bool SuppressDefaultMessages = true;
 
 	bool parserFlag(YAML::Node node, std::string name);
 	std::string parserString(YAML::Node node, std::string name);

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!-- Routes for simple loop scenario -->
+<routes xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/routes_file.xsd">
+
+    <!-- Vehicle type -->
+    <vType id="car" vClass="passenger" length="5.0" minGap="2.5" maxSpeed="20.0" accel="2.6" decel="4.5" sigma="0.5"/>
+
+    <!-- Loop route: bottom -> right -> top -> left -> repeat -->
+    <route id="loop" edges="bottom right top left" repeat="100"/>
+
+    <!-- Single ego vehicle that drives in a loop -->
+    <vehicle id="ego" type="car" route="loop" depart="0" color="1,0,0"/>
+
+</routes>

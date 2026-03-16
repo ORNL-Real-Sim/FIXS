@@ -1,11 +1,10 @@
 #include "TrafficHelper.h"
+#include <stdexcept>
 
 
 //const unsigned short selfServerPort[NSERVER] = { 420 };
 
 using namespace std;
-
-//using namespace libtraci;
 
 //CentralCtrl CentralCtrl_g;
 
@@ -34,12 +33,91 @@ void TrafficHelper::connectionSetup(string trafficIp, int trafficPort, int nClie
 
 	//system("sumo -c \"C:\Users\y0n\Dropbox (ORNL)\2_projects\1_2_sumo\1_4_speedHarmTest\speedHarmTest.sumocfg\" --remote-port 1337 ");
 
-	//Simulation::init(trafficPort, 60, trafficIp);
-	//Simulation::setOrder(1);
+	// ===========================================================================
+	// Auto-launch SUMO if configured
+	// ===========================================================================
+	if (Config_c->SumoSetup.EnableAutoLaunch) {
+		printf("Auto-launch SUMO enabled\n");
+		printf("  Config file: %s\n", Config_c->SumoSetup.SumoConfigFile.c_str());
+		printf("  Num clients: %d\n", Config_c->SumoSetup.NumClients);
 
-	traci.connect(trafficIp, trafficPort);
+#ifdef ENABLE_LIBSUMO
+		// -----------------------------------------------------------------------
+		// OPTION A: Direct launch via libsumo (headless only, no GUI)
+		// This is the active implementation
+		// -----------------------------------------------------------------------
+		try {
+			std::vector<std::string> cmd = {"sumo", "-c", Config_c->SumoSetup.SumoConfigFile, "--start", "--step-length", "0.1",
+				"--num-clients", std::to_string(Config_c->SumoSetup.NumClients)};
 
-	traci.setOrder(order);
+			printf("Launching SUMO via libsumo::Simulation::start()...\n");
+			libsumo::Simulation::start(cmd);
+			libsumo::Simulation::setOrder(order);
+			printf("SUMO launched successfully via libsumo\n");
+		}
+		catch (const std::exception& e) {
+			printf("ERROR: Failed to start SUMO via libsumo: %s\n", e.what());
+			throw;
+		}
+#else
+		// -----------------------------------------------------------------------
+		// OPTION B: External process launch with sumo-gui (supports GUI)
+		// -----------------------------------------------------------------------
+		try {
+			// Build command line for sumo-gui with multi-client support
+			std::string sumoCmd = "sumo-gui -c \"" + Config_c->SumoSetup.SumoConfigFile +
+				"\" --remote-port " + std::to_string(trafficPort) +
+				" --num-clients " + std::to_string(Config_c->SumoSetup.NumClients) +
+				" --step-length 0.1 --start";
+
+			printf("Launching SUMO-GUI as external process...\n");
+			printf("  Command: %s\n", sumoCmd.c_str());
+
+			// Launch in background (platform-specific)
+#ifdef WIN32
+			std::string launchCmd = "start /B " + sumoCmd;  // Windows: use start /B
+#else
+			std::string launchCmd = sumoCmd + " &";         // Linux: append &
+#endif
+			int result = system(launchCmd.c_str());
+			if (result != 0) {
+				printf("ERROR: Failed to launch SUMO-GUI (exit code: %d)\n", result);
+				throw std::runtime_error("Failed to launch SUMO-GUI process");
+			}
+
+			printf("SUMO-GUI process started successfully\n");
+
+			// Wait a bit for SUMO to initialize
+			printf("Waiting for SUMO to initialize...\n");
+#ifdef WIN32
+			Sleep(3000); // Wait 3 seconds (Windows)
+#else
+			sleep(3); // Wait 3 seconds (Linux)
+#endif
+
+			// Now connect via TraCI as usual
+			printf("Connecting to SUMO via TraCI...\n");
+			SUMO_TRACI_NAMESPACE::Simulation::init(trafficPort, libsumo::DEFAULT_NUM_RETRIES, trafficIp);
+			SUMO_TRACI_NAMESPACE::Simulation::setOrder(order);
+			printf("Connected to SUMO successfully\n");
+		}
+		catch (const std::exception& e) {
+			printf("ERROR: Failed to auto-launch SUMO: %s\n", e.what());
+			throw;
+		}
+#endif
+	}
+	else {
+		// Original behavior: connect to existing SUMO instance
+		try {
+			SUMO_TRACI_NAMESPACE::Simulation::init(trafficPort, libsumo::DEFAULT_NUM_RETRIES, trafficIp);
+			SUMO_TRACI_NAMESPACE::Simulation::setOrder(order);
+		}
+		catch (const std::exception& e) {
+			printf("ERROR: Failed to connect to SUMO at %s:%d - %s\n", trafficIp.c_str(), trafficPort, e.what());
+			throw;
+		}
+	}
 
 	/********************************************
 	* GET VEH SUBSCRIPTION
@@ -157,44 +235,53 @@ void TrafficHelper::connectionSetup(string trafficIp, int trafficPort, int nClie
 	/********************************************
 	* GET Speed Limit of every edge, lane
 	*********************************************/
-	vector <string> laneList = traci.lane.getIDList();
+	// Get list of all lanes and edges in the network
+	vector <string> laneList = SUMO_TRACI_NAMESPACE::Lane::getIDList();
 
+	// Build vehicle class list from all vehicle types defined in SUMO
 	vector <string> vehClassList;
 
-	vector <string> vehTypeList = traci.vehicletype.getIDList();
+	vector <string> vehTypeList = SUMO_TRACI_NAMESPACE::VehicleType::getIDList();
 	for (int i = 0; i < vehTypeList.size(); i++) {
 		string vehType = vehTypeList[i];
-		string vehClass = traci.vehicletype.getVehicleClass(vehType);
+		string vehClass = SUMO_TRACI_NAMESPACE::VehicleType::getVehicleClass(vehType);
 
 		vehClassList.push_back(vehClass);
 	}
 
-	for (int i = 0; i < laneList.size(); i++) {
-		string laneId = laneList[i];
-		string edgeId = traci.lane.getEdgeID(laneId);
-		
-		vector <string> allowClassList = traci.lane.getAllowed(laneId);
-		vector <string> disallowClassList = traci.lane.getDisallowed(laneId);
+	// Only retrieve speed limits if speedLimit or speedLimitNext is defined in VehicleMessageField
+	// This avoids expensive queries when speed limit data is not needed
+	if (VehicleMessageField_set.find("speedLimit") != VehicleMessageField_set.end() ||
+		VehicleMessageField_set.find("speedLimitNext") != VehicleMessageField_set.end()) {
+		for (int i = 0; i < laneList.size(); i++) {
+			string laneId = laneList[i];
+			string edgeId = SUMO_TRACI_NAMESPACE::Lane::getEdgeID(laneId);
 
-		if (allowClassList.size() == 0 && disallowClassList.size() == 0) {
-			for (int iC = 0; iC < vehClassList.size(); iC++) {
-				string vClass = vehClassList[iC];
-				LaneVehClass2SpeedLimit_um[make_pair(laneId, vClass)] = traci.lane.getMaxSpeed(laneId);
+			vector <string> allowClassList = SUMO_TRACI_NAMESPACE::Lane::getAllowed(laneId);
+			vector <string> disallowClassList = SUMO_TRACI_NAMESPACE::Lane::getDisallowed(laneId);
 
-				EdgeVehClass2SpeedLimit_um[make_pair(edgeId, vClass)] = traci.lane.getMaxSpeed(laneId);
+			// If no specific vehicle class restrictions, apply to all vehicle classes
+			if (allowClassList.size() == 0 && disallowClassList.size() == 0) {
+				for (int iC = 0; iC < vehClassList.size(); iC++) {
+					string vClass = vehClassList[iC];
+					LaneVehClass2SpeedLimit_um[make_pair(laneId, vClass)] = SUMO_TRACI_NAMESPACE::Lane::getMaxSpeed(laneId);
+
+					EdgeVehClass2SpeedLimit_um[make_pair(edgeId, vClass)] = SUMO_TRACI_NAMESPACE::Lane::getMaxSpeed(laneId);
+				}
 			}
-		}
-		else {
-			for (int iC = 0; iC < allowClassList.size(); iC++) {
-				string vClass = allowClassList[iC];
-				LaneVehClass2SpeedLimit_um[make_pair(laneId, vClass)] = traci.lane.getMaxSpeed(laneId);
+			// Otherwise, only apply to allowed vehicle classes
+			else {
+				for (int iC = 0; iC < allowClassList.size(); iC++) {
+					string vClass = allowClassList[iC];
+					LaneVehClass2SpeedLimit_um[make_pair(laneId, vClass)] = SUMO_TRACI_NAMESPACE::Lane::getMaxSpeed(laneId);
 
-				EdgeVehClass2SpeedLimit_um[make_pair(edgeId, vClass)] = traci.lane.getMaxSpeed(laneId);
+					EdgeVehClass2SpeedLimit_um[make_pair(edgeId, vClass)] = SUMO_TRACI_NAMESPACE::Lane::getMaxSpeed(laneId);
+				}
 			}
 		}
 	}
 
-	vector <string> edgeList = traci.edge.getIDList();
+	vector <string> edgeList = SUMO_TRACI_NAMESPACE::Edge::getIDList();
 	for (int i = 0; i < edgeList.size(); i++) {
 		AllEdgeList.insert(edgeList[i]);
 	}
@@ -244,8 +331,7 @@ void TrafficHelper::selectSUMO() {
 
 void TrafficHelper::close() {
 	if (SUMO_OR_VISSIM.compare("SUMO") == 0) {
-		/*Simulation::close();*/
-		traci.close();
+		SUMO_TRACI_NAMESPACE::Simulation::close();
 	}
 	else if (SUMO_OR_VISSIM.compare("VISSIM") == 0) {
 
@@ -361,20 +447,29 @@ int TrafficHelper::addEgoVehicle(double simTime) {
 
 	if (SUMO_OR_VISSIM.compare("SUMO") == 0) {
 		if (ENABLE_VEH_SIMULATOR) {
-			// !!!!check if what received is ego vehicle 
+			// !!!!check if what received is ego vehicle
 			// use default type if not specified!!
 			string idStr = Config_c->CarMakerSetup.EgoId;
-			// if ego not exist yet, add it
-			string typeStr = Config_c->CarMakerSetup.EgoType;
 
-			// if is empty
-			if (typeStr.size() == 0) {
-				traci.vehicle.add(idStr, "");
+			// Get all vehicle IDs from SUMO
+			vector<string> vehicleIds = SUMO_TRACI_NAMESPACE::Vehicle::getIDList();
+
+			// Check if ego vehicle already exists
+			bool vehicleExist = (find(vehicleIds.begin(), vehicleIds.end(), idStr) != vehicleIds.end());
+
+			// if ego not exist yet, add it
+			if (!vehicleExist) {
+				string typeStr = Config_c->CarMakerSetup.EgoType;
+
+				// if is empty
+				if (typeStr.size() == 0) {
+					SUMO_TRACI_NAMESPACE::Vehicle::add(idStr, "");
+				}
+				else {
+					SUMO_TRACI_NAMESPACE::Vehicle::add(idStr, "", typeStr);
+				}
+				SUMO_TRACI_NAMESPACE::Vehicle::setColor(idStr, libsumo::TraCIColor(255, 0, 0));
 			}
-			else {
-				traci.vehicle.add(idStr, "", typeStr);
-			}
-			traci.vehicle.setColor(idStr, libsumo::TraCIColor(255, 0, 0));
 		}
 
 		return 1;
@@ -390,7 +485,7 @@ int TrafficHelper::addEgoVehicleFromXY(double simTime, std::string vehicleId, st
 	if (SUMO_OR_VISSIM.compare("SUMO") == 0) {
 		if (ENABLE_VEH_SIMULATOR) {
 			// Map the x y positon to an edge for spawing the ego vehicle
-			libsumo::TraCIRoadPosition edgePosition = traci.simulation.convertRoad(positionX, positionY, false);
+			libsumo::TraCIRoadPosition edgePosition = SUMO_TRACI_NAMESPACE::Simulation::convertRoad(positionX, positionY, false);
 			// Create a dummy route for the ego vehicle
 			std::string dummyedgeID = edgePosition.edgeID;
 			double lanePos = edgePosition.pos; // position along the edge
@@ -398,10 +493,10 @@ int TrafficHelper::addEgoVehicleFromXY(double simTime, std::string vehicleId, st
 			std::string dummyRouteId = "route_" + vehicleId;
 			std::vector<std::string> dummyRoute;
 			dummyRoute.push_back(dummyedgeID);
-			traci.route.add(dummyRouteId, dummyRoute);
+			SUMO_TRACI_NAMESPACE::Route::add(dummyRouteId, dummyRoute);
 
-			traci.vehicle.add(vehicleId, dummyRouteId, vehicleType);
-			traci.vehicle.setColor(vehicleId, libsumo::TraCIColor(255, 0, 0));
+			SUMO_TRACI_NAMESPACE::Vehicle::add(vehicleId, dummyRouteId, vehicleType);
+			SUMO_TRACI_NAMESPACE::Vehicle::setColor(vehicleId, libsumo::TraCIColor(255, 0, 0));
 		}
 
 		return 1;
@@ -416,9 +511,8 @@ int TrafficHelper::addEgoVehicleFromXY(double simTime, std::string vehicleId, st
 int TrafficHelper::checkIfEgoExist(double* simTime) {
 
 	if (SUMO_OR_VISSIM.compare("SUMO") == 0) {
-		/**simTime = Simulation::getTime();*/
-		*simTime = traci.simulation.getTime();
-		vector <string> VehIdInSimulator = traci.vehicle.getIDList();
+		*simTime = SUMO_TRACI_NAMESPACE::Simulation::getTime();
+		vector <string> VehIdInSimulator = SUMO_TRACI_NAMESPACE::Vehicle::getIDList();
 
 		// check if subscribed vheicle is in the network
 		for (auto& iter : vehicleSubscribeId_v) {
@@ -444,8 +538,7 @@ int TrafficHelper::checkIfEgoExist(double* simTime) {
 
 int TrafficHelper::getSimulationTime(double* simTime) {
 	if (SUMO_OR_VISSIM.compare("SUMO") == 0) {
-		/**simTime = Simulation::getTime();*/
-		*simTime = traci.simulation.getTime();
+		*simTime = SUMO_TRACI_NAMESPACE::Simulation::getTime();
 		return 1;
 	}
 	else {
@@ -455,8 +548,7 @@ int TrafficHelper::getSimulationTime(double* simTime) {
 
 int TrafficHelper::runSimulation(double endTime) {
 	if (SUMO_OR_VISSIM.compare("SUMO") == 0) {
-		/*Simulation::step(endTime);*/
-		traci.simulationStep(endTime);
+		SUMO_TRACI_NAMESPACE::Simulation::step(endTime);
 		return 1;
 	}
 	else {
@@ -523,7 +615,7 @@ int TrafficHelper::sendToSUMO(double simTime, MsgHelper Msg_c) {
 	//}
 
 	try {
-		vector <string> VehIdInSimulator = traci.vehicle.getIDList();
+		vector <string> VehIdInSimulator = SUMO_TRACI_NAMESPACE::Vehicle::getIDList();
 		//uint32_t color = 4278190335;
 		//uint8_t r = (color >> 24) & 0xFF;
 		//uint8_t g = (color >> 16) & 0xFF;
@@ -553,7 +645,7 @@ int TrafficHelper::sendToSUMO(double simTime, MsgHelper Msg_c) {
 
 			if (ENABLE_VERBOSE) {
 				if (!ENABLE_VEH_SIMULATOR && find(VehIdInSimulator.begin(), VehIdInSimulator.end(), idStr) != VehIdInSimulator.end()) {
-					double speedOld = traci.vehicle.getSpeed(idStr);
+					double speedOld = SUMO_TRACI_NAMESPACE::Vehicle::getSpeed(idStr);
 					printf("Set SUMO id %s from speed %.4f to speed %.4f\n", idStr.c_str(), speedOld, speed);
 
 					FILE* f = fopen(MasterLogName.c_str(), "a");
@@ -583,7 +675,7 @@ int TrafficHelper::sendToSUMO(double simTime, MsgHelper Msg_c) {
 				// otherwise, move it
 				{
 					if (ENABLE_EXT_DYN) {
-						traci.vehicle.setPreviousSpeed(idStr, speed); // setting speed at (k) will be reflected at (k) "immediately", i.e., be considered in the next integration
+						SUMO_TRACI_NAMESPACE::Vehicle::setPreviousSpeed(idStr, speed); // setting speed at (k) will be reflected at (k) "immediately", i.e., be considered in the next integration
 					}
 					else {
 
@@ -592,7 +684,7 @@ int TrafficHelper::sendToSUMO(double simTime, MsgHelper Msg_c) {
 						double positionZ = (double)Msg_c.VehDataSend_um[0][iV].positionZ;
 						double heading = (double)Msg_c.VehDataSend_um[0][iV].heading;
 
-						traci.vehicle.moveToXY(idStr, "", -1, positionX, positionY, heading, 6); // keepRoute 110 => 6
+						SUMO_TRACI_NAMESPACE::Vehicle::moveToXY(idStr, "", -1, positionX, positionY, heading, 6); // keepRoute 110 => 6
 						//bit0(keepRoute = 1 when only this bit is set)
 							//1: The vehicle is mapped to the closest edge within it's existing route. If no suitable position is found within 100m mapping fails with an error.
 							//0 : The vehicle is mapped to the closest edge within the network.If that edge does not belong to the original route, the current route is replaced by a new route which consists of that edge only.If no suitable position is found within 100m mapping fails with an error.When using the sublane model the best lateral position that is fully within the lane will be used.Otherwise, the vehicle will drive in the center of the closest lane.
@@ -606,14 +698,14 @@ int TrafficHelper::sendToSUMO(double simTime, MsgHelper Msg_c) {
 					}
 
 					if (VehicleMessageField_set.find("lightIndicators") != VehicleMessageField_set.end()) {
-						traci.vehicle.setSignals(idStr, (int)Msg_c.VehDataSend_um[0][iV].lightIndicators);
+						SUMO_TRACI_NAMESPACE::Vehicle::setSignals(idStr, (int)Msg_c.VehDataSend_um[0][iV].lightIndicators);
 					}
 
 				}
 			}
 			// if carla is enabled and the reveiced id is within the interested ids
 			else if (ENABLE_CARLA&&ENABLE_CARLA_EXTERNAL_CONTROL&&find(Config_c->CarlaSetup.InterestedIds.begin(), Config_c->CarlaSetup.InterestedIds.end(), idStr) != Config_c->CarlaSetup.InterestedIds.end()) {
-				
+
 				double positionX = (double)Msg_c.VehDataSend_um[0][iV].positionX;
 				double positionY = (double)Msg_c.VehDataSend_um[0][iV].positionY;
 				double positionZ = (double)Msg_c.VehDataSend_um[0][iV].positionZ;
@@ -629,18 +721,18 @@ int TrafficHelper::sendToSUMO(double simTime, MsgHelper Msg_c) {
 				if (!vehicleExist) {
 					addEgoVehicleFromXY(simTime, idStr, vehicleType, positionX, positionY);
 				}
-				traci.vehicle.moveToXY(idStr, "", -1, positionX, positionY, heading, 6);
-				traci.vehicle.setSpeed(idStr, speed);
-				
+				SUMO_TRACI_NAMESPACE::Vehicle::moveToXY(idStr, "", -1, positionX, positionY, heading, 6);
+				SUMO_TRACI_NAMESPACE::Vehicle::setSpeed(idStr, speed);
+
 			}
 			else {
 				if (1 && find(VehIdInSimulator.begin(), VehIdInSimulator.end(), idStr) != VehIdInSimulator.end()) {
 					if (ENABLE_EXT_DYN) {
-						traci.vehicle.setPreviousSpeed(idStr, speed); // setting speed at (k) will be reflected at (k) "immediately", i.e., be considered in the next integration
+						SUMO_TRACI_NAMESPACE::Vehicle::setPreviousSpeed(idStr, speed); // setting speed at (k) will be reflected at (k) "immediately", i.e., be considered in the next integration
 					}
 					else {
-						traci.vehicle.setSpeed(idStr, speed); // speed set at (k) essentially will be reflected at (k+1), not considered in the integration
-						std::cout << "Set SUMO id " << idStr << " to speed " << speed << std::endl;
+						SUMO_TRACI_NAMESPACE::Vehicle::setSpeed(idStr, speed); // speed set at (k) essentially will be reflected at (k+1), not considered in the integration
+
 						/*
 						bit0: Regard safe speed
 						bit1 : Regard maximum acceleration
@@ -650,12 +742,12 @@ int TrafficHelper::sendToSUMO(double simTime, MsgHelper Msg_c) {
 						bit5 : Disregard right of way within intersections(only applies to foe vehicles that have entered the intersection).
 						*/
 
-						//traci.vehicle.setSpeedMode(idStr, Config_c->SumoSetup.SpeedMode); // 000000 most checks off
-						//traci.vehicle.setSpeedMode(idStr, 0); // 000000 most checks off
-						//traci.vehicle.setSpeedMode(idStr, 24); // 011000
-						//traci.vehicle.setSpeedMode(idStr, 8); // 001000
+						SUMO_TRACI_NAMESPACE::Vehicle::setSpeedMode(idStr, Config_c->SumoSetup.SpeedMode); // 000000 most checks off
+						//SUMO_TRACI_NAMESPACE::Vehicle::setSpeedMode(idStr, 0); // 000000 most checks off
+						//SUMO_TRACI_NAMESPACE::Vehicle::setSpeedMode(idStr, 24); // 011000
+						//SUMO_TRACI_NAMESPACE::Vehicle::setSpeedMode(idStr, 8); // 001000
 
-						//traci.vehicle.setSpeedFactor(idStr, 1);
+						//SUMO_TRACI_NAMESPACE::Vehicle::setSpeedFactor(idStr, 1);
 					}
 
 					// change vehicle color if needed
@@ -665,7 +757,7 @@ int TrafficHelper::sendToSUMO(double simTime, MsgHelper Msg_c) {
 						uint8_t g = (color >> 16) & 0xFF;
 						uint8_t b = (color >> 8) & 0xFF;
 						uint8_t a = (color) & 0xFF;
-						traci.vehicle.setColor(idStr, libsumo::TraCIColor(r, g, b, a));
+						SUMO_TRACI_NAMESPACE::Vehicle::setColor(idStr, libsumo::TraCIColor(r, g, b, a));
 					}
 
 				}
@@ -679,7 +771,7 @@ int TrafficHelper::sendToSUMO(double simTime, MsgHelper Msg_c) {
 			for (int iS = 0; iS < Msg_c.TlsDataSend_um[0].size(); iS++) {
 				string idStr = Msg_c.TlsDataSend_um[0][iS].name;
 
-				traci.trafficlights.setRedYellowGreenState(idStr, Msg_c.TlsDataSend_um[0][iS].state);
+				SUMO_TRACI_NAMESPACE::TrafficLight::setRedYellowGreenState(idStr, Msg_c.TlsDataSend_um[0][iS].state);
 			}
 		}
 
@@ -818,8 +910,7 @@ void TrafficHelper::parseSendMsg(MsgHelper MsgIn_c, MsgHelper& MsgOut_c) {
 
 void TrafficHelper::runOneStepSimulation() {
 	if (SUMO_OR_VISSIM.compare("SUMO") == 0) {
-		/*Simulation::step();*/
-		traci.simulationStep();
+		SUMO_TRACI_NAMESPACE::Simulation::step();
 	}
 	else if (SUMO_OR_VISSIM.compare("VISSIM") == 0) {
 
@@ -851,10 +942,9 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 	Msg_c.clearSendStorage();
 
 	VehIdInSimulator.clear();
-	
-	/**simTime = Simulation::getTime();*/
-	*simTime = traci.simulation.getTime();
-	VehIdInSimulator = traci.vehicle.getIDList();
+
+	*simTime = SUMO_TRACI_NAMESPACE::Simulation::getTime();
+	VehIdInSimulator = SUMO_TRACI_NAMESPACE::Vehicle::getIDList();
 	
 	int nVeh = VehIdInSimulator.size(); // number of vehicles
 
@@ -886,7 +976,7 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 				double radius = 0;
 				string id = iter;
 
-				traci.edge.subscribeContext(id, libsumo::CMD_GET_VEHICLE_VARIABLE, 100, VehDataSubscribeList, 0, tSimuEnd);
+				SUMO_TRACI_NAMESPACE::Edge::subscribeContext(id, libsumo::CMD_GET_VEHICLE_VARIABLE, 100, VehDataSubscribeList, 0, tSimuEnd);
 			}
 
 			edgeHasSubscribed = true;
@@ -918,15 +1008,15 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 					int 	g,
 					int 	b,
 					int 	a = 255*/
-				libsumo::TraCIColor color(255,0,255); // use magenta as color 
+				libsumo::TraCIColor color(255,0,255); // use magenta as color
 				string type = "RealSim";
 				int layer = 999; // put it as a very high layer
 				string imgFile = ""; // no image file
 				double width = 0; // width	float	width of rendered image in meters
 				double height = 0; // height	float	height of rendered image in meters
 				double angle = 0; // angle	float	angle of rendered image in degree
-				traci.poi.add(poiName, x, y, color, type, layer, imgFile, width, height, angle);
-				traci.poi.subscribeContext(poiName, libsumo::CMD_GET_VEHICLE_VARIABLE, r, VehDataSubscribeList, 0, tSimuEnd);
+				SUMO_TRACI_NAMESPACE::POI::add(poiName, x, y, color, type, layer, imgFile, width, height, angle);
+				SUMO_TRACI_NAMESPACE::POI::subscribeContext(poiName, libsumo::CMD_GET_VEHICLE_VARIABLE, r, VehDataSubscribeList, 0, tSimuEnd);
 
 				//pointNamePoi_v.push_back(poiName);
 				i++;
@@ -942,8 +1032,7 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 			// -------------------
 			
 			// get list of all vehicles entered network
-			/*vector <string> vehDepartedId_v = Simulation::getDepartedIDList();*/
-			vector <string> vehDepartedId_v = traci.simulation.getDepartedIDList();
+			vector <string> vehDepartedId_v = SUMO_TRACI_NAMESPACE::Simulation::getDepartedIDList();
 			allVehicleHasSubscribed = true;
 			// only able to get vehicle subscription for vehicles already in the network
 			int i = 0;
@@ -957,14 +1046,14 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 					if (find(vehDepartedId_v.begin(), vehDepartedId_v.end(), id)!=vehDepartedId_v.end()) {
 						double radius = iter.second;
 
-						traci.vehicle.subscribeContext(id, libsumo::CMD_GET_VEHICLE_VARIABLE, radius, VehDataSubscribeList, 0, tSimuEnd);
+						SUMO_TRACI_NAMESPACE::Vehicle::subscribeContext(id, libsumo::CMD_GET_VEHICLE_VARIABLE, radius, VehDataSubscribeList, 0, tSimuEnd);
 
 						vehicleHasSubscribed_v[i] = true;
 					}
 
 					i++;
 				}
-				
+
 			}
 
 			// !!! need to sub all vehicles
@@ -991,7 +1080,7 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 		// 			GET SUBSCRIBED VEHICLE
 		// ===========================================================================
 		libsumo::ContextSubscriptionResults VehicleSubscribeRaw;
-		VehicleSubscribeRaw = traci.vehicle.getAllContextSubscriptionResults();
+		VehicleSubscribeRaw = SUMO_TRACI_NAMESPACE::Vehicle::getAllContextSubscriptionResults();
 
 		//{
 		//int i = 0;
@@ -1045,7 +1134,7 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 		// 			GET SUBSCRIBED point
 		// ===========================================================================
 		libsumo::ContextSubscriptionResults PointSubscribeRaw;
-		PointSubscribeRaw = traci.poi.getAllContextSubscriptionResults();
+		PointSubscribeRaw = SUMO_TRACI_NAMESPACE::POI::getAllContextSubscriptionResults();
 
 		for (auto& it : PointSubscribeRaw) {
 			string poiName = it.first;
@@ -1089,7 +1178,7 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 		// 			GET SUBSCRIBED EDGE
 		// ===========================================================================
 		libsumo::ContextSubscriptionResults EdgeSubscribeRaw;
-		EdgeSubscribeRaw = traci.edge.getAllContextSubscriptionResults();
+		EdgeSubscribeRaw = SUMO_TRACI_NAMESPACE::Edge::getAllContextSubscriptionResults();
 
 
 		if (edgeHasSubscribed) {
@@ -1162,7 +1251,7 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 		// !!!temporary fix
 		// if doing vehicle simulator, e.g., CarMaker, only send limited number of vehicles
 		if (ENABLE_VEH_SIMULATOR) {
-			libsumo::TraCIPosition posEgo = traci.vehicle.getPosition(Config_c->CarMakerSetup.EgoId);
+			libsumo::TraCIPosition posEgo = SUMO_TRACI_NAMESPACE::Vehicle::getPosition(Config_c->CarMakerSetup.EgoId);
 
 			// sort distance, pair distance to ego, vehId
 			vector <pair <double, string>> dist2ego_v;
@@ -1199,8 +1288,7 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 		//=================
 		// remove vehicle from list
 		//=================
-		//vector <string> vehArrivedIdList = Simulation::getArrivedIDList();
-		vector <string> vehArrivedIdList =  traci.simulation.getArrivedIDList();
+		vector <string> vehArrivedIdList = SUMO_TRACI_NAMESPACE::Simulation::getArrivedIDList();
 		for (int i = 0; i < vehArrivedIdList.size(); i++) {
 			VehicleId2EdgeList_um.erase(vehArrivedIdList[i]);
 		}
@@ -1215,8 +1303,8 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 			//===================================================
 			// Retreive DETECTOR configuration for the scenario BEFORE simulation starts
 			//===================================================
-			vector <string> detAreaAllId_v = traci.lanearea.getIDList();
-			vector <string> detInductAllId_v = traci.inductionloop.getIDList();
+			vector <string> detAreaAllId_v = SUMO_TRACI_NAMESPACE::LaneArea::getIDList();
+			vector <string> detInductAllId_v = SUMO_TRACI_NAMESPACE::InductionLoop::getIDList();
 
 			// obtain detector ids of the selected intersection and subscribe to results
 
@@ -1225,7 +1313,7 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 			for (auto it: Config_c->SubscriptionDetectorList.pattern_v){
 				for (int iD = 0; iD < detAreaAllId_v.size(); iD++) {
 					if (detAreaAllId_v[iD].find(it) != std::string::npos) {
-						traci.lanearea.subscribe(detAreaAllId_v[iD], detSubscribeList, 0, tSimuEnd);
+						SUMO_TRACI_NAMESPACE::LaneArea::subscribe(detAreaAllId_v[iD], detSubscribeList, 0, tSimuEnd);
 					}
 				}
 			}
@@ -1235,7 +1323,7 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 		}
 
 		libsumo::SubscriptionResults DetSubscribeRaw;
-		DetSubscribeRaw = traci.lanearea.getAllSubscriptionResults();
+		DetSubscribeRaw = SUMO_TRACI_NAMESPACE::LaneArea::getAllSubscriptionResults();
 
 
 		vector <DetectorData_t> tempDetData_v;
@@ -1267,7 +1355,7 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 			//===================================================
 			// Retreive DETECTOR configuration for the scenario BEFORE simulation starts
 			//===================================================
-			vector <string> sigAllId_v = traci.trafficlights.getIDList();
+			vector <string> sigAllId_v = SUMO_TRACI_NAMESPACE::TrafficLight::getIDList();
 
 			// obtain detector ids of the selected intersection and subscribe to results
 
@@ -1275,12 +1363,12 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 
 			if (!Config_c->SubscriptionSignalList.subAllSignalFlag) {
 				for (auto it : Config_c->SubscriptionSignalList.signalId_v) {
-					traci.trafficlights.subscribe(it.c_str(), sigSubscribeList, 0, tSimuEnd);
+					SUMO_TRACI_NAMESPACE::TrafficLight::subscribe(it.c_str(), sigSubscribeList, 0, tSimuEnd);
 				}
 			}
 			else {
 				for (auto it : sigAllId_v) {
-					traci.trafficlights.subscribe(it.c_str(), sigSubscribeList, 0, tSimuEnd);
+					SUMO_TRACI_NAMESPACE::TrafficLight::subscribe(it.c_str(), sigSubscribeList, 0, tSimuEnd);
 				}
 			}
 
@@ -1290,7 +1378,7 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 
 		// if already subscribed, then get signal data out
 		libsumo::SubscriptionResults SigSubscribeRaw;
-		SigSubscribeRaw = traci.trafficlights.getAllSubscriptionResults();
+		SigSubscribeRaw = SUMO_TRACI_NAMESPACE::TrafficLight::getAllSubscriptionResults();
 
 		vector <TrafficLightData_t> tempSigData_v;
 
@@ -1359,7 +1447,7 @@ void TrafficHelper::parserSumoSubscription(libsumo::TraCIResults VehDataSubscrib
 
 	// if does not have this vehicle yet
 	if (VehicleId2EdgeList_um.find(vehId) == VehicleId2EdgeList_um.end()) {
-		vector <string> edgeList = traci.vehicle.getRoute(vehId);
+		vector <string> edgeList = SUMO_TRACI_NAMESPACE::Vehicle::getRoute(vehId);
 		VehicleId2EdgeList_um[vehId] = edgeList;
 		//vector <libsumo::TraCIConnection> nextLinkList = traci.vehicle.getNextLinks(vehId);
 		//int aa = 1;
@@ -1421,20 +1509,20 @@ void TrafficHelper::parserSumoSubscription(libsumo::TraCIResults VehDataSubscrib
 	//=================
 	// get preceding vehicle
 	//=================
-	pair<string, double> leaderIdNSpeed = traci.vehicle.getLeader(vehId, 1000);
+	pair<string, double> leaderIdNSpeed = SUMO_TRACI_NAMESPACE::Vehicle::getLeader(vehId, 1000);
 	CurVehData.precedingVehicleId = get<0>(leaderIdNSpeed);
 	CurVehData.precedingVehicleDistance = get<1>(leaderIdNSpeed);
 	CurVehData.hasPrecedingVehicle = 0;
 	CurVehData.precedingVehicleSpeed = -1.0;
 	if (CurVehData.precedingVehicleId.compare("") != 0) {
 		CurVehData.hasPrecedingVehicle = 1;
-		CurVehData.precedingVehicleSpeed = traci.vehicle.getSpeed(CurVehData.precedingVehicleId);
+		CurVehData.precedingVehicleSpeed = SUMO_TRACI_NAMESPACE::Vehicle::getSpeed(CurVehData.precedingVehicleId);
 	}
 
 	//=================
 	// get signal information
 	//=================
-	vector <libsumo::TraCINextTLSData> nextTlsList = traci.vehicle.getNextTLS(vehId);
+	vector <libsumo::TraCINextTLSData> nextTlsList = SUMO_TRACI_NAMESPACE::Vehicle::getNextTLS(vehId);
 
 	if (nextTlsList.size() > 0) {
 		CurVehData.signalLightId = nextTlsList[0].id;

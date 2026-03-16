@@ -7,11 +7,15 @@
 
 #include <math.h>
 
-//#include "TraCIAPI.h"
-//#define NOMINMAX
+//#define ENABLE_LIBSUMO
 
-//#include <libsumo/libtraci.h>
-#include "traci/TraCIAPI.h"
+#ifdef ENABLE_LIBSUMO
+#include <libsumo/libsumo.h>
+#define SUMO_TRACI_NAMESPACE libsumo
+#else
+#include <libsumo/libtraci.h>
+#define SUMO_TRACI_NAMESPACE libtraci
+#endif
 #include "SocketHelper.h"
 
 
@@ -71,13 +75,7 @@ public:
 	//======================
 	// This is for SUMO
 	//======================
-	class Client : public TraCIAPI {
-	public:
-		Client() {};
-		~Client() {};
-	};
-
-	Client traci;
+	// Using libtraci - no custom client class needed
 
 	
 	/********************************************
@@ -213,4 +211,8 @@ private:
 
 	const int N_MAX_VEH = 100;
 };
+
+
+
+
 

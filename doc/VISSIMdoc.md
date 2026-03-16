@@ -1,7 +1,6 @@
 # RealSim VISSIM documentation
 
-Table of Contents
-=======================
+## Table of Contents
 * [Simulation Setups](#simulation-setups)
     * [Compile Source Code](#compile-source-code)
     * [Interface Setup](#interface-setup)
@@ -93,6 +92,7 @@ XilSetup:
 1. The cmd window running TrafficLayer.exe will stop automatically after the first two steps. NOTE: The cmd window might pop an error message which is not indeed an error but part of the shutdown procedure.
 
 ## Run Simulation With Automation Script
+(start-simulation-1)=
 ### Start Simulation
 Use the ``main_autoRealSim.m`` as the template to build your own automation script applications. The startup order is similar to manual procedure as in section above, i.e., 
 1. start ``TrafficLayer.exe``; 
@@ -152,6 +152,7 @@ Make sure modify the ``main_autoRealSim.m`` and ``startVissim.m`` as needed, esp
     % simout = sim(simModelName); % alternatively can use 'sim' command
     ```
 
+(stop-simulation-1)=
 ### Stop Simulation
 Simulation will automatically stop after Simulink model reaches the 'StopTime' (see where this variable can be defined in section above), VISSIM file simulation seconds/periods should be larger or equal to this 'StopTime'. Adjust these simulation stops time as needed.
 

@@ -353,7 +353,7 @@ class MsgHelper:
             byte_index += 4
 
         if self.vehicle_msg_field_valid.get('signalLightColor'):
-            byte_data[byte_index] = veh_data.signalLightColor
+            byte_data[byte_index:byte_index+1] = struct.pack('b', veh_data.signalLightColor)
             byte_index += 1
 
         if self.vehicle_msg_field_valid.get('speedLimit'):
@@ -376,7 +376,7 @@ class MsgHelper:
             byte_index += 4
 
         if self.vehicle_msg_field_valid.get('activeLaneChange'):
-            byte_data[byte_index] = veh_data.activeLaneChange
+            byte_data[byte_index:byte_index+1] = struct.pack('b', veh_data.activeLaneChange)
             byte_index += 1
 
         if self.vehicle_msg_field_valid.get('length'):

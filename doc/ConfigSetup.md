@@ -1,99 +1,353 @@
-# Configuration Setup Guide 
+# Configuration Reference
 
-#ecodrivingConfig_SUMO.yaml — Configuration Documentation
+The Real-Sim interface is configured through YAML files (for example `config.yaml`). Each top-level section maps directly to structures parsed in `CommonLib/ConfigHelper`. This document describes the supported keys, their defaults, and any special behaviour such as derived paths.
 
-This page explains the structure and purpose of the `ecodrivingConfig_SUMO.yaml` file used in the Real-Sim environment. Each section of the YAML controls a different aspect of the simulation (metadata, experiment setup, traffic simulator, external dynamics, etc.).
+> **Path handling.** Unless stated otherwise, relative paths are resolved against the directory that contains the config file. The interface also accepts absolute paths.
+
+## SimulationSetup
+
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| EnableRealSim | bool | true | Master switch for the interface. |
+| EnableVerboseLog | bool | false | Enables detailed logging in TrafficLayer and companion tools. |
+| SimulationEndTime | double | 90000 | End time (seconds). Large default keeps the session open until external shutdown. |
+| EnableExternalDynamics | bool | false | When true, SUMO speed updates use `setPreviousSpeed` so acceleration limits are respected. |
+| VehicleMessageField | string list | All supported fields | Controls which vehicle fields are exchanged. Provide a subset if bandwidth is a concern. Must include `id`, `speed`, and one of `speedDesired` or `accelerationDesired`. |
+| SelectedTrafficSimulator | string | `"SUMO"` | Use `"SUMO"` or `"VISSIM"`. |
+| TrafficSimulatorIP | string | `"127.0.0.1"` | Host for TraCI/VISSIM connections. |
+| TrafficSimulatorPort | int | 1337 | Port for the selected simulator. |
+| SimulationMode | int | 0 | Bitmask mode as documented in the README. |
+| SimulationModeParameter | double | 0 | Auxiliary parameter consumed by selected modes. |
+| TrafficLayerIP | string | inferred | Defaults to the first vehicle subscription IP if not provided. |
+| TrafficLayerPort | int | inferred | Defaults to the first vehicle subscription port if not provided. |
+
+## SumoSetup
+
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| SpeedMode | int | 0 | Passed to `SUMO_TRACI_NAMESPACE::Vehicle::setSpeedMode`. Common values: 0 (default safety), 31 (default mode), 32 (all checks off). |
+| ExecutionOrder | int | 1 | Order passed to `Simulation::setOrder`. |
+| EnableAutoLaunch | bool | false | When true, TrafficLayer starts SUMO automatically; otherwise it expects a running instance. |
+| SumoConfigFile | string | `""` | Path to `.sumocfg` used when auto-launching. Relative paths resolved against config file directory. |
+| NumClients | int | 1 | Number of SUMO clients negotiated during auto-launch. |
+| RuntimeLibraryPath | string | `""` | Optional override for the SUMO runtime directory (DLL/.so path). |
+
+When `RuntimeLibraryPath` is omitted the executable searches for the libsumo runtime in the following order:
+
+1. `libsumo\bin` located next to `TrafficLayer.exe`.
+2. `CommonLib\libsumo\bin` relative to the executable, walking up to four parent directories (covers `TrafficLayer/x64/<Config>` and `build`).
+3. `CommonLib\libsumo\bin` relative to the current working directory.
+
+On Windows the resolved folder is supplied to `SetDllDirectory`. On Linux the folder is prepended to `LD_LIBRARY_PATH`. Leave the field commented out unless you intentionally repackage the SUMO binaries elsewhere.
+
+## ApplicationSetup
+
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| EnableApplicationLayer | bool | false | Enables the application message bus. |
+| ApplicationPort | int list | [] | Ports that receive messages (alternative to subscription-based port definition). |
+| VehicleSubscription | list of subscription blocks | [] | Each block has `type`, an `attribute` map, `ip`, and `port`. |
+| DetectorSubscription | list of subscription blocks | [] | Detector data subscriptions. |
+| SignalSubscription | list of subscription blocks | [] | Traffic signal subscriptions. |
+
+### Subscription Types
+
+**VehicleSubscription** supports the following types:
+- `ego`: Subscribe by vehicle ID. Attributes: `id` (list), `radius` (list), or `all` (bool).
+- `link`: Subscribe by edge/link ID. Attributes: `id` (list).
+- `point`: Subscribe by geographic point. Attributes: `x`, `y`, `z`, `radius` (all lists).
+- `vehicleType`: Subscribe by vehicle type. Attributes: `id` (list), `radius` (list).
+
+**SignalSubscription** supports:
+- `intersection`: Subscribe by signal controller. Attributes: `name` or `id` (list).
+
+**DetectorSubscription** supports:
+- `detector`: Subscribe by detector pattern. Attributes: `pattern`, `name`, or `id` (list).
+
+Example subscription block:
 
 ```yaml
-# =========================
-# Metadata
-# =========================
-Metadata:
-  name:             "Eco-Driving Test Scenario"
-  version:          "1.0.0"
-  description:      >
-    Runs a traffic simulation on SUMO, with
-    RealSim linking to a Python controller and Simulink for dynamics.
-  simulation_end:   33000
+VehicleSubscription:
+-   type: ego
+    attribute: {id: ['ego'], radius: [0]}
+    ip: ['127.0.0.1']
+    port: [2444]
+```
 
-# =========================
-# Base Directory
-# =========================
-root_dir: "./tests/Applications/Eco_Fixed_Timming"
+## XilSetup
 
-# =========================
-# Experiments
-# =========================
-Experiments:
-  config_file: "ecodrivingConfig.yaml"   # RealSim scenario YAML to modify and run
-  eco_driving: true                      # Enable eco-driving logic in Python controller
-  vehicle_dynamics: true                 # Delegate dynamics to Simulink if true
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| EnableXil | bool | false | Enables the co-simulation bridge. |
+| AsServer | bool | false | When true, TrafficLayer listens for XIL connections; otherwise acts as client. |
+| VehicleSubscription | list | [] | Same schema as the application-layer subscriptions. |
+| SignalSubscription | list | [] | Signal subscriptions for XIL. |
+| DetectorSubscription | list | [] | Detector subscriptions for XIL. |
 
-  SUMO:
-    port: 1337                           # TCP port for SUMO TraCI
-    src_path: "sumo_files"               # Path where SUMO network/config files are stored
+When the application layer is disabled but XIL is enabled, the interface automatically reuses the XIL vehicle subscriptions to seed outbound traffic.
 
-  Simulink:
-    port: 420                            # TCP port for Simulink (XIL client)
-    model_name: "EV_longitude"           # Name of MATLAB/Simulink model to launch
+## CarMakerSetup
 
-  FIXS:
-    port: 430                            # TCP port for RealSim’s Traffic ↔ Application link
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| EnableCosimulation | bool | false | Turn on integration with IPG CarMaker. |
+| EnableEgoSimulink | bool | false | When true, ego state comes from Simulink; when false, from User.cpp. |
+| CarMakerIP | string | inferred or `"127.0.0.1"` | Connection IP for CarMaker. Inferred from subscription if single vehicle subscribed. |
+| CarMakerPort | int | inferred or 7331 | Connection port for CarMaker. Inferred from subscription if single vehicle subscribed. |
+| TrafficRefreshRate | double | 0.001 | Update rate (seconds) for publishing traffic to CarMaker. |
+| EgoId | string | inferred or `"egoCm"` | Identifier for the ego vehicle in SUMO. Inferred from subscription if single vehicle subscribed. |
+| EgoType | string | `""` | SUMO vehicle type for ego. Empty uses SUMO default. |
+| SynchronizeTrafficSignal | bool | false | If enabled, subscribes to all signal controllers for synchronization. |
+| TrafficSignalPort | int | 2444 or inferred | Port for signal data. Inferred from SignalSubscription if available. |
 
-# =========================
-# Simulation Setup
-# =========================
+## CarlaSetup
+
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| EnableVerboseLog | bool | false | Verbose logging for the CARLA bridge. |
+| EnableCosimulation | bool | false | Enables CARLA co-simulation. |
+| EnableExternalControl | bool | false | When true, SUMO vehicles updated from CARLA state; when false, CARLA only visualizes. |
+| UseVehicleTypeAsBlueprint | bool | false | Interpret SUMO vehicle types as CARLA blueprints. |
+| CarlaServerIP | string | `"127.0.0.1"` | CARLA server endpoint IP. |
+| CarlaServerPort | int | 2000 | CARLA server endpoint port. |
+| CarlaClientIP | string | inferred or `"127.0.0.1"` | Client binding IP for CARLA streaming. Inferred from subscription if single vehicle. |
+| CarlaClientPort | int | inferred or 2001 | Client binding port for CARLA streaming. Inferred from subscription if single vehicle. |
+| CarlaMapName | string | `"Town01"` | Desired CARLA map name. |
+| CenteredViewId | string | `"ego"` | Actor id used for camera centering. |
+| TrafficRefreshRate | double | 0.1 | CARLA update period (seconds). |
+| InterestedIds | string list | `["ego"]` | Vehicle IDs that receive mirrored CARLA updates. Should be subset of VehicleSubscription. |
+
+## Vehicle Message Field Specifications
+
+This is the full list of available vehicle message fields that can be specified in `VehicleMessageField`:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| id | string | Vehicle ID (VISSIM integer converted to string, e.g., 8 → "8"). **Required.** |
+| type | string | Vehicle type (VISSIM integer converted to string, e.g., 100 → "100") |
+| vehicleClass | string | Vehicle class (car, truck in VISSIM; private, passenger, truck in SUMO) |
+| speed | float | Current speed (m/s). **Required.** |
+| acceleration | float | Current acceleration (m/s²) |
+| positionX | float | X position (m) in simulator coordinates |
+| positionY | float | Y position (m) in simulator coordinates |
+| positionZ | float | Z position (m) in simulator coordinates |
+| heading | float | Heading in degrees (north = 0°, clockwise, east = 90°) |
+| color | uint32 | Combined RGBA bits (8-bit each, leftmost = R) |
+| linkId | string | Link ID (VISSIM integer converted to string) |
+| laneId | int32 | Lane ID (rightmost lane = 1, consistent with VISSIM) |
+| distanceTravel | float | Cumulative driving distance since entering network (m) |
+| speedDesired | float | Desired speed (m/s). **Required if accelerationDesired not specified.** |
+| accelerationDesired | float | Desired acceleration (m/s²). **Required if speedDesired not specified.** |
+| hasPrecedingVehicle | int8 | 1 = has preceding vehicle, 0 = none |
+| precedingVehicleId | string | ID of preceding vehicle |
+| precedingVehicleDistance | float | Distance to preceding vehicle (m), -1 if none |
+| precedingVehicleSpeed | float | Speed of preceding vehicle (m/s), -1 if none |
+| signalLightId | string | Signal controller ID |
+| signalLightHeadId | int32 | Signal head index |
+| signalLightDistance | float | Distance to next signal (m), -1 if none |
+| signalLightColor | int8 | 1=red, 2=amber, 3=green, 4=red/amber, 5=amber flashing, 6=off, 0=other, -1=none |
+| speedLimit | float | Current speed limit (m/s), -1 if none |
+| speedLimitNext | float | Next speed limit ahead (m/s), -1 if none |
+| speedLimitChangeDistance | float | Distance to speed limit change (m), -1 if none |
+| linkIdNext | string | Next link ID |
+| grade | float | Road grade angle (radians), positive = uphill |
+| activeLaneChange | int8 | 1 = left, -1 = right, 0 = stay |
+| lightIndicators | - | Turn signal indicators |
+| length | float | Vehicle length (m) |
+| width | float | Vehicle width (m) |
+| height | float | Vehicle height (m) |
+
+## Example Configuration
+
+Below is a comprehensive example configuration demonstrating SimulationSetup, SumoSetup, ApplicationSetup, XilSetup, CarMakerSetup, and CarlaSetup:
+
+```yaml
+# NOTE: YAML files do not allow tabs. use 2 or 4 spaces for indentation
+#
+# Reserved TCP/IP port by RealSim: 1337, 1338
+# DO NOT use these ports when setting up clients to RealSim
+#
+# TCP/IP connection port config
+#               1337/1338                 ApplicationPort                                   XilPort
+#   VISSIM/SUMO ---------> Traffic Layer -----------------> Application Layer (controller) -----------> XIL Clients
+
+# =============================================================================
+# Global Simulation Setup
+# =============================================================================
 SimulationSetup:
-  EnableRealSim: true
-  EnableVerboseLog: true
-  SimulationEndTime: 33000
-  SelectedTrafficSimulator: 'SUMO'
+    # Master Switch to turn on/off RealSim interface
+    EnableRealSim: true
 
-  VehicleMessageField:        # Vehicle data fields sent each timestep
-    - id
-    - type
-    - speed
-    - acceleration
-    - positionX
-    - positionY
-    - positionZ
-    - color
-    - linkId
-    - laneId
-    - distanceTravel
-    - speedDesired
+    # Whether or not to save verbose log during the simulation
+    EnableVerboseLog: false
 
-  EnableExternalDynamics: true
-  TrafficSimulatorPort: 1337   # Overwritten at runtime from Experiments.SUMO.port
+    # Simulation end time in seconds
+    SimulationEndTime: 300
 
-# =========================
+    # Specify which traffic simulator: 'SUMO' or 'VISSIM'
+    SelectedTrafficSimulator: 'SUMO'
+
+    # Traffic simulator connection parameters
+    TrafficSimulatorIP: "127.0.0.1"
+    TrafficSimulatorPort: 1337
+
+    # Vehicle message fields to exchange
+    # Must include: id, speed, and one of speedDesired or accelerationDesired
+    VehicleMessageField: [id, type, vehicleClass, speed, acceleration, positionX,
+        positionY, positionZ, heading, color, linkId, laneId, distanceTravel,
+        speedDesired, grade, length, width, height]
+
+    # Use setPreviousSpeed instead of setSpeed to respect SUMO's acceleration dynamics
+    EnableExternalDynamics: true
+
+# =============================================================================
 # SUMO Setup
-# =========================
+# =============================================================================
 SumoSetup:
-  SpeedMode: 32                # TraCI bitmask: 31 = safety on, 32 = free-run
+    # Speed mode bitmask: 0 = default safety, 31 = default mode, 32 = all checks off
+    SpeedMode: 32
 
-# =========================
-# Application Setup
-# =========================
+    # Auto-launch SUMO directly from TrafficLayer
+    EnableAutoLaunch: true
+
+    # Path to SUMO configuration file (.sumocfg)
+    # Relative paths are resolved against the config file directory
+    SumoConfigFile: "./network.sumocfg"
+
+    # Number of SUMO client instances
+    NumClients: 1
+
+    # Optional override for SUMO runtime library directory
+    # RuntimeLibraryPath: '../../../CommonLib/libsumo/bin'
+
+# =============================================================================
+# Application Layer Setup
+# =============================================================================
 ApplicationSetup:
-  EnableApplicationLayer: true
-  VehicleSubscription:
-    - type: ego
-      attribute:
-        id:     ['ego']        # Vehicle ID filter
-        radius: [0]            # Radius 0 = exact match
-      ip:   ['127.0.0.1']      # Controller IP (localhost)
-      port: [430]              # Overwritten from Experiments.FIXS.port
+    # Enable application layer to receive vehicle data
+    EnableApplicationLayer: true
 
-# =========================
-# XIL Setup
-# =========================
+    # Vehicle subscriptions
+    VehicleSubscription:
+    # Subscribe to ego vehicle with 50m radius for surrounding vehicles
+    -   type: ego
+        attribute: {id: ['ego'], radius: [50]}
+        ip: ['127.0.0.1']
+        port: [440]
+
+    # Subscribe to vehicles by geographic point
+    -   type: point
+        attribute: {radius: [200], x: [100.0], y: [500.0], z: [0]}
+        ip: ['127.0.0.1']
+        port: [441]
+
+    # Signal subscriptions for traffic light data
+    SignalSubscription:
+    -   type: intersection
+        attribute: {name: ['signal_1', 'signal_2', 'signal_3']}
+        ip: ['127.0.0.1']
+        port: [440]
+
+    # Detector subscriptions
+    DetectorSubscription:
+    -   type: detector
+        attribute: {pattern: ['det_*']}
+        ip: ['127.0.0.1']
+        port: [442]
+
+# =============================================================================
+# XIL Setup (Simulink / Hardware-in-the-Loop)
+# =============================================================================
 XilSetup:
-  EnableXil: true              # Master switch for XIL interface
-  VehicleSubscription:
-    - type: ego
-      attribute:
-        id:     ['ego']        # Vehicle ID filter
-        radius: [0]            # Radius 0 = exact match
-      ip:   ['127.0.0.1']      # Simulink/hardware IP (localhost)
-      port: [420]              # Overwritten from Experiments.Simulink.port
+    # Enable/disable XIL
+    EnableXil: true
+
+    # Set to true if TrafficLayer should act as server
+    AsServer: false
+
+    # Vehicle subscription for XIL client
+    # Typically ego vehicle with radius 0 (only ego data sent to XIL)
+    VehicleSubscription:
+    -   type: ego
+        attribute: {id: ['ego'], radius: [0]}
+        ip: ['127.0.0.1']
+        port: [420]
+
+    # Signal subscription for XIL
+    SignalSubscription:
+    -   type: intersection
+        attribute: {name: ['signal_1']}
+        ip: ['127.0.0.1']
+        port: [420]
+
+# =============================================================================
+# CarMaker Setup (IPG CarMaker Co-simulation)
+# =============================================================================
+CarMakerSetup:
+    # Enable CarMaker co-simulation
+    EnableCosimulation: true
+
+    # If true, ego state comes from Simulink; if false, from User.cpp
+    EnableEgoSimulink: true
+
+    # CarMaker connection settings
+    CarMakerIP: 127.0.0.1
+    CarMakerPort: 7890
+
+    # Traffic objects update rate (seconds)
+    TrafficRefreshRate: 0.001
+
+    # Ego vehicle settings
+    EgoId: ego
+    EgoType: passenger
+
+    # Synchronize traffic signals with CarMaker
+    SynchronizeTrafficSignal: true
+    TrafficSignalPort: 2444
+
+# =============================================================================
+# CARLA Setup (Virtual Environment Co-simulation)
+# =============================================================================
+CarlaSetup:
+    # Enable verbose logging for CARLA bridge
+    EnableVerboseLog: false
+
+    # Enable CARLA co-simulation
+    EnableCosimulation: true
+
+    # If true, SUMO vehicles updated from CARLA state
+    # If false, CARLA only visualizes SUMO vehicles
+    EnableExternalControl: true
+
+    # Use vehicle type as CARLA blueprint
+    UseVehicleTypeAsBlueprint: true
+
+    # CARLA server connection
+    CarlaServerIP: 127.0.0.1
+    CarlaServerPort: 2000
+
+    # CARLA client binding
+    CarlaClientIP: 127.0.0.1
+    CarlaClientPort: 440
+
+    # CARLA map name
+    CarlaMapName: Town01
+
+    # Traffic objects update rate (seconds)
+    TrafficRefreshRate: 0.1
+
+    # Vehicle IDs to mirror in CARLA (subset of VehicleSubscription)
+    InterestedIds: ['ego']
+
+    # Center camera view on this vehicle
+    CenteredViewId: ego
+```
+
+## Updating the YAML
+
+1. Copy an existing configuration (for example `tests/Python/SimpleEchoClient/config.yaml` or `tests/SumoCarla/test_scenarios/Town01_with_ego_type_as_blueprint/defaultConfig.yaml`).
+2. Adjust the sections described above.
+3. If SUMO auto-launch is enabled, ensure the `.sumocfg` path is valid and that either `RuntimeLibraryPath` is set or the default `CommonLib/libsumo/bin` directory remains beside the executable.
+4. Keep indentation spaces (YAML does not support tabs).
+
+For quick reference, see the inline comments in the test configuration files, which demonstrate various setup combinations.

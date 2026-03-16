@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!-- Simple loop network: 4 edges forming a square -->
+<net version="1.16">
+
+    <location netOffset="0.00,0.00" convBoundary="0.00,0.00,200.00,200.00" origBoundary="0.00,0.00,200.00,200.00" projParameter="!"/>
+
+    <edge id="bottom" from="bottomLeft" to="bottomRight" priority="-1">
+        <lane id="bottom_0" index="0" speed="13.89" length="200.00" shape="0.00,-1.60 200.00,-1.60"/>
+    </edge>
+
+    <edge id="left" from="topLeft" to="bottomLeft" priority="-1">
+        <lane id="left_0" index="0" speed="13.89" length="200.00" shape="-1.60,200.00 -1.60,0.00"/>
+    </edge>
+
+    <edge id="right" from="bottomRight" to="topRight" priority="-1">
+        <lane id="right_0" index="0" speed="13.89" length="200.00" shape="201.60,0.00 201.60,200.00"/>
+    </edge>
+
+    <edge id="top" from="topRight" to="topLeft" priority="-1">
+        <lane id="top_0" index="0" speed="13.89" length="200.00" shape="200.00,201.60 0.00,201.60"/>
+    </edge>
+
+    <junction id="bottomLeft" type="priority" x="0.00" y="0.00" incLanes="left_0" intLanes="" shape="-3.20,0.00 0.00,0.00 0.00,-3.20 -3.20,-3.20">
+        <request index="0" response="0" foes="0"/>
+    </junction>
+
+    <junction id="bottomRight" type="priority" x="200.00" y="0.00" incLanes="bottom_0" intLanes="" shape="200.00,-3.20 203.20,-3.20 203.20,0.00 200.00,0.00">
+        <request index="0" response="0" foes="0"/>
+    </junction>
+
+    <junction id="topLeft" type="priority" x="0.00" y="200.00" incLanes="top_0" intLanes="" shape="0.00,203.20 0.00,200.00 -3.20,200.00 -3.20,203.20">
+        <request index="0" response="0" foes="0"/>
+    </junction>
+
+    <junction id="topRight" type="priority" x="200.00" y="200.00" incLanes="right_0" intLanes="" shape="203.20,200.00 203.20,203.20 200.00,203.20 200.00,200.00">
+        <request index="0" response="0" foes="0"/>
+    </junction>
+
+    <connection from="bottom" to="right" fromLane="0" toLane="0" dir="r" state="M"/>
+    <connection from="left" to="bottom" fromLane="0" toLane="0" dir="r" state="M"/>
+    <connection from="right" to="top" fromLane="0" toLane="0" dir="r" state="M"/>
+    <connection from="top" to="left" fromLane="0" toLane="0" dir="r" state="M"/>
+
+</net>

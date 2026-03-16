@@ -25,6 +25,7 @@
 
 **/RealSim_tmp/*
 **/RS_tmp/*
+**/tmp/*
 
 **/.vscode/*
 
@@ -37,6 +38,9 @@
 **/.vs/*
 
 Temp/*
+
+# Auto-generated version file
+CommonLib/RealSimVersion.h
 
 CommonLib/libevent/build/*
 CommonLib/libevent/out/build/*
@@ -183,11 +187,19 @@ CM11_proj/tmp.obj
 # Ignore Experiments folder under tests/Applications/Eco_Fixed_Timming
 /tests/Applications/Eco_Fixed_Timming/Experiments/
 
-# Ignore Claude Code configuration
-.claude/
+TODO.md
 
-# Ignore large SUMO output files
-fcd.xml
+# User-provided proprietary scenarios - track folder structure but ignore contents
+/tests/UserScenarios/*
+!/tests/UserScenarios/.gitkeep
+!/tests/UserScenarios/README.md
+
+# Active debug configuration (per-worktree, for VS debugging)
+/TrafficLayer/.active_config
+
+**/nul
+
+.claude/
 
 # Ignore large assets managed via download script
 tests/Applications/SUMO_CARLA_EcoDriving/MLK_Carla_Scenario/CARLAFiles/MLK_noped1002_final_debug.fbx
