@@ -33,7 +33,7 @@ ApplicationSetup:
     -   type: ego
         attribute: {id: ['egoCm123'], radius: [400]}
         ip: ["127.0.0.1"]
-        port: [2444] # this worked better when i changed this to port 1337 
+        port: [2444]
 
 # subscription in XilSetup must be subset of ApplicationSetup
 XilSetup:
