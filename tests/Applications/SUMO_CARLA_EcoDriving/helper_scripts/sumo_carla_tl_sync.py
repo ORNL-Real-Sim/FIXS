@@ -137,6 +137,42 @@ def restore_carla_async(world):
     settings.fixed_delta_seconds = None
     world.apply_settings(settings)
 
+def connect_or_start_sumo(args):
+    """
+    Active mode:
+      - if --sumocfg is provided, start SUMO ourselves
+      - else require --sumo-port and connect
+
+    Passive mode:
+      - require --sumo-port and connect to an already-running SUMO/TraCI server
+      - do not launch or step SUMO from this script
+    """
+    if args.passive:
+        if not args.sumo_port:
+            raise RuntimeError("--passive requires --sumo-port so this script can attach to an external SUMO TraCI server.")
+        print(f"[SUMO] Connecting to existing TraCI server on port {args.sumo_port}")
+        traci.connect(port=int(args.sumo_port))
+        return
+
+    if args.sumocfg:
+        sumo_bin = checkBinary("sumo-gui" if args.sumo_gui else "sumo")
+        sumo_cmd = [sumo_bin, "-c", args.sumocfg]
+
+        if args.sumo_step_length is not None:
+            sumo_cmd += ["--step-length", str(args.sumo_step_length)]
+        else:
+            sumo_cmd += ["--step-length", str(args.fixed_dt)]
+
+        print("[SUMO] Starting:", " ".join(sumo_cmd))
+        traci.start(sumo_cmd)
+        return
+
+    if not args.sumo_port:
+        raise RuntimeError("Either provide --sumocfg to launch SUMO, or --sumo-port to connect to an existing SUMO instance.")
+
+    print(f"[SUMO] Connecting to existing TraCI server on port {args.sumo_port}")
+    traci.connect(port=int(args.sumo_port))
+
 
 def main():
     ap = argparse.ArgumentParser()
@@ -147,7 +183,7 @@ def main():
     ap.add_argument("--sumocfg", required=False, help="Path to your SUMO .sumocfg")
     ap.add_argument("--sumo-gui", action="store_true")
     ap.add_argument("--sumo-step-length", type=float, default=None, help="Optional SUMO step length seconds")
-    ap.add_argument("--sumo-port", required=False, help="Port on which Sumo is running")
+    ap.add_argument("--sumo-port", required=False, help="Port on which SUMO TraCI is running")
 
     ap.add_argument("--tl-table", required=True, help="traffic_light_table.csv")
     ap.add_argument("--offset-x", type=float, default=0.0)
@@ -155,6 +191,19 @@ def main():
     ap.add_argument("--max-match-dist", type=float, default=50.0)
 
     ap.add_argument("--xodr", default=None, help="Optional: load standalone OpenDRIVE world from this .xodr file")
+
+    ap.add_argument(
+        "--passive",
+        action="store_true",
+        help="Passive mirror mode: do not tick CARLA or SUMO; assume an external component is advancing both sims."
+    )
+    ap.add_argument(
+        "--poll-sleep",
+        type=float,
+        default=0.001,
+        help="Sleep interval used only in passive mode if CARLA wait_for_tick is unavailable/fails."
+    )
+
     args = ap.parse_args()
 
     # CARLA connect
@@ -171,11 +220,13 @@ def main():
         print("[CARLA] Loaded OpenDRIVE standalone world")
     else:
         world = client.get_world()
-        #client.load_world("MLK_noped1002_final_debug")
         print(f"[CARLA] world: {world.get_map().name}")
 
-    # Set carla to synchronous mode
-    set_carla_sync(world, args.fixed_dt)
+    # Only force sync if we are the component driving CARLA ticks
+    if not args.passive:
+        set_carla_sync(world, args.fixed_dt)
+    else:
+        print("[MODE] Passive mode enabled: external component must tick CARLA and SUMO")
 
     # Load mapping table + map CARLA TL actors
     rows, table = load_tl_table(args.tl_table)
@@ -185,41 +236,55 @@ def main():
         max_match_dist=args.max_match_dist
     )
 
-    # SUMO start + TraCI connect
-    if (args.sumocfg):
-        sumo_bin = checkBinary("sumo-gui" if args.sumo_gui else "sumo")
-
-        sumo_cmd = [sumo_bin, "-c", args.sumocfg]
-        if args.sumo_step_length is not None:
-            sumo_cmd += ["--step-length", str(args.sumo_step_length)]
-        else:
-            # Keep SUMO step aligned to CARLA fixed dt by default
-            sumo_cmd += ["--step-length", str(args.fixed_dt)]
-
-        print("[SUMO] Starting:", " ".join(sumo_cmd))
-        traci.start(sumo_cmd)
-    else:
-        if (not args.sumo_port):
-            print("[SUMO] port number needed if not being launched by script.")
-            traci.connect(port=args.sumo_port)
-            return
+    # SUMO start/connect
+    connect_or_start_sumo(args)
 
     try:
         step = 0
-        while True:
-            # Step SUMO one tick
-            traci.simulationStep()
 
-            # Apply SUMO TL states to CARLA TL actors
-            apply_sumo_states_to_carla(table)
+        if args.passive:
+            last_frame = None
+            while True:
+                # Use CARLA frame advances as the pacing source when another component is ticking.
+                try:
+                    snapshot = world.wait_for_tick()
+                    frame = snapshot.frame
+                except Exception:
+                    # Fallback if wait_for_tick is not usable in the current setup.
+                    time.sleep(args.poll_sleep)
+                    snapshot = world.get_snapshot()
+                    frame = snapshot.frame
 
-            # Tick CARLA one tick
-            world.tick()
+                    if last_frame is not None and frame == last_frame:
+                        continue
 
-            step += 1
-            if step % 100 == 0:
-                sim_time = traci.simulation.getTime()
-                print(f"[SYNC] step={step} sumo_time={sim_time:.2f}s")
+                last_frame = frame
+
+                # Read current SUMO TL state and mirror into CARLA.
+                apply_sumo_states_to_carla(table)
+
+                step += 1
+                if step % 100 == 0:
+                    try:
+                        sim_time = traci.simulation.getTime()
+                        print(f"[PASSIVE] updates={step} carla_frame={frame} sumo_time={sim_time:.2f}s")
+                    except Exception:
+                        print(f"[PASSIVE] updates={step} carla_frame={frame}")
+        else:
+            while True:
+                # Step SUMO one tick
+                traci.simulationStep()
+
+                # Apply SUMO TL states to CARLA TL actors
+                apply_sumo_states_to_carla(table)
+
+                # Tick CARLA one tick
+                world.tick()
+
+                step += 1
+                if step % 100 == 0:
+                    sim_time = traci.simulation.getTime()
+                    print(f"[SYNC] step={step} sumo_time={sim_time:.2f}s")
 
     except KeyboardInterrupt:
         print("\n[EXIT] Stopping...")
@@ -228,10 +293,13 @@ def main():
             traci.close()
         except Exception:
             pass
-        try:
-            restore_carla_async(world)
-        except Exception:
-            pass
+
+        # Only restore async if this script changed CARLA settings.
+        if not args.passive:
+            try:
+                restore_carla_async(world)
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":
