@@ -30,11 +30,11 @@ timeout /t 3 /nobreak
 echo Starting Python Echo Client...
 REM Initialize conda if not already initialized
 if exist "%USERPROFILE%\miniconda3\Scripts\activate.bat" (
-    call %USERPROFILE%\miniconda3\Scripts\activate.bat realsim_dev
+    call %USERPROFILE%\miniconda3\Scripts\activate.bat realsim
 ) else if exist "%USERPROFILE%\anaconda3\Scripts\activate.bat" (
-    call %USERPROFILE%\anaconda3\Scripts\activate.bat realsim_dev
+    call %USERPROFILE%\anaconda3\Scripts\activate.bat realsim
 ) else (
-    call conda activate realsim_dev
+    call conda activate realsim
 )
 python %TestPath%\simple_echo_client.py
 

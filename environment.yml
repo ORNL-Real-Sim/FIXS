@@ -1,4 +1,4 @@
-name: realsim_dev
+name: realsim
 channels:
   - conda-forge
   - defaults
