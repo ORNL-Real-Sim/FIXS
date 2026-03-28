@@ -424,8 +424,8 @@ class SumoEnvMultiAgent:
                                                             set_speed_internally=False
                                                             ) for index, (key, veh) in enumerate(self.cav_object_dict.items()) if key in (list_cav_back_to_sumo + list_cav_control)}
 
-                # self.apply_vehicle_control(eco_speed_dic, smooth=True, exclude_veh_ids=veh_ids_controlled_by_FIXS)
-                print(traci.vehicle.getSpeedMode('ego'))
+                self.apply_vehicle_control(eco_speed_dic, smooth=True, exclude_veh_ids=veh_ids_controlled_by_FIXS)
+                # print(traci.vehicle.getSpeedMode('ego'))
                 traci.simulationStep()
                 self.apply_vehicle_control_FIXS(eco_speed_dic, vehicle_dynamics=vehicle_dynamics, eco_driving=eco_driving, control_veh_ids=veh_ids_controlled_by_FIXS, warmup=False)
                 

@@ -384,13 +384,12 @@ class SumoEnvMultiAgent:
             print('Connected by vehicle dynamics client')
 
             
-        self.reset()
-        # sim_time = traci.simulation.getTime()
+        # self.reset()
         
-        traci.simulationStep()
-        self.apply_vehicle_control_FIXS({}, vehicle_dynamics=vehicle_dynamics, eco_driving=eco_driving, control_veh_ids=veh_ids_controlled_by_FIXS)
+        # traci.simulationStep()
+        # self.apply_vehicle_control_FIXS({}, vehicle_dynamics=vehicle_dynamics, eco_driving=eco_driving, control_veh_ids=veh_ids_controlled_by_FIXS)
        
-        sim_time = traci.simulation.getTime()   
+        # sim_time = traci.simulation.getTime()   
             
         print('Total time spent for the first 28985: ', time.time() - start_time_1)
 
@@ -608,8 +607,8 @@ if __name__ == "__main__":
     parser.add_argument("--trafficlayerConfig", type=str, help="Path to the Configuration file", default=os.environ["CONFIG_PATH"])
     parser.add_argument("--trafficlayerIp", type=str, help="Specify Ip of traffic layer", default='127.0.0.1')
     parser.add_argument("--trafficlayerPort", type=str, help="Specify port of traffic layer", default=430)
-    parser.add_argument("--vehicleDynamics", action="store_true", help="use the vehicle dynamics", default=True)
-    parser.add_argument("--enableVehicleDynamics", action="store_true", help="use the vehicle dynamics", default=True)
+    parser.add_argument("--vehicleDynamics", action="store_true", help="use the vehicle dynamics", default=False)
+    parser.add_argument("--enableVehicleDynamics", action="store_true", help="use the vehicle dynamics", default=False)
     parser.add_argument("--vehicleDynamicsIp", type=str, help="Specify Ip of vehicle dynamics", default='127.0.0.1')
     # parser.add_argument("--vehicleDynamicsIp", type=str, help="Specify Ip of vehicle dynamics", default='192.168.140.11')
     parser.add_argument("--vehicleDynamicsPort", type=str, help="Specify port of vehicle dynamics", default=420)
@@ -627,7 +626,7 @@ if __name__ == "__main__":
     parser.add_argument("--sumoConfig", type=str, help="Specify sumo config file", default='chattCavMpr.sumocfg')
     parser.add_argument("--sumoNet", type=str, help="Specify sumo net file", default=os.environ["SUMO_NET_PATH"])
     parser.add_argument("--sumoRoute", type=str, help="Specify sumo route file", default='chattCavMpr.rou.xml')
-    parser.add_argument("--workingDirectory", type=str, help="Specify working directory", default='MPR_10')
+    parser.add_argument("--workingDirectory", type=str, help="Specify working directory", default='MPR')
     args = parser.parse_args()
     traffic_layer_config = args.trafficlayerConfig
     traffic_layer_ip = args.trafficlayerIp
