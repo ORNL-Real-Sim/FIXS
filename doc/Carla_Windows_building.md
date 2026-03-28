@@ -125,6 +125,7 @@ Solution:
 
 1). Modify the .bat scripts under:
 Util/InstallerWin
+
 2). Add the following flag to the CMake command:
 ```
 -DCMAKE_POLICY_VERSION_MINIMUM=3.5
