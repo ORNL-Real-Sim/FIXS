@@ -440,7 +440,13 @@ int ConfigHelper::getConfig(string configName) {
 		printf("\nSumo EgoDepartSpeed not specified! Will use '0.1' as default!\n");
 	}
 
-
+	// ---- Vehicle ID to remove (TraCI vehicle.remove) ----
+	if (node["VIDToRemove"]) {
+		SumoSetup.VIDToRemove = parserString(node, "VIDToRemove");
+	}
+	else {
+		SumoSetup.VIDToRemove = "";
+	}
 
 
 	// ===========================================================================

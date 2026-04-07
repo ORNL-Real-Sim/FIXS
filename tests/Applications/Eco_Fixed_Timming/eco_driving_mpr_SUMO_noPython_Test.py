@@ -134,7 +134,7 @@ class SumoEnvMultiAgent:
         xmlTree.write(os.path.join(output_dir, self.sumo_route))
 
     def change_config_directory(self):
-        file_name = f'{int(self.penetration_rate*100)}%_{int(1/self.step_length)}Hz' + f'{"_with" if self.enable_vehicle_dynamics else "_without"}_vehDyn_test0302'
+        file_name = f'{int(self.penetration_rate*100)}%_{int(1/self.step_length)}Hz' + f'{"_with" if self.enable_vehicle_dynamics else "_without"}_VehDyn_test0402'
         output_dir = os.path.join(self.sumo_folder, self.working_directory, file_name)
 
         # Making Results Directory
@@ -251,7 +251,7 @@ class SumoEnvMultiAgent:
                 print('Subscription Error')
                 continue
 
-    def get_travel_direction(self, veh_id, veh_type, road_id, route_edges, nextTls, next_tls):
+    def get_travel_direction(self, veh_id, veh_type, road_id, route_edges, nextTls, route, next_tls):
 
         road_id = "" if road_id is None else str(road_id)
         link_next = "" if route_edges is None else str(route_edges)
@@ -295,7 +295,7 @@ class SumoEnvMultiAgent:
         # else:
         #     control = 'False'
 
-        is_next_last = route_edges in ['-304','-2801', '-295']
+        # is_next_last = route_edges in ['-304','-2801', '-295']
         # is_next_last = link_next in ['-304','-2801', '-295']
 
         if veh_type == 'CAV' or veh_id == 'ego':
@@ -303,11 +303,9 @@ class SumoEnvMultiAgent:
 
                 if nextTls >= 2:
 
-
-                # if next_tls in self.tl_ids and (link_next in self.wb or link_next in self.eb):
                     control = 'True'
 
-                elif is_next_last:
+                elif '-304' in route or '-295' in route:
                     control = 'True'
                 
                 else:
@@ -503,7 +501,7 @@ class SumoEnvMultiAgent:
         if "veh_type" not in results_df.columns and "type" in results_df.columns:
             results_df["veh_type"] = results_df["type"]
 
-        results_df[['travel_direction', 'control']] = results_df.apply(lambda row: self.get_travel_direction(row['veh_id'], row['type'],row['linkId'], row['linkIdNext'],row['signalLightHeadId'], row['signalLightId']), axis=1, result_type='expand')
+        results_df[['travel_direction', 'control']] = results_df.apply(lambda row: self.get_travel_direction(row['veh_id'], row['type'],row['linkId'], row['linkIdNext'],row['signalLightHeadId'],row['routeEdges'], row['signalLightId']), axis=1, result_type='expand')
         results_df['orginal_desire_spd'] = results_df['speedLimit'] * 2.23694
         # get lead vehicle's speed
         results_df['speed'] = results_df['speed'] * 2.23694
@@ -727,7 +725,7 @@ if __name__ == "__main__":
     parser.add_argument("--trafficlayerIp", type=str, help="Specify Ip of traffic layer", default='127.0.0.1')
     parser.add_argument("--trafficlayerPort", type=str, help="Specify port of traffic layer", default=430)
     parser.add_argument("--vehicleDynamics", action="store_true", help="use the vehicle dynamics", default=False)
-    parser.add_argument("--enableVehicleDynamics", action="store_true", help="use the vehicle dynamics", default=True)
+    parser.add_argument("--enableVehicleDynamics", action="store_true", help="use the vehicle dynamics", default=False)
     parser.add_argument("--vehicleDynamicsIp", type=str, help="Specify Ip of vehicle dynamics", default='127.0.0.1')
     # parser.add_argument("--vehicleDynamicsIp", type=str, help="Specify Ip of vehicle dynamics", default='192.168.140.11')
     parser.add_argument("--vehicleDynamicsPort", type=str, help="Specify port of vehicle dynamics", default=420)
@@ -745,7 +743,7 @@ if __name__ == "__main__":
     parser.add_argument("--sumoConfig", type=str, help="Specify sumo config file", default='chattCavMpr.sumocfg')
     parser.add_argument("--sumoNet", type=str, help="Specify sumo net file", default=os.environ["SUMO_NET_PATH"])
     parser.add_argument("--sumoRoute", type=str, help="Specify sumo route file", default='chattCavMpr.rou.xml')
-    parser.add_argument("--workingDirectory", type=str, help="Specify working directory", default='MPR_10')
+    parser.add_argument("--workingDirectory", type=str, help="Specify working directory", default='MPR_1')
     args = parser.parse_args()
     traffic_layer_config = args.trafficlayerConfig
     traffic_layer_ip = args.trafficlayerIp
@@ -799,7 +797,7 @@ if __name__ == "__main__":
 
     senv.run_sumo(num_clients=1, seed=101, gui=True)
     time.sleep(2)
-    run_traffic_layer('TrafficLayer0223.exe', os.environ["CONFIG_PATH"])
+    run_traffic_layer('TrafficLayer0402.exe', os.environ["CONFIG_PATH"])
     time.sleep(2)
     senv.setup_connections()
     print('Starting subscription')

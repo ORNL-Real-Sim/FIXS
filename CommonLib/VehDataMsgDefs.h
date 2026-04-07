@@ -55,6 +55,8 @@ typedef struct  {
 
 	uint16_t lightIndicators;
 
+	std::vector<std::string> routeEdges;
+
 
 }VehFullData_t;
 

@@ -14,7 +14,7 @@ def extract_two_vehicles_speed(fcd_file, vehicle_id, ego_id):
         ego_id: ego vehicle ID
     """
     # output dic
-    results_dir = "Experiments_Sumo\Shallowford_after_calibration_banleftturn_AdjustedFixedTime_V3\MPR_10\Results"
+    results_dir = "Experiments_Sumo\Shallowford_after_calibration_banleftturn_AdjustedFixedTime_V3\MPR_1\Results"
     os.makedirs(results_dir, exist_ok=True)
     
     # Two output file
@@ -55,10 +55,10 @@ def extract_two_vehicles_speed(fcd_file, vehicle_id, ego_id):
 # ================= Example =================
 if __name__ == "__main__":
     # fcd.xml file path
-    fcd_file = "Experiments_Sumo/Shallowford_after_calibration_banleftturn_AdjustedFixedTime_V3/MPR_10/0%_10Hz_with_vehDyn_SP_test0302/fcd_1.xml"
+    fcd_file = "Experiments_Sumo/Shallowford_after_calibration_banleftturn_AdjustedFixedTime_V3/MPR_1/0%_10Hz_without_green_middle_4.83/fcd.xml"
     
     # Vehcle ID
-    vehicle_id = ""   # Target vehicle
+    vehicle_id = "4.83"   # Target vehicle
     ego_id = "ego"        # ego vehicle
     
     # extract speed data
@@ -69,11 +69,11 @@ if __name__ == "__main__":
     
     # target vehicle_blue
     plt.plot(df_vehicle["time"], df_vehicle["speed"], 
-             color='blue', linewidth=2, label=f'Vehicle {vehicle_id}')
+             color='black', linewidth=2, label=f'Vehicle {vehicle_id}')
     
     # ego vehicle_red
     plt.plot(df_ego["time"], df_ego["speed"], 
-             color='orange', linewidth=2, label=f'Ego {ego_id}')
+             color='green', linewidth=2, label=f'Ego {ego_id}')
     
     plt.xlabel("Time [s]", fontsize=12)
     plt.ylabel("Speed [m/s]", fontsize=12)
@@ -84,7 +84,7 @@ if __name__ == "__main__":
     
     # Save picture
     output_fig = os.path.join(
-        "Experiments_Sumo/Shallowford_after_calibration_banleftturn_AdjustedFixedTime_V3/MPR_10/Results",
+        "Experiments_Sumo/Shallowford_after_calibration_banleftturn_AdjustedFixedTime_V3/MPR_1/Results",
         f"{vehicle_id}_vs_{ego_id}_speed_comparison.png"
     )
     plt.savefig(output_fig, dpi=300, bbox_inches='tight')

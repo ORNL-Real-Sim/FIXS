@@ -118,7 +118,7 @@ class SumoEnvMultiAgent:
         xmlTree.write(os.path.join(output_dir, self.sumo_route))
 
     def change_config_directory(self):
-        file_name = f'{int(self.penetration_rate*100)}%_{int(1/self.step_length)}Hz' + f'{"_with" if self.enable_vehicle_dynamics else "_without"}_vehDyn_SP_test0302'
+        file_name = f'{int(self.penetration_rate*100)}%_{int(1/self.step_length)}Hz' + f'{"_with" if self.enable_vehicle_dynamics else "_without"}_green_end_4.86'
         output_dir = os.path.join(self.sumo_folder, self.working_directory, file_name)
 
         # Making Results Directory
@@ -344,7 +344,7 @@ class SumoEnvMultiAgent:
         sim_time = traci.simulation.getTime()
         
         start_time_1 = time.time()
-        while sim_time < 28985:
+        while sim_time < 29216.0:
             # sim_time = traci.simulation.getTime()
             # Phase trackers
             self.phase_tracker()
@@ -384,12 +384,12 @@ class SumoEnvMultiAgent:
             print('Connected by vehicle dynamics client')
 
             
-        # self.reset()
+        self.reset()
         
-        # traci.simulationStep()
-        # self.apply_vehicle_control_FIXS({}, vehicle_dynamics=vehicle_dynamics, eco_driving=eco_driving, control_veh_ids=veh_ids_controlled_by_FIXS)
+        traci.simulationStep()
+        self.apply_vehicle_control_FIXS({}, vehicle_dynamics=vehicle_dynamics, eco_driving=eco_driving, control_veh_ids=veh_ids_controlled_by_FIXS)
        
-        # sim_time = traci.simulation.getTime()   
+        sim_time = traci.simulation.getTime()   
             
         print('Total time spent for the first 28985: ', time.time() - start_time_1)
 

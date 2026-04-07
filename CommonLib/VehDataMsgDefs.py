@@ -47,6 +47,8 @@ class VehData:
     
     activeLaneChange: int = 0  # Boolean-like integer (-1, 0, or 1)
 
+    routeEdges: List[str] = field(default_factory=list)
+
     def get(self, field_name, default=None):
         return getattr(self, field_name, default)
 

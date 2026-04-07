@@ -449,6 +449,28 @@ int TrafficHelper::addEgoVehicle(double simTime) {
 		return 0;
 	}
 
+	std::string vehToRemove = Config_c->SumoSetup.VIDToRemove;
+	if (!vehToRemove.empty()) {
+		try {
+
+			std::vector<std::string> idList = traci.vehicle.getIDList();
+
+
+			if (std::find(idList.begin(), idList.end(), vehToRemove) != idList.end()) {
+
+				traci.vehicle.remove(vehToRemove, 3);
+				printf("[addEgoVehicle] Target vehicle %s detected and removed.\n", vehToRemove.c_str());
+			}
+			else {
+				printf("[addEgoVehicle] Target vehicle %s not found in network, skipping removal.\n", vehToRemove.c_str());
+			}
+		}
+		catch (const std::exception& e) {
+			printf("Error: Failed to remove vehicle %s: %s\n", vehToRemove.c_str(), e.what());
+		}
+	}
+
+
 	std::string idStr = Config_c->SumoSetup.EgoID;   //  Config_c->CarMakerSetup.EgoId;
 	std::string typeStr = Config_c->CarMakerSetup.EgoType;
 	if (typeStr.empty()) {
@@ -1647,6 +1669,8 @@ void TrafficHelper::parserSumoSubscription(libsumo::TraCIResults VehDataSubscrib
 	if (edgeListIdx + 1 < edgeRouteList.size()) {
 		CurVehData.linkIdNext = edgeRouteList[edgeListIdx + 1];
 	}
+
+	CurVehData.routeEdges = VehicleId2EdgeList_um[vehId];
 
 	tempStringPtr = static_pointer_cast<libsumo::TraCIString> (VehDataSubscribeTraciResults[libsumo::VAR_VEHICLECLASS]);
 	CurVehData.vehicleClass = tempStringPtr->value;

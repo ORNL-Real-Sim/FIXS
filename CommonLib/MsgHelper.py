@@ -48,7 +48,8 @@ class MsgHelper:
             'length': False,
             'width': False,
             'height': False,
-            'activeLaneChange': False
+            'activeLaneChange': False,
+            'routeEdges': True
         }
         self.traffic_light_msg_field_valid = {
             'id': False,
@@ -216,6 +217,25 @@ class MsgHelper:
             
         if self.vehicle_msg_field_valid.get('height'):
             veh_data.height, byte_index = MsgHelper.unpack_float(byte_data, byte_index)
+
+        if self.vehicle_msg_field_valid.get('routeEdges', True): 
+            veh_data.routeEdges = []
+            
+            
+
+            route_size = struct.unpack_from('<H', byte_data, byte_index)[0]
+            byte_index += 2
+            
+
+            for _ in range(route_size):
+
+                str_len = struct.unpack_from('<H', byte_data, byte_index)[0]
+                byte_index += 2
+                
+
+                edge_str = byte_data[byte_index : byte_index + str_len].decode('utf-8')
+                veh_data.routeEdges.append(edge_str)
+                byte_index += str_len
             
         return  veh_data
     
@@ -224,6 +244,13 @@ class MsgHelper:
         """
         calculate the Msgsize of single vehicle information
         """
+        route_edges_size = 0
+        if self.vehicle_msg_field_valid.get('routeEdges', 0):
+            route_edges_size = 2  
+            for edge in veh_data.routeEdges:
+
+                route_edges_size += 2 + len(edge.encode('utf-8'))
+
         msg_size = (
             round(self.vehicle_msg_field_valid.get('id', 0) * (1 + len(veh_data.id))
                 + self.vehicle_msg_field_valid.get('type', 0) * (1 + len(veh_data.type))
@@ -256,7 +283,8 @@ class MsgHelper:
                 + self.vehicle_msg_field_valid.get('activeLaneChange', 0) * 1
                 + self.vehicle_msg_field_valid.get('length', 0) * 4
                 + self.vehicle_msg_field_valid.get('width', 0) * 4
-                + self.vehicle_msg_field_valid.get('height', 0) * 4)
+                + self.vehicle_msg_field_valid.get('height', 0) * 4
+                + route_edges_size)
         )
         veh_msg_size = round(msg_size) + self.msg_each_header_size  # each-header=3 bytes
         return int(veh_msg_size)
@@ -265,7 +293,12 @@ class MsgHelper:
 
     def pack_veh_data(self, byte_data: bytearray, byte_index, veh_data: VehData):
         # Calculate nMsgSize based on vehicle_msg_field_valid flags and veh_data field lengths
-        
+        route_edges_size = 0
+        if self.vehicle_msg_field_valid.get('routeEdges', 0):
+            route_edges_size = 2 
+            for edge in veh_data.routeEdges:
+
+                route_edges_size += 2 + len(edge.encode('utf-8'))
         
         msg_size = (
             round(self.vehicle_msg_field_valid.get('id', 0) * (1 + len(veh_data.id))  # id
@@ -300,6 +333,7 @@ class MsgHelper:
                   + self.vehicle_msg_field_valid.get('length', 0) * 4  # length
                   + self.vehicle_msg_field_valid.get('width', 0) * 4  # width
                   + self.vehicle_msg_field_valid.get('height', 0) * 4  # height
+                  + route_edges_size
             )
         )
         veh_msg_size = round(msg_size) + self.msg_each_header_size
@@ -433,6 +467,25 @@ class MsgHelper:
         if self.vehicle_msg_field_valid.get('height'):
             byte_data[byte_index:byte_index+4] = struct.pack('f', veh_data.height)
             byte_index += 4
+
+        if self.vehicle_msg_field_valid.get('routeEdges'):
+
+            route_size = len(veh_data.routeEdges)
+            byte_data[byte_index:byte_index+2] = struct.pack('<H', route_size)
+            byte_index += 2
+
+
+            for edge in veh_data.routeEdges:
+                edge_bytes = edge.encode('utf-8')
+                str_len = len(edge_bytes)
+                
+
+                byte_data[byte_index:byte_index+2] = struct.pack('<H', str_len)
+                byte_index += 2
+                
+
+                byte_data[byte_index:byte_index+str_len] = edge_bytes
+                byte_index += str_len
         
         return byte_data, msg_size, byte_index
 

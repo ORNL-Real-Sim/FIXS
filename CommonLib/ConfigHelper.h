@@ -143,6 +143,8 @@ struct SumoSetup_t {
 	std::string EgoDepartLane;
 	std::string EgoDepartPos;
 	std::string EgoDepartSpeed;
+
+	std::string VIDToRemove;
 };
 
 typedef struct SubscriptionVehicleList_t {
