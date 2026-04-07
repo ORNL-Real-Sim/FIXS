@@ -19,7 +19,7 @@ Please strictly follow the **System requirements** and **Software requirements**
 
 - For **Visual Studio 2019**, make sure the correct **MSVC toolset** is selected. Note that the **Windows 8.1 SDK** may no longer be available and can be replaced with the **Windows 10 SDK**.
 
-![Select MSVC toolset](./img/VS 2019_MSVC toolset.png)
+![Select MSVC toolset](./img/VS2019_MSVC_toolset.png)
 
 - The installation and configuration of **Unreal Engine 4.26** can be completed by following the official CARLA documentation:  
   [CARLA Windows Build Documentation](https://carla.readthedocs.io/en/0.9.15/build_windows/#unreal-engine)
