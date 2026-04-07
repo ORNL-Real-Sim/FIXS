@@ -5,10 +5,7 @@ This document provides a practical guide for building CARLA 0.9.15 on Windows.
 For the official and complete build procedure, please refer to the 
 [CARLA 0.9.15 Windows Build Documentation](https://carla.readthedocs.io/en/0.9.15/build_windows/).
 
-The official documentation provides a comprehensive step-by-step process.  
-However, in practice, several issues may arise during the build process (e.g., dependency conflicts, version mismatches, and build errors).
-
-This document focuses on:
+This document follows the structure of Part One: Prerequisites and Part Two: Build CARLA from the official documentation, and focuses on:
 - Highlighting common issues encountered during the build process  
 - Providing practical solutions and workarounds  
 
@@ -16,18 +13,28 @@ This document focuses on:
 
 ## Part One: Prerequisites
 
-In this section, you will find the system requirements and necessary software setup before building CARLA.
-
 Please strictly follow the **System requirements** and **Software requirements** specified in the official documentation. In particular:
 
 - Ensure that the required version of **Make (3.81)** is used. This version may need to be installed manually (e.g., via Gnuwin), or obtained through other reliable sources.
 
-- For **Visual Studio 2019**, make sure the correct toolchain is selected. Note that the **Windows 8.1 SDK** may no longer be available and can be replaced with the **Windows 10 SDK**.
+- For **Visual Studio 2019**, make sure the correct **MSVC toolset** is selected. Note that the **Windows 8.1 SDK** may no longer be available and can be replaced with the **Windows 10 SDK**.
+
+![Select MSVC toolset](./img/VS 2019_MSVC toolset.png)
 
 - The installation and configuration of **Unreal Engine 4.26** can be completed by following the official CARLA documentation:  
-  [CARLA Windows Build Documentation](https://carla.readthedocs.io/en/0.9.15/build_windows/)
+  [CARLA Windows Build Documentation](https://carla.readthedocs.io/en/0.9.15/build_windows/#unreal-engine)
 
-Please ensure all dependencies are correctly installed before proceeding to the build stage.
+Please ensure all dependencies are correctly installed before proceeding to the build stage. Users can verify dependencies using:
+
+```
+- `python --version`  
+- `pip3 -V`  
+- `cmake --version`  
+- `make --version`  
+- `git --version`  
+```
+
+Visual Studio toolset and Windows SDK can be checked via **Visual Studio Installer**.
 
 ---
 
@@ -55,6 +62,11 @@ Solution: Manual Download and Extraction
 
 Identify the correct asset version for CARLA 0.9.15:
 20231108_c5101a5
+
+The correct asset version can be identified from:
+
+`Util/ContentVersions.txt` in the CARLA source directory, which maps each CARLA version to its corresponding asset package.
+
 Manually download the corresponding asset package.
 Extract the downloaded archive to:
 Unreal/CarlaUE4/Content/Carla
@@ -85,7 +97,7 @@ make PythonAPI
 
 During this step, several issues may arise. The most common ones and their solutions are listed below:
 
-1. Missing dependencies during build (zlib / boost / xerces-c)
+1. Missing dependencies during build (zlib / xerces-c)
 
 Problem:
 Some dependencies cannot be downloaded automatically during the build process (e.g., zlib, boost, xerces-c).
@@ -94,7 +106,6 @@ Solution:
 
 Manually download the required packages:
 zlib [v1.2.13](https://github.com/madler/zlib/tags)
-boost
 [xerces-c-3.2.3] (https://archive.apache.org/dist/xerces/c/3/sources/)
 Extract them into the corresponding Build directory
 Ensure the folder names match exactly (e.g., xerces-c-3.2.3-source)
@@ -107,6 +118,8 @@ install_boost.bat fails to download Boost automatically.
 Solution:
 
 - Manually download Boost (e.g., version 1.80.0)
+Extract them into the corresponding Build directory
+Ensure the folder names match exactly (e.g., boost-1.80.0-source)
 or
 - Modify install_boost.bat (around line 74) to use a valid download source
 ```
@@ -167,12 +180,3 @@ to
 - Ensure that the NumPy version is **< 2.0.0** to avoid build issues 
 
 ---
-
-### Summary
-
-The issues listed above represent common problems encountered during the build process.
-
-If none of these issues occur, the build environment is correctly configured.  
-Otherwise, the provided solutions may help resolve them.
-
-Contributions are welcome. If additional issues are encountered and resolved, please update this document accordingly.
