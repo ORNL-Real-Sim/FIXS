@@ -23,7 +23,7 @@ Remember to follow every steps in the CARLA Windows build documentation.
 If you don't need to use the source version CARLA as the server. You dont need to compile the Carla Server follwing the documentation. You can just run:
 
 ```shell
-make LibCarla GENERATOR="Visual Studio 17 2022" TOOLSET="msvc-14.3"
+make LibCarla GENERATOR="Visual Studio 2019" TOOLSET="msvc-14.2"
 ```
 
 which will provide the necessary dependencies for the FIXS-CARLA
