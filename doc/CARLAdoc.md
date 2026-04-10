@@ -12,22 +12,18 @@
 
 Please visit [Visual Studio Installer Download](https://visualstudio.microsoft.com/downloads/) to download the Visual Studio Installer
 
-To build the CARLA 0.9.15 under Visual Studio 2022, a practical guide is shown below:
+To build the CARLA 0.9.15 under Visual Studio 2019, a practical guide is shown below (For detailed build steps, please refer to [CARLA Windows Build Guide](./Carla_Windows_building.md).):
 
-The MSVC toolset version changed to 14.4 (i.e., the “14.4x” series) after Visual Studio 2022 version 17.10. Since the official installation script supports up to MSVC 14.3x, we use Visual Studio 2022 17.8 for simplicity. The `--channelURI` parameter can be used to specify the version.
+The MSVC toolset version changed to v142 after Visual Studio 2019. Since the official installation script supports MSVC 142, we use Visual Studio 2019 for simplicity. 
 
-```shell
-visualstudiosetup.exe --channelURI https://aka.ms/vs/17/release.LTSC.17.8/channel
-```
-
-The documentation for building CARLA on windows can be found [Carla Windows Build](https://carla.readthedocs.io/en/0.9.15/build_windows/). Please note that, we need to specify `GENERATOR="Visual Studio 17 2022" TOOLSET="msvc-14.3"` for compilation.
+The documentation for building CARLA on windows can be found [Carla Windows Build](https://carla.readthedocs.io/en/0.9.15/build_windows/). Please note that, we need to use "X64 Native Tools Command Prompt for VS 2019" for compilation.
 
 Remember to follow every steps in the CARLA Windows build documentation. 
 
 If you don't need to use the source version CARLA as the server. You dont need to compile the Carla Server follwing the documentation. You can just run:
 
 ```shell
-make LibCarla GENERATOR="Visual Studio 17 2022" TOOLSET="msvc-14.3"
+make LibCarla GENERATOR="Visual Studio 2019" TOOLSET="msvc-14.2"
 ```
 
 which will provide the necessary dependencies for the FIXS-CARLA
