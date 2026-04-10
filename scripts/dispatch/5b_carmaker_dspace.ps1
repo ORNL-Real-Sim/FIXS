@@ -156,11 +156,17 @@ if (-not (Test-Path $DspaceMakefile)) {
     Exit-Script 1
 }
 
-# Change to CommonLib directory
+# Change to CommonLib directory (dsmake must run here to find source files)
 $CommonLibDir = Join-Path $RepoRoot 'CommonLib'
 if (-not (Test-Path $CommonLibDir)) {
     Write-Error "CommonLib directory not found: $CommonLibDir"
     Exit-Script 1
+}
+
+$BuildDir = Join-Path $RepoRoot 'build'
+$DsLibOutDir = Join-Path $BuildDir 'CommonLib'
+if (-not (Test-Path $DsLibOutDir)) {
+    New-Item -ItemType Directory -Path $DsLibOutDir -Force | Out-Null
 }
 
 Set-Location $CommonLibDir
@@ -231,9 +237,14 @@ foreach ($cmVersion in $CarMakerVersions -split '\s+') {
         $CarMakerFailCount++
         $BuildResult = 1
     } else {
+        # Move output to build/CommonLib/ instead of leaving it in CommonLib/
+        $destFile = Join-Path $DsLibOutDir $libraryFile
+        Move-Item -Path $libraryFile -Destination $destFile -Force
+
         Write-Host ''
         Write-Host '=============================='
         Write-Host "dSPACE library built successfully: $libraryFile"
+        Write-Host "Output: $destFile"
         Write-Host '=============================='
 
         if ($UseLogging) {

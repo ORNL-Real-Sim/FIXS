@@ -186,9 +186,7 @@ for %%f in ("%SOURCE_PATH%\CommonLib\*.m") do (
     for %%e in (%EXCLUDE_FILES%) do if "%%~nxf"=="%%e" set "SKIP=1"
     if not defined SKIP copy /Y "%%f" "%RELEASE_PATH%\CommonLib\" >nul 2>&1
 )
-if exist "%SOURCE_PATH%\CommonLib\RealSimSocket.mexw64" (
-    copy /Y "%SOURCE_PATH%\CommonLib\RealSimSocket.mexw64" "%RELEASE_PATH%\CommonLib\" >nul
-)
+REM RealSimSocket.mexw64 is built directly to build/CommonLib/ by 6_mex_realsim_socket.ps1
 
 REM Release CarMaker files
 echo Copying CarMaker files...
@@ -203,8 +201,8 @@ if defined CARMAKER_VERSIONS (
                 copy /Y "%SOURCE_PATH%\ProprietaryFiles\CM%%m_proj\src\CarMaker.win64.exe" "%RELEASE_PATH%\CarMaker\CM%%m\" >nul
                 copy /Y "%SOURCE_PATH%\ProprietaryFiles\CM%%m_proj\src_cm4sl\libcarmaker4sl.mexw64" "%RELEASE_PATH%\CarMaker\CM%%m\" >nul
 
-                REM Copy corresponding dSPACE library to CarMaker folder
-                for %%f in ("%SOURCE_PATH%\CommonLib\libRealSimDsLib_*_CM!CM_VERSION_SAFE!.a") do (
+                REM Copy corresponding dSPACE library to CarMaker folder (built to build/CommonLib/ by 5b_carmaker_dspace.ps1)
+                for %%f in ("%RELEASE_PATH%\CommonLib\libRealSimDsLib_*_CM!CM_VERSION_SAFE!.a") do (
                     copy /Y "%%f" "%RELEASE_PATH%\CarMaker\CM%%m\" >nul 2>&1
                 )
             )
