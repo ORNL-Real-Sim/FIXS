@@ -36,10 +36,10 @@ set "CARMAKER_VERSIONS="
 set "YAML_MATLAB_VERSION="
 set "YAML_MATLAB_DIR="
 if exist "%YAML_HELPER%" (
-    for /f "usebackq tokens=* delims=" %%I in (`powershell -NoProfile -File "%YAML_HELPER%" -File "%DEPS_FILE%" -Section "matlab"`) do set "MATLAB_VERSION=%%~I"
-    for /f "usebackq tokens=* delims=" %%I in (`powershell -NoProfile -File "%YAML_HELPER%" -File "%DEPS_FILE%" -Section "carmaker" -ListKey "versions" -ReturnList`) do set "CARMAKER_VERSIONS=%%~I"
-    for /f "usebackq tokens=* delims=" %%I in (`powershell -NoProfile -File "%YAML_HELPER%" -File "%DEPS_FILE%" -Section "yaml_matlab"`) do set "YAML_MATLAB_VERSION=%%~I"
-    for /f "usebackq tokens=* delims=" %%I in (`powershell -NoProfile -File "%YAML_HELPER%" -File "%DEPS_FILE%" -Section "yaml_matlab" -Key "location"`) do set "YAML_MATLAB_DIR=%%~I"
+    for /f "usebackq tokens=* delims=" %%I in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%YAML_HELPER%" -File "%DEPS_FILE%" -Section "matlab"`) do set "MATLAB_VERSION=%%~I"
+    for /f "usebackq tokens=* delims=" %%I in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%YAML_HELPER%" -File "%DEPS_FILE%" -Section "carmaker" -ListKey "versions" -ReturnList`) do set "CARMAKER_VERSIONS=%%~I"
+    for /f "usebackq tokens=* delims=" %%I in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%YAML_HELPER%" -File "%DEPS_FILE%" -Section "yaml_matlab"`) do set "YAML_MATLAB_VERSION=%%~I"
+    for /f "usebackq tokens=* delims=" %%I in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%YAML_HELPER%" -File "%DEPS_FILE%" -Section "yaml_matlab" -Key "location"`) do set "YAML_MATLAB_DIR=%%~I"
 )
 if not defined MATLAB_VERSION (
     echo ERROR: MATLAB version not found in dependencies.yaml
@@ -69,7 +69,7 @@ set "BUILD_START_SECONDS=%time:~0,2%%time:~3,2%%time:~6,2%"
 REM ====================================
 REM Step 1: Compile External Libraries
 REM ====================================
-echo [1/8] Checking external libraries...
+echo [1/9] Checking external libraries...
 if not exist "%SOURCE_PATH%\CommonLib\yaml-cpp\build" (
     echo External libraries not found. Compiling...
     call "%~dp0\1_external_libraries.bat"
@@ -85,7 +85,7 @@ echo.
 REM ====================================
 REM Step 2: Compile Core Components
 REM ====================================
-echo [2/8] Compiling core components (TrafficLayer)...
+echo [2/9] Compiling core components (TrafficLayer)...
 call "%~dp0\2_core_components.bat" inline
 if %ERRORLEVEL% neq 0 (
     echo ERROR: Failed to compile core components!
@@ -96,7 +96,7 @@ echo.
 REM ====================================
 REM Step 3: Compile VISSIM Components
 REM ====================================
-echo [3/8] Compiling VISSIM components...
+echo [3/9] Compiling VISSIM components...
 call "%~dp0\3_vissim_components.bat" inline
 if %ERRORLEVEL% neq 0 (
     echo WARNING: VISSIM components build failed or skipped
@@ -106,7 +106,7 @@ echo.
 REM ====================================
 REM Step 4: Compile VirtualEnvironment
 REM ====================================
-echo [4/8] Compiling VirtualEnvironment...
+echo [4/9] Compiling VirtualEnvironment...
 call "%~dp0\4_virtual_environment.bat" inline
 if %ERRORLEVEL% neq 0 (
     echo WARNING: VirtualEnvironment build failed or skipped
@@ -116,7 +116,7 @@ echo.
 REM ====================================
 REM Step 5a: Compile CarMaker Components
 REM ====================================
-echo [5a/8] Compiling CarMaker components...
+echo [5a/9] Compiling CarMaker components...
 call powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0\5a_carmaker_components.ps1" -RunMode inline
 if %ERRORLEVEL% neq 0 (
     echo WARNING: CarMaker components build failed or skipped
@@ -126,7 +126,7 @@ echo.
 REM ====================================
 REM Step 5b: Compile dSPACE Libraries for CarMaker
 REM ====================================
-echo [5b/8] Compiling dSPACE libraries for CarMaker...
+echo [5b/9] Compiling dSPACE libraries for CarMaker...
 call powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0\5b_carmaker_dspace.ps1" -RunMode inline
 if %ERRORLEVEL% neq 0 (
     echo WARNING: dSPACE library build failed or skipped
@@ -136,7 +136,7 @@ echo.
 REM ====================================
 REM Step 6: Build RealSimSocket MEX
 REM ====================================
-echo [6/8] Building RealSimSocket MEX...
+echo [6/9] Building RealSimSocket MEX...
 call powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0\6_mex_realsim_socket.ps1" -RunMode inline
 if %ERRORLEVEL% neq 0 (
     echo WARNING: RealSimSocket MEX build failed or skipped
@@ -147,7 +147,7 @@ REM ====================================
 REM Step 7: Copy Files to Build Directory
 REM ====================================
 
-echo [7/8] Copying files to build directory...
+echo [7/9] Copying files to build directory...
 
 REM Release executables
 echo Copying executables...
@@ -243,8 +243,16 @@ set /a "DURATION_MIN=DURATION_SECONDS/60"
 set /a "DURATION_SEC=DURATION_SECONDS%%60"
 set "BUILD_DURATION=%DURATION_MIN%m %DURATION_SEC%s"
 
-echo [8/8] Generating BUILD_INFO.txt...
+echo [8/9] Generating BUILD_INFO.txt...
 call powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0\7_build_info.ps1" -RunMode inline -BuildStartTime "%BUILD_START%" -BuildDuration "%BUILD_DURATION%"
+echo.
+
+REM ====================================
+REM Step 9: Create Release Zip
+REM ====================================
+
+echo [9/9] Creating release zip...
+call powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0\8_create_zip.ps1" -RunMode inline
 echo.
 echo ==============================
 echo RealSim: Release Complete!
