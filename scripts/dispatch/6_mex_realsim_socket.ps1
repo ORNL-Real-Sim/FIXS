@@ -139,10 +139,16 @@ if (-not (Test-Path $MexBat)) {
 
 $SourceDir = Join-Path $RepoRoot 'CommonLib'
 $SourceFile = Join-Path $SourceDir 'RealSimSocket.cpp'
+$BuildDir = Join-Path $RepoRoot 'build'
+$MexOutDir = Join-Path $BuildDir 'CommonLib'
 
 if (-not (Test-Path $SourceFile)) {
     Write-Error "Source file not found: $SourceFile"
     Exit-Script 1
+}
+
+if (-not (Test-Path $MexOutDir)) {
+    New-Item -ItemType Directory -Path $MexOutDir -Force | Out-Null
 }
 
 Set-Location $SourceDir
@@ -169,7 +175,7 @@ Write-Host 'Invoking mex...'
 if ($UseLogging) {
     "===> Building RealSimSocket.mexw64..." | Out-File -FilePath $LogSummary -Append -Encoding UTF8
 
-    $output = & cmd /c "`"$MexBat`" -largeArrayDims -outdir `"$SourceDir`" `"$SourceFile`" 2>&1"
+    $output = & cmd /c "`"$MexBat`" -largeArrayDims -outdir `"$MexOutDir`" `"$SourceFile`" 2>&1"
     $output | Out-File -FilePath $LogOutput -Append -Encoding UTF8
 
     if ($LASTEXITCODE -ne 0) {
@@ -183,13 +189,13 @@ if ($UseLogging) {
         Write-Host ''
         Write-Host '=============================='
         Write-Host 'RealSimSocket MEX built successfully.'
-        Write-Host "Output: $SourceDir\RealSimSocket.mexw64"
+        Write-Host "Output: $MexOutDir\RealSimSocket.mexw64"
         Write-Host '=============================='
         "===> RealSimSocket.mexw64 build SUCCESS" | Out-File -FilePath $LogSummary -Append -Encoding UTF8
         $BuildResult = 0
     }
 } else {
-    & cmd /c "`"$MexBat`" -largeArrayDims -outdir `"$SourceDir`" `"$SourceFile`""
+    & cmd /c "`"$MexBat`" -largeArrayDims -outdir `"$MexOutDir`" `"$SourceFile`""
 
     if ($LASTEXITCODE -ne 0) {
         Write-Host ''
@@ -201,7 +207,7 @@ if ($UseLogging) {
         Write-Host ''
         Write-Host '=============================='
         Write-Host 'RealSimSocket MEX built successfully.'
-        Write-Host "Output: $SourceDir\RealSimSocket.mexw64"
+        Write-Host "Output: $MexOutDir\RealSimSocket.mexw64"
         Write-Host '=============================='
         $BuildResult = 0
     }
