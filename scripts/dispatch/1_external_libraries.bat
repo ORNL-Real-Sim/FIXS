@@ -4,10 +4,12 @@ REM Build External Libraries
 REM Builds yaml-cpp (and libevent if needed)
 REM ====================================
 
-cd ..\..
+REM Resolve repo root relative to this script's location
+set "SCRIPT_DIR=%~dp0"
+for %%I in ("%SCRIPT_DIR%..\..") do set "REPO_ROOT=%%~fI"
 
 REM Read Visual Studio version from dependencies.yaml
-for /f "delims=" %%a in ('powershell -ExecutionPolicy Bypass -File scripts\dispatch\yaml_helper.ps1 -File dependencies.yaml -Section visual_studio') do set VS_VERSION=%%a
+for /f "delims=" %%a in ('powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%yaml_helper.ps1" -File "%REPO_ROOT%\dependencies.yaml" -Section visual_studio') do set VS_VERSION=%%a
 
 if "%VS_VERSION%"=="" (
     echo ERROR: Could not read Visual Studio version from dependencies.yaml
@@ -30,12 +32,15 @@ REM cmake --build . --config Release
 REM cmake --build . --config Debug
 REM cd ..\..\..\
 
-cd .\CommonLib\yaml-cpp
-if not exist build md build
-cd build
-cmake -G "%CMAKE_GENERATOR%" ..
+set "YAMLCPP_DIR=%REPO_ROOT%\CommonLib\yaml-cpp"
+set "YAMLCPP_BUILD=%YAMLCPP_DIR%\build"
+
+if not exist "%YAMLCPP_BUILD%" mkdir "%YAMLCPP_BUILD%"
+pushd "%YAMLCPP_BUILD%"
+cmake -G "%CMAKE_GENERATOR%" "%YAMLCPP_DIR%"
 cmake --build . --config Release
 cmake --build . --config Debug
+popd
 
 REM Only pause if not called from dispatch
 if not "%1"=="inline" pause
