@@ -179,6 +179,11 @@ CM*_proj/**/Release/*
 tests/DelayedConnection/coordMerge.xml
 CM11_proj/tmp.obj
 
+# Build outputs that land in CommonLib/
+CommonLib/RealSimSocket.mexw64
+CommonLib/VirtualEnvironment.lib
+CommonLib/libRealSimDsLib_*.a
+
 **/build/**
 
 # Ignore CommonLib under tests/Applications/Eco_Fixed_Timming
