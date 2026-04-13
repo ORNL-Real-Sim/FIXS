@@ -46,13 +46,40 @@ if (Test-Path $ZipPath) {
     Remove-Item $ZipPath -Force
 }
 
-Write-Host "Creating $ZipName..."
+Write-Host "Creating $ZipName (excluding libsumo DLLs)..."
 try {
-    Compress-Archive -Path "$BuildDir\*" -DestinationPath $ZipPath -CompressionLevel Optimal
+    # Create a temp staging directory excluding libsumo/bin (large DLLs fetched separately)
+    $StagingDir = Join-Path ([System.IO.Path]::GetTempPath()) "fixs-zip-staging-$(Get-Random)"
+    New-Item -ItemType Directory -Path $StagingDir -Force | Out-Null
+
+    # Copy everything except libsumo/bin
+    Get-ChildItem -Path $BuildDir -Exclude 'fixs-build-*' | ForEach-Object {
+        if ($_.Name -eq 'CommonLib') {
+            $destCommonLib = Join-Path $StagingDir 'CommonLib'
+            New-Item -ItemType Directory -Path $destCommonLib -Force | Out-Null
+            Get-ChildItem -Path $_.FullName | Where-Object { -not ($_.Name -eq 'libsumo') } | ForEach-Object {
+                Copy-Item -Path $_.FullName -Destination $destCommonLib -Recurse -Force
+            }
+            # Copy libsumo headers only (not bin/)
+            $libsumoSrc = Join-Path $_.FullName 'libsumo'
+            if (Test-Path $libsumoSrc) {
+                $libsumoDest = Join-Path $destCommonLib 'libsumo'
+                New-Item -ItemType Directory -Path $libsumoDest -Force | Out-Null
+                Get-ChildItem -Path $libsumoSrc -File | Copy-Item -Destination $libsumoDest -Force
+            }
+        } else {
+            Copy-Item -Path $_.FullName -Destination $StagingDir -Recurse -Force
+        }
+    }
+
+    Compress-Archive -Path "$StagingDir\*" -DestinationPath $ZipPath -CompressionLevel Optimal
+    Remove-Item $StagingDir -Recurse -Force
+
     $size = [math]::Round((Get-Item $ZipPath).Length / 1MB, 1)
     Write-Host "Created: $ZipPath ($size MB)"
 } catch {
     Write-Error "Failed to create zip: $_"
+    if (Test-Path $StagingDir) { Remove-Item $StagingDir -Recurse -Force }
     Exit-Script 1
 }
 
