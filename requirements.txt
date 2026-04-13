@@ -13,6 +13,7 @@ pyyaml>=6.0
 ruamel.yaml>=0.17.0
 sphinx>=5.0.0
 sphinx_rtd_theme>=1.0.0
+PySide6>=6.5.0
 # SUMO Python libraries
 traci
 sumolib
