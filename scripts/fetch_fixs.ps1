@@ -80,6 +80,45 @@ try {
     # Extract
     Expand-Archive -Path $ZipFile.FullName -DestinationPath $OutputDir -Force
 
+    # Fetch libsumo DLLs from the FIXS repo (excluded from zip due to size)
+    Write-Host "Fetching libsumo DLLs from $Repo..."
+    $LibsumoDestDir = Join-Path $OutputDir 'CommonLib\libsumo\bin'
+
+    # Resolve the git ref for the release
+    $GitRef = 'dev'
+    if ($Version -ne 'latest') {
+        $GitRef = $Version
+    } else {
+        $refInfo = gh release view latest -R $Repo --json targetCommitish --jq '.targetCommitish' 2>$null
+        if ($refInfo) { $GitRef = $refInfo }
+    }
+
+    # Shallow clone just CommonLib/libsumo/bin using sparse checkout
+    $LibsumoTempDir = Join-Path ([System.IO.Path]::GetTempPath()) "fixs-libsumo-$(Get-Random)"
+    git clone --depth 1 --filter=blob:none --sparse --branch $GitRef "https://github.com/$Repo.git" $LibsumoTempDir 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        Push-Location $LibsumoTempDir
+        git sparse-checkout set CommonLib/libsumo/bin 2>$null
+        Pop-Location
+
+        $LibsumoSrcBin = Join-Path $LibsumoTempDir 'CommonLib\libsumo\bin'
+        if (Test-Path $LibsumoSrcBin) {
+            if (-not (Test-Path $LibsumoDestDir)) {
+                New-Item -ItemType Directory -Path $LibsumoDestDir -Force | Out-Null
+            }
+            Copy-Item -Path "$LibsumoSrcBin\*" -Destination $LibsumoDestDir -Recurse -Force
+            $dllCount = (Get-ChildItem -Path $LibsumoDestDir -Filter '*.dll' | Measure-Object).Count
+            Write-Host "  Fetched $dllCount libsumo DLLs"
+        } else {
+            Write-Warning "Could not fetch libsumo DLLs. You may need to copy them manually from CommonLib/libsumo/bin/"
+        }
+
+        Remove-Item $LibsumoTempDir -Recurse -Force -ErrorAction SilentlyContinue
+    } else {
+        Write-Warning "Could not clone repo for libsumo DLLs. You may need to copy them manually."
+        Remove-Item $LibsumoTempDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
     # Write version marker
     # For "latest", resolve the actual version from the zip name or release info
     $ActualVersion = $Version
