@@ -3,3 +3,6 @@
 	path = ProprietaryFiles
 	url = https://github.com/ORNL-Real-Sim/ProprietaryFiles.git
 
+[submodule "tests/Applications/SUMO_CARLA_EcoDriving/mlk_xil"]
+	path = tests/Applications/SUMO_CARLA_EcoDriving/mlk_xil
+	url = https://code.ornl.gov/realsim_realtwin-deployment/mlk_xil.git
