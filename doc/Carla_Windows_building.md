@@ -179,4 +179,52 @@ to
 
 - Ensure that the NumPy version is **< 2.0.0** to avoid build issues 
 
+6. Python version requirement
+
+Problem:
+CARLA 0.9.15 requires **Python 3.10**. On Windows, multiple Python versions may be installed simultaneously, and both `py` and `py3` may resolve to a different version (e.g., 3.11 or 3.12), causing `make PythonAPI` to fail with cryptic errors.
+
+Verify which Python the launcher currently resolves to:
+```
+py --version
+py3 --version
+```
+
+**Step 1 — Install Python 3.10 (if not already present):**
+
+Download and install Python 3.10 from [python.org](https://www.python.org/downloads/release/python-31011/).
+
+During installation:
+- Check **"Add Python 3.10 to PATH"**
+- Choose **"Install for all users"** if the build will be run by multiple users or from a system-level shell. This installs Python to `C:\Program Files\Python310\` and makes it available system-wide. If installing for yourself only, the default per-user install (`%LOCALAPPDATA%\Programs\Python\Python310\`) is sufficient.
+
+**Step 2 — Pin `py` and `py3` to Python 3.10 via `py.ini`:**
+
+Create (or edit) a `py.ini` file. The correct location depends on your Python install scope:
+
+| Install scope | `py.ini` location |
+|---|---|
+| Current user only | `%LOCALAPPDATA%\py.ini` (e.g., `C:\Users\<you>\AppData\Local\py.ini`) |
+| All users (system-wide) | Same directory as `py.exe`, typically `C:\Windows\py.ini` |
+
+Add the following content to `py.ini`:
+```
+[defaults]
+python=3.10
+python3=3.10
+```
+
+Verify after saving:
+```
+py --version    # should report Python 3.10.x
+py3 --version   # should report Python 3.10.x
+```
+
+**Step 3 — Install required Python packages under Python 3.10:**
+
+Ensure the following packages are installed specifically for Python 3.10, not just the system default:
+```
+py -3.10 -m pip install setuptools wheel "numpy<2.0.0"
+```
+
 ---
