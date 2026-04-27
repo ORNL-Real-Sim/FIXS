@@ -1030,45 +1030,55 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 			// -------------------
 			//  subscribe vehicle
 			// -------------------
-			
-			// get list of all vehicles entered network
-			vector <string> vehDepartedId_v = SUMO_TRACI_NAMESPACE::Simulation::getDepartedIDList();
-			allVehicleHasSubscribed = true;
-			// only able to get vehicle subscription for vehicles already in the network
-			int i = 0;
-			for (auto & iter: vehicleSubscribeId_v) {
-				// if any one of vehicle has not been subscribed yet
-				if (!vehicleHasSubscribed_v[i]) {
-					allVehicleHasSubscribed = false;
-					// id of the vehicle to be subscribed
-					string id = iter.first;
-					// if the vehicle to subscribe just entered the network
-					if (find(vehDepartedId_v.begin(), vehDepartedId_v.end(), id)!=vehDepartedId_v.end()) {
-						double radius = iter.second;
+			if (subscribeAllVehicle.first) {
+				vector <string> vehIdList = SUMO_TRACI_NAMESPACE::Vehicle::getIDList();
+				for (auto& id : vehIdList) {
+					if (subscribedAllVehicleIds_us.insert(id).second) {
+						SUMO_TRACI_NAMESPACE::Vehicle::subscribe(id, VehDataSubscribeList, 0, tSimuEnd);
+					}
+				}
+				allVehicleHasSubscribed = true;
+			}
+			else {
+				// get list of all vehicles entered network
+				vector <string> vehDepartedId_v = SUMO_TRACI_NAMESPACE::Simulation::getDepartedIDList();
+				allVehicleHasSubscribed = true;
+				// only able to get vehicle subscription for vehicles already in the network
+				int i = 0;
+				for (auto & iter: vehicleSubscribeId_v) {
+					// if any one of vehicle has not been subscribed yet
+					if (!vehicleHasSubscribed_v[i]) {
+						allVehicleHasSubscribed = false;
+						// id of the vehicle to be subscribed
+						string id = iter.first;
+						// if the vehicle to subscribe just entered the network
+						if (find(vehDepartedId_v.begin(), vehDepartedId_v.end(), id)!=vehDepartedId_v.end()) {
+							double radius = iter.second;
 
-						SUMO_TRACI_NAMESPACE::Vehicle::subscribeContext(id, libsumo::CMD_GET_VEHICLE_VARIABLE, radius, VehDataSubscribeList, 0, tSimuEnd);
+							SUMO_TRACI_NAMESPACE::Vehicle::subscribeContext(id, libsumo::CMD_GET_VEHICLE_VARIABLE, radius, VehDataSubscribeList, 0, tSimuEnd);
 
-						vehicleHasSubscribed_v[i] = true;
+							vehicleHasSubscribed_v[i] = true;
+						}
+
+						i++;
 					}
 
-					i++;
 				}
-
 			}
-
-			// !!! need to sub all vehicles
-
-			//while Simulation::getMinExpectedNumber() > 0:
-			//for veh_id in Simulation::getDepartedIDList() :
-			//	traci.vehicle.subscribe(veh_id, [traci.constants.VAR_POSITION])
-			//	positions = traci.vehicle.getAllSubscriptionResults()
-			//	traci.simulationStep()
-
-
 		}
 		else {
 			int aa = 1;
 
+		}
+
+		// Keep subscriptions updated for newly departed vehicles when "all vehicles" mode is enabled.
+		if (subscribeAllVehicle.first) {
+			vector <string> vehDepartedId_v = SUMO_TRACI_NAMESPACE::Simulation::getDepartedIDList();
+			for (auto& id : vehDepartedId_v) {
+				if (subscribedAllVehicleIds_us.insert(id).second) {
+					SUMO_TRACI_NAMESPACE::Vehicle::subscribe(id, VehDataSubscribeList, 0, tSimuEnd);
+				}
+			}
 		}
 
 		// this might make it slightly faster to not get repeated vehicles
@@ -1079,19 +1089,10 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 		// ===========================================================================
 		// 			GET SUBSCRIBED VEHICLE
 		// ===========================================================================
-		libsumo::ContextSubscriptionResults VehicleSubscribeRaw;
-		VehicleSubscribeRaw = SUMO_TRACI_NAMESPACE::Vehicle::getAllContextSubscriptionResults();
+		if (subscribeAllVehicle.first) {
+			libsumo::SubscriptionResults VehicleSubscribeRaw = SUMO_TRACI_NAMESPACE::Vehicle::getAllSubscriptionResults();
 
-		//{
-		//int i = 0;
-		//for (auto& it : vehicleSubscribeId_v) {
-		//	if (vehicleHasSubscribed_v[i]) {
-		for (auto& it : VehicleSubscribeRaw) {
-			//string id = it.first;
-			libsumo::SubscriptionResults VehDataSubscribeResults = it.second;
-
-			for (auto& iter : VehDataSubscribeResults) {
-
+			for (auto& iter : VehicleSubscribeRaw) {
 				string tempvehId = iter.first;
 
 				VehFullData_t CurVehData;
@@ -1104,12 +1105,7 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 				}
 
 				this->parserSumoSubscription(iter.second, tempvehId, CurVehData);
-				//libsumo::TraCIResults VehDataSubscribeTraciResults = VehDataSubscribeResults[tempvehId]
 
-				//=================
-				// save to Msg_c recv buffer
-				//=================
-				//Msg_c.VehDataRecvAll_v.push_back(CurVehData);
 				VehDataRecv_um_tmp[tempvehId] = CurVehData;
 
 				if (ENABLE_VERBOSE) {
@@ -1119,9 +1115,44 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 					FILE* f = fopen(MasterLogName.c_str(), "a");
 					fprintf(f, "recv SUMO veh id %s veh speed %.4f\n", tempvehId.c_str(), speed);
 					fclose(f);
+				}
+			}
+		}
+		else {
+			libsumo::ContextSubscriptionResults VehicleSubscribeRaw;
+			VehicleSubscribeRaw = SUMO_TRACI_NAMESPACE::Vehicle::getAllContextSubscriptionResults();
+
+			for (auto& it : VehicleSubscribeRaw) {
+				libsumo::SubscriptionResults VehDataSubscribeResults = it.second;
+
+				for (auto& iter : VehDataSubscribeResults) {
+
+					string tempvehId = iter.first;
+
+					VehFullData_t CurVehData;
+
+					if (processedVehId_us.find(tempvehId) == processedVehId_us.end()) {
+						processedVehId_us.insert(tempvehId);
+					}
+					else {
+						continue;
+					}
+
+					this->parserSumoSubscription(iter.second, tempvehId, CurVehData);
+
+					VehDataRecv_um_tmp[tempvehId] = CurVehData;
+
+					if (ENABLE_VERBOSE) {
+						float speed = CurVehData.speed;
+						printf("recv SUMO veh id %s veh speed %.4f\n", tempvehId.c_str(), speed);
+
+						FILE* f = fopen(MasterLogName.c_str(), "a");
+						fprintf(f, "recv SUMO veh id %s veh speed %.4f\n", tempvehId.c_str(), speed);
+						fclose(f);
+
+					}
 
 				}
-
 			}
 		}
 
@@ -1190,7 +1221,7 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 				libsumo::SubscriptionResults VehDataSubscribeResults = it.second;
 
 				auto iter = VehDataSubscribeResults.begin();
-				nVehSend = min((int)VehDataSubscribeResults.size(), 200);
+				nVehSend = (int)VehDataSubscribeResults.size();
 
 				vector <string> tempVehIdList;
 				//tempVehIdList.push_back(egoIdVec[iC]);
@@ -1248,9 +1279,12 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 		}
 
 
-		// !!!temporary fix
-		// if doing vehicle simulator, e.g., CarMaker, only send limited number of vehicles
-		if (ENABLE_VEH_SIMULATOR) {
+		if (subscribeAllVehicle.first) {
+			for (auto& it : VehDataRecv_um_tmp) {
+				Msg_c.VehDataRecv_um[it.first] = it.second;
+			}
+		}
+		else if (ENABLE_VEH_SIMULATOR) {
 			libsumo::TraCIPosition posEgo = SUMO_TRACI_NAMESPACE::Vehicle::getPosition(Config_c->CarMakerSetup.EgoId);
 
 			// sort distance, pair distance to ego, vehId
@@ -1266,12 +1300,8 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 				if (this->shouldSendVehicle(tempvehId, *simTime)) {
 					Msg_c.VehDataRecv_um[tempvehId] = VehDataRecv_um_tmp[tempvehId];
 				}
-
-				if (Msg_c.VehDataRecv_um.size() >= N_MAX_VEH) {
-					break;
-				}
 			}
-				
+
 		}
 		else {
 			for (auto& it : VehDataRecv_um_tmp) {
@@ -1282,6 +1312,14 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 					Msg_c.VehDataRecv_um[tempvehId] = VehDataRecv_um_tmp[tempvehId];
 				}
 			}
+		}
+
+		if (ENABLE_VERBOSE) {
+			printf("recv SUMO vehicle counts: in_sim=%d recv=%d\n", nVeh, (int)Msg_c.VehDataRecv_um.size());
+
+			FILE* f = fopen(MasterLogName.c_str(), "a");
+			fprintf(f, "recv SUMO vehicle counts: in_sim=%d recv=%d\n", nVeh, (int)Msg_c.VehDataRecv_um.size());
+			fclose(f);
 		}
 
 

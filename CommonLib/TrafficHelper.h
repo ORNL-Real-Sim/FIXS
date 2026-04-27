@@ -98,6 +98,7 @@ public:
 	//std::vector <std::string> pointNamePoi_v;
 
 	std::unordered_map <std::string, double> vehicleTypeSubscribedId_v;
+	std::unordered_set <std::string> subscribedAllVehicleIds_us;
 
 	bool edgeHasSubscribed = false;
 	bool pointHasSubscribed = false;
@@ -208,8 +209,6 @@ private:
 	const double SUB_CONT_TIME_THLD = 1; // has to be in for 10 seconds
 
 	const double SIM_STEP = 0.1;
-
-	const int N_MAX_VEH = 100;
 };
 
 
