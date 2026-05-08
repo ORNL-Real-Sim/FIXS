@@ -49,7 +49,7 @@ class MsgHelper:
             'width': False,
             'height': False,
             'activeLaneChange': False,
-            'routeEdges': True
+            'routeEdges': False
         }
         self.traffic_light_msg_field_valid = {
             'id': False,

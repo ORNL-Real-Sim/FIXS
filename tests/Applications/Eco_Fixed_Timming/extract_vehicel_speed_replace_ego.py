@@ -23,11 +23,11 @@ def extract_vehicle_speed(fcd_file, target_id):
 # ================= 主程序 =================
 if __name__ == "__main__":
     # 文件路径
-    fcd_466_path = r"C:\Users\yusun\Projects\XIL_Oct\tests\Applications\Eco_Fixed_Timming\Experiments_Sumo\Shallowford_after_calibration_banleftturn_AdjustedFixedTime_V3\MPR_2\0%_10Hz_wo_vehDyn_baseline\fcd.xml"
-    fcd_ego_path = r"C:\Users\yusun\Projects\XIL_Oct\tests\Applications\Eco_Fixed_Timming\Experiments_Sumo\Shallowford_after_calibration_banleftturn_AdjustedFixedTime_V3\MPR_2\0%_10Hz_wo_vehDyn_4.85\fcd.xml"
+    fcd_466_path = r"C:\Users\yusun\Projects\XIL_Oct\tests\Applications\Eco_Fixed_Timming\Experiments_Sumo\Shallowford_after_calibration_banleftturn_AdjustedFixedTime_V3\MPR_10\0%_10Hz_wo_vehDyn_477\fcd.xml"
+    fcd_ego_path = r"C:\Users\yusun\Projects\XIL_Oct\tests\Applications\Eco_Fixed_Timming\Experiments_Sumo\Shallowford_after_calibration_banleftturn_AdjustedFixedTime_V3\MPR_10\0%_10Hz_w_vehDyn_477\fcd.xml"
 
     # 车辆 ID
-    vehicle_id = "4.85"
+    vehicle_id = "ego"
     ego_id = "ego"
 
     # 提取数据
@@ -36,8 +36,8 @@ if __name__ == "__main__":
 
     # 画图
     plt.figure(figsize=(12, 7))
-    plt.plot(df_vehicle["time"], df_vehicle["speed"], color='blue', linewidth=2.5, label=f'Vehicle {vehicle_id}')
-    plt.plot(df_ego["time"], df_ego["speed"], color='orange', linewidth=2.5, label=f'Ego Vehicle')
+    plt.plot(df_vehicle["time"], df_vehicle["speed"], color='blue', linewidth=2.5, label=f'ego without Dyn')
+    plt.plot(df_ego["time"], df_ego["speed"], color='orange', linewidth=2.5, label=f'ego with Dyn')
 
     plt.xlabel("Time [s]", fontsize=20)
     plt.ylabel("Speed [m/s]", fontsize=20)
@@ -49,9 +49,9 @@ if __name__ == "__main__":
     plt.tight_layout()
 
     # 保存图像
-    output_dir = r".\Experiments_Sumo\Shallowford_after_calibration_banleftturn_AdjustedFixedTime_V3\MPR_2\Results"
+    output_dir = r".\Experiments_Sumo\Shallowford_after_calibration_banleftturn_AdjustedFixedTime_V3\MPR_10\Results"
     os.makedirs(output_dir, exist_ok=True)
-    output_fig = os.path.join(output_dir, f"{vehicle_id}_vs_{ego_id}_speed.png")
+    output_fig = os.path.join(output_dir, f"WithoutD_vs_WithD_speed.png")
     plt.savefig(output_fig, dpi=300, bbox_inches='tight')
     print(f"📊 图像已保存到: {output_fig}")
 

@@ -447,6 +447,14 @@ int ConfigHelper::getConfig(string configName) {
 	else {
 		SumoSetup.VIDToRemove = "";
 	}
+	// ---- MaxAcceleration for ego vehicle type ----
+	if (node["MaxAcceleration"]) {
+		SumoSetup.MaxAcceleration = node["MaxAcceleration"].as<double>();
+	}
+	else {
+		SumoSetup.MaxAcceleration = 2.0;
+		printf("\nSumo MaxAcceleration not specified! Will use 2.0 m/s^2 as default!\n");
+	}
 
 
 	// ===========================================================================

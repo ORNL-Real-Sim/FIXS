@@ -499,7 +499,7 @@ int TrafficHelper::addEgoVehicle(double simTime) {
 		traci.vehicle.setSpeedMode(idStr, speedMode);
 
 
-		double maxAcc = 2.0;  
+		double maxAcc = Config_c->SumoSetup.MaxAcceleration;
 		traci.vehicletype.setAccel(typeStr, maxAcc);
 		traci.vehicletype.setDecel(typeStr, maxAcc);
 

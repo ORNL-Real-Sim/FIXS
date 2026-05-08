@@ -145,6 +145,7 @@ struct SumoSetup_t {
 	std::string EgoDepartSpeed;
 
 	std::string VIDToRemove;
+	double MaxAcceleration;
 };
 
 typedef struct SubscriptionVehicleList_t {

@@ -6,7 +6,7 @@
 function [VehicleMessageFieldDefInputVec, VehDataBus, TrafficLayerIP, TrafficLayerPort, Status] = RealSimInitSimulink(configFilename)
     %% initialize outputs
     Status = 0;
-	VehicleMessageFieldDefInputVec = zeros(1, 29);
+	VehicleMessageFieldDefInputVec = zeros(1, 30);
     VehDataBus= Simulink.Bus;
     VehDataBus.Elements = [];
     TrafficLayerIP = '';
@@ -26,7 +26,7 @@ function [VehicleMessageFieldDefInputVec, VehDataBus, TrafficLayerIP, TrafficLay
 	%speedLimitNext, speedLimitChangeDistance, linkIdNext, grade, activeLaneChange]
 
     if ~isfield(Config.SimulationSetup, 'VehicleMessageField')
-        VehicleMessageFieldDefInputVec = ones(1, 29);
+        VehicleMessageFieldDefInputVec = ones(1, 30);
     else
         for i = 1:numel(Config.SimulationSetup.VehicleMessageField)
             %     curMsgId = ;
@@ -89,6 +89,8 @@ function [VehicleMessageFieldDefInputVec, VehDataBus, TrafficLayerIP, TrafficLay
                     VehicleMessageFieldDefInputVec(28) = 1;
                 case 'activeLaneChange'
                     VehicleMessageFieldDefInputVec(29) = 1;
+                case 'routeEdges'
+                    VehicleMessageFieldDefInputVec(30) = 1;
                 otherwise
                     fprintf('\nERROR! Vehicle message id not supported! Check configuration yaml file!\n')
             end    
@@ -213,6 +215,10 @@ function [VehicleMessageFieldDefInputVec, VehDataBus, TrafficLayerIP, TrafficLay
     end     
     
     %% create Simulink Bus
+    ROUTE_MAX_EDGE_LEN = 50;
+    ROUTE_MAX_EDGES    = 20;
+
+
     temp = struct('id', uint8(zeros(50,1)), 'idLength', 0, 'type', uint8(zeros(50,1)), 'typeLength', 0, ...
                     'vehicleClass', uint8(zeros(50,1)), 'vehicleClassLength', 0, ...
                     'speed', 0, 'acceleration', 0, 'positionX', 0, 'positionY', 0, 'positionZ', 0, ...
@@ -221,14 +227,34 @@ function [VehicleMessageFieldDefInputVec, VehDataBus, TrafficLayerIP, TrafficLay
                     'hasPrecedingVehicle', 0, 'precedingVehicleId', uint8(zeros(50,1)), 'precedingVehicleIdLength', 0, 'precedingVehicleDistance', 0, 'precedingVehicleSpeed', 0, ...
                     'signalLightId', uint8(zeros(50,1)), 'signalLightIdLength', 0, 'signalLightHeadId', 0, 'signalLightDistance', 0, 'signalLightColor', 0, ...
                     'speedLimit', 0, 'speedLimitNext', 0, 'speedLimitChangeDistance', 0, ...
-                    'linkIdNext', uint8(zeros(50,1)), 'linkIdNextLength', 0, 'grade', 0, 'activeLaneChange', 0);
+                    'linkIdNext', uint8(zeros(50,1)), 'linkIdNextLength', 0, 'grade', 0, 'activeLaneChange', 0, 'routeEdgesCount', uint16(0), 'routeEdgesLengths', uint8(zeros(ROUTE_MAX_EDGES, 1)), 'routeEdges', uint8(zeros(ROUTE_MAX_EDGE_LEN, ROUTE_MAX_EDGES)));
     tempnames = fieldnames(temp);
 
+    %for i = 1:numel(tempnames)
+    %    ele=Simulink.BusElement;
+    %    ele.Name = tempnames{i};
+    %    ele.Dimensions = max(numel(temp.(ele.Name)),1);
+    %    ele.DataType = class(temp.(ele.Name));
+    %    VehDataBus.Elements = [VehDataBus.Elements; ele];
+    %end
+
     for i = 1:numel(tempnames)
-        ele=Simulink.BusElement;
+        ele = Simulink.BusElement;
         ele.Name = tempnames{i};
-        ele.Dimensions = max(numel(temp.(ele.Name)),1);
-        ele.DataType = class(temp.(ele.Name));
+
+        val = temp.(ele.Name);
+
+        if strcmp(ele.Name, 'routeEdges')
+            % 2-D fixed array: [ROUTE_MAX_EDGE_LEN x ROUTE_MAX_EDGES]
+            ele.Dimensions = [ROUTE_MAX_EDGE_LEN, ROUTE_MAX_EDGES];
+        elseif strcmp(ele.Name, 'routeEdgesLengths')
+            % 1-D array: one length entry per possible edge
+            ele.Dimensions = ROUTE_MAX_EDGES;
+        else
+            ele.Dimensions = max(numel(val), 1);
+        end
+
+        ele.DataType = class(val);
         VehDataBus.Elements = [VehDataBus.Elements; ele];
     end
     

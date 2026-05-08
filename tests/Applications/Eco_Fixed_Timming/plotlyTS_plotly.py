@@ -6,7 +6,7 @@ import matplotlib as mpl
 import numpy as np
 
 
-OUTPUT_DIR = r".\Experiments_Sumo\Shallowford_after_calibration_banleftturn_AdjustedFixedTime_V3\MPR_1\Results"
+OUTPUT_DIR = r".\Experiments_Sumo\Shallowford_after_calibration_banleftturn_AdjustedFixedTime_V3\MPR_10\Results"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 SUMO_START_TIME = 28800
 # Increase font sizes globally
@@ -24,7 +24,7 @@ def get_data(folder_path: str, verbose: bool = False) -> dict[str, dict[str,]]:
     if verbose:
         print(f"Processing folder: {folder_path}")
 
-    folder = r"C:\Users\yusun\Projects\XIL_Oct\tests\Applications\Eco_Fixed_Timming\Experiments_Sumo\Shallowford_after_calibration_banleftturn_AdjustedFixedTime_V3\MPR_1\0%_10Hz_without_green_middle_4.83"
+    folder = r"C:\Users\yusun\Projects\XIL_Oct\tests\Applications\Eco_Fixed_Timming\Experiments_Sumo\Shallowford_after_calibration_banleftturn_AdjustedFixedTime_V3\MPR_10\0%_10Hz_without_VehDyn_noPy_test0420_466"
     file_path = os.path.join(folder, "sumoSignalConfig_26.csv")
     print(file_path)
     sumo_signal_config = pd.read_csv(file_path, index_col=0)
@@ -48,7 +48,7 @@ def get_data(folder_path: str, verbose: bool = False) -> dict[str, dict[str,]]:
 
     return data_dic
 
-data_dic_full = get_data(r".\Experiments_Sumo\Shallowford_after_calibration_banleftturn_AdjustedFixedTime_V3\MPR_1\0%_10Hz_without_green_middle_4.83", verbose=True)
+data_dic_full = get_data(r".\Experiments_Sumo\Shallowford_after_calibration_banleftturn_AdjustedFixedTime_V3\MPR_10\0%_10Hz_without_VehDyn_noPy_test0420_466", verbose=True)
 # data_dic_with_dynamics_after_calibration, data_dic_without_dynamics_after_calibration = get_data_dics('.\\Experiments_Sumo\\Debug')
 
 
@@ -94,8 +94,8 @@ from cav_casestudy.SUMO.spaceTimePlotWithSignals import  read_trajectory_xml, re
 
 
 def plot_space_time_diagram_two_conditions(data_dic,
-                                           condition_label = '0%_With_4.83',
-                                           output_dir = r".\Experiments_Sumo\Shallowford_after_calibration_banleftturn_AdjustedFixedTime_V3\MPR_1\Results",
+                                           condition_label = '0%_With_4.66',
+                                           output_dir = r".\Experiments_Sumo\Shallowford_after_calibration_banleftturn_AdjustedFixedTime_V3\MPR_10\Results",
                                            target_vehicle_id=None):
     """
     生成交互式交通流时空图：
@@ -407,9 +407,9 @@ def assign_trip_id(df: pd.DataFrame, distance_threshold: float):
 
 
 plot_space_time_diagram_two_conditions (data_dic,
-                                       condition_label = '0%_With_4.83',
+                                       condition_label = '0%_With_4.66',
                                         output_dir = OUTPUT_DIR,
-                                        target_vehicle_id='4.83') 
+                                        target_vehicle_id='') 
 
 
 

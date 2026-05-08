@@ -20,7 +20,7 @@ def plot_wb_two_vehicle_with_signals(
     # === 读取 4.66 车辆轨迹 ===
     traj_466 = read_trajectory_xml(os.path.join(folder_466, "fcd.xml"), refer_coord=refer_coord_wb)
     traj_466 = trajectory_process(traj_466, eb_lanes, wb_lanes, relative_time)
-    traj_466 = traj_466[(traj_466['id'] == '4.85') & (traj_466['direction'] == 'WB')].reset_index(drop=True)
+    traj_466 = traj_466[(traj_466['id'] == 'ego') & (traj_466['direction'] == 'WB')].reset_index(drop=True)
 
     # === 读取 ego 车辆轨迹 ===
     traj_ego = read_trajectory_xml(os.path.join(folder_ego, "fcd.xml"), refer_coord=refer_coord_wb)
@@ -46,7 +46,7 @@ def plot_wb_two_vehicle_with_signals(
         x=traj_466['time'],
         y=traj_466['distance'],
         mode='lines',
-        name="Vehicle 4.85 (WB)",
+        name="ego without Dyn (WB)",
         line=dict(width=3, color='blue'),
         hovertemplate="Veh 4.85<br>Time=%{x:.1f}s<br>Dist=%{y:.1f}m<extra></extra>"
     ))
@@ -56,7 +56,7 @@ def plot_wb_two_vehicle_with_signals(
         x=traj_ego['time'],
         y=traj_ego['distance'],
         mode='lines',
-        name="Ego Vehicle (WB)",
+        name="ego with Dyn (WB)",
         line=dict(width=3, color='orange'),
         hovertemplate="Ego<br>Time=%{x:.1f}s<br>Dist=%{y:.1f}m<extra></extra>"
     ))
@@ -129,8 +129,8 @@ def plot_wb_two_vehicle_with_signals(
 
 # === 调用函数 ===
 plot_wb_two_vehicle_with_signals(
-    folder_466=r"C:\Users\yusun\Projects\XIL_Oct\tests\Applications\Eco_Fixed_Timming\Experiments_Sumo\Shallowford_after_calibration_banleftturn_AdjustedFixedTime_V3\MPR_2\0%_10Hz_wo_vehDyn_baseline",
-    folder_ego=r"C:\Users\yusun\Projects\XIL_Oct\tests\Applications\Eco_Fixed_Timming\Experiments_Sumo\Shallowford_after_calibration_banleftturn_AdjustedFixedTime_V3\MPR_2\0%_10Hz_wo_vehDyn_4.85",
-    output_dir=r".\Experiments_Sumo\Shallowford_after_calibration_banleftturn_AdjustedFixedTime_V3\MPR_2\Results",
-    condition_label="4.85 vs Ego"
+    folder_466=r"C:\Users\yusun\Projects\XIL_Oct\tests\Applications\Eco_Fixed_Timming\Experiments_Sumo\Shallowford_after_calibration_banleftturn_AdjustedFixedTime_V3\MPR_10\0%_10Hz_wo_vehDyn_477",
+    folder_ego=r"C:\Users\yusun\Projects\XIL_Oct\tests\Applications\Eco_Fixed_Timming\Experiments_Sumo\Shallowford_after_calibration_banleftturn_AdjustedFixedTime_V3\MPR_10\0%_10Hz_w_vehDyn_477",
+    output_dir=r".\Experiments_Sumo\Shallowford_after_calibration_banleftturn_AdjustedFixedTime_V3\MPR_10\Results",
+    condition_label="Without Dyn vs With Dyn"
 )

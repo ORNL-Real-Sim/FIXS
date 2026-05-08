@@ -1,8 +1,18 @@
 classdef RealSimMsgClass < handle
     % RealSimMsgClass Basis Class that contains functions to support pack and depack 
+
+    properties(Constant)
+        % Maximum number of route edges stored in the fixed-size Simulink Bus array.
+        % Must match the second dimension of routeEdges in VehicleDataEmpty and the Bus definition.
+        ROUTE_MAX_EDGES = 20;
+        % Maximum byte length of a single edge ID string (e.g. "-2081").
+        % Must match the first dimension of routeEdges in VehicleDataEmpty and the Bus definition.
+        ROUTE_MAX_EDGE_LEN = 50;
+    end
+
     
     properties
-        VehicleMessageFieldDefInputVec = zeros(1, 29); % Vector of 0,1 to select which message field will be transmitted
+        VehicleMessageFieldDefInputVec = zeros(1, 30); % Vector of 0,1 to select which message field will be transmitted
         
     end
         
@@ -17,7 +27,7 @@ classdef RealSimMsgClass < handle
             'linkId', 0, 'laneId', 0, 'distanceTravel', 0, 'speedDesired', 0, 'accelerationDesired', 0, ...
             'hasPrecedingVehicle', 0, 'precedingVehicleId', 0, 'precedingVehicleDistance', 0, 'precedingVehicleSpeed', 0, ...
             'signalLightId', 0, 'signalLightHeadId', 0, 'signalLightDistance', 0, 'signalLightColor', 0, 'speedLimit', 0, 'speedLimitNext', 0, 'speedLimitChangeDistance', 0, ...
-            'linkIdNext', 0, 'grade', 0, 'activeLaneChange', 0);
+            'linkIdNext', 0, 'grade', 0, 'activeLaneChange', 0, 'routeEdges', 0);
 
         % DO NOT change. These are predetermined message header size
         % specified for Real-Sim
@@ -38,7 +48,9 @@ classdef RealSimMsgClass < handle
                     'hasPrecedingVehicle', 0, 'precedingVehicleId', uint8(zeros(50,1)), 'precedingVehicleIdLength', 0, 'precedingVehicleDistance', 0, 'precedingVehicleSpeed', 0, ...
                     'signalLightId', uint8(zeros(50,1)), 'signalLightIdLength', 0, 'signalLightHeadId', 0, 'signalLightDistance', 0, 'signalLightColor', 0, ...
                     'speedLimit', 0, 'speedLimitNext', 0, 'speedLimitChangeDistance', 0, ...
-                    'linkIdNext', uint8(zeros(50,1)), 'linkIdNextLength', 0, 'grade', 0, 'activeLaneChange', 0);
+                    'linkIdNext', uint8(zeros(50,1)), 'linkIdNextLength', 0, 'grade', 0, 'activeLaneChange', 0, 'routeEdgesCount', uint16(0), ...
+                    'routeEdgesLengths', uint8(zeros(20,1)), ...
+                    'routeEdges', uint8(zeros(50, 20)));
     
     end
     
@@ -61,7 +73,7 @@ classdef RealSimMsgClass < handle
                 'linkId', 'laneId', 'distanceTravel', 'speedDesired', 'accelerationDesired', ...
                 'hasPrecedingVehicle', 'precedingVehicleId', 'precedingVehicleDistance', 'precedingVehicleSpeed', ...
                 'signalLightId', 'signalLightHeadId', 'signalLightDistance', 'signalLightColor', 'speedLimit', 'speedLimitNext', 'speedLimitChangeDistance', ...
-                'linkIdNext', 'grade', 'activeLaneChange'};
+                'linkIdNext', 'grade', 'activeLaneChange', 'routeEdges'};
 
             for i = 1:numel(VehMsgAllList)
                 obj.VehicleMessageFieldDef.(VehMsgAllList{i}) = obj.VehicleMessageFieldDefInputVec(i);               
@@ -197,6 +209,30 @@ classdef RealSimMsgClass < handle
                 VehData.('activeLaneChange') = double(typecast(ByteData(iByte),'int8'));
                 iByte = iByte+1;
             end
+            if obj.VehicleMessageFieldDef.('routeEdges')
+                % Read total number of edges transmitted
+                routeSize = double(typecast(ByteData(iByte:iByte+1), 'uint16'));
+                iByte = iByte + 2;
+
+                VehData.('routeEdgesCount') = uint16(routeSize);
+                VehData.('routeEdges') = uint8(zeros(obj.ROUTE_MAX_EDGE_LEN, obj.ROUTE_MAX_EDGES));
+                VehData.('routeEdgesLengths') = uint8(zeros(obj.ROUTE_MAX_EDGES, 1));
+
+                % Decode each edge; only store up to ROUTE_MAX_EDGES
+                for k = 1:routeSize
+                    strLen = double(typecast(ByteData(iByte:iByte+1), 'uint16'));
+                    iByte = iByte + 2;
+
+                    if k <= obj.ROUTE_MAX_EDGES
+                        % Clamp copy length to the fixed row size
+                        copyLen = min(strLen, obj.ROUTE_MAX_EDGE_LEN);
+                        VehData.('routeEdges')(1:copyLen, k) = ByteData(iByte:iByte+copyLen-1);
+                        VehData.('routeEdgesLengths')(k) = uint8(copyLen);
+                    end
+                    % Always advance iByte by the full transmitted length
+                    iByte = iByte + strLen;
+                end
+            end
         end
         
         
@@ -218,6 +254,19 @@ classdef RealSimMsgClass < handle
         end
         
         function [ByteData, nMsgSize] = packVehData(obj, simState, t, ByteData, VehData)
+            
+            routeEdgesSize = 0;
+            if obj.VehicleMessageFieldDef.('routeEdges')
+                count = double(VehData.('routeEdgesCount'));
+                routeEdgesSize = 2; % uint16 for total edge count
+                for k = 1:min(count, obj.ROUTE_MAX_EDGES)
+                    % Use the stored per-edge length instead of scanning for a null terminator
+                    edgeLen = double(VehData.('routeEdgesLengths')(k));
+                    routeEdgesSize = routeEdgesSize + 2 + edgeLen; % uint16 length prefix + data
+                end
+            end
+
+
 
             nMsgSize = round( obj.msgHeaderSize + obj.msgEachHeaderSize  ...
                 + obj.VehicleMessageFieldDef.('id')*(1 + VehData.('idLength')) ...
@@ -249,6 +298,7 @@ classdef RealSimMsgClass < handle
                 + obj.VehicleMessageFieldDef.('linkIdNext')*(1 + VehData.('linkIdNextLength')) ... % linkIdNext
                 + obj.VehicleMessageFieldDef.('grade')*(4) ... % grade
                 + obj.VehicleMessageFieldDef.('activeLaneChange')*(1) ... % activeLaneChange
+                + routeEdgesSize ... % routeEdges
                 ) ;
             nVehMsgSize = round(nMsgSize - obj.msgHeaderSize);
 
@@ -463,6 +513,29 @@ classdef RealSimMsgClass < handle
                 ByteData(iByte) = tempInt8;
                 iByte = iByte + 1;
             end
+
+            if obj.VehicleMessageFieldDef.('routeEdges')
+                count = double(VehData.('routeEdgesCount'));
+                % Write total number of edges
+                tempUint16 = typecast(uint16(count), 'uint8');
+                ByteData(iByte:iByte+1) = tempUint16;
+                iByte = iByte + 2;
+
+                for k = 1:min(count, obj.ROUTE_MAX_EDGES)
+                    % Use stored length — no need to scan for null terminator
+                    edgeLen = double(VehData.('routeEdgesLengths')(k));
+
+                    tempUint16 = typecast(uint16(edgeLen), 'uint8');
+                    ByteData(iByte:iByte+1) = tempUint16;
+                    iByte = iByte + 2;
+
+                    if edgeLen > 0
+                        ByteData(iByte:iByte+edgeLen-1) = VehData.('routeEdges')(1:edgeLen, k);
+                        iByte = iByte + edgeLen;
+                    end
+                end
+            end
+
         end
         
         function [ByteData, iByte] = packString(obj, ByteData, iByte, VehData, messageField)

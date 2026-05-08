@@ -134,8 +134,12 @@ class SumoEnvMultiAgent:
         xmlTree.write(os.path.join(output_dir, self.sumo_route))
 
     def change_config_directory(self):
-        file_name = f'{int(self.penetration_rate*100)}%_{int(1/self.step_length)}Hz' + f'{"_with" if self.enable_vehicle_dynamics else "_without"}_VehDyn_test0402'
+        file_name = f'{int(self.penetration_rate*100)}%_{int(1/self.step_length)}Hz' + f'{"_with" if self.enable_vehicle_dynamics else "_without"}_VehDyn_noPy_0506'
         output_dir = os.path.join(self.sumo_folder, self.working_directory, file_name)
+
+        # self.speed_log_path = os.path.join(self.sumo_folder, self.working_directory, file_name, 'speed_log.csv')
+        # with open(self.speed_log_path, 'w') as f:
+        #     f.write('sim_time,veh_id,ori_speed_ms,speed_desired\n')
 
         # Making Results Directory
         try:
@@ -586,6 +590,12 @@ class SumoEnvMultiAgent:
 
 
         ori_speed = {veh_data.id:veh_data.speed for veh_data in self.socket_helper.vehicle_data_receive_list}
+
+        # if 'ego' in ori_speed:
+        #     with open(self.speed_log_path, 'a') as f:
+        #         f.write(f'{sim_time},ego,{ori_speed["ego"]},\n')
+
+
         for veh_id, eco_speed in eco_speed_dic.items():
             if eco_speed is not None:
                 if eco_driving:
@@ -657,6 +667,11 @@ class SumoEnvMultiAgent:
         # print(f"[t={sim_time}]=== FINAL SEND LIST TO FIXS ===")
         # for v in self.socket_helper.vehicle_data_send_list:
         #     print(v.id, v.speedDesired)
+
+        # with open(self.speed_log_path, 'a') as f:
+        #     for v in self.socket_helper.vehicle_data_send_list:
+        #         if v.id == 'ego':
+        #             f.write(f'{sim_time},ego,,{v.speedDesired}\n')
 
 
         self.socket_helper.clear_data()
@@ -743,7 +758,7 @@ if __name__ == "__main__":
     parser.add_argument("--sumoConfig", type=str, help="Specify sumo config file", default='chattCavMpr.sumocfg')
     parser.add_argument("--sumoNet", type=str, help="Specify sumo net file", default=os.environ["SUMO_NET_PATH"])
     parser.add_argument("--sumoRoute", type=str, help="Specify sumo route file", default='chattCavMpr.rou.xml')
-    parser.add_argument("--workingDirectory", type=str, help="Specify working directory", default='MPR_1')
+    parser.add_argument("--workingDirectory", type=str, help="Specify working directory", default='MPR_2')
     args = parser.parse_args()
     traffic_layer_config = args.trafficlayerConfig
     traffic_layer_ip = args.trafficlayerIp
@@ -797,7 +812,7 @@ if __name__ == "__main__":
 
     senv.run_sumo(num_clients=1, seed=101, gui=True)
     time.sleep(2)
-    run_traffic_layer('TrafficLayer0402.exe', os.environ["CONFIG_PATH"])
+    run_traffic_layer('TrafficLayer0508.exe', os.environ["CONFIG_PATH"])
     time.sleep(2)
     senv.setup_connections()
     print('Starting subscription')

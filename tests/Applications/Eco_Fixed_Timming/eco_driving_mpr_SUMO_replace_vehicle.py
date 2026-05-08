@@ -3,6 +3,7 @@ import time
 import traci
 import sumolib
 import shutil
+import struct
 import socket
 import xml.etree.ElementTree as ET
 from dotenv import load_dotenv
@@ -70,7 +71,7 @@ class SumoEnvMultiAgent:
         self.subscribed_vehicles = []
         self.speed_min = 0
         self.speed_max = 21
-        self.max_acc = 4.0
+        self.max_acc = 2.0
         self.prev_acc = 0.01
 
         # initialize the socket connections
@@ -114,7 +115,7 @@ class SumoEnvMultiAgent:
         xmlTree.write(os.path.join(output_dir, self.sumo_route))
 
     def change_config_directory(self):
-        file_name = f'{int(self.penetration_rate*100)}%_{int(1/self.step_length)}Hz' + f'{"_w" if self.enable_vehicle_dynamics else "_wo"}_vehDyn_Test'
+        file_name = f'{int(self.penetration_rate*100)}%_{int(1/self.step_length)}Hz' + f'{"_w" if self.enable_vehicle_dynamics else "_wo"}_vehDyn_0507'
         output_dir = os.path.join(self.sumo_folder, self.working_directory, file_name)
 
         # Making Results Directory
@@ -127,6 +128,7 @@ class SumoEnvMultiAgent:
         shutil.copy(os.path.join(self.sumo_folder, self.sumo_net), output_dir)
         shutil.copy(os.path.join(self.sumo_folder, "updated_signal.xml"), output_dir)
         shutil.copy(os.path.join(self.sumo_folder, "Edge.add.xml"), output_dir)
+        shutil.copy(os.path.join(self.sumo_folder, "sumoSignalConfig_26.csv"), output_dir)
         # MPR
         self.change_cav_mpr(output_dir)
 
@@ -152,8 +154,8 @@ class SumoEnvMultiAgent:
         for tl_id in self.tl_ids:
             self.phase_tracking_dict[tl_id].get_remaining_green()
             self.spat_statuses[tl_id] = self.phase_tracking_dict[tl_id].spat_status
-            if tl_id == '10':
-                print(self.spat_statuses[tl_id])
+            # if tl_id == '10':
+            #     print(self.spat_statuses[tl_id])
     
     def insert_ego_safely(self):
 
@@ -258,22 +260,45 @@ class SumoEnvMultiAgent:
 
         return t1s, t1e, t2s, t2e, r1s, curr_status
     
+
     def setup_connections(self):
-        
+
         self.socket2FIXS = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+        # Enable TCP keepalive to detect dead connections
+        self.socket2FIXS.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+
+        # Set socket timeout to detect if server becomes unresponsive
+        self.socket2FIXS.settimeout(30.0)  # 30 second timeout
+
+        # Enable SO_LINGER to ensure graceful shutdown with timeout
+        # This ensures that close() will wait for data to be sent, but not indefinitely
+        linger_struct = struct.pack('ii', 1, 5)  # Enabled, 5 second timeout
+        self.socket2FIXS.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, linger_struct)
+
         self.socket2FIXS.connect((self.traffic_layer_ip, int(self.traffic_layer_port)))
         print('Connected to FIXS server')
 
-        if self.enable_vehicle_dynamics:
-            socket2simulink = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            print('Waiting for vehicle dynamics client to connect...')
-            # bind the socket to the port and listen for incoming connections
-            print(f'Binding to ip {self.vehicle_dynamics_ip} port {self.vehicle_dynamics_port}')
-            socket2simulink.bind((self.vehicle_dynamics_ip, int(self.vehicle_dynamics_port)))
-            socket2simulink.listen(1)
-            # if a connection is established, accept it
-            self.socket2simulink, addr = socket2simulink.accept()
-            print('Connected by vehicle dynamics client')
+        self._sockets_initialized = True
+    
+    # def setup_connections(self):
+        
+    #     self.socket2FIXS = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    #     self.socket2FIXS.connect((self.traffic_layer_ip, int(self.traffic_layer_port)))
+    #     print('Connected to FIXS server')
+
+    #     if self.enable_vehicle_dynamics:
+    #         socket2simulink = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    #         print('Waiting for vehicle dynamics client to connect...')
+    #         # bind the socket to the port and listen for incoming connections
+    #         print(f'Binding to ip {self.vehicle_dynamics_ip} port {self.vehicle_dynamics_port}')
+    #         socket2simulink.bind((self.vehicle_dynamics_ip, int(self.vehicle_dynamics_port)))
+    #         socket2simulink.listen(1)
+    #         # if a connection is established, accept it
+    #         self.socket2simulink, addr = socket2simulink.accept()
+    #         print('Connected by vehicle dynamics client')
+
+
             
     def run_sumo(self, num_clients, gui=False):
         # start sumo-gui -c .\chattCavMpr.sumocfg --remote-port 1337 --step-length 1 --netstate-dump chatt.xml --netstate-dump.precision 10 --num-clients 2  --begin 28800 --end 33000
@@ -301,6 +326,28 @@ class SumoEnvMultiAgent:
             self.subscribe_departed_veh()
             traci.simulationStep()
             self.apply_vehicle_control_FIXS({}, vehicle_dynamics=vehicle_dynamics, eco_driving=eco_driving, control_veh_ids=veh_ids_controlled_by_FIXS, warmup=True)
+
+        if self.enable_vehicle_dynamics:
+            socket2simulink = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+            # Enable socket reuse to avoid "Address already in use" errors
+            socket2simulink.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+            print('Waiting for vehicle dynamics client to connect...')
+            # bind the socket to the port and listen for incoming connections
+            print(f'Binding to ip {self.vehicle_dynamics_ip} port {self.vehicle_dynamics_port}')
+            socket2simulink.bind((self.vehicle_dynamics_ip, int(self.vehicle_dynamics_port)))
+            socket2simulink.listen(1)
+            # if a connection is established, accept it
+            self.socket2simulink, _ = socket2simulink.accept()
+
+            # Configure the accepted connection with similar options
+            self.socket2simulink.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            self.socket2simulink.settimeout(30.0)
+            linger_struct = struct.pack('ii', 1, 5)
+            self.socket2simulink.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, linger_struct)
+
+            print('Connected by vehicle dynamics client')
             
         self.reset(replace_veh_id=replace_veh_id)
         traci.simulationStep()
@@ -404,7 +451,7 @@ class SumoEnvMultiAgent:
                     veh_data = VehData(id=veh_id, speedDesired=ori_speed[veh_id])
                 self.socket_helper.vehicle_data_send_list.append(veh_data)
                 
-        if self.enable_vehicle_dynamics:
+        if self.enable_vehicle_dynamics and hasattr(self, "socket2simulink"):
             if warmup:
                 veh_data = VehData(id='ego', speedDesired=self.speed_max)
                 self.socket_helper.vehicle_data_send_list.append(veh_data)
@@ -490,7 +537,7 @@ if __name__ == "__main__":
     parser.add_argument("--trafficlayerPort", type=str, help="Specify port of traffic layer", default=430)
     parser.add_argument("--vehicleDynamics", action="store_true", help="use the vehicle dynamics", default=False)
     parser.add_argument("--enableVehicleDynamics", action="store_true", help="use the vehicle dynamics", default=False)
-    parser.add_argument("--vehicleDynamicsIp", type=str, help="Specify Ip of vehicle dynamics", default='192.168.140.11')
+    parser.add_argument("--vehicleDynamicsIp", type=str, help="Specify Ip of vehicle dynamics", default='127.0.0.1')
     parser.add_argument("--vehicleDynamicsPort", type=str, help="Specify port of vehicle dynamics", default=420)
 
     # the following parameters are for CAV settings
@@ -566,4 +613,4 @@ if __name__ == "__main__":
     print('Starting subscription')
     print('Enable vehicle dynamics: ', enable_vehicle_dynamics)
     print('Use eco driving controller: ', eco_driving)
-    senv.start_subscription(eco_driving=eco_driving, vehicle_dynamics=vehicle_dynamics, replace_veh_id='4.68')
+    senv.start_subscription(eco_driving=eco_driving, vehicle_dynamics=vehicle_dynamics, replace_veh_id='4.66')
