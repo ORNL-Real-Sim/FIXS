@@ -150,7 +150,7 @@ class SocketHelper:
         byte_index = byte_index + self.msg_header_size
         vehicle_byte_index = 0
         vehicle_data_buffer = bytearray(65536) 
-        # TODO: add traffic light and detector data
+        # Not yet implemented - see GitHub issue #130
         traffic_light_data_buffer = bytearray(8096)
         detector_data_buffer = bytearray(8096)
         data_buffer = bytearray(81728)

@@ -6,9 +6,10 @@ Receives VehicleData messages and echoes them back to the server
 import socket
 import sys
 import os
+import pathlib
 
-# Add parent directory to path to import CommonLib
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..')))
+# Add repo root to path to import CommonLib
+sys.path.insert(0, str(pathlib.Path(__file__).parents[3]))
 
 from CommonLib.SocketHelper import SocketHelper
 from CommonLib.MsgHelper import MsgHelper

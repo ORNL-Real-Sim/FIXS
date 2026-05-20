@@ -188,6 +188,12 @@ for %%f in ("%SOURCE_PATH%\CommonLib\*.m") do (
 )
 REM RealSimSocket.mexw64 is built directly to build/CommonLib/ by 6_mex_realsim_socket.ps1
 
+REM Release CommonLib - Python TrafficLayer protocol package
+echo Copying Python CommonLib files...
+for %%f in ("%SOURCE_PATH%\CommonLib\*.py") do (
+    copy /Y "%%f" "%RELEASE_PATH%\CommonLib\" >nul 2>&1
+)
+
 REM Release CarMaker files
 echo Copying CarMaker files...
 if defined CARMAKER_VERSIONS (
