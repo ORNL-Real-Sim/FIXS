@@ -367,6 +367,20 @@ if (Test-Path (Join-Path $BuildDir 'CommonLib\libsumo')) {
 }
 
 [void]$sb.AppendLine()
+[void]$sb.AppendLine('Python TrafficLayer Protocol:')
+$pyFilesPath = Join-Path $BuildDir 'CommonLib\*.py'
+$CountPython = 0
+if (Test-Path (Split-Path $pyFilesPath -Parent)) {
+    $CountPython = (Get-ChildItem $pyFilesPath -ErrorAction SilentlyContinue).Count
+}
+if ($CountPython -gt 0) {
+    $padding = ' ' * [Math]::Max(0, 50 - "  $CheckSymbol CommonLib Python package".Length)
+    [void]$sb.AppendLine("  $CheckSymbol CommonLib Python package$padding[$CountPython files]")
+} else {
+    [void]$sb.AppendLine("  $CrossSymbol CommonLib Python package          [No .py files staged]")
+}
+
+[void]$sb.AppendLine()
 [void]$sb.AppendLine('BUILD ENVIRONMENT')
 [void]$sb.AppendLine('-----------------')
 [void]$sb.AppendLine("Host OS:              $OsVersion")
@@ -394,6 +408,10 @@ if (Test-Path (Join-Path $BuildDir 'CommonLib')) {
         if ((Get-ChildItem $mFilesPath -ErrorAction SilentlyContinue).Count -gt 0) {
             [void]$sb.AppendLine("  |   +-- *.m files ($CountMatlab files)")
         }
+    }
+
+    if ($CountPython -gt 0) {
+        [void]$sb.AppendLine("  |   +-- *.py files ($CountPython files)")
     }
 
     if (Test-Path (Join-Path $BuildDir 'CommonLib\libsumo')) { [void]$sb.AppendLine('  |   +-- libsumo/') }
