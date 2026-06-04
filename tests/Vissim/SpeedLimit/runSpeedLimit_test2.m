@@ -10,7 +10,7 @@ close all;clear all;clc;format compact;
 RealSimPath = '..\..\..\CommonLib';
 configFilename = '.\config_test2.yaml';
 stopTime = 90; % simulation stop time in seconds. co-simulation will automatically stop after this seconds
-vissimFilename = '.\speedLimit';
+vissimFilename = '..\networks\speedLimit\speedLimit';
 simModelName = 'speedLimitClient';
 
 %% add path of RealSim tools
