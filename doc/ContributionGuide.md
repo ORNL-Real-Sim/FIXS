@@ -77,6 +77,8 @@ the open-source parts of FIXS without them.
 
 ### If you are an ORNL team member modifying ProprietaryFiles
 
+**Goal:** every merged FIXS commit must point to a `ProprietaryFiles/main` commit, so anyone cloning FIXS gets a stable PF state. The two PRs are reviewed in parallel but merged back-to-back: PF first, then FIXS.
+
 ```bash
 # Step 1: Create a matching branch in the private submodule
 cd ProprietaryFiles
@@ -84,20 +86,31 @@ git checkout -b maintenance/NNN_short_desc
 # ... make changes, commit ...
 git push origin maintenance/NNN_short_desc
 
-# Step 2: Stage the updated submodule pointer in FIXS
+# Step 2: Stage the updated submodule pointer in FIXS (points at your PF branch tip)
 cd ..
 git add ProprietaryFiles
 git commit -m "chore: bump ProprietaryFiles to maintenance/NNN"
 git push origin maintenance/NNN_short_desc
 
-# Step 3: Open PR in FIXS (public) — only the hash pointer is visible publicly
-# Step 4: After FIXS PR merges to dev, open a PR in ProprietaryFiles (private) to merge to main
+# Step 3: Open BOTH PRs at the same time, cross-referencing each other:
+#   - ProprietaryFiles PR  →  PF/main
+#   - FIXS PR              →  dev
+
+# Step 4: When both PRs are approved, merge PF first, then re-point FIXS to PF/main:
+cd ProprietaryFiles && git fetch origin && git checkout main && git pull
+cd ..
+git add ProprietaryFiles
+git commit -m "chore: bump ProprietaryFiles pointer to merged main"
+git push
+# Then merge the FIXS PR.
 ```
 
 **Rules:**
-- Never push directly to `ProprietaryFiles/main` — it is branch-protected (requires PR + 1 review)
+- Never push directly to `ProprietaryFiles/main` — branch-protected (requires PR + review)
 - The ProprietaryFiles branch name must mirror the FIXS issue branch name
-- Reference the ProprietaryFiles branch in the FIXS PR description so internal reviewers can find it
+- Reference the companion PR in each PR's description so reviewers can find it
+- Step 4 re-point is mandatory: do not merge a FIXS PR while its submodule pointer is at a PF feature-branch tip
+- If the FIXS PR is rejected after the PF PR is merged, open a revert PR in PF — don't leave orphan code on PF/main
 
 ### If you are an external contributor
 
@@ -113,5 +126,5 @@ You do not need access to `ProprietaryFiles` to contribute to the open-source pa
 - [ ] PR title follows `#NNN/short_description` format
 - [ ] All template sections filled in
 - [ ] Python unit tests pass locally
-- [ ] If ProprietaryFiles was modified: matching branch created and pushed there first
+- [ ] If ProprietaryFiles was modified: companion PR opened, PF merged first, submodule pointer re-pointed to PF/main HEAD before merging FIXS
 - [ ] Relevant GitHub issue is linked in PR body

@@ -159,31 +159,45 @@ Tests are organized by scenario (CoordMerge, DelayedConnection, Elevation, etc.)
 
 `ProprietaryFiles` ([ORNL-Real-Sim/ProprietaryFiles](https://github.com/ORNL-Real-Sim/ProprietaryFiles)) is a **private** submodule containing CarMaker/VISSIM/dSPACE integration code that cannot be made public. The public FIXS repo stores only a commit hash pointer — no proprietary content is exposed.
 
+**Invariant:** every merged FIXS commit must point to a `ProprietaryFiles/main` commit, never to a feature-branch tip. This way anyone cloning FIXS gets a stable, reviewed PF state.
+
+**Branching:** PF uses `main` only (no `dev` branch in this flow). Feature branches target `main` directly. FIXS keeps its own `dev_v0.X.0` → `main` line because FIXS bundles multiple issues per release; PF is small and atomic per change, so it doesn't need a staging branch.
+
 **When your changes touch `ProprietaryFiles`:**
 
 ```bash
-# Step 1: Create a matching branch in the private repo
+# Step 1: Create matching branch in the private repo, commit, push
 cd ProprietaryFiles
 git checkout -b maintenance/NNN_short_desc
-# make your changes, commit, push
+# ... make changes, commit ...
 git push origin maintenance/NNN_short_desc
 
-# Step 2: Back in the FIXS worktree, stage the updated submodule pointer
+# Step 2: Bump the FIXS submodule pointer to your in-progress PF branch tip
 cd ..
 git add ProprietaryFiles
 git commit -m "chore: bump ProprietaryFiles to maintenance/NNN"
 git push origin maintenance/NNN_short_desc
 
-# Step 3: Open PR in FIXS (public) targeting dev — shows only the hash change
-# Step 4: Open companion PR in ProprietaryFiles targeting dev
-# Step 5: After both devs are merged, release PRs merge dev→main in both repos together
+# Step 3: Open BOTH PRs in parallel, cross-referencing each other:
+#   - ProprietaryFiles PR  →  PF/main
+#   - FIXS PR              →  dev_v0.X.0
+
+# Step 4: Review both together. When both have approval:
+#   (a) Merge the ProprietaryFiles PR first
+#   (b) Fast-forward the FIXS submodule pointer to the new PF/main HEAD:
+cd ProprietaryFiles && git fetch origin && git checkout main && git pull
+cd ..
+git add ProprietaryFiles
+git commit -m "chore: bump ProprietaryFiles pointer to merged main"
+git push
+#   (c) Merge the FIXS PR
 ```
 
 **Rules:**
-- Never commit directly to `ProprietaryFiles/main` or `ProprietaryFiles/dev` — both are branch-protected (require PR + review; admins may bypass)
-- Always use a named branch in ProprietaryFiles that mirrors the FIXS issue branch
-- Feature PRs in ProprietaryFiles target **`dev`** (not `main`); `main` is updated only via release PRs from `dev`
-- The FIXS PR description should reference the ProprietaryFiles companion PR for context (internal reviewers can check it; external contributors see only the hash)
+- Never commit directly to `ProprietaryFiles/main` — branch-protected (requires PR + review; admins may bypass)
+- Always use a PF branch name that mirrors the FIXS issue branch
+- Step 4b is mandatory: do not merge a FIXS PR whose submodule pointer is at a PF feature-branch tip
+- If a FIXS PR is rejected *after* its companion PF PR was merged, open a revert PR in PF — don't leave orphan code on `PF/main`
 - Use the same PR template as FIXS (identical `.github/pull_request_template.md`)
 
 ## Important Notes
