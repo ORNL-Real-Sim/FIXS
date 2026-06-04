@@ -1,0 +1,31 @@
+# NOTE: YAML files do not allow tabs. use 2 or 4 spaces for indentation
+#
+# Vissim/SimpleEcho — minimal "is the FIXS↔VISSIM interface alive?" test.
+# Python client connects to TrafficLayer and echoes received vehicle data.
+# No Simulink, no XIL, no golden reference — just verifies the data path.
+
+SimulationSetup:
+    EnableRealSim: true
+    EnableVerboseLog: false
+
+    SelectedTrafficSimulator: 'VISSIM'
+
+    TrafficSimulatorIP: "127.0.0.1"
+    TrafficSimulatorPort: 1337
+
+    VehicleMessageField: [id, speed, positionX, positionY, heading, linkId, laneId]
+
+ApplicationSetup:
+    EnableApplicationLayer: true
+
+    # Subscribe to all vehicles in the network so the test runs without
+    # adding an ego vehicle. start_vissim.py does not add one.
+    VehicleSubscription:
+    -   type: ego
+        attribute: {id: ['All'], radius: [0]}
+        ip: ["127.0.0.1"]
+        port: [2444]
+
+XilSetup:
+    EnableXil: false
+    VehicleSubscription:
