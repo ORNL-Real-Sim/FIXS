@@ -36,6 +36,7 @@
 #include "DebugHelper.h"
 
 //preset delay durations
+carla::time_duration timeout_10s = std::chrono::seconds(10);
 carla::time_duration timeout_1s = std::chrono::seconds(1);
 carla::time_duration timeout_50ms = std::chrono::milliseconds(50);
 carla::time_duration timeout_100ms = std::chrono::duration<double>(0.1);  // 0.1 second
@@ -46,7 +47,7 @@ using namespace std::string_literals;
 #define EXPECT_TRUE(pred) if (!(pred)) { throw std::runtime_error(#pred); }
 #define SET_CONTAINS_ID(set, value) ((set).find(value) != (set).end())
 #define MAP_CONTAINS_KEY(map, key) ((map).find(key) != (map).end())
-#define SPAWN_OFFSET_Z 0.5f // Offset for spawning actors above the ground
+#define SPAWN_OFFSET_Z 0.1f // Offset for spawning actors above the ground
 
 static void show_usage(std::string name)
 {
@@ -146,7 +147,9 @@ int main(int argc, const char* argv[]) {
     bool enableExternalControl = carlaSetup.EnableExternalControl;
     // centeredViewId is the id of the camera that is used to render the view in Carla      
     std::string centeredViewId = configHelper.CarlaSetup.CenteredViewId;
-
+    // Enable traffic light synchronization
+    /*bool enableTlsSync = configHelper.CarlaSetup.EnableTrafficLightSync;*/
+    bool enableTlsSync = true;
     std::unordered_set<std::string> setInterestedIds;
     for (const std::string& id : carlaSetup.InterestedIds) {
         setInterestedIds.insert(id);
@@ -181,7 +184,7 @@ int main(int argc, const char* argv[]) {
 		// initialize carla client and world
         std::cout << "Client API version : " << carlaClient.GetClientVersion() << '\n';
         std::cout << "Server API version : " << carlaClient.GetServerVersion() << '\n';
-		
+        carlaClient.SetTimeout(timeout_10s);
 		carla::client::World carlaWorld = carlaClient.GetWorld();
         carla::SharedPtr<carla::client::Actor> carlaSpectator = carlaWorld.GetSpectator();
 
@@ -206,37 +209,38 @@ int main(int argc, const char* argv[]) {
 		// command batch to set the transform of the actors (non-interested actors)
         std::vector<carla::rpc::Command> transformCommandBatch;
 
-        
+        if (enableTlsSync) {
+            carla::SharedPtr <carla::client::ActorList> carlaTrafficLightActors = carlaWorld.GetActors()->Filter("traffic.traffic_light");
 
-        carla::SharedPtr <carla::client::ActorList> carlaTrafficLightActors = carlaWorld.GetActors()->Filter("traffic.traffic_light");
+            for (const carla::SharedPtr<carla::client::Actor>& carlaActor : *carlaTrafficLightActors) {
+                carla::SharedPtr<carla::client::TrafficLight> carlaTrafficLightActorPtr = boost::static_pointer_cast<carla::client::TrafficLight>(carlaActor);
+                carlaTrafficLightActorPtr->Freeze(true);
+                std::string carlaTrafficLightActorId = std::to_string(carlaActor->GetId());
+                // Convert Carla location to SUMO coordinate
+                carla::geom::Location carlaLocation = carlaActor->GetLocation();
+                carla::geom::Location sumoLocation = BridgeHelper::map_location_Carla_to_Sumo(carlaLocation);
 
-        for (const carla::SharedPtr<carla::client::Actor>& carlaActor : *carlaTrafficLightActors) {
-            carla::SharedPtr<carla::client::TrafficLight> carlaTrafficLightActorPtr = boost::static_pointer_cast<carla::client::TrafficLight>(carlaActor);
-            carlaTrafficLightActorPtr->Freeze(true);
-            std::string carlaTrafficLightActorId = std::to_string(carlaActor->GetId());
-            // Convert Carla location to SUMO coordinate
-            carla::geom::Location carlaLocation = carlaActor->GetLocation();
-            carla::geom::Location sumoLocation = BridgeHelper::map_location_Carla_to_Sumo(carlaLocation);
+                // Find closest TLS from map
+                std::pair<std::string, int> trafficLightId = BridgeHelper::find_closest_trafficLight_id(
+                    trafficLightMap,
+                    sumoLocation.x,
+                    sumoLocation.y
+                );
+                std::string junctionId = trafficLightId.first;
+                int linkId = trafficLightId.second;
 
-            // Find closest TLS from map
-            std::pair<std::string, int> trafficLightId = BridgeHelper::find_closest_trafficLight_id(
-                trafficLightMap,
-                sumoLocation.x,
-                sumoLocation.y
-            );
-            std::string junctionId = trafficLightId.first;
-            int linkId = trafficLightId.second;
+                if (junctionId == "") {
+                    std::cerr << "No matching traffic light found for actor " << carlaTrafficLightActorId << "\n";
+                    continue;
+                }
 
-            if (junctionId == "") {
-                std::cerr << "No matching traffic light found for actor " << carlaTrafficLightActorId << "\n";
-                continue;
+                // Assign traffic light attributes
+                TrafficLight& trafficLight = trafficLightMap[junctionId][linkId];
+                trafficLight.carlaTrafficLightActorId = carlaTrafficLightActorId; // Store the Carla actor ID in the traffic light data
+                trafficLight.carlaTrafficLightActorPtr = carlaTrafficLightActorPtr; // Store the Carla actor pointer in the traffic light data
             }
-
-            // Assign traffic light attributes
-            TrafficLight& trafficLight = trafficLightMap[junctionId][linkId];
-            trafficLight.carlaTrafficLightActorId = carlaTrafficLightActorId; // Store the Carla actor ID in the traffic light data
-            trafficLight.carlaTrafficLightActorPtr = carlaTrafficLightActorPtr; // Store the Carla actor pointer in the traffic light data
         }
+        
         while (simTime < simEndTime) {
             std::chrono::steady_clock::time_point loop_start_time = std::chrono::steady_clock::now();
             ///***********************
@@ -279,7 +283,8 @@ int main(int argc, const char* argv[]) {
 				carla::geom::Location tmpLocation(tmpVehData.positionX, tmpVehData.positionY, tmpVehData.positionZ);
 				// The grade received from FIXS is in radians, convert to degrees
                 carla::geom::Rotation tmpRotation(tmpVehData.grade * 180/M_PI, tmpVehData.heading, 0.0f);
-                carla::geom::Vector3D tmpExtent(tmpVehData.length / 2, tmpVehData.width / 2, tmpVehData.height / 2);
+                //carla::geom::Vector3D tmpExtent(tmpVehData.length / 2, tmpVehData.width / 2, tmpVehData.height / 2);
+                carla::geom::Vector3D tmpExtent(4.8f, 2.0f, 1.8f); // Default extent, can be modified later
                 carla::geom::Transform tmpTransform(tmpLocation, tmpRotation);
 
                 if (!MAP_CONTAINS_KEY(mapSumoActor, tmpVehData.id)) {
@@ -293,33 +298,35 @@ int main(int argc, const char* argv[]) {
 				}
 				setCurrentSumoIds.insert(tmpVehData.id);
             }
-
-            for (const std::pair<const std::string, TrafficLightData_t>& pair : msgHelper.TlsDataRecv_um) {
-                const std::string& junctionID = pair.first;
-                const TrafficLightData_t& tmpTrafficLightData = pair.second;
-                const std::string& tafficLightStateStr = tmpTrafficLightData.state;
-                if (enableVerboseLog) {
-                    std::cout << "Received Traffic Light Data for junction: " << junctionID << std::endl;
-                    std::cout << "ID: " << tmpTrafficLightData.id << std::endl;
-                    std::cout << "Name: " << tmpTrafficLightData.name << std::endl;
-                    std::cout << "State: " << tmpTrafficLightData.state << std::endl;
-                }
-                // traverse each char in the state str
-                for (size_t linkId = 0; linkId < tafficLightStateStr.size(); ++linkId) {
-                    char stateChar = tafficLightStateStr[linkId];
-                    SumoTrafficLightState sumoTrafficLightState = BridgeHelper::get_Sumo_traffic_light_state_from_char(stateChar);
-                    carla::rpc::TrafficLightState carlaTrafficLightState = BridgeHelper::map_Sumo_traffic_light_state_to_Carla(sumoTrafficLightState);
-                    // set the traffic light state in Carla, if the traffic light exists in the map
-                    TrafficLight& trafficLight = trafficLightMap[junctionID][linkId];
-                    
-                    if (trafficLight.carlaTrafficLightActorPtr) {
-                        trafficLight.carlaTrafficLightActorPtr->SetState(carlaTrafficLightState);
+            if (enableTlsSync) {
+                for (const std::pair<const std::string, TrafficLightData_t>& pair : msgHelper.TlsDataRecv_um) {
+                    const std::string& junctionID = pair.first;
+                    const TrafficLightData_t& tmpTrafficLightData = pair.second;
+                    const std::string& tafficLightStateStr = tmpTrafficLightData.state;
+                    if (enableVerboseLog) {
+                        std::cout << "Received Traffic Light Data for junction: " << junctionID << std::endl;
+                        std::cout << "ID: " << tmpTrafficLightData.id << std::endl;
+                        std::cout << "Name: " << tmpTrafficLightData.name << std::endl;
+                        std::cout << "State: " << tmpTrafficLightData.state << std::endl;
                     }
-                    else {
-                        std::cerr << "Carla actor for traffic light " << tmpTrafficLightData.id << "Junction Id:" << junctionID << "Link Id: "<< linkId << " not found." << std::endl;
+                    // traverse each char in the state str
+                    for (size_t linkId = 0; linkId < tafficLightStateStr.size(); ++linkId) {
+                        char stateChar = tafficLightStateStr[linkId];
+                        SumoTrafficLightState sumoTrafficLightState = BridgeHelper::get_Sumo_traffic_light_state_from_char(stateChar);
+                        carla::rpc::TrafficLightState carlaTrafficLightState = BridgeHelper::map_Sumo_traffic_light_state_to_Carla(sumoTrafficLightState);
+                        // set the traffic light state in Carla, if the traffic light exists in the map
+                        TrafficLight& trafficLight = trafficLightMap[junctionID][linkId];
+
+                        if (trafficLight.carlaTrafficLightActorPtr) {
+                            trafficLight.carlaTrafficLightActorPtr->SetState(carlaTrafficLightState);
+                        }
+                        else {
+                            std::cerr << "Carla actor for traffic light " << tmpTrafficLightData.id << "Junction Id:" << junctionID << "Link Id: " << linkId << " not found." << std::endl;
+                        }
                     }
                 }
             }
+            
 			// Check if the mapSumoActor contains vehicles that are not in the current step (vehicles have left the simulation)
 			// If so, remove them from the mapSumoActor and mapCarlaActor
             for (std::unordered_map<std::string, SumoActor>::iterator it = mapSumoActor.begin(); it != mapSumoActor.end(); ) {
@@ -377,9 +384,6 @@ int main(int argc, const char* argv[]) {
                 // This is to ensure that the carla transform is on the road
                 // =======================================================
                 //carlaTransform.location = waypointTransform.location;
-				
-			
-                
                 //Use the waypoint's rotation to ensure the vehicle is aligned with the road
 				//carlaTransform.rotation = waypointTransform.rotation; 
                 //print the sumo and carla transform
@@ -390,7 +394,7 @@ int main(int argc, const char* argv[]) {
                 // =======================================================
                 if (!MAP_CONTAINS_KEY(mapSumoToCarla , sumoActorId) || !sumoActor.spawnedInCarla || sumoActor.carlaVehicleActorPtr ==nullptr) {
                     // Add a small offset to the z coordinate to avoid collision with the ground
-                    carlaTransform.location.z = SPAWN_OFFSET_Z;
+                    carlaTransform.location.z = carlaTransform.location.z + SPAWN_OFFSET_Z;
 					
 
                     std::string carlaActorTypeId;
@@ -423,47 +427,46 @@ int main(int argc, const char* argv[]) {
                         if (enableVerboseLog) std::cout << "Found Intertested Vehicle with Carla Type ID: " << carlaActorTypeId << " SUMO ID:" << sumoActorId << std::endl;
                     }
                     else {
-                        carlaVehicleActorPtr = boost::static_pointer_cast<carla::client::Vehicle>(carlaWorld.TrySpawnActor(vehicle_blueprint_local, carlaTransform));
                         if (enableVerboseLog) std::cout << "Spawning actor with Carla Type ID: " << carlaActorTypeId << " SUMO ID:" << sumoActorId << std::endl;
-                        // set the simulate physics to false, so that the actor does not fall down
-                        //carlaActor->SetSimulatePhysics(false);
-                    }
-                    
-                     
-					
-                    if (carlaVehicleActorPtr != nullptr) {
-						sumoActor.spawnedInCarla = true; // Mark the Sumo actor as spawned in Carla
-						sumoActor.carlaVehicleActorPtr = carlaVehicleActorPtr; // Store the Carla actor in the SumoActor
 
-                        if (enableVerboseLog) std::cout << "Spawned actor with Carla ID: " << carlaVehicleActorPtr->GetId() << " SUMO ID:" << sumoActorId << std::endl;
-                        if (enableVerboseLog && sumoActorId == "ego") {
-                            std::cout << "Sumo Transform:" << std::endl;
-                            std::cout << "  Location -> x: " << sumoActor.sumoTransform.location.x
-                                << ", y: " << sumoActor.sumoTransform.location.y
-                                << ", z: " << sumoActor.sumoTransform.location.z << std::endl;
+                        carlaVehicleActorPtr = boost::static_pointer_cast<carla::client::Vehicle>(carlaWorld.TrySpawnActor(vehicle_blueprint_local, carlaTransform));
+                        
+                        if (carlaVehicleActorPtr != nullptr) {
+                            
+                            carlaVehicleActorPtr->SetSimulatePhysics(false);
+                            sumoActor.spawnedInCarla = true; // Mark the Sumo actor as spawned in Carla
+                            sumoActor.carlaVehicleActorPtr = carlaVehicleActorPtr; // Store the Carla actor in the SumoActor
 
-                            std::cout << "  Rotation -> pitch: " << sumoActor.sumoTransform.rotation.pitch
-                                << ", yaw: " << sumoActor.sumoTransform.rotation.yaw
-                                << ", roll: " << sumoActor.sumoTransform.rotation.roll << std::endl;
+                            if (enableVerboseLog) std::cout << "Spawned actor with Carla ID: " << carlaVehicleActorPtr->GetId() << " SUMO ID:" << sumoActorId << std::endl;
+                            if (enableVerboseLog && sumoActorId == "ego") {
+                                std::cout << "Sumo Transform:" << std::endl;
+                                std::cout << "  Location -> x: " << sumoActor.sumoTransform.location.x
+                                    << ", y: " << sumoActor.sumoTransform.location.y
+                                    << ", z: " << sumoActor.sumoTransform.location.z << std::endl;
 
-                            std::cout << "Carla Transform:" << std::endl;
-                            std::cout << "  Location -> x: " << carlaTransform.location.x
-                                << ", y: " << carlaTransform.location.y
-                                << ", z: " << carlaTransform.location.z << std::endl;
+                                std::cout << "  Rotation -> pitch: " << sumoActor.sumoTransform.rotation.pitch
+                                    << ", yaw: " << sumoActor.sumoTransform.rotation.yaw
+                                    << ", roll: " << sumoActor.sumoTransform.rotation.roll << std::endl;
 
-                            std::cout << "  Rotation -> pitch: " << carlaTransform.rotation.pitch
-                                << ", yaw: " << carlaTransform.rotation.yaw
-                                << ", roll: " << carlaTransform.rotation.roll << std::endl;
+                                std::cout << "Carla Transform:" << std::endl;
+                                std::cout << "  Location -> x: " << carlaTransform.location.x
+                                    << ", y: " << carlaTransform.location.y
+                                    << ", z: " << carlaTransform.location.z << std::endl;
+
+                                std::cout << "  Rotation -> pitch: " << carlaTransform.rotation.pitch
+                                    << ", yaw: " << carlaTransform.rotation.yaw
+                                    << ", roll: " << carlaTransform.rotation.roll << std::endl;
+                            }
+                            // convert the carla actor id (uint_32 to string)
+                            std::string carlaActorId = std::to_string(carlaVehicleActorPtr->GetId());
+                            mapCarlaToSumo[carlaActorId] = sumoActorId;
+                            mapSumoToCarla[sumoActorId] = carlaActorId;
+                            sumoActor.carlaTransform = carlaTransform; // Store the Carla transform in the SumoActor
                         }
-                        // convert the carla actor id (uint_32 to string)
-                        std::string carlaActorId = std::to_string(carlaVehicleActorPtr->GetId());
-                        mapCarlaToSumo[carlaActorId] = sumoActorId;
-                        mapSumoToCarla[sumoActorId] = carlaActorId;
-                        sumoActor.carlaTransform = carlaTransform; // Store the Carla transform in the SumoActor
-                    }
-                    else {
-                        std::cerr << "Failed to spawn actor. " << sumoActorId << std::endl;
-                        /*return 1;*/
+                        else {
+                            std::cout << "[Warning] Failed to spawn actor with SUMO ID:" << sumoActorId << std::endl;
+                        }
+                        
                     }
                     
                 }
@@ -586,20 +589,24 @@ int main(int argc, const char* argv[]) {
 					    tmpVehData.heading = sumoRotation.yaw;
 					    tmpVehData.grade = sumoRotation.pitch * M_PI / 180.0; // Convert to radians
 					    
-					    tmpVehData.length = carlaExtent.x * 2; // The extent is half the length, so multiply by 2
-					    tmpVehData.width = carlaExtent.y * 2; // The extent is half the width, so multiply by 2
-					    tmpVehData.height = carlaExtent.z * 2; // The extent is half the height, so multiply by 2
+					    //tmpVehData.length = carlaExtent.x * 2; // The extent is half the length, so multiply by 2
+					    //tmpVehData.width = carlaExtent.y * 2; // The extent is half the width, so multiply by 2
+					    //tmpVehData.height = carlaExtent.z * 2; // The extent is half the height, so multiply by 2
 					    msgHelper.VehDataSend_um[socketHelper.serverSock[sockId]].push_back(tmpVehData);
                     }
+                    
                     if (sumoId == centeredViewId) {
+
 						// Set the spectator to follow the centered view actor
 						// Note: The spectator is a special camera that follows the actor
 						if (enableVerboseLog) std::cout << "Setting spectator to follow actor with ID: " << sumoId << std::endl;
+                        static carla::geom::Location smoothedLocation;
                         carla::geom::Location tmpLocation = carlaTransform.location;
-                        tmpLocation.z = 100.0; // Set height to 100 meters above the ground
+                        tmpLocation.z += 100.0f;// Set height to 100 meters above the ground
+                        smoothedLocation = 0.9f * smoothedLocation + 0.1f * tmpLocation;
                         //pitch = -90.0, yaw = 0.0, roll = 0.0
                         carla::geom::Rotation tmpRotation(-90.0f, -90.0f, 0.0f);
-                        carla::geom::Transform tmpTransform(tmpLocation, tmpRotation);
+                        carla::geom::Transform tmpTransform(smoothedLocation, tmpRotation);
                         carlaSpectator->SetTransform(tmpTransform);
                         //drawCircle(carlaWorld.MakeDebugHelper(), tmpLocation, 2.5f, 32, 0.5f, 0.1f, 0.2f);
 					}
@@ -637,12 +644,12 @@ int main(int argc, const char* argv[]) {
             
 			msgHelper.clearRecvStorage();
             msgHelper.clearSendStorage();
-            const std::chrono::steady_clock::time_point loop_end_time = std::chrono::steady_clock::now();
-            std::chrono::milliseconds elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(loop_end_time - loop_start_time);
-            std::chrono::milliseconds sleep_duration = std::chrono::milliseconds(step_duration_ms) - elapsed;
-            if (sleep_duration.count() > 0) {
-                std::this_thread::sleep_for(sleep_duration);
-            }
+            //const std::chrono::steady_clock::time_point loop_end_time = std::chrono::steady_clock::now();
+            //std::chrono::milliseconds elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(loop_end_time - loop_start_time);
+            //std::chrono::milliseconds sleep_duration = std::chrono::milliseconds(step_duration_ms) - elapsed;
+            //if (sleep_duration.count() > 0) {
+            //    std::this_thread::sleep_for(sleep_duration);
+            //}
         }
         
         carlaWorldSettings = carlaWorld.GetSettings();
