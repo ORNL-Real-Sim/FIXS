@@ -133,8 +133,8 @@ The release build process executes the following steps:
    - Output: Component directories + copied to `build/`
 
 3. **VISSIM Components** (`3_vissim_components.bat`)
-   - `DriverModel_RealSim.dll` - VISSIM 2022 driver model
-   - `DriverModel_RealSim_v2021.dll` - VISSIM 2021 driver model
+   - `DriverModel_RealSim.dll` - VISSIM driver model, default (int API, VISSIM 2021+, including 2022)
+   - `DriverModel_RealSim_legacy.dll` - VISSIM driver model, legacy/frozen (long API, VISSIM ≤ 2020)
    - Output: `ProprietaryFiles/VISSIMserver/` + copied to `build/`
 
 4. **CarMaker Components** (`4a_carmaker_components.ps1`)
@@ -169,8 +169,8 @@ build/
 ├── BUILD_INFO.txt                    # Build metadata and versions
 ├── TrafficLayer.exe                  # Core interface
 ├── CoordMerge.exe                    # Controller
-├── DriverModel_RealSim.dll           # VISSIM 2022 interface
-├── DriverModel_RealSim_v2021.dll     # VISSIM 2021 interface
+├── DriverModel_RealSim.dll           # VISSIM interface, default (int API, VISSIM 2021+)
+├── DriverModel_RealSim_legacy.dll    # VISSIM interface, legacy (long API, VISSIM ≤ 2020)
 ├── RealSimSocket.mexw64              # MATLAB MEX file
 ├── RealSim*.m                        # MATLAB helper scripts
 ├── CommonLib/                        # Helper libraries and headers

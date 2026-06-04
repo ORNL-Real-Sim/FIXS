@@ -67,7 +67,7 @@ dispatch.bat
 Automatically builds all components and copies to `build/` directory:
 1. External libraries (yaml-cpp)
 2. TrafficLayer.exe, CoordMerge.exe, VirtualEnvironment.lib
-3. DriverModel_RealSim.dll and DriverModel_RealSim_v2021.dll (VISSIM interface)
+3. DriverModel_RealSim.dll (default, int API, VISSIM 2021+) and DriverModel_RealSim_legacy.dll (frozen, long API, VISSIM ≤ 2020)
 4. CarMaker executables for all versions in dependencies.yaml (CM11, CM13)
 5. dSPACE libraries (if dSPACE detected)
 6. RealSimSocket.mexw64 (if MATLAB detected)
