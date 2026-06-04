@@ -2,32 +2,32 @@
 % simulink files. A config.yaml needs to present to read the vehicle data
 % subscription setup.
 
-% select vehicle #6, follow sine wave
+%     add and select egoCAV type 1000
 
 close all;clear all;clc;format compact;
 
 %% Initializations
-RealSimPath = '..\..\CommonLib';
+RealSimPath = '..\..\..\CommonLib';
 configFilename = '.\config_test1.yaml';
-stopTime = 120; % simulation stop time in seconds. co-simulation will automatically stop after this seconds
-vissimFilename = '.\speedLimit';
-simModelName = 'speedLimitClient';
+stopTime = 90; % simulation stop time in seconds. co-simulation will automatically stop after this seconds
+vissimFilename = '.\\TrafficModel\\Headquarters 11';
+simModelName = 'multipleVissimClient';
 
 %% add path of RealSim tools
 addpath(genpath(RealSimPath))
 
 %% Run Batch Scripts
-system(['start cmd /c ..\..\TrafficLayer\x64\Release\TrafficLayer.exe -f ', sprintf('%s', configFilename)])
+system(['start cmd /c ..\..\..\TrafficLayer\x64\Release\TrafficLayer.exe -f ', sprintf('%s', configFilename)])
 
 %% Initialize RealSim for Simulink, Read yaml file
 [VehicleMessageFieldDefInputVec, VehDataBus, TrafficLayerIP, TrafficLayerPort] = RealSimInitSimulink(configFilename);
 RealSimPara = struct;
-RealSimPara.speedInit = 14; % initial speed of the ego vehicle when entering SUMO network
+RealSimPara.speedInit = 13; % initial speed of the ego vehicle when entering SUMO network
 RealSimPara.tLookahead = 0.1; % use 0.1 for exteranl control, recommend to use tLookahead >= 0.2 for SUMO driver
 RealSimPara.smoothWindow = 1; % number of moving average data point, 1 essentially mean no moving average
 
-RealSimPara.speedSource = 3; % select sine wave for tracking
- 
+RealSimPara.speedSource = 2; % select sine wave for tracking
+
 %% RealSim Start Procedure
 % start Vissim in second Matlab window
 % this Matlab window will be closed automatically after simulation ends
@@ -38,7 +38,7 @@ RealSimPara.speedSource = 3; % select sine wave for tracking
 system([' matlab -nodesktop -nosplash -r ', ...
     '"', ...
     sprintf('startVissim(''%s'', %f, ''%s''); ', vissimFilename, stopTime+1, configFilename), ...
-    'quit; " & ']);
+    'quit force; " & ']);
 
 tic
 
@@ -55,11 +55,11 @@ sim_time = toc
 
 %% check results
 checkFailed = 0;
-filename = '..\testsResults.log';
+filename = '..\..\testsResults.log';
 
 DataNamesToCheck = {'speed','speedLimit','speedLimitNext','speedLimitChangeDistance',...
     'signalLightId','signalLightHeadId','precedingVehicleDistance','precedingVehicleSpeed'};
-temp = load('speedLimitTest1_orig','VehicleOut');
+temp = load('multipleVissimTest1_orig','VehicleOut');
 Orig = temp.VehicleOut.VehDataBus;
 Mod = VehicleOut.VehDataBus;
 
@@ -101,7 +101,7 @@ rmpath(genpath(RealSimPath))
 
 %% quit matlab
 if ~checkFailed
-    message = '===> PASSED SPEEDLIMIT TEST 1: VISSIM test ===> \n';
+    message = '===> PASSED MULTIPLEVISSIM TEST 1: VISSIM test ===> \n';
     writeLog(filename, message)
     
 end

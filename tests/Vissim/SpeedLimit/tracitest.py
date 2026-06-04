@@ -19,7 +19,7 @@ nT = math.ceil(tSimuEnd/dt)
 nMaxVeh = 100
 
 #if __name__ == "__main__":
-sceneName = "./tests/SpeedLimit/speedLimit.sumocfg "
+sceneName = "./tests/Vissim/SpeedLimit/speedLimit.sumocfg "
 traci.start(["sumo-gui", "-c", sceneName, "--start", "--step-length", str(dt)])
 
 traci.setOrder(1)

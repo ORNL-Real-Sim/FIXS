@@ -7,7 +7,7 @@
 close all;clear all;clc;format compact;
 
 %% Initializations
-RealSimPath = '..\..\CommonLib';
+RealSimPath = '..\..\..\CommonLib';
 configFilename = '.\config_sumo.yaml';
 stopTime = 120; % simulation stop time in seconds. co-simulation will automatically stop after this seconds
 simModelName = 'speedLimitClient';
@@ -16,7 +16,7 @@ simModelName = 'speedLimitClient';
 addpath(genpath(RealSimPath))
 
 % %% Run Batch Scripts
-% system(['start cmd /c ..\..\TrafficLayer\x64\Release\TrafficLayer.exe -f ', sprintf('%s', configFilename)])
+% system(['start cmd /c ..\..\..\TrafficLayer\x64\Release\TrafficLayer.exe -f ', sprintf('%s', configFilename)])
 
 %% Initialize RealSim for Simulink, Read yaml file
 [VehicleMessageFieldDefInputVec, VehDataBus, TrafficLayerIP, TrafficLayerPort] = RealSimInitSimulink(configFilename);
