@@ -13,16 +13,17 @@ SimulationSetup:
     TrafficSimulatorIP: "127.0.0.1"
     TrafficSimulatorPort: 1337
 
-    VehicleMessageField: [id, speed, positionX, positionY, heading, linkId, laneId]
+    VehicleMessageField: [id, speed, speedDesired, positionX, positionY, heading, linkId, laneId]
 
 ApplicationSetup:
     EnableApplicationLayer: true
 
-    # Subscribe to all vehicles in the network so the test runs without
-    # adding an ego vehicle. start_vissim.py does not add one.
+    # Treat the first Car that enters the loop (VISSIM no=1) as ego.
+    # radius=0 sends only that vehicle. Vehicles enter via the demand
+    # input on link 1 added by archive/setup_network.py.
     VehicleSubscription:
     -   type: ego
-        attribute: {id: ['All'], radius: [0]}
+        attribute: {id: ['1'], radius: [0]}
         ip: ["127.0.0.1"]
         port: [2444]
 

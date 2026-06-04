@@ -67,6 +67,12 @@ def main():
     sim.SetAttValue('SimRes', STEP_HZ)
     sim.SetAttValue('RandSeed', RAND_SEED)
     sim.SetAttValue('UseMaxSimSpeed', True)
+    # FIXS DriverModel_RealSim.dll is not flagged as multi-thread safe;
+    # VISSIM 2022 refuses to run with multiple cores when an external
+    # driver is hooked. Force single-threaded — UseAllCores=True overrides
+    # NumCores, so both must be set.
+    sim.SetAttValue('UseAllCores', False)
+    sim.SetAttValue('NumCores', 1)
 
     print(f"[start_vissim] Running for {STOP_TIME_S}s ...", file=sys.stderr)
     sim.RunContinuous()
