@@ -1,14 +1,13 @@
 """
-Minimal VISSIM bootstrap via COM (pywin32). Mirrors the role of
-startVissim.m but adds no ego vehicle — relies on the network's own
-vehicle demand to produce traffic for the echo client to subscribe to.
+Minimal VISSIM bootstrap via COM (pywin32). Loads simple_loop.inpx and
+wires up the FIXS driver model DLL on the Car vehicle type so that
+TrafficLayer receives vehicle state.
 
-Reuses ../SpeedLimit/speedLimit.{inpx,layx} as a placeholder network.
-Replace with a smaller dummy network if/when one is added to the repo.
+No ego vehicle is injected — the vehicle input on link 1 (added by
+archive/setup_network.py) produces traffic organically.
 
 Requires: pywin32  (pip install pywin32)
 """
-import os
 import sys
 import pathlib
 
@@ -19,17 +18,21 @@ except ImportError:
     sys.exit(1)
 
 HERE = pathlib.Path(__file__).parent.resolve()
-# SimpleEcho owns its network: simple_loop.inpx is generated from
-# simple_loop.xodr (netconvert output) via a one-time GUI import +
-# archive/setup_demand.py to bake in vehicle demand.
-# See README.md for the full setup workflow.
+REPO_ROOT = HERE.parents[2]   # tests/Vissim/SimpleEcho -> repo root
+
 NET = HERE / 'simple_loop.inpx'
 LAYOUT = HERE / 'simple_loop.layx'
 CONFIG = HERE / 'config.yaml'
 
+# FIXS driver model DLL (built by scripts/dispatch/3_vissim_components.bat)
+DRIVER_DLL = REPO_ROOT / 'ProprietaryFiles' / 'VISSIMserver' / 'x64' / 'Release' / 'DriverModel_RealSim.dll'
+
+# Vehicle type to hook FIXS into — Car (no=100, the only type that
+# actually appears in traffic given the Default composition).
+EGO_VEHICLE_TYPE = 100
+
 # VISSIM 2022 ProgID — repo's target version, matches MATLAB scripts.
-# Use 2200 if your test machine runs VISSIM 2022; switch to 2600 if you
-# run 2026 (the 2022-saved .inpx is loadable in both).
+# Switch to 'VISSIM.Vissim.2600' if your dev machine runs VISSIM 2026.
 VISSIM_PROGID = 'VISSIM.Vissim.2200'
 
 STOP_TIME_S = 60
@@ -38,19 +41,26 @@ RAND_SEED = 42
 
 
 def main():
-    if not NET.is_file():
-        sys.exit(f"ERROR: VISSIM network not found at {NET}")
+    for p, label in [(NET, 'network'), (LAYOUT, 'layout'),
+                     (CONFIG, 'config'), (DRIVER_DLL, 'driver DLL')]:
+        if not p.is_file():
+            sys.exit(f"ERROR: {label} not found at {p}")
 
     print(f"[start_vissim] Dispatching {VISSIM_PROGID} ...", file=sys.stderr)
     vissim = win32com.client.Dispatch(VISSIM_PROGID)
 
-    print(f"[start_vissim] Loading network {NET}", file=sys.stderr)
+    print(f"[start_vissim] Loading network {NET.name}", file=sys.stderr)
     vissim.LoadNet(str(NET))
     vissim.LoadLayout(str(LAYOUT))
 
-    # Point every vehicle type at this config so the FIXS driver-model
-    # DLL inside VISSIM finds the right TrafficLayer endpoint.
-    vissim.Net.VehicleTypes.SetAllAttValues('ExtDriverParFile', str(CONFIG))
+    # Hook the FIXS driver model DLL onto the Car vehicle type.
+    # ExtDriverDLLFile + ExtDriverParFile must both be absolute paths.
+    car = vissim.Net.VehicleTypes.ItemByKey(EGO_VEHICLE_TYPE)
+    car.SetAttValue('ExtDriver', True)
+    car.SetAttValue('ExtDriverDLLFile', str(DRIVER_DLL))
+    car.SetAttValue('ExtDriverParFile', str(CONFIG))
+    print(f"[start_vissim] FIXS hook on type {EGO_VEHICLE_TYPE}: "
+          f"DLL={DRIVER_DLL.name}, Par={CONFIG.name}", file=sys.stderr)
 
     sim = vissim.Simulation
     sim.SetAttValue('SimPeriod', STOP_TIME_S)
