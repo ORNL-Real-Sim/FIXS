@@ -20,10 +20,17 @@ except ImportError:
     sys.exit(1)
 
 HERE = pathlib.Path(__file__).parent.resolve()
+REPO_ROOT = HERE.parents[2]
 NET_DIR = HERE.parent / 'networks' / 'speedLimit'
 NET = NET_DIR / 'speedLimit.inpx'
 LAYOUT = NET_DIR / 'speedLimit.layx'
 CONFIG = HERE / 'config.yaml'
+
+# FIXS driver model DLL (built by scripts/dispatch/3_vissim_components.bat).
+# speedLimit.inpx has a stale baked-in path (#data#..\..\VISSIMServer\...)
+# that no longer resolves after the network was elevated to
+# tests/Vissim/networks/speedLimit/, so we override at runtime.
+DRIVER_DLL = REPO_ROOT / 'ProprietaryFiles' / 'VISSIMserver' / 'x64' / 'Release' / 'DriverModel_RealSim.dll'
 
 # VISSIM 2022 ProgID — matches the MATLAB scripts in ../SpeedLimit/.
 # Switch to 'VISSIM.Vissim.2600' if your dev machine runs VISSIM 2026.
@@ -33,7 +40,8 @@ STOP_TIME_S = 120
 STEP_HZ = 10
 RAND_SEED = 42
 
-# Ego injection parameters — match startVissim.m exactly
+# Ego injection parameters — match startVissim.m exactly so traces are
+# comparable against speedLimitTest{1,2,3}_orig.{mat,csv}.
 EGO_ENTER_TIME_S = 11.5
 EGO_VEHICLE_TYPE = 1000
 EGO_LINK = 1
@@ -62,7 +70,17 @@ def main():
     vissim.LoadNet(str(NET))
     vissim.LoadLayout(str(LAYOUT))
 
-    vissim.Net.VehicleTypes.SetAllAttValues('ExtDriverParFile', str(CONFIG))
+    # FIXS hook on ego (type 1000): override stale DLL path baked into .inpx
+    ego_type = vissim.Net.VehicleTypes.ItemByKey(EGO_VEHICLE_TYPE)
+    ego_type.SetAttValue('ExtDriver', True)
+    ego_type.SetAttValue('ExtDriverDLLFile', str(DRIVER_DLL))
+    ego_type.SetAttValue('ExtDriverParFile', str(CONFIG))
+    # Disable FIXS on background Car traffic (type 100) — speedLimit.inpx
+    # had ExtDriver=True with the same stale path which would just error.
+    car_type = vissim.Net.VehicleTypes.ItemByKey(100)
+    car_type.SetAttValue('ExtDriver', False)
+    print(f"[start_vissim] FIXS hook on type {EGO_VEHICLE_TYPE} (ego); "
+          f"disabled on type 100 (Car background)", file=sys.stderr)
 
     sim = vissim.Simulation
     sim.SetAttValue('SimPeriod', STOP_TIME_S)
@@ -71,26 +89,29 @@ def main():
     sim.SetAttValue('RandSeedIncr', 1)
     sim.SetAttValue('NumRuns', 1)
     sim.SetAttValue('UseMaxSimSpeed', True)
+    # FIXS DLL is not multi-thread safe; UseAllCores must be False.
+    sim.SetAttValue('UseAllCores', False)
+    sim.SetAttValue('NumCores', 1)
 
     unit_conv = speed_unit_factor(vissim)
 
-    # Run until just before egoEnterTime, then single-step to land on it
-    sim.SetAttValue('SimBreakAt', math.floor(EGO_ENTER_TIME_S))
-    print(f"[start_vissim] Running to t={math.floor(EGO_ENTER_TIME_S)}s ...", file=sys.stderr)
-    sim.RunContinuous()
-
-    sub_steps = round(STEP_HZ * (EGO_ENTER_TIME_S - math.floor(EGO_ENTER_TIME_S)))
-    for _ in range(sub_steps):
+    # Step manually up to ego entry time so we can observe progress and
+    # avoid the appearance of a hang during RunContinuous.
+    n_pre_steps = round(STEP_HZ * EGO_ENTER_TIME_S)
+    print(f"[start_vissim] Stepping {n_pre_steps} sub-steps to t={EGO_ENTER_TIME_S}s ...", file=sys.stderr)
+    for i in range(n_pre_steps):
         sim.RunSingleStep()
+        if (i + 1) % STEP_HZ == 0:
+            print(f"  ...t={(i+1)/STEP_HZ:.1f}s", file=sys.stderr, flush=True)
 
-    print(f"[start_vissim] Injecting ego vehicle (type={EGO_VEHICLE_TYPE}) ...", file=sys.stderr)
+    print(f"[start_vissim] Injecting ego (type={EGO_VEHICLE_TYPE}) ...", file=sys.stderr)
     ego = vissim.Net.Vehicles.AddVehicleAtLinkPosition(
         EGO_VEHICLE_TYPE, EGO_LINK, EGO_LANE, EGO_XCOORD,
         EGO_DESIRED_SPEED_MS * unit_conv, True,
     )
     ego.SetAttValue('Speed', EGO_INITIAL_SPEED_MS * unit_conv)
     ego.SetAttValue('ExtContr', 1)
-    sim.RunSingleStep()
+    print(f"[start_vissim] Ego id={ego.AttValue('No')}", file=sys.stderr)
 
     print(f"[start_vissim] Running to t={STOP_TIME_S}s ...", file=sys.stderr)
     sim.RunContinuous()

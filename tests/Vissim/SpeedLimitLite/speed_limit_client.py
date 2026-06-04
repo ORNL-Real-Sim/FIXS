@@ -24,6 +24,7 @@ from CommonLib.ConfigHelper import ConfigHelper
 
 HERE = pathlib.Path(__file__).parent.resolve()
 LOG_CSV = HERE / 'speed_limit_lite_trace.csv'
+LOG_PARQUET = HERE / 'speed_limit_lite_trace.parquet'
 
 
 def main():
@@ -108,6 +109,17 @@ def main():
         csv_file.close()
         client_socket.close()
         print(f'Trace written to {LOG_CSV}', file=sys.stderr)
+
+        # Also write a Parquet copy for compact/typed storage. ~10x smaller
+        # than CSV and the canonical format for compare_traces.py.
+        try:
+            import pandas as pd
+            df = pd.read_csv(LOG_CSV)
+            df.rename(columns={'simTime': 'Time'}, inplace=True)
+            df.to_parquet(LOG_PARQUET, compression='zstd')
+            print(f'Trace also written to {LOG_PARQUET}', file=sys.stderr)
+        except ImportError:
+            print(f'(pandas/pyarrow not installed; Parquet skipped)', file=sys.stderr)
 
 
 if __name__ == '__main__':

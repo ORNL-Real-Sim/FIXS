@@ -22,9 +22,12 @@ SimulationSetup:
 ApplicationSetup:
     EnableApplicationLayer: true
 
+    # Subscribe by vehicle type — the manually-injected ego is the only
+    # vehicle of type 1000, so this delivers exactly that vehicle without
+    # us having to predict the runtime VISSIM id.
     VehicleSubscription:
-    -   type: ego
-        attribute: {id: ['6'], radius: [0]}
+    -   type: vehicleType
+        attribute: {id: ['1000'], radius: [0]}
         ip: ["127.0.0.1"]
         port: [2333]
 
