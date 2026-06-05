@@ -6,7 +6,7 @@ Default reference is the Parquet next to the original .mat:
 
 Reference originated as a Simulink.SimulationOutput object inside the
 .mat file (PSCAD-style opaque binary, unreadable from Python). We
-converted it via archive/export_mat_to_csv.m → write parquet here:
+converted it via archive/export_mat_to_csv.m -> write parquet here:
 ~46x smaller than CSV, preserves dtypes, language-agnostic.
 
 Reference is sampled at Simulink's 1 ms; SpeedLimitLite at VISSIM's
@@ -68,7 +68,14 @@ def align_nearest(ref: pd.DataFrame, t_mod: np.ndarray) -> pd.DataFrame:
     return ref.iloc[idx].reset_index(drop=True)
 
 
-def compare(ref: pd.DataFrame, mod: pd.DataFrame) -> tuple[bool, list[str]]:
+def compare(
+    ref: pd.DataFrame,
+    mod: pd.DataFrame,
+    fields: list[str] | None = None,
+    stat: str = 'max',
+) -> tuple[bool, list[str]]:
+    if fields is None:
+        fields = COMPARE_FIELDS
     t_mod = mod['Time'].to_numpy()
     ref_aligned = align_nearest(ref, t_mod)
 
@@ -76,11 +83,11 @@ def compare(ref: pd.DataFrame, mod: pd.DataFrame) -> tuple[bool, list[str]]:
         f"Reference: {len(ref)} rows, t in [{ref['Time'].min():.3f}, {ref['Time'].max():.3f}]",
         f"SpeedLimitLite: {len(mod)} rows, t in [{t_mod.min():.3f}, {t_mod.max():.3f}]",
         "",
-        f"{'field':<28} {'tol':>8} {'max|diff|':>10} {'mean|diff|':>10} {'verdict':>10}",
-        "-" * 70,
+        f"{'field':<28} {'tol':>8} {'max|diff|':>10} {'mean|diff|':>10} {'p99|diff|':>10} {'verdict':>10}",
+        "-" * 82,
     ]
     ok = True
-    for fn in COMPARE_FIELDS:
+    for fn in fields:
         if fn not in ref.columns or fn not in mod.columns:
             lines.append(f"{fn:<28} {'(missing in one side)':>40}")
             ok = False
@@ -95,11 +102,13 @@ def compare(ref: pd.DataFrame, mod: pd.DataFrame) -> tuple[bool, list[str]]:
             continue
         diff = np.abs(a[mask] - b[mask])
         f_tol = TOLERANCES.get(fn, TOLERANCES['_default'])
-        ok_field = float(diff.max()) <= f_tol
+        p99 = float(np.percentile(diff, 99))
+        metric = p99 if stat == 'p99' else float(diff.max())
+        ok_field = metric <= f_tol
         ok &= ok_field
         verdict = 'OK' if ok_field else 'FAIL'
         lines.append(
-            f"{fn:<28} {f_tol:>8.3f} {diff.max():>10.4f} {diff.mean():>10.4f} {verdict:>10}"
+            f"{fn:<28} {f_tol:>8.3f} {diff.max():>10.4f} {diff.mean():>10.4f} {p99:>10.4f} {verdict:>10}"
         )
     return ok, lines
 
@@ -111,6 +120,12 @@ def main():
                    help=f"Golden reference (.parquet or .csv). Default: {DEFAULT_REF.name}")
     p.add_argument('--mod', type=pathlib.Path, default=DEFAULT_MOD,
                    help=f"SpeedLimitLite trace (.parquet or .csv). Default: {DEFAULT_MOD.name}")
+    p.add_argument('--time-shift', type=float, default=0.0,
+                   help='Seconds to add to the modified trace Time before alignment.')
+    p.add_argument('--ignore-field', action='append', default=[],
+                   help='Field to omit from comparison. Can be passed more than once.')
+    p.add_argument('--stat', choices=['max', 'p99'], default='max',
+                   help='Statistic used for pass/fail verdict. Default: max.')
     args = p.parse_args()
 
     if not args.ref.is_file():
@@ -125,7 +140,17 @@ def main():
 
     ref = load_trace(args.ref)
     mod = load_trace(args.mod)
-    ok, lines = compare(ref, mod)
+    if args.time_shift:
+        mod = mod.copy()
+        mod['Time'] = mod['Time'] + args.time_shift
+    fields = [f for f in COMPARE_FIELDS if f not in set(args.ignore_field)]
+    ok, lines = compare(ref, mod, fields, args.stat)
+    if args.stat != 'max':
+        lines.insert(2, f"Verdict statistic: {args.stat}")
+    if args.time_shift:
+        lines.insert(2, f"Modified time shift: {args.time_shift:+.3f} s")
+    if args.ignore_field:
+        lines.insert(3, f"Ignored fields: {', '.join(args.ignore_field)}")
     for ln in lines:
         print(ln)
     sys.exit(0 if ok else 1)
