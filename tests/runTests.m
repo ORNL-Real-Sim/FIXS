@@ -23,14 +23,14 @@ run(fullfile('.\CoordMerge', 'runMatlabClient_VISSIM.m'));
 run(fullfile('.\CoordMerge', 'runMatlabClient_SUMO.m'));
 
 %% Run SpeedLimit
-run(fullfile('.\SpeedLimit', 'runSpeedLimit_test1.m'));
-run(fullfile('.\SpeedLimit', 'runSpeedLimit_test2.m'));
-run(fullfile('.\SpeedLimit', 'runSpeedLimit_test3.m'));
+run(fullfile('.\Vissim\SpeedLimit', 'runSpeedLimit_test1.m'));
+run(fullfile('.\Vissim\SpeedLimit', 'runSpeedLimit_test2.m'));
+run(fullfile('.\Vissim\SpeedLimit', 'runSpeedLimit_test3.m'));
 
 %% Run MultipleVissim
-cd('.\MultipleVissim')
+cd('.\Vissim\Multiple')
 system(fullfile('runRealSim.bat'));
-cd('..\')
+cd('..\..\')
 
 %% Run SumoDriver
 run(fullfile('.\SumoDriver', 'runSUMOdriver.m'));

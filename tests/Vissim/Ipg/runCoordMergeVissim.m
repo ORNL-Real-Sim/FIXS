@@ -6,10 +6,10 @@
 % system("runCoordMergeSUMO.bat")
 
 %% define constants
-CommonLibPath = '..\..\CommonLib';
-% CommonLibPath = '..\..\realsimreleaseford';
+CommonLibPath = '..\..\..\CommonLib';
+% CommonLibPath = '..\..\..\realsimreleaseford';
 ModelPath = '.\';
-% CommonLibPath = '..\..\RealSimRelease';
+% CommonLibPath = '..\..\..\RealSimRelease';
 configFilename = 'config_vissim.yaml';
 simModelName = 'RealSimGeneric';
 

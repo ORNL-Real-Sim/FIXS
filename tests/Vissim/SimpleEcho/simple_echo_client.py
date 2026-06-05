@@ -1,0 +1,103 @@
+"""
+Simple Echo Client for TrafficLayer.exe (VISSIM variant)
+Receives VehicleData messages and echoes them back to the server.
+
+This client is simulator-agnostic — the only thing that differs from
+the SUMO version is the config.yaml it reads.
+"""
+
+import socket
+import sys
+import os
+import pathlib
+
+# Add repo root to path to import CommonLib
+sys.path.insert(0, str(pathlib.Path(__file__).parents[3]))
+
+from CommonLib.SocketHelper import SocketHelper
+from CommonLib.MsgHelper import MsgHelper
+from CommonLib.ConfigHelper import ConfigHelper
+
+
+def main():
+    config_file = os.path.join(os.path.dirname(__file__), 'config.yaml')
+    config_helper = ConfigHelper()
+    config_helper.getConfig(config_file)
+
+    msg_helper = MsgHelper()
+    vehicle_msg_fields = config_helper.simulation_setup.get('VehicleMessageField', ['id', 'speed'])
+    msg_helper.set_vehicle_message_field(vehicle_msg_fields)
+
+    socket_helper = SocketHelper(config_helper, msg_helper)
+
+    vehicle_subscription = config_helper.application_setup.get('VehicleSubscription', [])
+    if not vehicle_subscription:
+        print('Error: No VehicleSubscription found in ApplicationSetup', file=sys.stderr)
+        return
+
+    server_ip = vehicle_subscription[0]['ip'][0]
+    server_port = vehicle_subscription[0]['port'][0]
+
+    client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+    server_address = (server_ip, server_port)
+    print(f'Connecting to {server_ip} port {server_port}', file=sys.stderr)
+
+    try:
+        client_socket.connect(server_address)
+        print('Connected successfully!', file=sys.stderr)
+    except Exception as e:
+        print(f'Failed to connect: {e}', file=sys.stderr)
+        return
+
+    verbose_log = config_helper.simulation_setup.get('EnableVerboseLog', False)
+
+    step_count = 0
+    try:
+        while True:
+            socket_helper.clear_data()
+
+            sim_state, sim_time = socket_helper.recv_data(client_socket)
+
+            if sim_state == 0:
+                print('\nReceived shutdown signal from server. Exiting gracefully...', file=sys.stderr)
+                break
+
+            step_count += 1
+
+            if verbose_log:
+                print(f'\n--- Step {step_count} | Time: {sim_time:.2f}s | State: {sim_state} ---')
+                print(f'Received {len(socket_helper.vehicle_data_receive_list)} vehicles:')
+
+                for veh_data in socket_helper.vehicle_data_receive_list:
+                    print(f'  Vehicle ID: {veh_data.id.strip()}, Speed: {veh_data.speed:.2f} m/s, '
+                          f'Pos: ({veh_data.positionX:.2f}, {veh_data.positionY:.2f})')
+
+                    socket_helper.vehicle_data_send_list.append(veh_data)
+
+                socket_helper.sendData(sim_state, sim_time, client_socket)
+                print(f'Echoed {len(socket_helper.vehicle_data_send_list)} vehicles back to server')
+            else:
+                for veh_data in socket_helper.vehicle_data_receive_list:
+                    socket_helper.vehicle_data_send_list.append(veh_data)
+
+                socket_helper.sendData(sim_state, sim_time, client_socket)
+
+                if step_count % 100 == 0:
+                    print(f'Step {step_count} | Time: {sim_time:.2f}s | Vehicles: {len(socket_helper.vehicle_data_receive_list)}')
+
+    except KeyboardInterrupt:
+        print('\nShutting down client...', file=sys.stderr)
+    except ConnectionResetError:
+        print('\nServer closed the connection.', file=sys.stderr)
+    except Exception as e:
+        print(f'\nError occurred: {e}', file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+    finally:
+        print('Closing connection...', file=sys.stderr)
+        client_socket.close()
+
+
+if __name__ == '__main__':
+    main()

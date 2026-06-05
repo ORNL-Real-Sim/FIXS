@@ -1,0 +1,36 @@
+# NOTE: YAML files do not allow tabs. use 2 or 4 spaces for indentation
+#
+# Vissim/SpeedLimitLite — Python-only rewrite of the SpeedLimit test.
+# Subscribes to ego vehicle '6' (matches the MATLAB version) and logs
+# speed-limit-related fields to CSV instead of comparing against a .mat.
+#
+# Intentionally mirrors ../SpeedLimit/config_test1.yaml so the network
+# and ego behavior are identical to the production XIL stack test —
+# only the client tooling differs.
+
+SimulationSetup:
+    EnableRealSim: true
+    EnableVerboseLog: false
+
+    SelectedTrafficSimulator: 'VISSIM'
+
+    TrafficSimulatorIP: "127.0.0.1"
+    TrafficSimulatorPort: 1337
+
+    VehicleMessageField: [id, speed, speedDesired, hasPrecedingVehicle, precedingVehicleDistance, precedingVehicleSpeed, signalLightId, signalLightHeadId, signalLightDistance, signalLightColor, speedLimit, speedLimitNext, speedLimitChangeDistance, heading, linkId, activeLaneChange]
+
+ApplicationSetup:
+    EnableApplicationLayer: true
+
+    # Subscribe by vehicle type — the manually-injected ego is the only
+    # vehicle of type 1000, so this delivers exactly that vehicle without
+    # us having to predict the runtime VISSIM id.
+    VehicleSubscription:
+    -   type: vehicleType
+        attribute: {id: ['1000'], radius: [0]}
+        ip: ["127.0.0.1"]
+        port: [2333]
+
+XilSetup:
+    EnableXil: false
+    VehicleSubscription:
