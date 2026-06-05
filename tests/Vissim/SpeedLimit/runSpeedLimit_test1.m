@@ -7,17 +7,17 @@
 close all;clear all;clc;format compact;
 
 %% Initializations
-RealSimPath = '..\..\CommonLib';
+RealSimPath = '..\..\..\CommonLib';
 configFilename = '.\config_test1.yaml';
 stopTime = 120; % simulation stop time in seconds. co-simulation will automatically stop after this seconds
-vissimFilename = '.\speedLimit';
+vissimFilename = '..\networks\speedLimit\speedLimit';
 simModelName = 'speedLimitClient';
 
 %% add path of RealSim tools
 addpath(genpath(RealSimPath))
 
 %% Run Batch Scripts
-system(['start cmd /c ..\..\TrafficLayer\x64\Release\TrafficLayer.exe -f ', sprintf('%s', configFilename)])
+system(['start cmd /c ..\..\..\TrafficLayer\x64\Release\TrafficLayer.exe -f ', sprintf('%s', configFilename)])
 
 %% Initialize RealSim for Simulink, Read yaml file
 [VehicleMessageFieldDefInputVec, VehDataBus, TrafficLayerIP, TrafficLayerPort] = RealSimInitSimulink(configFilename);
@@ -55,7 +55,7 @@ sim_time = toc
 
 %% check results
 checkFailed = 0;
-filename = '..\testsResults.log';
+filename = '..\..\testsResults.log';
 
 DataNamesToCheck = {'speed','speedLimit','speedLimitNext','speedLimitChangeDistance',...
     'signalLightId','signalLightHeadId','precedingVehicleDistance','precedingVehicleSpeed'};

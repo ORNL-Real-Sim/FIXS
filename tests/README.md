@@ -36,6 +36,13 @@
 
   ability to start SUMO simulation and only launch simulink after XYZ seconds
 
+## Vissim/SpeedLimit, Vissim/Multiple, Vissim/Ipg
+
+  VISSIM-anchored tests (moved from `VissimSpeedLimit/`, `MultipleVissim/`, `VissimIpg/` into `Vissim/`):
+  - `Vissim/SpeedLimit`: speed-limit transmission test on a dummy VISSIM network with three configurations
+  - `Vissim/Multiple`: multi-vehicle VISSIM scenario based on the Headquarters 11 network
+  - `Vissim/Ipg`: VISSIM + CarMaker (IPG) co-simulation on the coordMerge network
+
 ## Tests that need further service or development
 
-  AsyncConn, VissimIpg, VissimSpeedLimit
+  AsyncConn

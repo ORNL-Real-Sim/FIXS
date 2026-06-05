@@ -208,6 +208,70 @@ git push
 - **Multi-vehicle numbering**: Client/controller components numbered 1-20 for running multiple instances
 - **Platform**: Windows-only (uses WinSock, VISSIM is Windows-only)
 
+## VISSIM 2022 dispatch on Win11 24H2 — fragility + soft reset
+
+On Windows 11 24H2 the system `ucrtbase.dll` (10.0.26100.x) is incompatible
+with VISSIM 2022's CRT init. `VISSIM220.exe` crashes a meaningful fraction
+of COM dispatches at startup, leaving zombie processes / stale FlexNet
+license tokens / temp lock files behind. Symptoms accumulate over a
+session:
+
+- `actxserver('VISSIM.Vissim.2200')` and Python `Dispatch('VISSIM.Vissim.2200')`
+  both work right after reboot, then start returning
+  `Server execution failed` (HRESULT `0x80080005`).
+- The same dispatch may work from one process and fail from another at
+  the same moment (whichever runs into the zombie first).
+
+**Stick with the 2022 ProgID** — do not silently bump scripts to 2600.
+The repo target and the pinned `.mat` references are 2022-bound; switching
+breaks cross-machine reproducibility.
+
+### Soft reset (try before rebooting)
+
+Run from any shell. Step 2 needs admin; the others don't.
+
+```cmd
+REM 1. Reap zombie/half-dead processes
+taskkill /F /IM VISSIM220.exe
+taskkill /F /IM TrafficLayer.exe
+REM (don't kill your interactive MATLAB)
+
+REM 2. Bounce FlexNet (returns leaked license tokens) — admin only
+net stop "FlexNet Licensing Service 64"
+net start "FlexNet Licensing Service 64"
+
+REM 3. Clean stale VISSIM temp/lock files
+del /Q "%TEMP%\VISSIM\*.lock"
+del /Q "%TEMP%\VISSIM\vissim_msgs*.txt"
+del /Q "%TEMP%\VISSIM\CommonDialogs.log"
+```
+
+Verify dispatch is healthy by running a one-off Python probe:
+```python
+import pythoncom, win32com.client
+pythoncom.CoInitialize()
+v = win32com.client.Dispatch('VISSIM.Vissim.2200')
+print('OK')
+```
+
+If still failing after soft reset, reboot. Long-term fix is repair-installing
+VISSIM 2022 from PTV's installer so a healthy SxS VC runtime gets dropped
+next to `VISSIM220.exe`.
+
+### Other operational notes
+
+- **Never `taskkill /F` a process that holds an open VISSIM COM reference**
+  while the .inpx is loaded — that's the primary way zombies are created.
+  Let MATLAB/Python exit cleanly when possible.
+- **VISSIM 2026 is installed side-by-side on dev boxes that have it**, but
+  it is not the supported target. `VISSIM.Vissim.2600` is a fallback only,
+  used in emergencies and reverted as soon as 2022 is healthy again.
+- **Spawning a second MATLAB from a primary MATLAB and having the child
+  call `actxserver`** is the most fragile pattern (the spawned MATLAB
+  inherits half-initialized COM state from the parent and contends for
+  the floating PSL license). When refactoring tests, prefer having
+  Python — not a child MATLAB — run the VISSIM bootstrap.
+
 ## Documentation
 
 - VISSIM-specific: [doc/VISSIMdoc.md](doc/VISSIMdoc.md)
