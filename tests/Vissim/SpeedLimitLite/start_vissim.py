@@ -8,6 +8,7 @@ the same scenario as SpeedLimit — just a different client stack.
 
 Requires: pywin32  (pip install pywin32)
 """
+import argparse
 import os
 import sys
 import math
@@ -32,9 +33,10 @@ CONFIG = HERE / 'config.yaml'
 # tests/Vissim/networks/speedLimit/, so we override at runtime.
 DRIVER_DLL = REPO_ROOT / 'ProprietaryFiles' / 'VISSIMserver' / 'x64' / 'Release' / 'DriverModel_RealSim.dll'
 
-# VISSIM 2022 ProgID — matches the MATLAB scripts in ../SpeedLimit/.
-# Switch to 'VISSIM.Vissim.2600' if your dev machine runs VISSIM 2026.
-VISSIM_PROGID = 'VISSIM.Vissim.2200'
+# VISSIM ProgID — 2200 (VISSIM 2022) is the documented target. Use 2600
+# (VISSIM 2026) only when your install only has 2026. Override at runtime
+# via --progid / env var VISSIM_PROGID, or hardcode default here.
+DEFAULT_VISSIM_PROGID = 'VISSIM.Vissim.2200'
 
 STOP_TIME_S = 120
 STEP_HZ = 10
@@ -60,11 +62,21 @@ def speed_unit_factor(vissim):
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        '--progid',
+        default=os.environ.get('VISSIM_PROGID', DEFAULT_VISSIM_PROGID),
+        help=f'VISSIM COM ProgID. Default: env VISSIM_PROGID or '
+             f'{DEFAULT_VISSIM_PROGID}. Use VISSIM.Vissim.2600 for 2026.',
+    )
+    args = parser.parse_args()
+    progid = args.progid
+
     if not NET.is_file():
         sys.exit(f"ERROR: VISSIM network not found at {NET}")
 
-    print(f"[start_vissim] Dispatching {VISSIM_PROGID} ...", file=sys.stderr)
-    vissim = win32com.client.Dispatch(VISSIM_PROGID)
+    print(f"[start_vissim] Dispatching {progid} ...", file=sys.stderr)
+    vissim = win32com.client.Dispatch(progid)
 
     print(f"[start_vissim] Loading {NET}", file=sys.stderr)
     vissim.LoadNet(str(NET))

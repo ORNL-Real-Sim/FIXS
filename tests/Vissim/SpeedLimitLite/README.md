@@ -39,17 +39,45 @@ simulation to `speed_limit_lite_trace.{csv,parquet}`.
 run_speed_limit_lite.bat
 ```
 
-Output (in this folder):
+By default the bat hooks `start_vissim.py` at VISSIM 2022 (ProgID
+`VISSIM.Vissim.2200`). On a dev machine that only has VISSIM 2026
+installed, run the Python helper directly with the ProgID override:
+
+```
+python start_vissim.py --progid VISSIM.Vissim.2600
+```
+
+or set `VISSIM_PROGID=VISSIM.Vissim.2600` in the environment.
+
+Runtime outputs (gitignored, in this folder):
 
 - `speed_limit_lite_trace.csv` — human-readable trace
 - `speed_limit_lite_trace.parquet` — typed, compressed (~10× smaller)
 
-Compare against the reference:
+## Compare against the blessed baseline
+
+Each VISSIM major version produces a different trace (different RNG,
+different per-step processing order, sometimes a different ego
+trajectory through the network). Two blessed CSVs are committed in
+this folder:
+
+- `speed_limit_lite_orig_v2022.csv` — produced by VISSIM 2022.00-13
+- `speed_limit_lite_orig_v2026.csv` — produced by VISSIM 2026
+
+Pick the one matching the VISSIM you just ran with:
 
 ```
 conda activate realsim_dev
-python compare_traces.py             # vs speedLimitTest1_orig.parquet
-python compare_traces.py --ref ../SpeedLimit/speedLimitTest2_orig.parquet
+python compare_traces.py --vissim-version 2022   # default
+python compare_traces.py --vissim-version 2026
+```
+
+If you need to compare against the *historical* SpeedLimit Simulink
+references for any reason (different stack — Simulink ego controller
+at 1 ms vs our Python observer at 100 ms), point `--ref` explicitly:
+
+```
+python compare_traces.py --ref ../SpeedLimit/speedLimitTest1_orig.parquet
 ```
 
 ## Reference data: why Parquet, not .mat
