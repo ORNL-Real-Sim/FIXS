@@ -23,8 +23,18 @@ import numpy as np
 import pandas as pd
 
 HERE = pathlib.Path(__file__).parent.resolve()
-DEFAULT_REF = HERE.parent / 'SpeedLimit' / 'speedLimitTest1_orig.parquet'
-DEFAULT_MOD = HERE / 'speed_limit_lite_trace.parquet'
+
+
+def default_ref(vissim_version: str) -> pathlib.Path:
+    """SpeedLimitLite golden trace for a given VISSIM version.
+    The blessed CSVs are produced by running SpeedLimitLite once on a
+    clean machine with that VISSIM and committing the result.
+    """
+    return HERE / f'speed_limit_lite_orig_v{vissim_version}.csv'
+
+
+DEFAULT_MOD = HERE / 'speed_limit_lite_trace.csv'
+LEGACY_PARQUET_REF = HERE.parent / 'SpeedLimit' / 'speedLimitTest1_orig.parquet'
 
 COMPARE_FIELDS = ['speed', 'speedLimit', 'speedLimitNext',
                   'speedLimitChangeDistance', 'signalLightHeadId',
@@ -116,10 +126,16 @@ def compare(
 def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument('--ref', type=pathlib.Path, default=DEFAULT_REF,
-                   help=f"Golden reference (.parquet or .csv). Default: {DEFAULT_REF.name}")
+    p.add_argument('--vissim-version', choices=['2022', '2026'], default='2022',
+                   help="VISSIM version whose blessed CSV to compare against. "
+                        "Picks tests/Vissim/SpeedLimitLite/"
+                        "speed_limit_lite_orig_v{2022,2026}.csv. "
+                        "Default: 2022.")
+    p.add_argument('--ref', type=pathlib.Path, default=None,
+                   help="Override the golden reference path entirely (.csv or .parquet). "
+                        "If omitted, picked from --vissim-version.")
     p.add_argument('--mod', type=pathlib.Path, default=DEFAULT_MOD,
-                   help=f"SpeedLimitLite trace (.parquet or .csv). Default: {DEFAULT_MOD.name}")
+                   help=f"SpeedLimitLite trace (.csv or .parquet). Default: {DEFAULT_MOD.name}")
     p.add_argument('--time-shift', type=float, default=0.0,
                    help='Seconds to add to the modified trace Time before alignment.')
     p.add_argument('--ignore-field', action='append', default=[],
@@ -127,6 +143,9 @@ def main():
     p.add_argument('--stat', choices=['max', 'p99'], default='max',
                    help='Statistic used for pass/fail verdict. Default: max.')
     args = p.parse_args()
+
+    if args.ref is None:
+        args.ref = default_ref(args.vissim_version)
 
     if not args.ref.is_file():
         sys.exit(f"ERROR: reference not found: {args.ref}")
