@@ -1,0 +1,37 @@
+# Integrated regression test for FIXS#158 Stages B + C.
+#
+# This config drives the TrafficLayer in DSProxy mode + opens an
+# application socket for the python_ego.py client (Stage B path). The
+# staged .inpx is PATCHED at runtime by run_coexist_xil.bat to add the
+# FIXS DriverModel as ExtDriver on Car (type 100), with coexist_par.yaml
+# (EnableRealSim: false). That tests the PF#6 patch (Stage C) end-to-end
+# with the actual FIXS-built DriverModel — not just PTV's stock sample
+# that the Stage 2 probe used.
+
+SimulationSetup:
+    EnableRealSim: false
+    EnableVerboseLog: false
+    SelectedTrafficSimulator: VISSIM
+    SimulationEndTime: 30
+    VehicleMessageField: [id, type, speed, speedDesired, positionX, positionY, positionZ, heading, linkId, laneId, grade]
+
+ApplicationSetup:
+    EnableApplicationLayer: true
+    VehicleSubscription:
+    -   type: ego
+        attribute: { id: ['ego'], radius: [0] }
+        ip: ['127.0.0.1']
+        port: [2444]
+
+XilSetup:
+    EnableXil: false
+
+VissimDSProxySetup:
+    Enable: true
+    NetworkFile: 'C:\src_git\RS_FIXS\156_drivingsim_dll_design\tests\Vissim\Probes\TrafficLayer_DSProxy_coexist_xil\stage_network\driving_simulator_test.inpx'
+    VissimVersion: 2022
+    SimulatorFrequency: 10
+    VisibilityRadius: -1.0
+    MaxSimulatorVeh: 10
+    MaxTotalVeh: 50000
+    MaxVissimSigGrp: 1000

@@ -1,0 +1,22 @@
+# DriverModel par-file for the integrated Stage B + Stage C regression test.
+#
+# CRITICAL: EnableRealSim must be `false`. With the PF#6 patch (FIXS#158
+# Stage C), this flag now also gates Sock_c.socketSetup, so the DriverModel
+# loads, receives every per-vehicle callback, returns USE_INTERNAL_MODEL=1
+# (so VISSIM keeps its Wiedemann integration), and opens no socket. That's
+# the B' doctrine in practice: DriverModel as a no-op behavior-modifier
+# while DSProxy drives the ego in TrafficLayer.
+
+SimulationSetup:
+    EnableRealSim: false
+    EnableVerboseLog: true
+    SelectedTrafficSimulator: VISSIM
+    TrafficSimulatorIP: "127.0.0.1"
+    TrafficSimulatorPort: 1337
+    VehicleMessageField: [id, speed, speedDesired, positionX, positionY, heading]
+
+ApplicationSetup:
+    EnableApplicationLayer: false
+
+XilSetup:
+    EnableXil: false
