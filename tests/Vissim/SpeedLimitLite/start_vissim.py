@@ -28,10 +28,22 @@ LAYOUT = NET_DIR / 'speedLimit.layx'
 CONFIG = HERE / 'config.yaml'
 
 # FIXS driver model DLL (built by scripts/dispatch/3_vissim_components.bat).
-# speedLimit.inpx has a stale baked-in path (#data#..\..\VISSIMServer\...)
-# that no longer resolves after the network was elevated to
-# tests/Vissim/networks/speedLimit/, so we override at runtime.
-DRIVER_DLL = REPO_ROOT / 'ProprietaryFiles' / 'VISSIMserver' / 'x64' / 'Release' / 'DriverModel_RealSim.dll'
+# Two variants ship today:
+#   - DriverModel_RealSim.dll       — long-API source (DriverModel_RealSim.cpp),
+#                                     targets VISSIM <= 2020. Works on 2021+
+#                                     too because x64 LLP64 keeps long and
+#                                     int both 32-bit; doesn't exercise the
+#                                     int-API-only code blocks.
+#   - DriverModel_RealSim_v2021.dll — int-API source, the default ABI for
+#                                     VISSIM 2021+ and the one PTV's headers
+#                                     ship today.
+# After #147 the names will flip (the v2021/int build becomes
+# DriverModel_RealSim.dll; long-API becomes DriverModel_RealSim_legacy.dll).
+# speedLimit.inpx has a stale baked-in DLL path that no longer resolves
+# after the network was elevated to tests/Vissim/networks/speedLimit/, so
+# we override at runtime regardless.
+DRIVER_DLL_DIR = REPO_ROOT / 'ProprietaryFiles' / 'VISSIMserver' / 'x64' / 'Release'
+DEFAULT_DRIVER_DLL = 'int'   # int-API; switch to 'legacy' for the long-API path
 
 # VISSIM ProgID — 2200 (VISSIM 2022) is the documented target. Use 2600
 # (VISSIM 2026) only when your install only has 2026. Override at runtime
@@ -61,6 +73,16 @@ def speed_unit_factor(vissim):
     return 3.6  # kilometers-per-hour (also the fallback)
 
 
+def resolve_driver_dll(value: str) -> pathlib.Path:
+    """`int` / `legacy` map to the two PF-shipped DLLs. Anything else is
+    treated as an explicit path."""
+    if value == 'int':
+        return DRIVER_DLL_DIR / 'DriverModel_RealSim_v2021.dll'
+    if value == 'legacy':
+        return DRIVER_DLL_DIR / 'DriverModel_RealSim.dll'
+    return pathlib.Path(value).expanduser().resolve()
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -69,13 +91,24 @@ def main():
         help=f'VISSIM COM ProgID. Default: env VISSIM_PROGID or '
              f'{DEFAULT_VISSIM_PROGID}. Use VISSIM.Vissim.2600 for 2026.',
     )
+    parser.add_argument(
+        '--driver-dll',
+        default=os.environ.get('FIXS_DRIVER_DLL', DEFAULT_DRIVER_DLL),
+        help=f'Which FIXS driver DLL to load. "int" (default, VISSIM 2021+ '
+             f'native ABI), "legacy" (VISSIM <=2020 long-API source), or an '
+             f'explicit .dll path.',
+    )
     args = parser.parse_args()
     progid = args.progid
+    DRIVER_DLL = resolve_driver_dll(args.driver_dll)
 
     if not NET.is_file():
         sys.exit(f"ERROR: VISSIM network not found at {NET}")
+    if not DRIVER_DLL.is_file():
+        sys.exit(f"ERROR: driver DLL not found at {DRIVER_DLL}")
 
-    print(f"[start_vissim] Dispatching {progid} ...", file=sys.stderr)
+    print(f"[start_vissim] Dispatching {progid} (driver_dll={args.driver_dll})...",
+          file=sys.stderr)
     vissim = win32com.client.Dispatch(progid)
 
     print(f"[start_vissim] Loading {NET}", file=sys.stderr)
