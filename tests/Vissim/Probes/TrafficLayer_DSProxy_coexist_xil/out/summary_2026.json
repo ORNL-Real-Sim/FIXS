@@ -1,0 +1,21 @@
+{
+  "ticks": 85,
+  "background_traffic_first_last": [
+    9,
+    96
+  ],
+  "ego_visible_near_pushed_pose_onlink": 60,
+  "car_seen_count": 85,
+  "driver_model_error_size": 99,
+  "driver_model_log_size": 84981,
+  "invariants": {
+    "B_ego_visible_near_pushed_pose": true,
+    "B_ego_registered_per_tl_log": true,
+    "B_background_traffic_grew": true,
+    "B_tls_received": true,
+    "C_drivermodel_flagged_type_present": true,
+    "C_drivermodel_init_evidence": true,
+    "C_no_traffic_layer_socket_error": true
+  },
+  "overall_pass": true
+}

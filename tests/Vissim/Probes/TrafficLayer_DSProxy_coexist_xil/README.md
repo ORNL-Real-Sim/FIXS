@@ -77,18 +77,55 @@ OVERALL: PASS
 
 **Why this matters**: prior to this probe, Stage C's PF#6 patch was only empirically validated against PTV's stock DriverModel sample. This probe is the first time the **actual FIXS-built `DriverModel_RealSim.dll`** coexists with DSProxy end-to-end, with TrafficLayer relaying state to a Python client over the FIXS binary protocol. The B′ doctrine is now empirically grounded in the real production DriverModel binary.
 
+## Empirical baseline — VISSIM 2026 (last run: 2026-06-06)
+
+Run via `run_coexist_xil_2026.bat` (stages PTV's shipped DS example from
+the 2026 install dir, drives `TrafficLayer.exe` against `config_2026.yaml`
+with `VissimDSProxySetup.VissimVersion: 2026`).
+
+```
+Stage B contracts:
+  PASS B_ego_visible_near_pushed_pose      60/60 on-link frames
+  PASS B_ego_registered_per_tl_log         ego registered as VehicleID 11
+  PASS B_background_traffic_grew           vehicles 9 -> 96
+  PASS B_tls_received                      85 ticks
+
+Stage C contracts:
+  PASS C_drivermodel_flagged_type_present  85/85 ticks had Car (type 100) in readback
+  PASS C_drivermodel_init_evidence         DriverModelError.txt size 99 B
+  PASS C_no_traffic_layer_socket_error     no TL connection failure logged
+
+OVERALL: PASS
+```
+
+Baseline JSON: [`out/summary_2026.json`](out/summary_2026.json).
+
+**Conclusion**: the entire #158 stack (Stages A/B/C) runs end-to-end on
+VISSIM 2026 with no source changes — only `VissimVersion: 2026` in the
+config (selects `versionNo=2600` + the 2026-shipped DSProxy.dll) and a
+re-stage from the 2026 install dir's `.inpx`. Both 2022 and 2026 runs
+use the same `TrafficLayer.exe` binary and the same FIXS
+`DriverModel_RealSim.dll` (PF#6 patch active in both). Vehicle counts
+differ across versions because VISSIM's RNG seed and car-following
+parameters drift across patch releases — this matches the 2022 vs 2026
+observation in the Stage 1 smoke probe
+([../DSProxy_smoke/](../DSProxy_smoke/)).
+
 ## Files
 
 | File | Purpose |
 | --- | --- |
-| `config.yaml` | TrafficLayer config (`VissimDSProxySetup.Enable: true` + `ApplicationSetup.VehicleSubscription`) |
-| `coexist_par.yaml` | DriverModel par-file with `EnableRealSim: false` |
-| `patch_inpx.py` | Stages PTV's `.inpx` and patches `extDriver*` attrs on Car type |
-| `python_ego.py` | Ego client + invariant validator + `summary.json` writer |
-| `run_coexist_xil.bat` | Orchestrates the three pieces |
-| `out/summary.json` | Last-run numeric snapshot — checked in as a regression baseline |
-| `stage_network/` | Writable mirror (gitignored, regenerated each run) |
-| `tl.log` | TrafficLayer stdout capture (gitignored) |
+| `config.yaml` | TrafficLayer config for the 2022 run |
+| `config_2026.yaml` | TrafficLayer config for the 2026 run |
+| `coexist_par.yaml` | DriverModel par-file with `EnableRealSim: false` (same for both versions) |
+| `patch_inpx.py` | Stages PTV's `.inpx` (CLI arg `--vissim-version 2022|2026`) and patches `extDriver*` attrs on Car type |
+| `python_ego.py` | Ego client + invariant validator + `summary.json` writer (CLI arg `--config`) |
+| `run_coexist_xil.bat` | Orchestrates the 2022 run |
+| `run_coexist_xil_2026.bat` | Orchestrates the 2026 run |
+| `out/summary.json` | 2022 regression baseline — checked in |
+| `out/summary_2026.json` | 2026 regression baseline — checked in |
+| `stage_network/`, `stage_network_2026/` | Writable mirrors (gitignored, regenerated each run) |
+| `tl.log`, `tl_2026.log` | TrafficLayer stdout captures (gitignored) |
 
 ## When to re-run
 

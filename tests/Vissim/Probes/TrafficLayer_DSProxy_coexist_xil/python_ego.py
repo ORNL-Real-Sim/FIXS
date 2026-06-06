@@ -108,7 +108,13 @@ def make_ego(cmd: FrameCmd) -> VehData:
 
 
 def main() -> int:
-    cfg_path = os.path.join(os.path.dirname(__file__), "config.yaml")
+    import argparse
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--config", default="config.yaml",
+                    help="config file under this probe dir (default: config.yaml; "
+                         "use config_2026.yaml for the VISSIM 2026 variant)")
+    args, _ = ap.parse_known_args()
+    cfg_path = os.path.join(os.path.dirname(__file__), args.config)
     cfg = ConfigHelper()
     cfg.getConfig(cfg_path)
 
@@ -226,7 +232,9 @@ def main() -> int:
                   "— FIXS DriverModel loaded without aborting DSProxy",
     }
     # Verify the DriverModelError.txt / DriverModelLog.txt artifacts
-    network_dir = HERE / "stage_network"
+    # Derive the staged network dir from the config filename: config_2026.yaml
+    # -> stage_network_2026/, anything else -> stage_network/.
+    network_dir = HERE / ("stage_network_2026" if "2026" in args.config else "stage_network")
     dm_err = network_dir / "DriverModelError.txt"
     dm_log = network_dir / "DriverModelLog.txt"
     err_size = dm_err.stat().st_size if dm_err.is_file() else 0

@@ -1,0 +1,34 @@
+# VISSIM 2026 variant of the integrated B+C regression test (#158).
+# Same scenario as config.yaml; only the VISSIM version differs.
+#
+# Run via run_coexist_xil_2026.bat — that .bat stages from the 2026
+# install dir (which has separate copies of the example .inpx +
+# .layx + .fzp + .sig under PTV Vissim 2026/API/DrivingSimulator_DLL/...).
+
+SimulationSetup:
+    EnableRealSim: false
+    EnableVerboseLog: false
+    SelectedTrafficSimulator: VISSIM
+    SimulationEndTime: 20
+    VehicleMessageField: [id, type, speed, speedDesired, positionX, positionY, positionZ, heading, linkId, laneId, grade]
+
+ApplicationSetup:
+    EnableApplicationLayer: true
+    VehicleSubscription:
+    -   type: ego
+        attribute: { id: ['ego'], radius: [0] }
+        ip: ['127.0.0.1']
+        port: [2444]
+
+XilSetup:
+    EnableXil: false
+
+VissimDSProxySetup:
+    Enable: true
+    NetworkFile: 'C:\src_git\RS_FIXS\156_drivingsim_dll_design\tests\Vissim\Probes\TrafficLayer_DSProxy_coexist_xil\stage_network_2026\driving_simulator_test.inpx'
+    VissimVersion: 2026                # selects versionNo=2600 + 2026's DSProxy.dll
+    SimulatorFrequency: 10
+    VisibilityRadius: -1.0
+    MaxSimulatorVeh: 10
+    MaxTotalVeh: 50000
+    MaxVissimSigGrp: 1000
