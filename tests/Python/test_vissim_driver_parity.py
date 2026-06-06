@@ -49,7 +49,7 @@ LEGACY_CPP = os.path.join(
 )
 COMMON_H = os.path.join(
     VISSIM_SERVER_DIR,
-    "DriverModel_FIXS_Common.h"
+    "Common", "DriverModel_FIXS_Common.h"
 )
 
 
