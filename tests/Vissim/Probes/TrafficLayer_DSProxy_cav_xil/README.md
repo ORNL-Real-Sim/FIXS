@@ -26,12 +26,48 @@ A single Python client sends BOTH the ego pose (`id='ego'`) and CAV behavior com
 - ✅ App client connects on 2444
 - ✅ "Running 300 ticks" reached
 
-**What hangs at tick 0**:
-- The per-tick loop sends DM commands (empty on tick 0) → calls `proxy.setDriverVehicles(empty)` → hangs.
-- VISSIM ticks, DM callback fires, DM does `recvData(VissimSock, ...)` to read TL's commands. The 9-byte header we sent should be there.
-- Either DM's `recvData` finds something it doesn't expect, OR DM sends back state in a format TL's later `recvData` can't parse, OR there's another handshake step in the FIXS DriverModel protocol we haven't accounted for.
+**What hangs (updated 2026-06-06 after deeper trace)**:
 
-**Most likely culprit**: there's a FIXS DriverModel handshake protocol detail (probably around `disableServerTrigger` / `disableWaitClientTrigger` state and what bytes flow during initConnection) that the existing TrafficLayer main loop handles implicitly via `SocketHelper::initConnection`'s state machine but my Stage B+ bypass replicates incorrectly.
+Two issues found by reading `DriverModel_FIXS_Common.h::DRIVER_DATA_TIME` (line 525-631)
+and the per-vehicle MOVE_DRIVER path (line 1605-1742):
+
+1. **Tick 0 — fixed**: on the first VISSIM tick the FIXS DriverModel takes the
+   `isVeryFirstStep` branch (line 545) which does neither send nor recv. The
+   TrafficLayer-side loop was previously trying to `recvData` on tick 0 and
+   blocked forever. This commit guards DM I/O with `tick >= 1`.
+
+2. **Tick 1+ — open**: the FIXS DriverModel has `SUB_EGO_ONLY` hardcoded to
+   `true` (line 54). That flag:
+   - **Gates the once-per-tick send/recv at line 613 on `!SUB_EGO_ONLY`** — so the
+     per-tick path is *always skipped* in current FIXS builds.
+   - **Routes send/recv through the per-vehicle MOVE_DRIVER path at line 1735** —
+     which only fires when `VehDataSend_v.size() > 0`, i.e., at least one
+     subscribed vehicle is present in the callback.
+
+   The probe's `coexist_par.yaml` has `EnableApplicationLayer: false`, so the
+   DriverModel's subscription list is empty → no vehicle is ever subscribed →
+   `VehDataSend_v` stays empty → DriverModel does **zero socket I/O for the
+   entire simulation**. TrafficLayer's first `recvData(dmSock)` on tick 1 then
+   blocks waiting for bytes that will never arrive.
+
+**Two clean fixes**, each ~½ day of additional work:
+
+A. **Easier**: Give the par-file a non-empty `ApplicationSetup.VehicleSubscription`
+   targeting a vehicle type (e.g., type 100 Car). DM then exercises the
+   per-vehicle send/recv path. TrafficLayer DSProxyMode needs to do `recv/send`
+   pairs **per Car per tick** instead of one pair per tick — a meaningful
+   restructure of the inner loop.
+
+B. **Cleaner**: Add a `SubEgoOnly: false` config knob to FIXS DriverModel
+   (small ProprietaryFiles patch, ~5 lines). When false, DM does the once-per-
+   tick send/recv at line 614 — matching TrafficLayer DSProxyMode's existing
+   single-pair-per-tick loop without any TL-side restructure. This is the
+   right long-term answer because the per-vehicle pattern is for the old non-
+   DSProxy CarMaker-side ego subscription, which DSProxy obsoletes.
+
+I'd land **B** as a follow-up dual PR (FIXS + ProprietaryFiles) after the
+main #158 stack merges. The architecture in this PR is correct for path B;
+only the FIXS DM patch is missing.
 
 ## Where to pick up
 

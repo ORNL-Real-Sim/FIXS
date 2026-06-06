@@ -10,7 +10,7 @@
 
 SimulationSetup:
     EnableRealSim: true                # DriverModel WILL bind a socket and call back
-    EnableVerboseLog: false
+    EnableVerboseLog: true             # write per-tick logs to DriverModelLog.txt for diagnosis
     SelectedTrafficSimulator: VISSIM
     TrafficSimulatorIP: "127.0.0.1"
     TrafficSimulatorPort: 1337
