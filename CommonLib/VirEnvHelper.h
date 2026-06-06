@@ -134,6 +134,8 @@
         // sumo controller id -> head id, trflight index
         std::unordered_map <std::string, std::vector <std::pair<int, int>> > SignalController2HeadIdTrfLightIndex;
 
+        // charState is a single character from a SUMO TLS state string ('r'/'y'/'G' etc.);
+        // not a FIXS-canonical signal type. Revisit when #156 picks the VISSIM signal-routing path.
         tTLState tlsChar2CmState(char charState);
 
         int readSignalTable(const char* signalTablePathInput);
