@@ -107,7 +107,13 @@ def main():
 
     print(f"[start_vissim] Dispatching {progid} (driver_dll={args.driver_dll})...",
           file=sys.stderr)
-    vissim = win32com.client.Dispatch(progid)
+    # On Windows 11 build 26100+ (ucrtbase 10.0.26100.8328) VISSIM 2022 and
+    # 2026 crash in their COM -Embedding init with STATUS_STACK_BUFFER_OVERRUN
+    # when launched in pywin32's default multi-threaded apartment. Force STA
+    # + LOCAL_SERVER so the dispatch survives. See FIXS#152.
+    import pythoncom
+    pythoncom.CoInitializeEx(pythoncom.COINIT_APARTMENTTHREADED)
+    vissim = win32com.client.Dispatch(progid, clsctx=pythoncom.CLSCTX_LOCAL_SERVER)
 
     print(f"[start_vissim] Loading {NET}", file=sys.stderr)
     vissim.LoadNet(str(NET))
