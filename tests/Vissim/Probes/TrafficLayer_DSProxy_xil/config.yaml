@@ -1,0 +1,46 @@
+# Stage B probe (issue #158): TrafficLayer in DSProxy mode + Python fake-
+# CarMaker client. Validates the end-to-end XIL ego inject pipeline:
+#
+#   fake CarMaker --[VehFullData on socket 2444]--> TrafficLayer
+#   TrafficLayer --[VISSIM_SetDriverVehicles]------> VISSIM (DSProxy)
+#   VISSIM --[VISSIM_GetTrafficVehicles+Signals]---> TrafficLayer
+#   TrafficLayer --[VehFullData + TLS on socket]---> fake CarMaker
+#
+# No CarMaker required for this probe. CarMaker-side wiring is in the
+# tests/Vissim/Ipg/ refurbishment (still TBD as part of Stage B).
+
+SimulationSetup:
+    EnableRealSim: false              # Stage B uses the DSProxy code path; this flag stays off
+    EnableVerboseLog: false
+    SelectedTrafficSimulator: VISSIM   # informational only; DSProxy mode bypasses dispatch
+    SimulationEndTime: 30              # 300 ticks at 10 Hz
+
+    # Required for ConfigHelper.py to parse a VehicleSubscription block.
+    # speedDesired is required (ConfigHelper enforces one of speedDesired/
+    # accelerationDesired even though Stage B doesn't use it yet).
+    VehicleMessageField: [id, type, speed, speedDesired, positionX, positionY, positionZ, heading, linkId, laneId, grade]
+
+ApplicationSetup:
+    EnableApplicationLayer: true
+
+    # First subscription's port[0] is the canonical Stage B publish port.
+    # The fake CarMaker client connects to TrafficLayer here and exchanges
+    # VehFullData_t messages every tick.
+    VehicleSubscription:
+    -   type: ego
+        attribute: { id: ['ego'], radius: [0] }
+        ip: ['127.0.0.1']
+        port: [2444]
+
+XilSetup:
+    EnableXil: false
+
+VissimDSProxySetup:
+    Enable: true
+    NetworkFile: 'C:\src_git\RS_FIXS\156_drivingsim_dll_design\tests\Vissim\Probes\TrafficLayer_DSProxy_xil\stage_network\driving_simulator_test.inpx'
+    VissimVersion: 2022
+    SimulatorFrequency: 10
+    VisibilityRadius: -1.0
+    MaxSimulatorVeh: 10
+    MaxTotalVeh: 50000
+    MaxVissimSigGrp: 1000
