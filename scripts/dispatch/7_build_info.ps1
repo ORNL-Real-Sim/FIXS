@@ -192,7 +192,7 @@ try {
 
 # Define expected components for each category
 $ExpectedCore = @('TrafficLayer.exe', 'VirtualEnvironment.lib')
-$ExpectedVissim = @('DriverModel_RealSim.dll', 'DriverModel_RealSim_v2021.dll')
+$ExpectedVissim = @('DriverModel_RealSim.dll', 'DriverModel_RealSim_legacy.dll')
 
 $CountCore = 0
 $CountVissim = 0
@@ -302,7 +302,7 @@ if ($line) { [void]$sb.AppendLine($line) }
 # VISSIM components
 $line = Get-FileStatusLine (Join-Path $BuildDir 'DriverModel_RealSim.dll') 'DriverModel_RealSim.dll' 'Not built - VISSIMserver not found'
 if ($line) { [void]$sb.AppendLine($line) }
-$line = Get-FileStatusLine (Join-Path $BuildDir 'DriverModel_RealSim_v2021.dll') 'DriverModel_RealSim_v2021.dll' 'Not built - VISSIMserver not found'
+$line = Get-FileStatusLine (Join-Path $BuildDir 'DriverModel_RealSim_legacy.dll') 'DriverModel_RealSim_legacy.dll' 'Not built - VISSIMserver not found'
 if ($line) { [void]$sb.AppendLine($line) }
 
 [void]$sb.AppendLine()
@@ -397,7 +397,7 @@ if ($DspaceVer) { [void]$sb.AppendLine("  dSPACE:             C:\Program Files\d
 if (Test-Path (Join-Path $BuildDir 'TrafficLayer.exe')) { [void]$sb.AppendLine('  +-- TrafficLayer.exe') }
 if (Test-Path (Join-Path $BuildDir 'VirtualEnvironment.lib')) { [void]$sb.AppendLine('  +-- VirtualEnvironment.lib') }
 if (Test-Path (Join-Path $BuildDir 'DriverModel_RealSim.dll')) { [void]$sb.AppendLine('  +-- DriverModel_RealSim.dll') }
-if (Test-Path (Join-Path $BuildDir 'DriverModel_RealSim_v2021.dll')) { [void]$sb.AppendLine('  +-- DriverModel_RealSim_v2021.dll') }
+if (Test-Path (Join-Path $BuildDir 'DriverModel_RealSim_legacy.dll')) { [void]$sb.AppendLine('  +-- DriverModel_RealSim_legacy.dll') }
 
 if (Test-Path (Join-Path $BuildDir 'CommonLib')) {
     [void]$sb.AppendLine('  +-- CommonLib/')
