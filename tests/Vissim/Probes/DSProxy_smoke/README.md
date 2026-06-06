@@ -52,20 +52,55 @@ VISSIM in advance — let the DLL spawn it.
 ## Outputs
 
 Under `out_<version>/`:
-- `run.log` — per-frame summary
-- `vehicles.csv` — every vehicle returned by `VISSIM_GetTrafficVehicles`, all frames
-- `signals.csv` — every signal returned by `VISSIM_GetSignalStates`, all frames
-- `network/` — copy of PTV's shipped `.inpx` + companion files (this directory
-  is what VISSIM actually opens, since the install tree is read-only without
-  admin)
+- `run.log` — per-frame summary (gitignored, regenerated each run)
+- `vehicles.csv` — every vehicle returned by `VISSIM_GetTrafficVehicles`, all frames (gitignored)
+- `signals.csv` — every signal returned by `VISSIM_GetSignalStates`, all frames (gitignored)
+- `network/` — copy of PTV's shipped `.inpx` + companion files, used as VISSIM's working network directory (gitignored)
+- **`summary.json`** — compact regression-comparison artifact (**checked in**, see "Regression baseline" below)
 
-## After the run
+Then `python summarize.py out_<version>` reduces the CSVs to `summary.json`
+and prints PASS/FAIL on a small set of structural invariants.
 
-Hand-inspect:
-- `run.log` for the line `ego registered, VISSIM VehicleID = …`
-- `vehicles.csv` for `controlled_by_vissim==1` rows (VISSIM-internal traffic
-  reacting to the ego)
-- `signals.csv` for non-empty rows
+## Regression baseline
+
+The `summary.json` files under `out_2022/` and `out_2026/` are
+checked-in reference snapshots from the last known-good run. Exact
+vehicle counts drift with VISSIM's seeded RNG and per-version car-
+following tuning, so the regression criteria in `summarize.py`
+test **structural invariants** rather than exact numbers:
+
+| Check | Pass criterion |
+| --- | --- |
+| `ego_registered` | DS ego appeared in `VISSIM_GetTrafficVehicles` with `ControlledByVissim==False` |
+| `ego_unique_id` | VISSIM assigned exactly one `VehicleID` to the ego, never re-assigned |
+| `ego_moved_east` | ego X coordinate at last frame > first frame |
+| `signals_present` | every frame returned ≥1 signal |
+| `signal_state_red_seen` / `_green_seen` | both Red and Green states appeared during the run |
+| `vehicles_grow` | total vehicle count at last frame > first (VISSIM spawned background traffic) |
+| `leading_id_resolved` | ≥1 vehicle had a non-zero `LeadingVehicleID` (VISSIM is computing leader relations on the DS-controlled vehicle's surroundings) |
+
+Re-run after any FIXS-relevant change (build-system, ProprietaryFiles
+update, VISSIM version bump) to catch regressions; rebaseline only after
+explicit verification.
+
+## Empirical baseline (last run: 2026-06-06)
+
+| | VISSIM 2022 | VISSIM 2026 |
+| --- | --- | --- |
+| `VISSIM_Connect` returned | True (19s) | True (25s) |
+| ego VISSIM `VehicleID` | 1 | 1 |
+| signals per frame | 20 (5 controllers × 4 SGs) | 20 (5 × 4) |
+| signal states observed | Red, RedAmber, Green | Red, RedAmber, Green, Amber |
+| vehicles at frame 0 / 99 | 7 / 88 | 10 / 91 |
+| vehicle types seen | 100, 200, 300, 400 | 100, 200, 300, 400 |
+| leading IDs resolved | 2419 / 100 frames | 3970 / 100 frames |
+| clean shutdown | yes | yes |
+
+**Same Python wrapper, same script. Only the DLL path and `versionNo`
+(2200 vs 2600) differ — empirically confirms the doc-only nature of the
+header diff between the two installs.**
+
+## Troubleshooting
 
 If anything fails the soft-reset playbook in repo
 [CLAUDE.md](../../../../CLAUDE.md) ("VISSIM 2022 dispatch on Win11 24H2")
