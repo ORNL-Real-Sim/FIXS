@@ -28,17 +28,15 @@ LAYOUT = NET_DIR / 'speedLimit.layx'
 CONFIG = HERE / 'config.yaml'
 
 # FIXS driver model DLL (built by scripts/dispatch/3_vissim_components.bat).
-# Two variants ship today:
-#   - DriverModel_RealSim.dll       — long-API source (DriverModel_RealSim.cpp),
-#                                     targets VISSIM <= 2020. Works on 2021+
-#                                     too because x64 LLP64 keeps long and
-#                                     int both 32-bit; doesn't exercise the
-#                                     int-API-only code blocks.
-#   - DriverModel_RealSim_v2021.dll — int-API source, the default ABI for
-#                                     VISSIM 2021+ and the one PTV's headers
-#                                     ship today.
-# After #147 the names will flip (the v2021/int build becomes
-# DriverModel_RealSim.dll; long-API becomes DriverModel_RealSim_legacy.dll).
+# Two variants ship today (post-#147 layout):
+#   - DriverModel_RealSim.dll        — int-API source, the default ABI for
+#                                      VISSIM 2021+ and the one PTV's headers
+#                                      ship today.
+#   - DriverModel_RealSim_legacy.dll — long-API source, frozen, targets
+#                                      VISSIM <= 2020. Loads on 2021+ too
+#                                      (x64 LLP64 keeps long and int both
+#                                      32-bit), but doesn't exercise the
+#                                      int-API-only code blocks.
 # speedLimit.inpx has a stale baked-in DLL path that no longer resolves
 # after the network was elevated to tests/Vissim/networks/speedLimit/, so
 # we override at runtime regardless.
@@ -77,9 +75,9 @@ def resolve_driver_dll(value: str) -> pathlib.Path:
     """`int` / `legacy` map to the two PF-shipped DLLs. Anything else is
     treated as an explicit path."""
     if value == 'int':
-        return DRIVER_DLL_DIR / 'DriverModel_RealSim_v2021.dll'
-    if value == 'legacy':
         return DRIVER_DLL_DIR / 'DriverModel_RealSim.dll'
+    if value == 'legacy':
+        return DRIVER_DLL_DIR / 'DriverModel_RealSim_legacy.dll'
     return pathlib.Path(value).expanduser().resolve()
 
 
