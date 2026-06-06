@@ -7,6 +7,7 @@
 #include <cstring>
 
 #include "TrafficHelper.h"
+#include "DSProxyMode.h"
 
 #include "RealSimVersion.h"
 
@@ -523,11 +524,19 @@ int main(int argc, char* argv[]) {
 	else {
 		printf("Read configuration file success\n");
 	}
-	
+
 	{
 		FILE* f = fopen(MasterLogName.c_str(), "a");
 		fprintf(f, "\nConfigFile %s\n", configPath.c_str());
 		fclose(f);
+	}
+
+	// Stage A dispatch (issue #158): if VissimDSProxySetup.Enable is true,
+	// TrafficLayer drives VISSIM via PTV's DrivingSimulatorProxy.dll instead
+	// of the COM path below. The DSProxy code path is fully self-contained;
+	// the rest of mainTrafficLayer is bypassed and we return its exit code.
+	if (Config_c.VissimDSProxySetup.Enable) {
+		return FIXS::DSProxy::runDSProxyMode(Config_c);
 	}
 
 	// initialize Traffic Layer setup variables

@@ -1,0 +1,45 @@
+# Stage A probe (issue #158): minimum config that exercises the new
+# TrafficLayer DSProxy code path end-to-end. The network is PTV's shipped
+# driving_simulator_test.inpx so we are not debugging .inpx authoring at
+# this stage.
+#
+# No DriverModel, no CarMaker, no XIL — Stage A only validates that
+# TrafficLayer can spawn VISSIM via DSProxy, tick through the simulation,
+# and read back vehicles + signals every frame.
+
+SimulationSetup:
+    EnableRealSim: false              # Stage A bypasses RealSim/Application sockets
+    EnableVerboseLog: false
+
+    # SelectedTrafficSimulator is not consulted in DSProxy mode (the early-
+    # return dispatch bypasses it), but populate sensibly so logs are clean.
+    SelectedTrafficSimulator: VISSIM
+
+    SimulationEndTime: 30             # seconds — at 10 Hz = 300 ticks total
+
+ApplicationSetup:
+    EnableApplicationLayer: false
+
+XilSetup:
+    EnableXil: false
+
+# New in #158 Stage A. Flip Enable: true to route through DSProxy.
+VissimDSProxySetup:
+    Enable: true
+
+    # NetworkFile is the .inpx VISSIM will load. The path here points at
+    # the staged copy that run_dsproxy_smoke.bat mirrors from PTV's
+    # shipped DS example (which has the "driving simulator" network
+    # setting already enabled) into a writable directory under stage_network/.
+    # VISSIM writes lockfiles next to the .inpx and the install tree is
+    # read-only without admin.
+    NetworkFile: 'C:\src_git\RS_FIXS\156_drivingsim_dll_design\tests\Vissim\Probes\TrafficLayer_DSProxy\stage_network\driving_simulator_test.inpx'
+
+    VissimVersion: 2022               # selects versionNo=2200 + default DLL path
+    # DllPath:                        # leave blank to derive from VissimVersion
+
+    SimulatorFrequency: 10            # Hz
+    VisibilityRadius: -1.0            # unlimited
+    MaxSimulatorVeh: 10
+    MaxTotalVeh: 50000
+    MaxVissimSigGrp: 1000
