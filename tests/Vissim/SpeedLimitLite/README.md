@@ -56,21 +56,36 @@ Runtime outputs (gitignored, in this folder):
 
 ## Compare against the blessed baseline
 
-Each VISSIM major version produces a different trace (different RNG,
-different per-step processing order, sometimes a different ego
-trajectory through the network). Two blessed CSVs are committed in
-this folder:
+The blessed trace depends on **two** orthogonal axes — which VISSIM
+version dispatched, and which FIXS driver-DLL ABI is loaded into it:
 
-- `speed_limit_lite_orig_v2022.csv` — produced by VISSIM 2022.00-13
-- `speed_limit_lite_orig_v2026.csv` — produced by VISSIM 2026
+| File | VISSIM | DLL ABI (DLL filename today) | Notes |
+|---|---|---|---|
+| `speed_limit_lite_orig_v2022.csv` | 2022.00-13 | int (`DriverModel_RealSim_v2021.dll`) | new default |
+| `speed_limit_lite_orig_v2026.csv` | 2026 | int (`DriverModel_RealSim_v2021.dll`) | new default |
+| `speed_limit_lite_orig_v2022_legacy.csv` | 2022.00-13 | long (`DriverModel_RealSim.dll`) | VISSIM ≤ 2020 source |
+| `speed_limit_lite_orig_v2026_legacy.csv` | 2026 | long (`DriverModel_RealSim.dll`) | VISSIM ≤ 2020 source |
 
-Pick the one matching the VISSIM you just ran with:
+`compare_traces.py --vissim-version {2022,2026} --api {int,legacy}` picks
+the matching CSV. Defaults: `--vissim-version 2022 --api int`.
 
 ```
 conda activate realsim_dev
-python compare_traces.py --vissim-version 2022   # default
-python compare_traces.py --vissim-version 2026
+python compare_traces.py                            # v2022 int (default)
+python compare_traces.py --vissim-version 2026      # v2026 int
+python compare_traces.py --api legacy               # v2022 long-API
+python compare_traces.py --vissim-version 2026 --api legacy
 ```
+
+**Why both ABIs?** PTV moved the driver-model SDK from `long` to `int`
+parameters between VISSIM 2020 and 2021. On Windows x64 LLP64 both are
+32-bit, so the long-API DLL still loads in VISSIM 2021+, but it doesn't
+exercise the int-API-only code paths (SUB_EGO_ONLY, ENABLE_WARMUP,
+ENABLE_LOG, etc.). The four-baseline split locks SpeedLimitLite to
+the expected output on each (VISSIM, DLL) cell.
+
+`start_vissim.py` picks the DLL via `--driver-dll int|legacy|<path>`
+(default `int`), or `FIXS_DRIVER_DLL=int|legacy` in the env.
 
 If you need to compare against the *historical* SpeedLimit Simulink
 references for any reason (different stack — Simulink ego controller

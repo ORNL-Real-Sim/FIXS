@@ -25,12 +25,21 @@ import pandas as pd
 HERE = pathlib.Path(__file__).parent.resolve()
 
 
-def default_ref(vissim_version: str) -> pathlib.Path:
-    """SpeedLimitLite golden trace for a given VISSIM version.
-    The blessed CSVs are produced by running SpeedLimitLite once on a
-    clean machine with that VISSIM and committing the result.
+def default_ref(vissim_version: str, api: str) -> pathlib.Path:
+    """SpeedLimitLite golden trace for a (VISSIM version, FIXS API) pair.
+
+    Two FIXS DLL ABI variants ship today:
+      - int    -> DriverModel_RealSim_v2021.dll (default for VISSIM >= 2021)
+      - legacy -> DriverModel_RealSim.dll       (long-API source, VISSIM <= 2020)
+
+    Produces four blessed CSVs total:
+      speed_limit_lite_orig_v2022.csv          (int-API baseline)
+      speed_limit_lite_orig_v2022_legacy.csv   (long-API baseline)
+      speed_limit_lite_orig_v2026.csv          (int-API baseline)
+      speed_limit_lite_orig_v2026_legacy.csv   (long-API baseline)
     """
-    return HERE / f'speed_limit_lite_orig_v{vissim_version}.csv'
+    suffix = '_legacy' if api == 'legacy' else ''
+    return HERE / f'speed_limit_lite_orig_v{vissim_version}{suffix}.csv'
 
 
 DEFAULT_MOD = HERE / 'speed_limit_lite_trace.csv'
@@ -128,12 +137,16 @@ def main():
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument('--vissim-version', choices=['2022', '2026'], default='2022',
                    help="VISSIM version whose blessed CSV to compare against. "
-                        "Picks tests/Vissim/SpeedLimitLite/"
-                        "speed_limit_lite_orig_v{2022,2026}.csv. "
                         "Default: 2022.")
+    p.add_argument('--api', choices=['int', 'legacy'], default='int',
+                   help="FIXS driver-DLL ABI used in the run being verified. "
+                        "'int' (default) = DriverModel_RealSim_v2021.dll, the "
+                        "VISSIM 2021+ native ABI. 'legacy' = "
+                        "DriverModel_RealSim.dll, the long-API source for "
+                        "VISSIM <= 2020.")
     p.add_argument('--ref', type=pathlib.Path, default=None,
                    help="Override the golden reference path entirely (.csv or .parquet). "
-                        "If omitted, picked from --vissim-version.")
+                        "If omitted, picked from --vissim-version and --api.")
     p.add_argument('--mod', type=pathlib.Path, default=DEFAULT_MOD,
                    help=f"SpeedLimitLite trace (.csv or .parquet). Default: {DEFAULT_MOD.name}")
     p.add_argument('--time-shift', type=float, default=0.0,
@@ -145,7 +158,7 @@ def main():
     args = p.parse_args()
 
     if args.ref is None:
-        args.ref = default_ref(args.vissim_version)
+        args.ref = default_ref(args.vissim_version, args.api)
 
     if not args.ref.is_file():
         sys.exit(f"ERROR: reference not found: {args.ref}")
