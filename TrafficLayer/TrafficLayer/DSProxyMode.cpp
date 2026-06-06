@@ -155,6 +155,60 @@ int runDSProxyMode(const ConfigHelper& config) {
         printf("App socket:         disabled — pump mode only\n");
     }
 
+    SocketHelper sockHelper;
+    MsgHelper msgHelper;
+    int clientSock = -1;
+
+    const bool relayDM = cfg.EnableDriverModelRelay;
+    int dmSock = -1;
+    int dmListener = -1;
+    int appListener = -1;
+
+    auto bindListener = [](int port) -> int {
+        WSADATA wsaData;
+        WSAStartup(MAKEWORD(2, 2), &wsaData);    // idempotent if already initialized elsewhere
+        int s = static_cast<int>(socket(AF_INET, SOCK_STREAM, IPPROTO_TCP));
+        if (s < 0) return -1;
+        BOOL reuse = TRUE;
+        setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (const char*)&reuse, sizeof(reuse));
+        sockaddr_in addr{};
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = htonl(INADDR_ANY);
+        addr.sin_port = htons(static_cast<u_short>(port));
+        if (::bind(s, (sockaddr*)&addr, sizeof(addr)) < 0) {
+            fprintf(stderr, "ERROR: bind(%d) failed: %d\n", port, WSAGetLastError());
+            closesocket(s);
+            return -1;
+        }
+        if (::listen(s, 5) < 0) {
+            fprintf(stderr, "ERROR: listen(%d) failed: %d\n", port, WSAGetLastError());
+            closesocket(s);
+            return -1;
+        }
+        return s;
+    };
+
+    // Open the listeners BEFORE VISSIM_Connect. With
+    // EnableDriverModelRelay: true and EnableRealSim: true in the par-
+    // file, the FIXS DriverModel tries to connect to TL on
+    // TrafficSimulatorPort during VISSIM_Connect's own handshake. The
+    // listener has to be up by then or DM's connect fails and VISSIM
+    // aborts the DSProxy handshake.
+    if (appSock.enabled) {
+        if (relayDM) {
+            dmListener = bindListener(config.SimulationSetup.TrafficSimulatorPort);
+            if (dmListener < 0) { return 6; }
+            printf("DriverModel listener bound on port %d\n",
+                   config.SimulationSetup.TrafficSimulatorPort);
+        }
+        appListener = bindListener(appSock.port);
+        if (appListener < 0) {
+            if (dmListener >= 0) closesocket(dmListener);
+            return 6;
+        }
+        printf("app listener bound on port %d\n", appSock.port);
+    }
+
     const unsigned short versionNo = connectVersionNo(cfg.VissimVersion);
 
     printf("calling VISSIM_Connect (versionNo=%u) ...\n", versionNo);
@@ -172,39 +226,41 @@ int runDSProxyMode(const ConfigHelper& config) {
         std::wstring err = proxy.lastError();
         fwprintf(stderr, L"ERROR: VISSIM_Connect failed: %ls\n",
                  err.empty() ? L"(no detail)" : err.c_str());
+        if (dmListener >= 0) closesocket(dmListener);
+        if (appListener >= 0) closesocket(appListener);
         return 4;
     }
     printf("VISSIM_Connect OK\n");
 
-    // App socket setup. We open a single server socket and wait for the
-    // client before entering the tick loop, so CarMaker / fake client gets
-    // a clean handshake.
-    SocketHelper sockHelper;
-    MsgHelper msgHelper;
-    int clientSock = -1;
-
-    if (appSock.enabled) {
-        std::vector<int> selfPorts = { appSock.port };
-        sockHelper.socketSetup(selfPorts);
-        sockHelper.disableServerTrigger();
-        // No wait-for-trigger handshake — the fake CarMaker probe (and
-        // future real CarMaker integration) goes straight to send/recv
-        // once the TCP connection is up.
-        sockHelper.disableWaitClientTrigger();
-
-        printf("waiting for client on port %d ...\n", appSock.port);
-        if (sockHelper.initConnection("TrafficLayer.err") < 0) {
-            fprintf(stderr, "ERROR: initConnection failed for port %d\n", appSock.port);
-            proxy.disconnect();
+    // Accept clients. DM (if relayDM) is likely already queued from its
+    // connect during VISSIM_Connect. The app client connects after
+    // VISSIM_Connect when the run_*.bat launches it.
+    if (relayDM && dmListener >= 0) {
+        sockaddr_in dmAddr{};
+        int dmAddrLen = sizeof(dmAddr);
+        dmSock = static_cast<int>(accept(dmListener, (sockaddr*)&dmAddr, &dmAddrLen));
+        if (dmSock < 0) {
+            fprintf(stderr, "ERROR: accept DM failed: %d\n", WSAGetLastError());
             return 6;
         }
-        if (sockHelper.clientSock.empty()) {
-            fprintf(stderr, "ERROR: no client connected on port %d\n", appSock.port);
-            proxy.disconnect();
+        int nodelay = 1;
+        setsockopt(dmSock, IPPROTO_TCP, TCP_NODELAY,
+                   reinterpret_cast<const char*>(&nodelay), sizeof(nodelay));
+        printf("DriverModel connected (sock=%d)\n", dmSock);
+        // No handshake exchange — the patched FIXS DriverModel calls
+        // disableServerTrigger() before initConnection, so it doesn't send
+        // any "ready" bytes. The first per-tick recvData on dmSock will
+        // get the DM's state from its first VISSIM callback.
+    }
+    if (appSock.enabled && appListener >= 0) {
+        sockaddr_in appAddr{};
+        int appAddrLen = sizeof(appAddr);
+        clientSock = static_cast<int>(accept(appListener, (sockaddr*)&appAddr, &appAddrLen));
+        if (clientSock < 0) {
+            fprintf(stderr, "ERROR: accept app client failed: %d\n", WSAGetLastError());
             return 6;
         }
-        clientSock = sockHelper.clientSock[0];
-        printf("client connected on port %d\n", appSock.port);
+        printf("app client connected (sock=%d)\n", clientSock);
         msgHelper.getConfig(const_cast<ConfigHelper&>(config));
     }
 
@@ -222,7 +278,24 @@ int runDSProxyMode(const ConfigHelper& config) {
     int rc = 0;
 
     for (int tick = 0; tick < totalTicks; ++tick) {
-        // 1. Push DS egos
+        const float simTime = static_cast<float>(tick) / cfg.SimulatorFrequency;
+
+        // 1. Send pending DriverModel commands (CAV behavior overrides from
+        //    the previous tick's app-side recv). DM's per-vehicle callback
+        //    inside the next VISSIM tick (which proxy.setDriverVehicles
+        //    triggers) does recv-from-TL FIRST then send-state-to-TL, so we
+        //    must have data ready in the socket before VISSIM ticks or DM's
+        //    recv blocks. On tick 0 the buffer is empty (no prior app recv),
+        //    which DM is fine with.
+        if (relayDM && dmSock > 0) {
+            if (sockHelper.sendData(dmSock, 0, simTime, /*simState=*/1, msgHelper) < 0) {
+                fprintf(stderr, "ERROR tick %d: DM sendData failed\n", tick);
+                rc = 10;
+                break;
+            }
+        }
+
+        // 2. Push DS egos and advance VISSIM
         if (!proxy.setDriverVehicles(egos)) {
             std::wstring err = proxy.lastError();
             fwprintf(stderr, L"ERROR tick %d: SetDriverVehicles failed: %ls\n",
@@ -231,11 +304,28 @@ int runDSProxyMode(const ConfigHelper& config) {
             break;
         }
 
-        // 2. Pull state back
+        // 3. Drain DriverModel state-up. DSProxy is the canonical state
+        //    source for downstream consumers so this data is discarded —
+        //    but we have to recv it so DM's send buffer doesn't back up
+        //    and block its next callback.
+        if (relayDM && dmSock > 0) {
+            msgHelper.VehDataRecv_um.clear();
+            msgHelper.TlsDataRecv_um.clear();
+            msgHelper.DetDataRecv_um.clear();
+            int dmRecvState = 0;
+            float dmRecvTime = 0.0f;
+            if (sockHelper.recvData(dmSock, &dmRecvState, &dmRecvTime, msgHelper) < 0) {
+                fprintf(stderr, "ERROR tick %d: DM recvData failed\n", tick);
+                rc = 9;
+                break;
+            }
+        }
+
+        // 4. Pull canonical state from DSProxy
         const auto vehicles = proxy.getTrafficVehicles();
         const auto signals  = proxy.getSignalStates();
 
-        // 3. Resolve egoVissimId once the Create round-trips
+        // 5. Resolve egoVissimId once the Create round-trips
         if (egoVissimId == 0 && egoPending) {
             for (const auto& v : vehicles) {
                 if (v.CreateID == egoCreateId && !v.ControlledByVissim) {
@@ -246,7 +336,7 @@ int runDSProxyMode(const ConfigHelper& config) {
             }
         }
 
-        // 4. Publish to client if connected
+        // 5. Publish to app client if connected
         if (appSock.enabled && clientSock > 0) {
             msgHelper.VehDataSend_um[clientSock].clear();
             msgHelper.TlsDataSend_um[clientSock].clear();
@@ -267,7 +357,8 @@ int runDSProxyMode(const ConfigHelper& config) {
                 break;
             }
 
-            // 5. Receive ego pose from client (one round-trip per tick)
+            // 6. Receive ego pose + (optionally) CAV behavior commands from
+            //    app client (one round-trip per tick)
             msgHelper.VehDataRecv_um.clear();
             int recvSimState = 0;
             float recvSimTime = 0.0f;
@@ -277,26 +368,41 @@ int runDSProxyMode(const ConfigHelper& config) {
                 break;
             }
 
-            // 6. Translate ego pose for next tick's SetDriverVehicles
+            // 7. Split client-received vehicles: ego goes to DSProxy on the
+            //    next tick, everything else goes to DriverModel as a
+            //    behavior command.
             egos.clear();
+            if (relayDM && dmSock > 0) {
+                msgHelper.VehDataSend_um[dmSock].clear();
+                msgHelper.TlsDataSend_um[dmSock].clear();
+                msgHelper.DetDataSend_um[dmSock].clear();
+            }
             for (const auto& kv : msgHelper.VehDataRecv_um) {
                 const VehFullData_t& v = kv.second;
-                // Match the client's ego either by configured EgoId or by
-                // accepting whatever id the client sends back. For Stage B
-                // we accept any one vehicle from the client as the ego.
-                if (!appSock.egoId.empty() && v.id != appSock.egoId) continue;
-                Simulator_Veh_Data ego = egoFromMsg(v);
-                if (egoVissimId == 0) {
-                    ego.Create = true;
-                    ego.CreateID = egoCreateId;
-                    egoPending = true;
-                } else {
-                    ego.VehicleID = egoVissimId;
-                    ego.Create = false;
+                const bool isEgo = (!appSock.egoId.empty() && v.id == appSock.egoId);
+                if (isEgo) {
+                    Simulator_Veh_Data ego = egoFromMsg(v);
+                    if (egoVissimId == 0) {
+                        ego.Create = true;
+                        ego.CreateID = egoCreateId;
+                        egoPending = true;
+                    } else {
+                        ego.VehicleID = egoVissimId;
+                        ego.Create = false;
+                    }
+                    egos.push_back(ego);
+                } else if (relayDM && dmSock > 0) {
+                    // CAV behavior command: relay to DriverModel as-is.
+                    // DriverModel parses VehFullData_t and applies
+                    // speedDesired / accelerationDesired in its next
+                    // DRIVER_DATA_DESIRED_VELOCITY / _ACCELERATION callback.
+                    msgHelper.VehDataSend_um[dmSock].push_back(v);
                 }
-                egos.push_back(ego);
-                break;     // single ego for Stage B; multi-ego is a refinement
             }
+
+            // 8. CAV behavior cmds (now sitting in msgHelper.VehDataSend_um[dmSock])
+            //    get sent at the START of the next tick, before the next
+            //    proxy.setDriverVehicles call.
         }
 
         if (tick - lastReportedTick >= 25) {
@@ -308,11 +414,17 @@ int runDSProxyMode(const ConfigHelper& config) {
 
     // Shutdown
     if (appSock.enabled && clientSock > 0) {
-        printf("sending shutdown signal to client ...\n");
+        printf("sending shutdown signal to clients ...\n");
         msgHelper.VehDataSend_um[clientSock].clear();
         msgHelper.TlsDataSend_um[clientSock].clear();
         msgHelper.DetDataSend_um[clientSock].clear();
         sockHelper.sendData(clientSock, 0, 0.0f, /*simState=*/0, msgHelper);
+        if (relayDM && dmSock > 0) {
+            msgHelper.VehDataSend_um[dmSock].clear();
+            msgHelper.TlsDataSend_um[dmSock].clear();
+            msgHelper.DetDataSend_um[dmSock].clear();
+            sockHelper.sendData(dmSock, 0, 0.0f, /*simState=*/0, msgHelper);
+        }
         sockHelper.socketShutdown();
     }
 

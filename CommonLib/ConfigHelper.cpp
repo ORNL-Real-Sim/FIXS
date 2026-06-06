@@ -608,21 +608,23 @@ int ConfigHelper::getConfig(string configName) {
 	VissimSetup.MaxTotalVeh = 50000;
 	VissimSetup.MaxVissimPed = 0;
 	VissimSetup.MaxVissimSigGrp = 1000;
+	VissimSetup.EnableDriverModelRelay = false;
 
 	node = config["VissimSetup"];
 	if (node) {
-		if (node["EnableDSProxy"])      VissimSetup.EnableDSProxy      = parserFlag(node, "EnableDSProxy");
-		if (node["NetworkFile"])        VissimSetup.NetworkFile        = parserString(node, "NetworkFile");
-		if (node["VissimVersion"])      VissimSetup.VissimVersion      = parserInteger(node, "VissimVersion");
-		if (node["DllPath"])            VissimSetup.DllPath            = parserString(node, "DllPath");
-		if (node["SimulatorFrequency"]) VissimSetup.SimulatorFrequency = parserInteger(node, "SimulatorFrequency");
-		if (node["VisibilityRadius"])   VissimSetup.VisibilityRadius   = parserDouble(node, "VisibilityRadius");
-		if (node["MaxSimulatorVeh"])    VissimSetup.MaxSimulatorVeh    = parserInteger(node, "MaxSimulatorVeh");
-		if (node["MaxSimulatorPed"])    VissimSetup.MaxSimulatorPed    = parserInteger(node, "MaxSimulatorPed");
-		if (node["MaxSimulatorDet"])    VissimSetup.MaxSimulatorDet    = parserInteger(node, "MaxSimulatorDet");
-		if (node["MaxTotalVeh"])        VissimSetup.MaxTotalVeh        = parserInteger(node, "MaxTotalVeh");
-		if (node["MaxVissimPed"])       VissimSetup.MaxVissimPed       = parserInteger(node, "MaxVissimPed");
-		if (node["MaxVissimSigGrp"])    VissimSetup.MaxVissimSigGrp    = parserInteger(node, "MaxVissimSigGrp");
+		if (node["EnableDSProxy"])           VissimSetup.EnableDSProxy           = parserFlag(node, "EnableDSProxy");
+		if (node["NetworkFile"])             VissimSetup.NetworkFile             = parserString(node, "NetworkFile");
+		if (node["VissimVersion"])           VissimSetup.VissimVersion           = parserInteger(node, "VissimVersion");
+		if (node["DllPath"])                 VissimSetup.DllPath                 = parserString(node, "DllPath");
+		if (node["SimulatorFrequency"])      VissimSetup.SimulatorFrequency      = parserInteger(node, "SimulatorFrequency");
+		if (node["VisibilityRadius"])        VissimSetup.VisibilityRadius        = parserDouble(node, "VisibilityRadius");
+		if (node["MaxSimulatorVeh"])         VissimSetup.MaxSimulatorVeh         = parserInteger(node, "MaxSimulatorVeh");
+		if (node["MaxSimulatorPed"])         VissimSetup.MaxSimulatorPed         = parserInteger(node, "MaxSimulatorPed");
+		if (node["MaxSimulatorDet"])         VissimSetup.MaxSimulatorDet         = parserInteger(node, "MaxSimulatorDet");
+		if (node["MaxTotalVeh"])             VissimSetup.MaxTotalVeh             = parserInteger(node, "MaxTotalVeh");
+		if (node["MaxVissimPed"])            VissimSetup.MaxVissimPed            = parserInteger(node, "MaxVissimPed");
+		if (node["MaxVissimSigGrp"])         VissimSetup.MaxVissimSigGrp         = parserInteger(node, "MaxVissimSigGrp");
+		if (node["EnableDriverModelRelay"])  VissimSetup.EnableDriverModelRelay  = parserFlag(node, "EnableDriverModelRelay");
 	}
 
 	return 0;

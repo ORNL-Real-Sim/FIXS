@@ -1,0 +1,23 @@
+# DriverModel par-file for the Stage B+ CAV probe.
+#
+# DIFFERENT from the Stage C `coexist_par.yaml` (TrafficLayer_DSProxy_coexist_xil):
+# here we set EnableRealSim: TRUE so the DriverModel actively connects to
+# TrafficLayer on TrafficSimulatorPort and accepts behavior commands. The
+# Python client sends per-vehicle speedDesired overrides; TrafficLayer
+# relays them down to DriverModel; DriverModel returns them to VISSIM in
+# the DRIVER_DATA_DESIRED_VELOCITY callback, which Wiedemann then uses to
+# integrate the car's actual speed.
+
+SimulationSetup:
+    EnableRealSim: true                # DriverModel WILL bind a socket and call back
+    EnableVerboseLog: false
+    SelectedTrafficSimulator: VISSIM
+    TrafficSimulatorIP: "127.0.0.1"
+    TrafficSimulatorPort: 1337
+    VehicleMessageField: [id, speed, speedDesired, positionX, positionY, heading]
+
+ApplicationSetup:
+    EnableApplicationLayer: false
+
+XilSetup:
+    EnableXil: false

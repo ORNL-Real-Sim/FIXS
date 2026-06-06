@@ -170,6 +170,19 @@ struct VissimSetup_t {
 	int    MaxTotalVeh;
 	int    MaxVissimPed;
 	int    MaxVissimSigGrp;
+
+	// Stage B+ (issue #158). When true, TrafficLayer also opens a server
+	// socket on SimulationSetup.TrafficSimulatorPort for a FIXS DriverModel
+	// callback. Per tick the loop:
+	//   - drains DriverModel's per-tick state messages (DSProxy is the
+	//     canonical source for vehicle state, so DriverModel uploads are
+	//     received and discarded — just to keep its socket buffer clear)
+	//   - relays any non-ego VehFullData_t received from app clients down
+	//     to DriverModel as behavior commands (desired speed / acceleration
+	//     / lane change for Wiedemann-integrated CAVs)
+	// Unlocks scenario 3a — Python CAV controller modulating background
+	// vehicles while DSProxy drives the ego.
+	bool EnableDriverModelRelay;
 };
 
 typedef struct SubscriptionVehicleList_t {
