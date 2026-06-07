@@ -10,17 +10,22 @@ port from config.yaml and exchanges VehFullData_t messages every tick:
 
 Validates the bidirectional pipeline introduced in Stage B without
 requiring an actual CarMaker install. Real CarMaker integration arrives
-when tests/Vissim/Ipg/ is refurbished (also Stage B scope, deferred to a
-follow-up commit once #160 has merge feedback).
+when tests/Vissim/Ipg/ is refurbished (also Stage B scope).
+
+PASS/FAIL invariants + summary.json output mirror the pattern used by
+the integrated B+C probe (tests/Vissim/Probes/TrafficLayer_DSProxy_coexist_xil/),
+so this probe is now CI-shaped rather than a one-off smoke test.
 """
 
 from __future__ import annotations
 
+import json
 import math
 import os
 import pathlib
 import socket
 import sys
+import time
 from dataclasses import dataclass
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[4]
@@ -119,15 +124,67 @@ def main() -> int:
         except OSError:
             pass
 
-    print("\n=== fake_carmaker summary ===")
-    print(f"total ticks: {len(summaries)}")
-    if summaries:
-        last = summaries[-1]
-        peak_veh = max(s.received_vehicles for s in summaries)
-        print(f"peak received vehicles: {peak_veh}")
-        print(f"final tick: tick={last.tick} recv_vehicles={last.received_vehicles} "
-              f"recv_tls={last.received_tls} ego_x_sent={last.ego_x_sent:.2f}")
-    return 0
+    # ----- INVARIANT CHECKS -----
+    here = pathlib.Path(__file__).resolve().parent
+    if not summaries:
+        print("FAIL — no ticks completed")
+        return 4
+
+    n_ticks = len(summaries)
+    peak_veh = max(s.received_vehicles for s in summaries)
+    final = summaries[-1]
+    first_veh = summaries[0].received_vehicles
+
+    # TL stdout evidence — `ego registered: VISSIM VehicleID=...` printed
+    # once when the CreateID round-trip resolves.
+    tl_log = here / "tl.log"
+    tl_log_text = tl_log.read_text(errors="replace") if tl_log.is_file() else ""
+
+    inv = {
+        "B_minimum_ticks_completed": {
+            # Stage B target was 300 ticks; allow 90% as the floor.
+            "pass": n_ticks >= 270,
+            "detail": f"{n_ticks} ticks completed (target >=270)",
+        },
+        "B_ego_registered_per_tl_log": {
+            "pass": "ego registered: VISSIM VehicleID=" in tl_log_text,
+            "detail": "TL stdout contains 'ego registered: VISSIM VehicleID=...'",
+        },
+        "B_background_traffic_grew": {
+            "pass": final.received_vehicles > first_veh,
+            "detail": f"vehicles {first_veh} -> {final.received_vehicles} "
+                      f"(peak {peak_veh})",
+        },
+        "B_ego_moved_east": {
+            # ego.positionX starts at START_X and grows by EGO_SPEED * DT
+            # per tick. final.ego_x_sent should be > START_X + 1 m at any
+            # tick past tick 10.
+            "pass": final.ego_x_sent > START_X + 1.0,
+            "detail": f"ego_x_sent {START_X:.2f} -> {final.ego_x_sent:.2f}",
+        },
+    }
+
+    all_pass = all(v["pass"] for v in inv.values())
+    print("")
+    print("=== Invariants ===")
+    for k, v in inv.items():
+        print(f"  {'PASS' if v['pass'] else 'FAIL'} {k:35s} ({v['detail']})")
+    print(f"=== OVERALL: {'PASS' if all_pass else 'FAIL'} ===")
+
+    summary = {
+        "ticks": n_ticks,
+        "peak_received_vehicles": peak_veh,
+        "first_received_vehicles": first_veh,
+        "final_received_vehicles": final.received_vehicles,
+        "final_recv_tls": final.received_tls,
+        "final_ego_x_sent": final.ego_x_sent,
+        "invariants": {k: v["pass"] for k, v in inv.items()},
+        "overall_pass": all_pass,
+    }
+    (here / "out").mkdir(exist_ok=True)
+    (here / "out" / "summary.json").write_text(json.dumps(summary, indent=2))
+    print(f"summary -> {here / 'out' / 'summary.json'}")
+    return 0 if all_pass else 1
 
 
 if __name__ == "__main__":

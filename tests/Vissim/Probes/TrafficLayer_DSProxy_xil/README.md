@@ -48,21 +48,37 @@ run_stageB_xil.bat                                REM stages .inpx, launches TL 
 example into `stage_network\`, launches `TrafficLayer.exe`, waits, then
 launches `fake_carmaker.py`. VISSIM 2022 GUI opens.
 
+## Invariants
+
+`fake_carmaker.py` writes `out/summary.json` with PASS/FAIL for these
+checks (mirrors the integrated B+C probe pattern):
+
+| Invariant | What it asserts |
+| --- | --- |
+| `B_minimum_ticks_completed` | The run completed at least 270 / 300 ticks |
+| `B_ego_registered_per_tl_log` | TL stdout has `ego registered: VISSIM VehicleID=N` |
+| `B_background_traffic_grew` | Final vehicle count > first vehicle count |
+| `B_ego_moved_east` | `ego_x_sent` advanced past `START_X + 1 m` |
+
+Run exits 0 if all PASS, 1 otherwise. `run_stageB_xil.bat` redirects TL
+stdout to `tl.log` so the second invariant can grep for the registration
+line.
+
 ## Empirical baseline (last run: 2026-06-06)
 
-| Check | Result |
+```
+=== Invariants ===
+  PASS B_minimum_ticks_completed   (300 ticks completed)
+  PASS B_ego_registered_per_tl_log (TL stdout contains 'ego registered: VISSIM VehicleID=...')
+  PASS B_background_traffic_grew   (vehicles 6 -> 289, peak 289)
+  PASS B_ego_moved_east            (ego_x_sent 397.88 -> 696.88)
+=== OVERALL: PASS ===
+```
+
+| Other observations | Value |
 | --- | --- |
-| TrafficLayer config parse | OK |
-| `VISSIM_Connect` | OK |
-| Application socket bound on port 2444 | OK |
-| `fake_carmaker.py` connects and handshakes | OK |
-| Ego `Create=true` round-trips to `VehicleID` | OK — registered as VehicleID 7 in this run |
-| Ticks executed | 300 / 300 |
-| Vehicles received by client (last frame) | 138 |
-| Peak vehicles | 139 |
 | Signals received by C++ TrafficLayer | 20 per frame |
 | Signals received by Python client | 0 — see "Known gap" below |
-| Ego longitudinal motion | `ego_x_sent` 397.88 → 696.88 m over 300 ticks @ 10 m/s ✓ |
 | Clean shutdown (`simState=0`, `VISSIM_Disconnect`) | OK |
 
 ## Known gap — Python TLS parsing

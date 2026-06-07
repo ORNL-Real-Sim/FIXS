@@ -40,16 +40,20 @@ copy /Y "%PTV_DIR%\driving_simulator_test.pp"   "%STAGE%\"  >nul
 copy /Y "%PTV_DIR%\CARRE4E_RO_500_1.sig"        "%STAGE%\"  >nul
 
 echo [1/2] Launching TrafficLayer in DSProxy mode (config: %HERE%config.yaml)
-start "TrafficLayer (DSProxy mode)" cmd /c ""%TL%" -f "%HERE%config.yaml""
+REM Capture TL stdout to tl.log so the Python invariant check can
+REM verify the 'ego registered: VISSIM VehicleID=...' line.
+start "TrafficLayer (DSProxy mode)" /B cmd /c ""%TL%" -f "%HERE%config.yaml" > "%HERE%tl.log" 2>&1"
 
-echo Waiting 4s for TrafficLayer to bind socket 2444 ...
-timeout /t 4 /nobreak >nul
+echo Waiting 18s for VISSIM startup + DSProxy handshake + socket bind ...
+ping 127.0.0.1 -n 19 >nul
 
 echo [2/2] Launching fake_carmaker.py
-if exist "%USERPROFILE%\miniconda3\Scripts\activate.bat" (
-    call "%USERPROFILE%\miniconda3\Scripts\activate.bat" realsim_dev
-) else (
-    call conda activate realsim_dev
-)
-python "%HERE%fake_carmaker.py"
-exit /b %ERRORLEVEL%
+set "PYEXE="
+if exist "%USERPROFILE%\miniconda3\envs\realsim_dev\python.exe" set "PYEXE=%USERPROFILE%\miniconda3\envs\realsim_dev\python.exe"
+if "%PYEXE%"=="" ( echo ERROR: realsim_dev python.exe not found & exit /b 3 )
+"%PYEXE%" "%HERE%fake_carmaker.py"
+set RC=%ERRORLEVEL%
+
+ping 127.0.0.1 -n 3 >nul
+taskkill /F /IM TrafficLayer.exe >nul 2>&1
+exit /b %RC%
