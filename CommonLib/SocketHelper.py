@@ -129,8 +129,9 @@ class SocketHelper:
                 aa = 1
                 vehicle_data_received = self.msg_helper.depack_veh_data(received_buffer)
                 self.vehicle_data_receive_list.append(vehicle_data_received)
-            elif msg_type == MessageType.traffic_light_data:               
-                aa = 1
+            elif msg_type == MessageType.traffic_light_data:
+                tls_data = self.msg_helper.depack_traffic_light_data(received_buffer)
+                self.traffic_light_data_receive_list.append(tls_data)
 
             elif msg_type == MessageType.detector_data:
                 # DetDataRecv_v = self.depackDetectorData(received_buffer) 

@@ -289,20 +289,12 @@ int runDSProxyMode(const ConfigHelper& config) {
             break;
         }
 
-        // 2. DriverModel state-up + behavior-cmd-down. The FIXS
-        //    DriverModel's DRIVER_DATA_TIME callback (see
-        //    DriverModel_FIXS_Common.h ~line 614) is sendMessage() THEN
-        //    receiveMessage() — DM sends its per-vehicle state first then
-        //    blocks on recv waiting for TL's commands. We mirror with
-        //    recv-then-send here.
-        //
-        //    SKIP on tick 0: DM's first-tick path takes the
-        //    `isVeryFirstStep` branch (line 545) which does NEITHER send
-        //    nor recv — just clears the very-first-step flag. If we tried
-        //    to recv here on tick 0 we'd block forever waiting for bytes
-        //    that DM will never send.
-        if (relayDM && dmSock > 0 && tick >= 1) {
-            // recv DM state (discard — DSProxy is canonical source).
+        // DriverModel does sendMessage + receiveMessage during VISSIM tick 0
+        // too: DRIVER_DATA_TIME is called multiple times per VISSIM tick,
+        // and the second call hits the send/recv branch. TL must do recv+send
+        // on every tick (including tick 0) or VISSIM tick 0 never completes
+        // and getTrafficVehicles deadlocks.
+        if (relayDM && dmSock > 0) {
             msgHelper.VehDataRecv_um.clear();
             msgHelper.TlsDataRecv_um.clear();
             msgHelper.DetDataRecv_um.clear();
@@ -313,9 +305,6 @@ int runDSProxyMode(const ConfigHelper& config) {
                 rc = 9;
                 break;
             }
-            // send CAV behavior cmds (built at end of previous tick from
-            // the app recv split; empty on tick 1 because tick 0 had no
-            // app recv yet).
             if (sockHelper.sendData(dmSock, 0, simTime, /*simState=*/1, msgHelper) < 0) {
                 fprintf(stderr, "ERROR tick %d: DM sendData failed\n", tick);
                 rc = 10;

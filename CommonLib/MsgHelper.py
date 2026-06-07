@@ -394,18 +394,32 @@ class MsgHelper:
         return byte_data, msg_size, byte_index
 
     def depack_traffic_light_data(self, byte_data: bytes)-> TrafficLightData:
-        traffic_light_data = TrafficLightData()
+        # Wire format (matches CommonLib/MsgHelper.cpp::packTrafficLightData):
+        #   1 byte uint8  name_len
+        #   N bytes utf-8 name
+        #   2 bytes uint16 id
+        #   1 byte uint8  state_len
+        #   N bytes utf-8 state
+        # (the leading 2-byte msg_size + 1-byte msg_type header have already
+        # been consumed by SocketHelper.recv_data before this is called.)
         byte_index = 0
-        if self.traffic_light_msg_field_valid.get('id'):
-            traffic_light_data.id, byte_index = MsgHelper.unpack_uint32(byte_data, byte_index)
-        if self.traffic_light_msg_field_valid.get('name'):
-            str_data, str_len, byte_index, uint8Arr = MsgHelper.depack_string(byte_data, byte_index)
-            traffic_light_data.name = str_data
-        if self.traffic_light_msg_field_valid.get('state'):
-            str_data, str_len, byte_index, uint8Arr = MsgHelper.depack_string(byte_data, byte_index)
-            traffic_light_data.state = str_data
 
-        return traffic_light_data
+        name_len = byte_data[byte_index]
+        byte_index += 1
+        name = byte_data[byte_index:byte_index + name_len].decode('utf-8', errors='replace')
+        byte_index += name_len
+
+        tl_id = int.from_bytes(
+            byte_data[byte_index:byte_index + 2], byteorder='little', signed=False
+        )
+        byte_index += 2
+
+        state_len = byte_data[byte_index]
+        byte_index += 1
+        state = byte_data[byte_index:byte_index + state_len].decode('utf-8', errors='replace')
+        byte_index += state_len
+
+        return TrafficLightData(id=tl_id, name=name, state=state)
     
     def pack_traffic_light_data(self, byte_data: bytearray, byte_index, traffic_light_data: TrafficLightData):
         # Calculate nMsgSize based on traffic_light_msg_field_valid flags and traffic_light_data field lengths

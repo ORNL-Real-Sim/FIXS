@@ -168,10 +168,11 @@ def main() -> int:
                 sh.vehicle_data_send_list.append(make_cav_cmd(car))
             sh.sendData(sim_state, sim_time, sock)
 
-            if tick % 25 == 0:
+            if tick % 5 == 0:
                 print(f"[python_ego_cav] tick {tick:3d} veh={len(sh.vehicle_data_receive_list):3d} "
                       f"tls={len(sh.traffic_light_data_receive_list):2d} cars={len(cars):2d} "
-                      f"car_mean_speed={cars_mean_speed:5.2f} m/s ego_near={ego_near}")
+                      f"car_mean_speed={cars_mean_speed:5.2f} m/s ego_near={ego_near}",
+                      flush=True)
     except (ConnectionResetError, ConnectionAbortedError):
         print("[python_ego_cav] server closed connection")
     finally:

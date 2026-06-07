@@ -35,6 +35,20 @@ struct SimulationSetup_t {
 
 	bool EnableVerboseLog;
 
+	// FIXS DriverModel "ego only" mode (issue #158 Stage B+).
+	//   true  (default, legacy):  DriverModel does per-vehicle send/recv
+	//                             inside the MOVE_DRIVER callback when the
+	//                             vehicle is in the subscription list,
+	//                             and skips per-tick I/O entirely when no
+	//                             subscribed vehicle is present.
+	//   false (CAV controller):   DriverModel does ONE send/recv per tick
+	//                             at DRIVER_DATA_TIME, regardless of
+	//                             subscription state. Required for the
+	//                             TrafficLayer DSProxy + DriverModel relay
+	//                             path where TL sends behavior cmds for
+	//                             arbitrary CAV vehicles per tick.
+	bool SubEgoOnly;
+
 	double SimulationEndTime;
 
 	// NEED to fix later

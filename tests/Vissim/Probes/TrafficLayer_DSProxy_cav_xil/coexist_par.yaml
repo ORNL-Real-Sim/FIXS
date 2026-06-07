@@ -11,10 +11,18 @@
 SimulationSetup:
     EnableRealSim: true                # DriverModel WILL bind a socket and call back
     EnableVerboseLog: true             # write per-tick logs to DriverModelLog.txt for diagnosis
+    SubEgoOnly: false                  # FIXS#158 Stage B+: once-per-tick send/recv at
+                                       # DRIVER_DATA_TIME (vs per-vehicle inside MOVE_DRIVER).
+                                       # Required for the TL DSProxy + DriverModel relay tick loop.
     SelectedTrafficSimulator: VISSIM
     TrafficSimulatorIP: "127.0.0.1"
     TrafficSimulatorPort: 1337
-    VehicleMessageField: [id, speed, speedDesired, positionX, positionY, heading]
+    # Must MATCH the field list in ../TrafficLayer_DSProxy_cav_xil/config.yaml
+    # exactly — the binary VehFullData_t wire format gates each field on
+    # vehicle_msg_field_valid[field], so a mismatch between TL (packer)
+    # and DM (depacker) misaligns the per-message reader and silently
+    # blocks both sides on the next recv.
+    VehicleMessageField: [id, type, speed, speedDesired, positionX, positionY, positionZ, heading, linkId, laneId, grade, signalLightDistance, signalLightColor]
 
 ApplicationSetup:
     EnableApplicationLayer: false
