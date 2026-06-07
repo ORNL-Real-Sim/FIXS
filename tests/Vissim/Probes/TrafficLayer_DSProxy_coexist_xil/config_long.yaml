@@ -1,0 +1,39 @@
+# Long-duration variant of the integrated B+C regression test (#158).
+# Same scenario as config.yaml, but runs for 5 minutes (3000 ticks @ 10 Hz)
+# to validate connection + protocol stability under sustained load.
+#
+# Goals:
+#   - background traffic count stays in a reasonable steady-state band
+#     (proves vehicle list pump doesn't leak / saturate)
+#   - signal table refresh stays alive across multiple TLS phase cycles
+#     (the shipped DS example's signal cycles every ~30-60s; 5 min = >=5 cycles)
+#   - DriverModel stays attached, no progressive error log growth
+#   - TrafficLayer + Python client both complete the full target
+
+SimulationSetup:
+    EnableRealSim: false
+    EnableVerboseLog: false
+    SelectedTrafficSimulator: VISSIM
+    SimulationEndTime: 310                # 5 min target + 10s buffer
+    VehicleMessageField: [id, type, speed, speedDesired, positionX, positionY, positionZ, heading, linkId, laneId, grade]
+
+ApplicationSetup:
+    EnableApplicationLayer: true
+    VehicleSubscription:
+    -   type: ego
+        attribute: { id: ['ego'], radius: [0] }
+        ip: ['127.0.0.1']
+        port: [2444]
+
+XilSetup:
+    EnableXil: false
+
+VissimDSProxySetup:
+    Enable: true
+    NetworkFile: 'C:\src_git\RS_FIXS\156_drivingsim_dll_design\tests\Vissim\Probes\TrafficLayer_DSProxy_coexist_xil\stage_network\driving_simulator_test.inpx'
+    VissimVersion: 2022
+    SimulatorFrequency: 10
+    VisibilityRadius: -1.0
+    MaxSimulatorVeh: 10
+    MaxTotalVeh: 50000
+    MaxVissimSigGrp: 1000
