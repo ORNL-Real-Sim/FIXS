@@ -221,8 +221,17 @@ int runDSProxyMode(const ConfigHelper& config) {
     int lastReportedTick = -25;
     int rc = 0;
 
+    // Per-tick loop. Phase labels match doc/fixs_tick_flow.md so that the
+    // future XIL orchestrator refactor (#117) can absorb this body as a
+    // mechanical code-move rather than a rewrite. PHASES 3/4/5 here use
+    // the same SocketHelper/MsgHelper calls the legacy mainTrafficLayer
+    // while loop uses; PHASES 1/2 are DSProxy-specific (the adapter
+    // responsibility); DSProxy folds PHASE 7 into the next tick's PHASE
+    // 1 by storing egos for the next setDriverVehicles call.
     for (int tick = 0; tick < totalTicks; ++tick) {
-        // 1. Push DS egos
+        // PHASE 1 — Advance source (push egos + tick VISSIM via DSProxy).
+        // Folds the previous tick's PHASE 7 (commands) into this tick's
+        // push. See doc/fixs_tick_flow.md.
         if (!proxy.setDriverVehicles(egos)) {
             std::wstring err = proxy.lastError();
             fwprintf(stderr, L"ERROR tick %d: SetDriverVehicles failed: %ls\n",
@@ -231,11 +240,13 @@ int runDSProxyMode(const ConfigHelper& config) {
             break;
         }
 
-        // 2. Pull state back
+        // PHASE 2 — Collect state from source into local buffers (the
+        // DSProxy analogue of populating MsgServer_c in the legacy loop).
         const auto vehicles = proxy.getTrafficVehicles();
         const auto signals  = proxy.getSignalStates();
 
-        // 3. Resolve egoVissimId once the Create round-trips
+        // Resolve egoVissimId once the Create round-trips. This is an
+        // intra-PHASE-2 bookkeeping step, not a phase of its own.
         if (egoVissimId == 0 && egoPending) {
             for (const auto& v : vehicles) {
                 if (v.CreateID == egoCreateId && !v.ControlledByVissim) {
@@ -246,7 +257,11 @@ int runDSProxyMode(const ConfigHelper& config) {
             }
         }
 
-        // 4. Publish to client if connected
+        // PHASE 3 — Distribute state to client (one-port simplification of
+        // the legacy main loop's per-port subscription filter). Will become
+        // routing-table lookup once #117 lands.
+        // PHASE 4 — Publish to client via SocketHelper::sendData (identical
+        // call shape to the legacy main loop's per-client send).
         if (appSock.enabled && clientSock > 0) {
             msgHelper.VehDataSend_um[clientSock].clear();
             msgHelper.TlsDataSend_um[clientSock].clear();
@@ -267,7 +282,9 @@ int runDSProxyMode(const ConfigHelper& config) {
                 break;
             }
 
-            // 5. Receive ego pose from client (one round-trip per tick)
+            // PHASE 5 — Collect from client via SocketHelper::recvData
+            // (identical call shape to the legacy main loop's per-client
+            // recv). #117 Stage C will add a per-recv deadline policy here.
             msgHelper.VehDataRecv_um.clear();
             int recvSimState = 0;
             float recvSimTime = 0.0f;
@@ -277,7 +294,10 @@ int runDSProxyMode(const ConfigHelper& config) {
                 break;
             }
 
-            // 6. Translate ego pose for next tick's SetDriverVehicles
+            // PHASE 6 — Merge client response into source commands. Legacy
+            // loop's Traffic_c.parseSendMsg(MsgClient_c, MsgServer_c) does
+            // the same job; here we extract one ego pose. Stored egos
+            // become PHASE 1 of the next tick.
             egos.clear();
             for (const auto& kv : msgHelper.VehDataRecv_um) {
                 const VehFullData_t& v = kv.second;
