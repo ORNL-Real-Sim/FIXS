@@ -533,8 +533,12 @@ int main(int argc, char* argv[]) {
 
 	// Stage A dispatch (issue #158): if VissimSetup.EnableDSProxy is true,
 	// TrafficLayer drives VISSIM via PTV's DrivingSimulatorProxy.dll instead
-	// of the COM path below. The DSProxy code path is fully self-contained;
-	// the rest of mainTrafficLayer is bypassed and we return its exit code.
+	// of the legacy DriverModel socket path below (where the FIXS DriverModel
+	// DLL runs inside VISSIM and TrafficLayer talks to it via TCP). The
+	// DSProxy code path is fully self-contained; the rest of mainTrafficLayer
+	// is bypassed and we return its exit code. The bypass is intentional for
+	// 0.9.0 to avoid risking SUMO/legacy regressions; absorption into a
+	// unified loop is tracked by issue #117 (XIL orchestrator).
 	if (Config_c.VissimSetup.EnableDSProxy) {
 		return FIXS::DSProxy::runDSProxyMode(Config_c);
 	}
