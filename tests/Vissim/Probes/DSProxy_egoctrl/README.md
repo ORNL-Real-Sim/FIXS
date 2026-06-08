@@ -15,8 +15,15 @@ this validation once the pipeline is locked.
 | A | 0–49 | straight east, constant 10 m/s | baseline link-following |
 | B | 50–69 | hold (speed 0, no advance) | DS holds ego mid-link without VISSIM auto-removing it |
 | C | 70–99 | reverse west, constant 3 m/s, heading π | DS can push poses VISSIM's internal model would never produce |
-| D | 100–119 | lateral teleport ±5 m on Y | XIL-style off-link excursion |
+| D | 100–119 | lateral wobble ±0.5 m on Y, 5 m/s east | realistic in-lane lateral motion (CarMaker-shaped) |
 | E | 120–149 | straight east, constant 10 m/s | recovery after the abuse |
+
+> **Note on phase D.** Earlier versions of this probe pushed ±5 m lateral
+> teleport to deliberately stress VISSIM's link-width clamp; that confirmed
+> VISSIM drops the ego from snapshots when the pushed Y falls outside the
+> link (it does NOT delete the ego — see "deleted list" invariant). The
+> finding is preserved in this README; the test was relaxed to a smooth
+> ±0.5 m wobble so CI runs don't flicker the ego in/out every frame.
 
 ## Invariants (pass/fail)
 
@@ -43,6 +50,19 @@ python egoctrl_test.py    # writes to out_2022/
 ```
 
 VISSIM 2022 GUI opens; total run is ~30 s wall-clock for 150 frames at 10 Hz.
+
+### Don't touch VISSIM's GUI controls during a run
+
+DSProxy mode means the **Python script owns the clock**. If you click VISSIM's
+**Play / Pause / Single Step** buttons while the probe is running, VISSIM tries
+to advance its own internal tick — but the script's next `SetDriverVehicles`
+call expects the previous state. VISSIM goes into an inconsistent state and
+pops "Vissim has encountered a severe problem and should be restarted."
+
+The probe's output is unaffected (it's written before the crash), but the
+dialog is confusing and the next run may inherit a zombie VISSIM process.
+Just leave the GUI alone — open the network view, zoom, watch passively;
+don't drive the simulation.
 
 ## Empirical findings (last run: 2026-06-06)
 

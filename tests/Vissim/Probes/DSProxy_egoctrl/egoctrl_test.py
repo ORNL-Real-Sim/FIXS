@@ -13,7 +13,7 @@ DS-created ego (VehicleType=0 -> default DS type, CreateID=4711):
   A. straight east, constant 10 m/s         frames   0..49
   B. hold position (speed=0, no advance)    frames  50..69
   C. reverse west, constant -3 m/s          frames  70..99
-  D. lateral teleport +/- 5 m on Y          frames 100..119
+  D. lateral wobble +/- 0.5 m at 5 m/s east frames 100..119
   E. straight east again (recovery)         frames 120..149
 
 Invariants we check for every frame:
@@ -88,10 +88,19 @@ def build_trajectory() -> list[FrameCmd]:
         cmds.append(FrameCmd(len(cmds), "C_reverse_3mps", x, y, math.pi, 3.0))
         x -= 3.0 * DT
 
-    # Phase D: 20 frames lateral teleport +/- 5 m on Y around a fixed X
+    # Phase D: 20 frames realistic lateral wobble while cruising forward.
+    # +/- 0.5 m around lane centerline (well within link width), 5 m/s
+    # eastbound. Mimics the lateral wobble a CarMaker dyno produces during
+    # lane-keeping — small enough that VISSIM keeps the ego in every
+    # snapshot, so phase D can use the same strict invariant as the rest.
+    # (Earlier versions pushed +/-5 m to deliberately exercise the link-
+    # width clamp; that finding is documented but isn't worth re-paying
+    # for every CI run.)
+    import math
     for i in range(20):
-        offset = 5.0 if (i % 2 == 0) else -5.0
-        cmds.append(FrameCmd(len(cmds), "D_lateral_teleport", x, y + offset, 0.0, 0.0))
+        offset = 0.5 * math.sin(i * math.pi / 5)   # 2-period sine over 20 frames
+        cmds.append(FrameCmd(len(cmds), "D_lateral_wobble", x, y + offset, 0.0, 5.0))
+        x += 5.0 * DT
 
     # Phase E: 30 frames east again (recovery)
     y_baseline = y
@@ -189,13 +198,11 @@ def run(args: argparse.Namespace) -> int:
         "ego_never_deleted": True,
         "ego_always_ds_controlled": True,
         "background_traffic_grew": False,
-        "ego_present_in_onlink_phases": True,   # A/B/C/E require presence
+        "ego_present_in_onlink_phases": True,   # all 5 phases require presence
         "pushed_x_honored_in_onlink_phases": True,  # |pushed_x - readback_x| < 1m
     }
-    # phase D allows off-link presence to drop (documented XIL limit)
-    onlink_phases = {"A_east_10mps", "B_hold", "C_reverse_3mps", "E_east_recovery"}
-    phase_d_present_frames = 0
-    phase_d_total_frames = 0
+    onlink_phases = {"A_east_10mps", "B_hold", "C_reverse_3mps",
+                     "D_lateral_wobble", "E_east_recovery"}
     max_x_drift_onlink = 0.0
     initial_veh_count = None
     last_veh_count = None
@@ -239,27 +246,26 @@ def run(args: argparse.Namespace) -> int:
                 inv["ego_never_deleted"] = False
                 emit(f"frame {cmd.frame}: WARN ego appears in deleted list!")
 
-            if cmd.phase == "D_lateral_teleport":
-                phase_d_total_frames += 1
-                if ego_row is not None:
-                    phase_d_present_frames += 1
-            else:
-                if ever_created_frame is not None and ego_row is None:
-                    inv["ego_present_in_onlink_phases"] = False
-                    emit(f"frame {cmd.frame} [{cmd.phase}]: WARN ego ({ego_vissim_id}) "
-                         "missing from vehicle list")
-                # Skip first 5 frames after creation: VISSIM is still snapping
-                # the ego onto its initial link (PDF §2 link-by-heading match).
-                if ego_row is not None and cmd.phase in onlink_phases \
-                        and ever_created_frame is not None \
-                        and cmd.frame >= ever_created_frame + 5:
-                    drift = abs(ego_row.Position_X - cmd.x)
-                    if drift > 2.0:
-                        inv["pushed_x_honored_in_onlink_phases"] = False
-                        emit(f"frame {cmd.frame} [{cmd.phase}]: WARN x drift {drift:.2f}m "
-                             f"(pushed {cmd.x:.2f}, readback {ego_row.Position_X:.2f})")
-                    if drift > max_x_drift_onlink:
-                        max_x_drift_onlink = drift
+            # Phase D is now a smooth in-lane wobble (no teleport edge
+            # case), so it uses the same strict invariants as the other
+            # on-link phases — ego must be present every frame and X-drift
+            # must stay bounded.
+            if ever_created_frame is not None and ego_row is None:
+                inv["ego_present_in_onlink_phases"] = False
+                emit(f"frame {cmd.frame} [{cmd.phase}]: WARN ego ({ego_vissim_id}) "
+                     "missing from vehicle list")
+            # Skip first 5 frames after creation: VISSIM is still snapping
+            # the ego onto its initial link (PDF §2 link-by-heading match).
+            if ego_row is not None and cmd.phase in onlink_phases \
+                    and ever_created_frame is not None \
+                    and cmd.frame >= ever_created_frame + 5:
+                drift = abs(ego_row.Position_X - cmd.x)
+                if drift > 2.0:
+                    inv["pushed_x_honored_in_onlink_phases"] = False
+                    emit(f"frame {cmd.frame} [{cmd.phase}]: WARN x drift {drift:.2f}m "
+                         f"(pushed {cmd.x:.2f}, readback {ego_row.Position_X:.2f})")
+                if drift > max_x_drift_onlink:
+                    max_x_drift_onlink = drift
 
             if ego_row is not None and ego_row.ControlledByVissim:
                 inv["ego_always_ds_controlled"] = False
@@ -291,6 +297,11 @@ def run(args: argparse.Namespace) -> int:
                 emit(f"frame {cmd.frame:4d} [{cmd.phase}]: total_veh={len(veh_list):3d} "
                      f"ego_present={ego_row is not None}")
 
+            # Inter-tick pacing — see --throttle. Default 0.0 = flat-out
+            # for CI; 0.1 lets VISSIM repaint so vehicles visibly move.
+            if args.throttle > 0:
+                time.sleep(args.throttle)
+
         # Wrap-up assertions
         if len(seen_ids) > 1:
             inv["ego_assigned_unique_id"] = False
@@ -315,14 +326,6 @@ def run(args: argparse.Namespace) -> int:
     emit("")
     emit("=== Observations (informational, not pass/fail) ===")
     emit(f"  max X-drift in on-link phases: {max_x_drift_onlink:.3f} m")
-    if phase_d_total_frames > 0:
-        ratio = phase_d_present_frames / phase_d_total_frames
-        emit(f"  phase D off-link presence: {phase_d_present_frames}/{phase_d_total_frames}"
-             f" frames ({ratio:.0%})")
-        emit("    note: VISSIM drops the ego from snapshots on frames where the pushed Y")
-        emit("    falls outside the link width. Ego is NOT deleted (never appears in")
-        emit("    deletedVehicleIds list), just temporarily not in the snapshot. This is")
-        emit("    a known XIL limit and not a defect.")
     emit(f"  background traffic: {initial_veh_count} -> {last_veh_count}")
     emit(f"  ego VISSIM VehicleIDs used: {sorted(seen_ids)}")
     emit(f"=== OVERALL: {'PASS' if all_ok else 'FAIL'} ===")
@@ -334,6 +337,11 @@ def run(args: argparse.Namespace) -> int:
 def parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out-dir", default="out_2022")
+    ap.add_argument("--throttle", type=float, default=0.0,
+                    help="Sleep N seconds between ticks (e.g. 0.1) so the "
+                         "VISSIM window repaints and vehicles visibly move. "
+                         "Default 0 = flat-out for CI. VSCode launch.json "
+                         "passes 0.1.")
     return ap.parse_args()
 
 
