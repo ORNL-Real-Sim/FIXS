@@ -23,9 +23,11 @@ ApplicationSetup:
 XilSetup:
     EnableXil: false
 
-# New in #158 Stage A. Flip Enable: true to route through DSProxy.
-VissimDSProxySetup:
-    Enable: true
+# New in #158 Stage A. Flip EnableDSProxy: true to route through DSProxy.
+# (Sibling EnableDriverModelRelay arrives with Stage B+ — both flags can
+# coexist on the same VISSIM run.)
+VissimSetup:
+    EnableDSProxy: true
 
     # NetworkFile is the .inpx VISSIM will load. The path here points at
     # the staged copy that run_dsproxy_smoke.bat mirrors from PTV's

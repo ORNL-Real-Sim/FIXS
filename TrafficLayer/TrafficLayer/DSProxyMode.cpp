@@ -12,7 +12,7 @@ int runDSProxyMode(const ConfigHelper& config) {
     // when this process is run with stdout piped to a file (Stage A probe).
     setvbuf(stdout, nullptr, _IONBF, 0);
 
-    const auto& cfg = config.VissimDSProxySetup;
+    const auto& cfg = config.VissimSetup;
 
     printf("\n=== DSProxy mode (Stage A, issue #158) ===\n");
     printf("VissimVersion:      %d\n", cfg.VissimVersion);
@@ -21,7 +21,7 @@ int runDSProxyMode(const ConfigHelper& config) {
     printf("NetworkFile:        %s\n", cfg.NetworkFile.c_str());
 
     if (cfg.NetworkFile.empty()) {
-        fprintf(stderr, "ERROR: VissimDSProxySetup.NetworkFile is required when Enable: true\n");
+        fprintf(stderr, "ERROR: VissimSetup.NetworkFile is required when EnableDSProxy: true\n");
         return 2;
     }
 

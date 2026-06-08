@@ -10,9 +10,9 @@ signal source) can build on it.
 
 ## What it exercises
 
-1. ConfigHelper parses the new `VissimDSProxySetup:` block (issue #158).
+1. ConfigHelper parses the new `VissimSetup:` block (issue #158).
 2. `mainTrafficLayer` dispatches to `FIXS::DSProxy::runDSProxyMode` when
-   `VissimDSProxySetup.Enable: true`.
+   `VissimSetup.EnableDSProxy: true`.
 3. `VissimDSProxy::load` resolves the PTV DLL path from `VissimVersion`,
    loads it via `LoadLibrary`, and binds all entry points.
 4. `VissimDSProxy::connect` spawns VISSIM via COM and opens the shared-
@@ -57,7 +57,7 @@ exits cleanly.
 
 | Check | Result |
 | --- | --- |
-| `VissimDSProxySetup:` parsed | true |
+| `VissimSetup:` parsed | true |
 | Dispatch to `runDSProxyMode` reached | true |
 | `VissimDSProxy::load` | bound all 9 PTV entry points |
 | `VISSIM_Connect` (versionNo=2200) | OK |
@@ -74,7 +74,7 @@ identically to the Python ctypes probe, as expected.
 
 | File | Purpose |
 | --- | --- |
-| `config.yaml` | TrafficLayer config with `VissimDSProxySetup.Enable: true` |
+| `config.yaml` | TrafficLayer config with `VissimSetup.EnableDSProxy: true` |
 | `run_dsproxy_smoke.bat` | Stage shipped .inpx + launch TrafficLayer |
 | `stage_network/` | Writable mirror of PTV's shipped DS example (gitignored) |
 

@@ -151,8 +151,12 @@ struct SumoSetup_t {
 // VISSIM DrivingSimulatorProxy.dll coupling (issue #158, Stage A).
 // When Enable: true, TrafficLayer drives VISSIM via the DSProxy DLL instead
 // of the COM path. See doc/156_drivingsim_dll_design_proposal.md.
-struct VissimDSProxySetup_t {
-	bool Enable;
+struct VissimSetup_t {
+	// Enable the VISSIM DrivingSimulatorProxy.dll code path (TrafficLayer
+	// drives VISSIM via DSProxy instead of the legacy COM path). Sibling
+	// flags like EnableDriverModelRelay (Stage B+) live alongside, since a
+	// single VISSIM run can have DSProxy on AND a DriverModel attached.
+	bool EnableDSProxy;
 
 	std::string NetworkFile;        // .inpx path passed to VISSIM_Connect
 	int    VissimVersion;           // 2022 | 2026 (selects versionNo 2200/2600 + default DLL path)
@@ -234,7 +238,7 @@ public:
 	CarMakerSetup_t CarMakerSetup;
 	SumoSetup_t SumoSetup;
 	CarlaSetup_t CarlaSetup;
-	VissimDSProxySetup_t VissimDSProxySetup;
+	VissimSetup_t VissimSetup;
 
 
 

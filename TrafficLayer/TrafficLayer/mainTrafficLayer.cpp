@@ -531,11 +531,11 @@ int main(int argc, char* argv[]) {
 		fclose(f);
 	}
 
-	// Stage A dispatch (issue #158): if VissimDSProxySetup.Enable is true,
+	// Stage A dispatch (issue #158): if VissimSetup.EnableDSProxy is true,
 	// TrafficLayer drives VISSIM via PTV's DrivingSimulatorProxy.dll instead
 	// of the COM path below. The DSProxy code path is fully self-contained;
 	// the rest of mainTrafficLayer is bypassed and we return its exit code.
-	if (Config_c.VissimDSProxySetup.Enable) {
+	if (Config_c.VissimSetup.EnableDSProxy) {
 		return FIXS::DSProxy::runDSProxyMode(Config_c);
 	}
 

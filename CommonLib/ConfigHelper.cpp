@@ -592,37 +592,37 @@ int ConfigHelper::getConfig(string configName) {
 	}
 
 	// ===========================================================================
-	// 			READ VissimDSProxySetup section (issue #158, Stage A)
+	// 			READ VissimSetup section (issue #158, Stage A)
 	// ===========================================================================
 	// Default all members up front. If the block is absent, this is the final
 	// state. If present, the per-key overrides below replace any of them.
-	VissimDSProxySetup.Enable = false;
-	VissimDSProxySetup.NetworkFile = "";
-	VissimDSProxySetup.VissimVersion = 2022;
-	VissimDSProxySetup.DllPath = "";
-	VissimDSProxySetup.SimulatorFrequency = 10;
-	VissimDSProxySetup.VisibilityRadius = -1.0;
-	VissimDSProxySetup.MaxSimulatorVeh = 10;
-	VissimDSProxySetup.MaxSimulatorPed = 0;
-	VissimDSProxySetup.MaxSimulatorDet = 0;
-	VissimDSProxySetup.MaxTotalVeh = 50000;
-	VissimDSProxySetup.MaxVissimPed = 0;
-	VissimDSProxySetup.MaxVissimSigGrp = 1000;
+	VissimSetup.EnableDSProxy = false;
+	VissimSetup.NetworkFile = "";
+	VissimSetup.VissimVersion = 2022;
+	VissimSetup.DllPath = "";
+	VissimSetup.SimulatorFrequency = 10;
+	VissimSetup.VisibilityRadius = -1.0;
+	VissimSetup.MaxSimulatorVeh = 10;
+	VissimSetup.MaxSimulatorPed = 0;
+	VissimSetup.MaxSimulatorDet = 0;
+	VissimSetup.MaxTotalVeh = 50000;
+	VissimSetup.MaxVissimPed = 0;
+	VissimSetup.MaxVissimSigGrp = 1000;
 
-	node = config["VissimDSProxySetup"];
+	node = config["VissimSetup"];
 	if (node) {
-		if (node["Enable"])             VissimDSProxySetup.Enable             = parserFlag(node, "Enable");
-		if (node["NetworkFile"])        VissimDSProxySetup.NetworkFile        = parserString(node, "NetworkFile");
-		if (node["VissimVersion"])      VissimDSProxySetup.VissimVersion      = parserInteger(node, "VissimVersion");
-		if (node["DllPath"])            VissimDSProxySetup.DllPath            = parserString(node, "DllPath");
-		if (node["SimulatorFrequency"]) VissimDSProxySetup.SimulatorFrequency = parserInteger(node, "SimulatorFrequency");
-		if (node["VisibilityRadius"])   VissimDSProxySetup.VisibilityRadius   = parserDouble(node, "VisibilityRadius");
-		if (node["MaxSimulatorVeh"])    VissimDSProxySetup.MaxSimulatorVeh    = parserInteger(node, "MaxSimulatorVeh");
-		if (node["MaxSimulatorPed"])    VissimDSProxySetup.MaxSimulatorPed    = parserInteger(node, "MaxSimulatorPed");
-		if (node["MaxSimulatorDet"])    VissimDSProxySetup.MaxSimulatorDet    = parserInteger(node, "MaxSimulatorDet");
-		if (node["MaxTotalVeh"])        VissimDSProxySetup.MaxTotalVeh        = parserInteger(node, "MaxTotalVeh");
-		if (node["MaxVissimPed"])       VissimDSProxySetup.MaxVissimPed       = parserInteger(node, "MaxVissimPed");
-		if (node["MaxVissimSigGrp"])    VissimDSProxySetup.MaxVissimSigGrp    = parserInteger(node, "MaxVissimSigGrp");
+		if (node["EnableDSProxy"])      VissimSetup.EnableDSProxy      = parserFlag(node, "EnableDSProxy");
+		if (node["NetworkFile"])        VissimSetup.NetworkFile        = parserString(node, "NetworkFile");
+		if (node["VissimVersion"])      VissimSetup.VissimVersion      = parserInteger(node, "VissimVersion");
+		if (node["DllPath"])            VissimSetup.DllPath            = parserString(node, "DllPath");
+		if (node["SimulatorFrequency"]) VissimSetup.SimulatorFrequency = parserInteger(node, "SimulatorFrequency");
+		if (node["VisibilityRadius"])   VissimSetup.VisibilityRadius   = parserDouble(node, "VisibilityRadius");
+		if (node["MaxSimulatorVeh"])    VissimSetup.MaxSimulatorVeh    = parserInteger(node, "MaxSimulatorVeh");
+		if (node["MaxSimulatorPed"])    VissimSetup.MaxSimulatorPed    = parserInteger(node, "MaxSimulatorPed");
+		if (node["MaxSimulatorDet"])    VissimSetup.MaxSimulatorDet    = parserInteger(node, "MaxSimulatorDet");
+		if (node["MaxTotalVeh"])        VissimSetup.MaxTotalVeh        = parserInteger(node, "MaxTotalVeh");
+		if (node["MaxVissimPed"])       VissimSetup.MaxVissimPed       = parserInteger(node, "MaxVissimPed");
+		if (node["MaxVissimSigGrp"])    VissimSetup.MaxVissimSigGrp    = parserInteger(node, "MaxVissimSigGrp");
 	}
 
 	return 0;
