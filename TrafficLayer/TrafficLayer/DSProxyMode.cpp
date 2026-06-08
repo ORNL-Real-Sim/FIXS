@@ -143,10 +143,16 @@ std::vector<AppSocketConfig> resolveAppSockets(const ConfigHelper& config) {
     return out;
 }
 
-// Per-port outbound filter. The default is to publish every vehicle to
-// every subscribed client — matches mainTrafficLayer's existing
-// non-CarMaker behavior (`ENABLE_VEH_SIMULATOR == false`, ConfigHelper
-// just uses subscription tuples to know which (ip,port) pairs to serve).
+// Per-port outbound filter — the canonical PHASE 3 routing-rule
+// implementation (see doc/fixs_tick_flow.md). The default is to publish
+// every vehicle to every subscribed client — matches mainTrafficLayer's
+// existing non-CarMaker behavior (`ENABLE_VEH_SIMULATOR == false`,
+// ConfigHelper just uses subscription tuples to know which (ip,port)
+// pairs to serve).
+//
+// When the XIL orchestrator (#117) lands, this function's per-port
+// (subscription, message) → publish-or-skip decision becomes a row in
+// the orchestrator's routing table; the body stays the same.
 //
 // Only `type: vehicleType` is treated as a real per-vehicle filter,
 // because the YAML attribute `id: [...]` then literally lists the vehicle
@@ -282,8 +288,16 @@ int runDSProxyMode(const ConfigHelper& config) {
     int lastReportedTick = -25;
     int rc = 0;
 
+    // Per-tick loop. Phase labels match doc/fixs_tick_flow.md so the future
+    // XIL orchestrator refactor (#117) can absorb this body as a code-move
+    // rather than a rewrite. The multi-port per-subscription filter
+    // (publishesVehicle / per-port loop in PHASE 3+4) is *exactly* the
+    // routing-table pattern the orchestrator will formalize — same
+    // SocketHelper / MsgHelper call shape as the legacy mainTrafficLayer
+    // while loop, just with multiple clients instead of one.
     for (int tick = 0; tick < totalTicks; ++tick) {
-        // 1. Push DS egos
+        // PHASE 1 — Advance source via DSProxy. Folds previous tick's
+        // PHASE 7 (commands) into this tick's push.
         if (!proxy.setDriverVehicles(egos)) {
             std::wstring err = proxy.lastError();
             fwprintf(stderr, L"ERROR tick %d: SetDriverVehicles failed: %ls\n",
@@ -292,11 +306,12 @@ int runDSProxyMode(const ConfigHelper& config) {
             break;
         }
 
-        // 2. Pull state back
+        // PHASE 2 — Collect state from source.
         const auto vehicles = proxy.getTrafficVehicles();
         const auto signals  = proxy.getSignalStates();
 
-        // 3. Resolve egoVissimId once the Create round-trips
+        // Resolve egoVissimId once the Create round-trips. Intra-PHASE-2
+        // bookkeeping.
         if (egoVissimId == 0 && egoPending) {
             for (const auto& v : vehicles) {
                 if (v.CreateID == egoCreateId && !v.ControlledByVissim) {
@@ -307,8 +322,11 @@ int runDSProxyMode(const ConfigHelper& config) {
             }
         }
 
-        // 4. Pre-translate to FIXS protocol once (so per-port filtering
-        //    doesn't redo the conversion).
+        // PHASE 3 — Distribute to clients per subscription (pre-translate
+        // once to FIXS protocol; per-port filter applied below). This is
+        // exactly the routing-table responsibility the orchestrator will
+        // own; the per-port `publishesVehicle` filter is the per-port
+        // entry in that table.
         std::vector<VehFullData_t> vehFull;
         vehFull.reserve(vehicles.size());
         for (const auto& v : vehicles) vehFull.push_back(toVehFull(v));
@@ -320,7 +338,9 @@ int runDSProxyMode(const ConfigHelper& config) {
         const float simTime = static_cast<float>(tick) / cfg.SimulatorFrequency;
         const uint8_t simState = 1;
 
-        // 5. Publish to each subscribed client (per-port subscription filter)
+        // PHASE 4 — Publish to each subscribed client via SocketHelper
+        // (same call shape as legacy mainTrafficLayer's per-client send;
+        // we're just iterating appSocks instead of actualClientSock).
         for (const auto& asock : appSocks) {
             if (asock.clientSock <= 0) continue;
             msgHelper.VehDataSend_um[asock.clientSock].clear();
@@ -346,8 +366,12 @@ int runDSProxyMode(const ConfigHelper& config) {
         }
         if (rc != 0) break;
 
-        // 6. Receive from each subscribed client. Any inbound vehicle whose
-        //    id matches the canonical egoId is the DSProxy ego inject.
+        // PHASE 5 — Receive responses from each client via SocketHelper
+        // (same call shape as legacy mainTrafficLayer's per-client recv).
+        // PHASE 6 — Merge: any inbound vehicle whose id matches the
+        // canonical egoId is the DSProxy ego inject for the next tick's
+        // PHASE 1. Stored egos become the next setDriverVehicles input.
+        // #117 Stage C will add per-recv deadline policy here.
         egos.clear();
         for (const auto& asock : appSocks) {
             if (asock.clientSock <= 0) continue;
