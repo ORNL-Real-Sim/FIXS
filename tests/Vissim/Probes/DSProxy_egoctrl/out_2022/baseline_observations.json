@@ -1,0 +1,17 @@
+{
+  "_comment": "Baseline observations from a known-good run of egoctrl_test.py. Use as a sanity-check after intentional VISSIM/DSProxy bumps. Re-baseline only after visual confirmation.",
+  "vissim_version": "2022",
+  "trajectory_frames": 150,
+  "ego_vissim_vehicle_ids_used": [8],
+  "background_traffic_first_to_last_frame_count": [6, 139],
+  "max_x_drift_onlink_m": 0.46,
+  "phase_d_off_link_presence_fraction": 0.5,
+  "invariants": {
+    "ego_assigned_unique_id": "PASS",
+    "ego_never_deleted": "PASS",
+    "ego_always_ds_controlled": "PASS",
+    "background_traffic_grew": "PASS",
+    "ego_present_in_onlink_phases": "PASS",
+    "pushed_x_honored_in_onlink_phases": "PASS"
+  }
+}
