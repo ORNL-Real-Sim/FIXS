@@ -69,8 +69,13 @@ call `SocketHelper::sendData` / `SocketHelper::recvData` with the same
 `MsgHelper` data structures.
 
 PHASES 1, 2, 6, 7 are **source-specific** — they touch the underlying
-traffic simulator's API (SUMO `libsumo`, VISSIM COM, VISSIM DSProxy.dll).
-This is where adapters live.
+traffic simulator's API (SUMO `libsumo`, VISSIM via the FIXS DriverModel
+DLL socket, VISSIM via DSProxy.dll). This is where adapters live.
+
+Note: TrafficLayer does NOT drive VISSIM over COM. COM (`actxserver`) is
+used by external bootstrap scripts to start a VISSIM instance, but the
+per-tick orchestration loop always goes through the DriverModel socket
+(legacy) or DSProxy DLL (new).
 
 ## What absorption looks like (#117)
 
