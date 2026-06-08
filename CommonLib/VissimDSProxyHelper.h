@@ -11,6 +11,12 @@
 //
 // Empirical validation lives under tests/Vissim/Probes/DSProxy_*/
 // from issue #156's investigation. This is Stage A of issue #158.
+//
+// Scope boundary: this is the adapter for DSProxy specifically. It knows
+// nothing about TrafficLayer, sockets, or config — any C++ caller that
+// needs to talk to DSProxy can link it. Other VISSIM API adapters
+// (DriverModel-side socket protocol, COM IDispatch, future signal-state
+// stream) belong in separate `Vissim<API>Helper.{h,cpp}` files, not here.
 
 #ifndef WINDOWS_INCLUDED
 #define WINDOWS_INCLUDED
