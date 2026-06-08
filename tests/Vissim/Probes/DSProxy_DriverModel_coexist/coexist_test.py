@@ -307,6 +307,11 @@ def run(args: argparse.Namespace) -> int:
                      f"signals={len(sig_list):3d} "
                      f"type100_seen={frame in type100_seen_frames}")
 
+            # Inter-tick pacing — see --throttle. Default 0.0 = flat-out
+            # for CI; 0.1 lets VISSIM repaint so vehicles visibly move.
+            if args.throttle > 0:
+                time.sleep(args.throttle)
+
         emit("calling VISSIM_Disconnect...")
         proxy.disconnect()
 
@@ -347,6 +352,11 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--version", choices=sorted(VISSIM_INSTALLS), default="2022")
     ap.add_argument("--frames", type=int, default=100)
     ap.add_argument("--out-dir", default=None)
+    ap.add_argument("--throttle", type=float, default=0.0,
+                    help="Sleep N seconds between ticks (e.g. 0.1) so the "
+                         "VISSIM window repaints and vehicles visibly move. "
+                         "Default 0 = flat-out for CI. VSCode launch.json "
+                         "passes 0.1.")
     ap.add_argument(
         "--mode",
         choices=["real_drivermodel", "ptv_stock", "bogus_dll", "no_drivermodel"],

@@ -245,6 +245,12 @@ def run(args: argparse.Namespace) -> int:
                 emit(f"frame {frame:4d}: vehicles={len(veh_list):3d} "
                      f"signals={len(sig_list):3d} ego_in_list={ego_found}")
 
+            # Inter-tick pacing — see --throttle below. Default 0.0
+            # keeps CI fast; passing 0.1 makes the VISSIM GUI repaint so
+            # vehicles visibly move (used by .vscode/launch.json).
+            if args.throttle > 0:
+                time.sleep(args.throttle)
+
     finally:
         emit("calling VISSIM_Disconnect...")
         proxy.disconnect()
@@ -264,6 +270,11 @@ def parse_args() -> argparse.Namespace:
                     help="Number of frames to replay (0 = full trajectory)")
     ap.add_argument("--out-dir", default=None,
                     help="Output directory (default: out_<version>/)")
+    ap.add_argument("--throttle", type=float, default=0.0,
+                    help="Sleep N seconds between ticks (e.g. 0.1) so the "
+                         "VISSIM window repaints and vehicles visibly move. "
+                         "Default 0 = flat-out (~50 Hz) for CI throughput. "
+                         "VSCode launch.json passes 0.1.")
     args = ap.parse_args()
     if args.out_dir is None:
         args.out_dir = f"out_{args.version}"
