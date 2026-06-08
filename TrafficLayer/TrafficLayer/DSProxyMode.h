@@ -1,13 +1,22 @@
 #pragma once
 
-// Stage A entry point for the VISSIM DrivingSimulatorProxy.dll coupling
+// Stage B+ entry point for the VISSIM DrivingSimulatorProxy.dll coupling
 // (issue #158). When `VissimSetup.EnableDSProxy` is true in the config,
 // mainTrafficLayer dispatches to runDSProxyMode and exits when it returns.
 //
-// Stage A scope: TrafficLayer drives VISSIM via DSProxy. No CarMaker, no
-// DriverModel interaction, no consumer-side publishing yet — those land in
-// Stages B–D. This entry point exists so Stage A can be shipped, tested,
-// and merged independently.
+// Stage B+ scope: TrafficLayer drives VISSIM via DSProxy, publishes to
+// the app client (CAV controller), AND relays CAV behavior commands down
+// to the FIXS DriverModel via a second socket. CAV controller sends
+// per-vehicle speedDesired/accelerationDesired; TL routes ego.Pose to
+// DSProxy and non-ego.Intent to DriverModel.
+//
+// Per-tick tick flow follows the seven-phase canonical pattern documented
+// in doc/fixs_tick_flow.md. The DriverModel is treated as a second FIXS-
+// protocol endpoint — its PHASE 4 (TL→DM publish) and PHASE 5 (TL←DM
+// drain) use SocketHelper / MsgHelper identically to the app client.
+// From the future XIL orchestrator's pub/sub matrix view (#117), DM is
+// just another node with subscribes=[VehicleIntent] and publishes=[]
+// (we discard its state upload since DSProxy is canonical).
 //
 // Scope boundary: this file is the orchestrator for the DSProxy mode only.
 // If you're adding a different VISSIM integration mode (e.g., the legacy
@@ -18,16 +27,6 @@
 // TrafficLayer never talks to VISSIM over COM — COM is only used by
 // external bootstrap scripts to start VISSIM; the per-tick orchestration
 // loop uses the DriverModel socket or DSProxy DLL.)
-//
-// Forward-looking note (issue #117): TrafficLayer's per-tick orchestration
-// will eventually be unified — main loop's pub/sub matrix becomes the
-// router; per-Mode files (this one included) become adapter entry points
-// that hand off to the unified loop rather than running their own ticks.
-// Stage A keeps its own tick loop because the unified orchestrator does
-// not exist yet; absorption later is straightforward because this file
-// already uses CommonLib's MsgHelper / SocketHelper (when Stages B+ wire
-// in publishing/recv) the same way mainTrafficLayer does. See #117 for
-// the explicit XIL orchestration design.
 
 #include "ConfigHelper.h"
 

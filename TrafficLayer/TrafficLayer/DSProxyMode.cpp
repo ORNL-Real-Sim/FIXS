@@ -277,10 +277,18 @@ int runDSProxyMode(const ConfigHelper& config) {
     int lastReportedTick = -25;
     int rc = 0;
 
+    // Per-tick loop. Phase labels match doc/fixs_tick_flow.md so the future
+    // XIL orchestrator refactor (#117) can absorb this body as a
+    // code-move rather than a rewrite. Stage B+ adds the DriverModel relay
+    // as a second FIXS-protocol client (alongside the app client) — DM is
+    // just another endpoint exchanging VehFullData_t over SocketHelper, so
+    // from the orchestrator's pub/sub matrix view it's identical to any
+    // other client.
     for (int tick = 0; tick < totalTicks; ++tick) {
         const float simTime = static_cast<float>(tick) / cfg.SimulatorFrequency;
 
-        // 1. Push DS egos and kick off VISSIM tick
+        // PHASE 1 — Advance source via DSProxy. Folds previous tick's
+        // PHASE 7 (egos extracted from app recv) into this push.
         if (!proxy.setDriverVehicles(egos)) {
             std::wstring err = proxy.lastError();
             fwprintf(stderr, L"ERROR tick %d: SetDriverVehicles failed: %ls\n",
@@ -289,11 +297,19 @@ int runDSProxyMode(const ConfigHelper& config) {
             break;
         }
 
-        // DriverModel does sendMessage + receiveMessage during VISSIM tick 0
-        // too: DRIVER_DATA_TIME is called multiple times per VISSIM tick,
-        // and the second call hits the send/recv branch. TL must do recv+send
-        // on every tick (including tick 0) or VISSIM tick 0 never completes
-        // and getTrafficVehicles deadlocks.
+        // PHASE 5+4 for the DM endpoint (interleaved between VISSIM PHASE 1
+        // and PHASE 2 because DRIVER_DATA_TIME is called multiple times per
+        // VISSIM tick; the second call hits send+recv even on tick 0. TL
+        // must do this every tick — including tick 0 — or getTrafficVehicles
+        // deadlocks):
+        //   - sockHelper.recvData(dmSock, ...) = PHASE 5 (drain DM's per-
+        //     tick state upload; DSProxy is canonical so the content is
+        //     discarded).
+        //   - sockHelper.sendData(dmSock, ...) = PHASE 4 (publish to DM
+        //     the CAV behavior cmds queued from the previous tick's app
+        //     PHASE 6 split).
+        // SocketHelper / MsgHelper call shape is identical to the app-side
+        // PHASE 4/5 below; only the destination socket changes.
         if (relayDM && dmSock > 0) {
             msgHelper.VehDataRecv_um.clear();
             msgHelper.TlsDataRecv_um.clear();
@@ -312,11 +328,12 @@ int runDSProxyMode(const ConfigHelper& config) {
             }
         }
 
-        // 4. Pull canonical state from DSProxy
+        // PHASE 2 — Collect canonical state from DSProxy.
         const auto vehicles = proxy.getTrafficVehicles();
         const auto signals  = proxy.getSignalStates();
 
-        // 5. Resolve egoVissimId once the Create round-trips
+        // Resolve egoVissimId once the Create round-trips. Intra-PHASE-2
+        // bookkeeping.
         if (egoVissimId == 0 && egoPending) {
             for (const auto& v : vehicles) {
                 if (v.CreateID == egoCreateId && !v.ControlledByVissim) {
@@ -327,7 +344,11 @@ int runDSProxyMode(const ConfigHelper& config) {
             }
         }
 
-        // 5. Publish to app client if connected
+        // PHASE 3 — Distribute to app client. Today the routing is "publish
+        // every vehicle + every signal to the one configured client";
+        // multi-port routing on the parallel #165 branch shows where this
+        // becomes per-subscription filtering.
+        // PHASE 4 — Publish to app client via SocketHelper::sendData.
         if (appSock.enabled && clientSock > 0) {
             msgHelper.VehDataSend_um[clientSock].clear();
             msgHelper.TlsDataSend_um[clientSock].clear();
@@ -348,8 +369,8 @@ int runDSProxyMode(const ConfigHelper& config) {
                 break;
             }
 
-            // 6. Receive ego pose + (optionally) CAV behavior commands from
-            //    app client (one round-trip per tick)
+            // PHASE 5 — Receive from app client (one round-trip per tick).
+            // #117 Stage C will add per-recv deadline policy here.
             msgHelper.VehDataRecv_um.clear();
             int recvSimState = 0;
             float recvSimTime = 0.0f;
@@ -359,9 +380,14 @@ int runDSProxyMode(const ConfigHelper& config) {
                 break;
             }
 
-            // 7. Split client-received vehicles: ego goes to DSProxy on the
-            //    next tick, everything else goes to DriverModel as a
-            //    behavior command.
+            // PHASE 6 — Merge: split client-received vehicles by ownership.
+            //   - ego → stored for next tick's PHASE 1 (DSProxy egos)
+            //   - non-ego → queued for next tick's DM PHASE 4 send as
+            //     CAV behavior commands
+            // This split is exactly the vehicle-ownership routing the
+            // orchestrator will formalize: ego.Pose is owned by DSProxy
+            // (so we forward to it); non-ego.Intent is owned by the CAV
+            // controller (so we forward to DriverModel which integrates).
             egos.clear();
             if (relayDM && dmSock > 0) {
                 msgHelper.VehDataSend_um[dmSock].clear();
@@ -391,9 +417,9 @@ int runDSProxyMode(const ConfigHelper& config) {
                 }
             }
 
-            // 8. CAV behavior cmds (now sitting in msgHelper.VehDataSend_um[dmSock])
-            //    get sent at the START of the next tick, before the next
-            //    proxy.setDriverVehicles call.
+            // PHASE 7 — folded: egos go to next tick's PHASE 1 (DSProxy);
+            // CAV cmds (now in msgHelper.VehDataSend_um[dmSock]) go to
+            // next tick's DM PHASE 4 send at the top of the loop.
         }
 
         if (tick - lastReportedTick >= 25) {
