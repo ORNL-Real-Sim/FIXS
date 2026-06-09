@@ -299,11 +299,17 @@ int ConfigHelper::getConfig(string configName) {
 	}
 
 	// figure out TrafficLayer IP
-	if (XilSetup.EnableXil) {
+	// Both branches assume the chosen subscription has at least one entry,
+	// which is true for every shipped scenario today. Guarding the empty
+	// case here lets a Stage A DSProxy probe config — which deliberately
+	// has no subscriptions yet — load without an access violation. The IP/
+	// port stay at default-constructed values; consumers further down the
+	// main path require at least one subscription anyway.
+	if (XilSetup.EnableXil && !XilSetup.VehicleSubscription.empty()) {
 		SimulationSetup.TrafficLayerIP = get<2>(XilSetup.VehicleSubscription[0])[0];
 		SimulationSetup.TrafficLayerPort = get<3>(XilSetup.VehicleSubscription[0])[0];
 	}
-	else {
+	else if (!XilSetup.EnableXil && !ApplicationSetup.VehicleSubscription.empty()) {
 		SimulationSetup.TrafficLayerIP = get<2>(ApplicationSetup.VehicleSubscription[0])[0];
 		SimulationSetup.TrafficLayerPort = get<3>(ApplicationSetup.VehicleSubscription[0])[0];
 	}
@@ -583,6 +589,40 @@ int ConfigHelper::getConfig(string configName) {
 	else {
 		CarlaSetup.InterestedIds = {"ego"};
 		if (!SuppressDefaultMessages) printf("\nDefault to track actor with id ego\n");
+	}
+
+	// ===========================================================================
+	// 			READ VissimSetup section (issue #158, Stage A)
+	// ===========================================================================
+	// Default all members up front. If the block is absent, this is the final
+	// state. If present, the per-key overrides below replace any of them.
+	VissimSetup.EnableDSProxy = false;
+	VissimSetup.NetworkFile = "";
+	VissimSetup.VissimVersion = 2022;
+	VissimSetup.DllPath = "";
+	VissimSetup.SimulatorFrequency = 10;
+	VissimSetup.VisibilityRadius = -1.0;
+	VissimSetup.MaxSimulatorVeh = 10;
+	VissimSetup.MaxSimulatorPed = 0;
+	VissimSetup.MaxSimulatorDet = 0;
+	VissimSetup.MaxTotalVeh = 50000;
+	VissimSetup.MaxVissimPed = 0;
+	VissimSetup.MaxVissimSigGrp = 1000;
+
+	node = config["VissimSetup"];
+	if (node) {
+		if (node["EnableDSProxy"])      VissimSetup.EnableDSProxy      = parserFlag(node, "EnableDSProxy");
+		if (node["NetworkFile"])        VissimSetup.NetworkFile        = parserString(node, "NetworkFile");
+		if (node["VissimVersion"])      VissimSetup.VissimVersion      = parserInteger(node, "VissimVersion");
+		if (node["DllPath"])            VissimSetup.DllPath            = parserString(node, "DllPath");
+		if (node["SimulatorFrequency"]) VissimSetup.SimulatorFrequency = parserInteger(node, "SimulatorFrequency");
+		if (node["VisibilityRadius"])   VissimSetup.VisibilityRadius   = parserDouble(node, "VisibilityRadius");
+		if (node["MaxSimulatorVeh"])    VissimSetup.MaxSimulatorVeh    = parserInteger(node, "MaxSimulatorVeh");
+		if (node["MaxSimulatorPed"])    VissimSetup.MaxSimulatorPed    = parserInteger(node, "MaxSimulatorPed");
+		if (node["MaxSimulatorDet"])    VissimSetup.MaxSimulatorDet    = parserInteger(node, "MaxSimulatorDet");
+		if (node["MaxTotalVeh"])        VissimSetup.MaxTotalVeh        = parserInteger(node, "MaxTotalVeh");
+		if (node["MaxVissimPed"])       VissimSetup.MaxVissimPed       = parserInteger(node, "MaxVissimPed");
+		if (node["MaxVissimSigGrp"])    VissimSetup.MaxVissimSigGrp    = parserInteger(node, "MaxVissimSigGrp");
 	}
 
 	return 0;

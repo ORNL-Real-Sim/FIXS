@@ -23,6 +23,8 @@
     <ClCompile Include="..\..\CommonLib\MsgHelper.cpp" />
     <ClCompile Include="..\..\CommonLib\SocketHelper.cpp" />
     <ClCompile Include="..\..\CommonLib\TrafficHelper.cpp" />
+    <ClCompile Include="..\..\CommonLib\VissimDSProxyHelper.cpp" />
+    <ClCompile Include="DSProxyMode.cpp" />
     <ClCompile Include="mainTrafficLayer.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -33,6 +35,8 @@
     <ClInclude Include="..\..\CommonLib\TrafficHelper.h" />
     <ClInclude Include="..\..\CommonLib\VehDataMsgDefs.h" />
     <ClInclude Include="..\..\CommonLib\RealSimVersion.h" />
+    <ClInclude Include="..\..\CommonLib\VissimDSProxyHelper.h" />
+    <ClInclude Include="DSProxyMode.h" />
     <ClInclude Include="..\..\CommonLib\yaml-cpp\include\yaml-cpp\yaml.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">

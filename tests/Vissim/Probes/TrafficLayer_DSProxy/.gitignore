@@ -1,0 +1,4 @@
+# Staged copy of PTV's shipped DS example .inpx + companions. Mirror is
+# regenerated on every run_dsproxy_smoke.bat; VISSIM writes lockfiles next
+# to the .inpx so the originals must stay in the read-only install dir.
+stage_network/
