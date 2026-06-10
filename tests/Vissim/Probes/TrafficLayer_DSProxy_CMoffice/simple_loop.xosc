@@ -34,7 +34,7 @@
           <PrivateAction>
             <TeleportAction>
               <Position>
-                <LanePosition roadId="40" laneId="-1" offset="0" s="10.0"/>
+                <LanePosition roadId="1" laneId="-1" offset="0" s="10.0"/>
               </Position>
             </TeleportAction>
           </PrivateAction>

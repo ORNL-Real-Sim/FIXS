@@ -22,6 +22,8 @@ from __future__ import annotations
 import pathlib
 import re
 
+from derive_drvpath import derive_drvpath
+
 REPO = pathlib.Path(__file__).resolve().parents[4]
 CMPROJ = REPO / "ProprietaryFiles" / "CM13_proj"
 RD = CMPROJ / "Data" / "Road" / "simple_loop.rd5"
@@ -30,34 +32,45 @@ TR_DEMO = CMPROJ / "Data" / "TestRun" / "SimpleLoop_VISSIM_rs"
 
 ROUTE_ID = 900
 DRVPATH_ID = 901
-# Clockwise loop LanePath object-ids (verified against simple_loop.rd5 geometry):
-#   link0 E (LP id15) -> jc1 (id161) -> link2 N (id71) -> jc3 (id223)
-#   -> link3 W (id99) -> jc2 (id192) -> link1 S (id43) -> jc0 (id130)
-DRVPATH = [15, 161, 71, 223, 99, 192, 43, 130]
-ROUTE_LEN = 820.0
+# The DrvPath (LanePath ids, driving order) is auto-derived from the current rd5
+# by derive_drvpath() -- the authored junction loop's 8 LanePaths (4 straights +
+# 4 R15 corner-junction connectors) chained 1->5->2->6->3->7->4->8.
+ROUTE_LEN = 774.25  # 4x170 straights + 4x23.56 R15 arcs; roadutil -rlen 0 = 774.25
 N_TRAFFIC = 20
-# Ego drives one 200 m straight (link 0) at EGO_SPEED_KMH; IPGDriver does not
-# navigate the hand-authored loop junctions, so the run is ended GRACEFULLY at
-# RUN_SECONDS (before the ego reaches the link-0 end at ~40 s @ 18 km/h). The
-# co-simulation (ego pose -> VISSIM, VISSIM traffic -> CarMaker) is fully
-# exercised in that window. Looping the ego is a known follow-up (IPGDriver
-# junction routing on the synthetic road).
+# The loop now has real R15 corner junctions (authored xodr -> osc2cm), so
+# IPGDriver follows the full 774 m loop and rounds every corner smoothly. The
+# ego runs the whole demo window; co-simulation (ego pose -> VISSIM, VISSIM
+# traffic -> CarMaker) runs throughout.
 EGO_SPEED_KMH = 18.0
-RUN_SECONDS = 30
+RUN_SECONDS = 120
 
 
 def add_route_to_road() -> None:
+    # Always re-derive + rewrite (idempotent: prior Route.0.* is dropped below),
+    # so the route tracks the current rd5 even on re-runs without a fresh osc2cm.
     lines = RD.read_text(encoding="utf-8").splitlines()
-    if any(l.startswith(f"Route.0.ID = {ROUTE_ID}") for l in lines):
-        # already has our route (idempotent re-run after a fresh osc2cm wipes it)
-        if "nRoutes = 1" in lines:
-            return
+    drvpath, road_order, n_seg, _, closed = derive_drvpath(RD)
+    if not closed:
+        print(f"[build_testrun] WARNING: derived DrvPath is not a closed loop "
+              f"({n_seg} segs, roads {road_order})")
     out = []
+    in_drvpath = False
     for l in lines:
         if l.startswith("nRoutes ="):
             out.append("nRoutes = 1")
+            in_drvpath = False
             continue
-        # drop any prior Route.0.* (e.g. a half-written one) to stay idempotent
+        # drop a prior Route.0.DrvPath block: the header line AND its indented
+        # "\t<id>" segment lines (those don't start with "Route.0." so must be
+        # dropped explicitly, else they orphan and CarMaker errors "Unknown line").
+        if l.startswith("Route.0.DrvPath:"):
+            in_drvpath = True
+            continue
+        if in_drvpath:
+            if re.match(r"\s+\d+\s*$", l):
+                continue
+            in_drvpath = False
+        # drop any other prior Route.0.* to stay idempotent
         if re.match(r"Route\.0\.", l):
             continue
         out.append(l)
@@ -70,7 +83,7 @@ def add_route_to_road() -> None:
     out.append("Route.0.Name = loop")
     out.append(f"Route.0.DrvPath.ID = {DRVPATH_ID}")
     out.append("Route.0.DrvPath:")
-    for seg in DRVPATH:
+    for seg in drvpath:
         out.append(f"\t{seg}")
     RD.write_text("\n".join(out) + "\n", encoding="utf-8")
     print(f"[build_testrun] added Route {ROUTE_ID} (loop) to simple_loop.rd5")
@@ -109,7 +122,10 @@ def fix_ego_testrun(tr: pathlib.Path) -> None:
 
 
 def traffic_obj(i: int) -> list[str]:
-    s = 5.0 + (i % 20) * 9.0
+    # Spread the 20 load-time positions around the full ~774 m loop route. They
+    # are free-motion-teleported to the VISSIM-driven positions at runtime, so
+    # these are just valid load-time anchors.
+    s = 5.0 + (i % 20) * 38.0
     return [
         f"Traffic.{i}.Name = RS_C{i:03d}", f"Traffic.{i}.Info:",
         f"Traffic.{i}.DetectMask = 1 1", f"Traffic.{i}.UpdRate = 1000",
