@@ -388,7 +388,20 @@ int runDSProxyMode(const ConfigHelper& config) {
             msgHelper.DetDataSend_um[clientSock].clear();
 
             for (const auto& v : vehicles) {
-                msgHelper.VehDataSend_um[clientSock].push_back(toVehFull(v));
+                VehFullData_t vf = toVehFull(v);
+                // Re-stamp the ego with its client-side id ("egoCm") so the .lib
+                // recognizes and SKIPS its own ego. Without this the ego is sent
+                // with its raw VISSIM id; the .lib (which skips by CarMakerSetup.
+                // EgoId) does not match it and -- now that toVehFull sets a real
+                // vehicleClass -- places it as a phantom RS_C object on top of the
+                // ego (the "double vehicle"). VISSIM assigns the integer id, so
+                // we map it back to the original "egoCm" here; wire-identical to
+                // the SUMO path, whose ego already carries that id.
+                if (egoVissimId != 0 && v.VehicleID == egoVissimId &&
+                    !appSock.egoId.empty()) {
+                    vf.id = appSock.egoId;
+                }
+                msgHelper.VehDataSend_um[clientSock].push_back(vf);
             }
             for (const auto& s : signals) {
                 msgHelper.TlsDataSend_um[clientSock].push_back(toTlsData(s));
@@ -468,19 +481,6 @@ int runDSProxyMode(const ConfigHelper& config) {
         if (tick - lastReportedTick >= 25) {
             printf("tick %5d: vehicles=%3zu signals=%3zu egos=%zu\n",
                    tick, vehicles.size(), signals.size(), egos.size());
-            // [verify] record what TrafficLayer transmits for up to 3 background
-            // vehicles: id, VISSIM type, and absolute position — so it can be
-            // checked against the (matching) VISSIM/CarMaker coordinates.
-            int shown = 0;
-            for (const auto& v : vehicles) {
-                if (egoVissimId != 0 && v.VehicleID == egoVissimId) continue;  // skip ego
-                float fixsHdg = 90.0f - static_cast<float>(v.Orient_Heading) * 180.0f / 3.14159265358979f;
-                while (fixsHdg < 0.0f) fixsHdg += 360.0f;
-                printf("        bg veh id=%d type=%d pos=(%.1f, %.1f) vissim=%.3frad -> fixs=%.0fdeg\n",
-                       v.VehicleID, v.VehicleType,
-                       v.Position_X, v.Position_Y, v.Orient_Heading, fixsHdg);
-                if (++shown >= 3) break;
-            }
             lastReportedTick = tick;
         }
     }
