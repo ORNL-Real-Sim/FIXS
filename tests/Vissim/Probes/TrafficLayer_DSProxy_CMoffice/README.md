@@ -201,3 +201,35 @@ ego-skip logic works unchanged.
 - No Simulink, no CM4SL, no dSPACE — office IPGDriver only.
 - Single ego. Lockstep start only (deferred-connect / `SimulationMode` wait —
   already a SUMO-path feature — is future work for the DSProxy loop).
+
+## Known issue: loop corners are too sharp for the ego (geometry redesign)
+
+The SimpleEcho square loop has **~2–3 m radius corners** (in VISSIM the corner
+connectors, links 5–8, are ~2×2 m and turn ~76°; in the xodr the corner
+connectors are 5.19 m / ~3 m radius). A passenger car's **minimum turning radius
+is ~5–6 m**, so the IPGDriver ego *physically cannot* track these corners and
+drives off the road. Slowing the ego does **not** help — the corner is below the
+car's turning limit. (The committed testrun therefore ends at 35 s, before the
+ego reaches the first corner at ~40 s, so the demo runs clean on the bottom
+straight.)
+
+**Fix — not yet applied; needs a coordinated geometry redesign of *both*
+network representations:**
+
+1. Replace each 90° sharp corner with a quarter-circle **arc of radius R ≥ ~10–15 m**
+   (a "rounded rectangle"): shorten each 200 m straight to `(200 − 2R)` and add a
+   radius-R 90° arc at each corner. Loop perimeter becomes `4·(200−2R) + 4·(πR/2)`.
+2. Apply it to **both** the VISSIM network **and** the xodr, kept **coordinate-
+   matched** — the co-sim exchanges absolute X/Y, so any mismatch puts the ego
+   off the VISSIM road (and the traffic off the CarMaker road).
+3. The **xodr** side is mechanical (`<arc curvature="1/R">` geometry, then
+   `osc2cm` → rd5 + update the route `DrvPath`). The **VISSIM** side is the
+   blocker: rewriting the existing network's link/connector/lane geometry by hand
+   is error-prone and can't be visually verified headlessly. Cleanest path:
+   **redraw the loop with curved corners in the VISSIM GUI** (or import a
+   rounded-rectangle OpenDRIVE so VISSIM and CarMaker derive from one source),
+   then regenerate the rd5 from the matching xodr and re-validate the route.
+
+Once corners are widened, the ego can complete the loop and the run can be
+extended past 35 s (raise `DrvMan.Global.EndCond` / the maneuver `TimeLimit` in
+the testrun).
