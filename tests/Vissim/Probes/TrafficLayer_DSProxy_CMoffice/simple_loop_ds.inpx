@@ -35,16 +35,12 @@
 	<colorDistributions>
 		<colorDistribution name="Default" no="1">
 			<colorDistrEl>
-				<colorDistributionElement color="ff000000" share="1"/>
-				<colorDistributionElement color="ffd62828" share="1"/>
-				<colorDistributionElement color="ffffffff" share="1"/>
 				<colorDistributionElement color="ff1543b6" share="1"/>
-				<colorDistributionElement color="ffd1d1d1" share="1"/>
-				<colorDistributionElement color="ff5f5f5f" share="0.5"/>
-				<colorDistributionElement color="ff148e47" share="0.25"/>
-				<colorDistributionElement color="ff0080ff" share="0.25"/>
-				<colorDistributionElement color="fffeff60" share="0.1"/>
-				<colorDistributionElement color="ffffa13d" share="0.1"/>
+			</colorDistrEl>
+		</colorDistribution>
+		<colorDistribution name="EgoRed" no="2">
+			<colorDistrEl>
+				<colorDistributionElement color="ffd62828" share="1"/>
 			</colorDistrEl>
 		</colorDistribution>
 		<colorDistribution name="Bike" no="60">
@@ -3715,6 +3711,14 @@
 	</vehicleInputs>
 	<vehicleTypes>
 		<vehicleType alightTm="0" anmFlag="false" boardTm="0" capExact="false" capacity="0" category="CAR" clearTmPT="0" colorDistr1="1" desAccelFunc="1" desDecelFunc="1" distCoeffPerMeter="0" doorClosDur="2" dwellTmIsAdd="true" equip="" extDriver="false" extDriverDLLFile="" extDriverParFile="" extEmissionDLLFile="" linkCostCoeff="1" maxAccelFunc="1" maxDecelFunc="1" model2D3DDistr="10" name="Car" no="100" occupDistr="1" travTmCoeff="1">
+			<parkLotSelPars>
+				<parkingLotSelectionParameters attrac="0" avail="0" decSituation="DEPARTUREFROMPARKINGLOT" distFromDestM="0" genCost="0" parkFee="0"/>
+				<parkingLotSelectionParameters attrac="0" avail="0" decSituation="DYNAMICROUTINGDECISION" distFromDestM="0" genCost="0" parkFee="0"/>
+				<parkingLotSelectionParameters attrac="0" avail="0" decSituation="ROUTEGUIDANCETACTIC1" distFromDestM="0" genCost="0" parkFee="0"/>
+				<parkingLotSelectionParameters attrac="0" avail="0" decSituation="ROUTEGUIDANCETACTIC2" distFromDestM="0" genCost="0" parkFee="0"/>
+			</parkLotSelPars>
+		</vehicleType>
+		<vehicleType alightTm="0" anmFlag="false" boardTm="0" capExact="false" capacity="0" category="CAR" clearTmPT="0" colorDistr1="2" desAccelFunc="1" desDecelFunc="1" distCoeffPerMeter="0" doorClosDur="2" dwellTmIsAdd="true" equip="" extDriver="false" extDriverDLLFile="" extDriverParFile="" extEmissionDLLFile="" linkCostCoeff="1" maxAccelFunc="1" maxDecelFunc="1" model2D3DDistr="10" name="DS_Ego" no="110" occupDistr="1" travTmCoeff="1">
 			<parkLotSelPars>
 				<parkingLotSelectionParameters attrac="0" avail="0" decSituation="DEPARTUREFROMPARKINGLOT" distFromDestM="0" genCost="0" parkFee="0"/>
 				<parkingLotSelectionParameters attrac="0" avail="0" decSituation="DYNAMICROUTINGDECISION" distFromDestM="0" genCost="0" parkFee="0"/>
