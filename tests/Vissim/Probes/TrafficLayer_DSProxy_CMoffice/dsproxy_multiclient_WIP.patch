@@ -1,0 +1,171 @@
+diff --git a/TrafficLayer/TrafficLayer/DSProxyMode.cpp b/TrafficLayer/TrafficLayer/DSProxyMode.cpp
+index c18c12d6..82ada542 100644
+--- a/TrafficLayer/TrafficLayer/DSProxyMode.cpp
++++ b/TrafficLayer/TrafficLayer/DSProxyMode.cpp
+@@ -158,6 +158,21 @@ int runDSProxyMode(const ConfigHelper& config) {
+     SocketHelper sockHelper;
+     MsgHelper msgHelper;
+     int clientSock = -1;
++    // Additional app-client connections beyond the first. The office
++    // VirtualEnvironment.lib is built for run / stop / re-run in one CarMaker
++    // session: each run re-initializes and — because its shutdown intentionally
++    // keeps the previous socket OPEN (the non-dSPACE socketShutdown/clear are
++    // commented out) — opens a NEW socket to this port while keeping the old
++    // ones. It then talks on ALL of them every tick (sends the ego to each and
++    // receives traffic from each: VirEnvHelper.cpp send loop ~L791, recv loop
++    // ~L441). The proven SUMO TrafficLayer accepts every such connection
++    // (SocketHelper::initConnection loops `while (!AllClientConnected)`); this
++    // DSProxy path historically accepted only one, so the .lib blocked forever
++    // on the socket TL never serviced (the GUI's internal start->end->start
++    // makes the .lib hold 2 sockets even for a single user "Start"). clientSock
++    // stays the primary (ego source); these extras are serviced identically so
++    // their recv/send unblock. Headless (single run) leaves this empty -> no-op.
++    std::vector<int> extraSocks;
+ 
+     const bool relayDM = cfg.EnableDriverModelRelay;
+     int dmSock = -1;
+@@ -262,8 +277,31 @@ int runDSProxyMode(const ConfigHelper& config) {
+         }
+         printf("app client connected (sock=%d)\n", clientSock);
+         msgHelper.getConfig(const_cast<ConfigHelper&>(config));
++        // Switch the listener to non-blocking so we can drain any already-queued
++        // additional connections now and poll for later ones each tick without
++        // blocking (the .lib's 2nd init may land before or after this point).
++        u_long nb = 1;
++        ioctlsocket(appListener, FIONBIO, &nb);
+     }
+ 
++    // Accept any additional app-client connections that are (or become) pending.
++    // Non-blocking: returns immediately once none are queued. Called at startup
++    // and once per tick so the .lib's re-run / start->end->start reconnects get
++    // serviced instead of deadlocking. See extraSocks declaration above.
++    auto drainNewAppClients = [&]() {
++        if (!(appSock.enabled && appListener >= 0)) return;
++        for (;;) {
++            sockaddr_in a{};
++            int alen = sizeof(a);
++            int s = static_cast<int>(accept(appListener, (sockaddr*)&a, &alen));
++            if (s < 0) break;  // WSAEWOULDBLOCK once nothing more is pending
++            extraSocks.push_back(s);
++            printf("additional app client connected (sock=%d, servicing %zu clients)\n",
++                   s, extraSocks.size() + 1);
++        }
++    };
++    drainNewAppClients();  // grab anything already queued at startup
++
+     const double endTime = config.SimulationSetup.SimulationEndTime;
+     const int totalTicks = static_cast<int>(endTime * cfg.SimulatorFrequency);
+     printf("Running %d ticks (end_time=%.1fs at %d Hz)\n",
+@@ -287,6 +325,10 @@ int runDSProxyMode(const ConfigHelper& config) {
+     for (int tick = 0; tick < totalTicks; ++tick) {
+         const float simTime = static_cast<float>(tick) / cfg.SimulatorFrequency;
+ 
++        // Pick up any app clients that (re)connected since last tick — the
++        // office .lib opens a fresh socket on every CarMaker re-run.
++        drainNewAppClients();
++
+         // PHASE 1 — Advance source via DSProxy. Folds previous tick's
+         // PHASE 7 (egos extracted from app recv) into this push.
+         if (!proxy.setDriverVehicles(egos)) {
+@@ -345,9 +387,11 @@ int runDSProxyMode(const ConfigHelper& config) {
+         }
+ 
+         // PHASE 3 — Distribute to app client. Today the routing is "publish
+-        // every vehicle + every signal to the one configured client";
+-        // multi-port routing on the parallel #165 branch shows where this
+-        // becomes per-subscription filtering.
++        // every vehicle + every signal to the one configured client" (the
++        // ego is re-stamped with its client-side id in PHASE 4 so the consumer
++        // can skip its own ego — see there); multi-port routing on the
++        // parallel #165 branch shows where this becomes per-subscription
++        // filtering.
+         // PHASE 4 — Publish to app client via SocketHelper::sendData.
+         if (appSock.enabled && clientSock > 0) {
+             msgHelper.VehDataSend_um[clientSock].clear();
+@@ -355,7 +399,23 @@ int runDSProxyMode(const ConfigHelper& config) {
+             msgHelper.DetDataSend_um[clientSock].clear();
+ 
+             for (const auto& v : vehicles) {
+-                msgHelper.VehDataSend_um[clientSock].push_back(toVehFull(v));
++                VehFullData_t vf = toVehFull(v);
++                // Re-stamp the ego with its original client-side string id so
++                // the downstream consumer can recognize its own ego. VISSIM
++                // reassigns an integer VehicleID to the DS-created ego, which
++                // toVehFull() stringifies — losing the "egoCm"-style id the
++                // client sent. The SUMO path never loses it (SUMO creates the
++                // vehicle under the original string id), and CarMaker's
++                // VirtualEnvironment.lib relies on matching CarMakerSetup.EgoId
++                // to skip echoing the ego back as a phantom traffic object
++                // (VirEnvHelper.cpp ~L466). Restoring the id here makes the
++                // DSProxy publish stream wire-identical to SUMO so that
++                // existing .lib ego-skip logic works unchanged.
++                if (egoVissimId != 0 && v.VehicleID == egoVissimId &&
++                    !appSock.egoId.empty()) {
++                    vf.id = appSock.egoId;
++                }
++                msgHelper.VehDataSend_um[clientSock].push_back(vf);
+             }
+             for (const auto& s : signals) {
+                 msgHelper.TlsDataSend_um[clientSock].push_back(toTlsData(s));
+@@ -368,6 +428,23 @@ int runDSProxyMode(const ConfigHelper& config) {
+                 rc = 7;
+                 break;
+             }
++            // Mirror the publish to every extra .lib socket (same traffic
++            // payload) so its per-socket recv unblocks. ALL sends must precede
++            // ANY recv below: the .lib does recv-all-then-send-all, so it won't
++            // send on socket N until it has received on every socket.
++            for (size_t i = 0; i < extraSocks.size(); ) {
++                const int es = extraSocks[i];
++                msgHelper.VehDataSend_um[es] = msgHelper.VehDataSend_um[clientSock];
++                msgHelper.TlsDataSend_um[es] = msgHelper.TlsDataSend_um[clientSock];
++                msgHelper.DetDataSend_um[es] = msgHelper.DetDataSend_um[clientSock];
++                if (sockHelper.sendData(es, 0, simTime, simState, msgHelper) < 0) {
++                    printf("extra app client (sock=%d) closed; dropping\n", es);
++                    closesocket(es);
++                    extraSocks.erase(extraSocks.begin() + i);
++                } else {
++                    ++i;
++                }
++            }
+ 
+             // PHASE 5 — Receive from app client (one round-trip per tick).
+             // #117 Stage C will add per-recv deadline policy here.
+@@ -420,6 +497,23 @@ int runDSProxyMode(const ConfigHelper& config) {
+             // PHASE 7 — folded: egos go to next tick's PHASE 1 (DSProxy);
+             // CAV cmds (now in msgHelper.VehDataSend_um[dmSock]) go to
+             // next tick's DM PHASE 4 send at the top of the loop.
++
++            // Drain each extra .lib socket's per-tick send. The .lib sends the
++            // SAME ego on every socket, already captured from clientSock above,
++            // so here we only consume-and-discard to keep the .lib unblocked.
++            for (size_t i = 0; i < extraSocks.size(); ) {
++                const int es = extraSocks[i];
++                msgHelper.VehDataRecv_um.clear();
++                int esState = 0;
++                float esTime = 0.0f;
++                if (sockHelper.recvData(es, &esState, &esTime, msgHelper) < 0) {
++                    printf("extra app client (sock=%d) closed; dropping\n", es);
++                    closesocket(es);
++                    extraSocks.erase(extraSocks.begin() + i);
++                } else {
++                    ++i;
++                }
++            }
+         }
+ 
+         if (tick - lastReportedTick >= 25) {
+@@ -436,6 +530,13 @@ int runDSProxyMode(const ConfigHelper& config) {
+         msgHelper.TlsDataSend_um[clientSock].clear();
+         msgHelper.DetDataSend_um[clientSock].clear();
+         sockHelper.sendData(clientSock, 0, 0.0f, /*simState=*/0, msgHelper);
++        for (int es : extraSocks) {
++            msgHelper.VehDataSend_um[es].clear();
++            msgHelper.TlsDataSend_um[es].clear();
++            msgHelper.DetDataSend_um[es].clear();
++            sockHelper.sendData(es, 0, 0.0f, /*simState=*/0, msgHelper);
++            closesocket(es);
++        }
+         if (relayDM && dmSock > 0) {
+             msgHelper.VehDataSend_um[dmSock].clear();
+             msgHelper.TlsDataSend_um[dmSock].clear();
