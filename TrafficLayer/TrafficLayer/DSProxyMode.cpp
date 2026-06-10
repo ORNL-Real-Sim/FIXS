@@ -433,14 +433,24 @@ int runDSProxyMode(const ConfigHelper& config) {
                 if (isEgo) {
                     Simulator_Veh_Data ego = egoFromMsg(v);
                     if (egoVissimId == 0) {
-                        ego.Create = true;
-                        ego.CreateID = egoCreateId;
-                        egoPending = true;
+                        // Create the ego in VISSIM exactly ONCE. Resolving
+                        // egoVissimId needs the CreateID round-trip (~2 ticks); if
+                        // we re-sent Create every tick until then, VISSIM would
+                        // spawn a DUPLICATE ego each tick -- the extras come back as
+                        // traffic, never match egoVissimId, and get placed as RS_C
+                        // objects overlapping the real ego (the "double ego"). After
+                        // the first Create we wait (submit nothing) until resolved.
+                        if (!egoPending) {
+                            ego.Create = true;
+                            ego.CreateID = egoCreateId;
+                            egoPending = true;
+                            egos.push_back(ego);
+                        }
                     } else {
                         ego.VehicleID = egoVissimId;
                         ego.Create = false;
+                        egos.push_back(ego);
                     }
-                    egos.push_back(ego);
                 } else if (relayDM && dmSock > 0) {
                     // CAV behavior command: relay to DriverModel as-is.
                     // DriverModel parses VehFullData_t and applies
