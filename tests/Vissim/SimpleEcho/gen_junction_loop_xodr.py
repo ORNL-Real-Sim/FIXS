@@ -23,7 +23,7 @@ Layout (CCW), reference line = lane centerline of the rounded rectangle:
   connectors 5=br 6=tr 7=tl 8=bl             (quarter R arcs, one per junction)
   junctions  1=br 2=tr 3=tl 4=bl
 
-Run:  python gen_junction_loop_xodr.py [R]      (R defaults to 15 m)
+Run:  python gen_junction_loop_xodr.py [R] [LANE_W]   (defaults: R 15 m, lane 3.2 m)
 """
 from __future__ import annotations
 import math
@@ -53,6 +53,7 @@ JUNC_CONN = {1: (1, 5), 2: (2, 6), 3: (3, 7), 4: (4, 8)}  # junction -> (incomin
 
 def main() -> int:
     R = float(sys.argv[1]) if len(sys.argv) > 1 else 15.0
+    lane_w = float(sys.argv[2]) if len(sys.argv) > 2 else LANE_W
     straight = L - 2.0 * R
     arc_len = (math.pi / 2.0) * R
     curv = 1.0 / R
@@ -99,7 +100,7 @@ def main() -> int:
     <lanes>
       <laneSection s="0">
         <center><lane id="0" type="none" level="false"/></center>
-        <right><lane id="-1" type="driving" level="false">{lane_link}<width sOffset="0" a="{LANE_W}" b="0" c="0" d="0"/><roadMark sOffset="0" type="solid" weight="standard" color="standard" width="0.12"/></lane></right>
+        <right><lane id="-1" type="driving" level="false">{lane_link}<width sOffset="0" a="{lane_w}" b="0" c="0" d="0"/><roadMark sOffset="0" type="solid" weight="standard" color="standard" width="0.12"/></lane></right>
       </laneSection>
     </lanes>
   </road>
@@ -119,8 +120,8 @@ def main() -> int:
             f'north="0" south="0" east="0" west="0"/>\n{roads}{juncs}</OpenDRIVE>\n')
     out = HERE / "simple_loop.xodr"
     out.write_text(xodr, encoding="utf-8")
-    print(f"[gen] junction loop R={R} m: 4 straights ({straight:.0f} m) + "
-          f"4 R{R:.0f} arc connectors + 4 junctions -> {out.name}")
+    print(f"[gen] junction loop R={R} m, lane width {lane_w} m: 4 straights "
+          f"({straight:.0f} m) + 4 R{R:.0f} arc connectors + 4 junctions -> {out.name}")
     return 0
 
 
