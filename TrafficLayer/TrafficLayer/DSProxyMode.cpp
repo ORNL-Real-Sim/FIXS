@@ -42,11 +42,29 @@ VehFullData_t toVehFull(const VISSIM_Veh_Data& v) {
     VehFullData_t out{};
     out.id = std::to_string(v.VehicleID);
     out.type = std::to_string(v.VehicleType);
+    // VirEnvHelper places an RS_C traffic object only if vehicleClass matches a
+    // known slot (~VirEnvHelper.cpp L479: "car"/"passenger"/"private" -> car,
+    // "truck" -> truck); an empty/unknown class is SILENTLY DROPPED (no else),
+    // so DSProxy traffic never appeared in CarMaker. The SUMO path sets this
+    // from SUMO's vehicle class; here we derive it from the VISSIM type number
+    // (VISSIM defaults: 100 Car, 200 HGV, 300 Bus). Map HGV -> truck, everything
+    // else -> passenger so background traffic is actually placed.
+    out.vehicleClass = (v.VehicleType >= 200 && v.VehicleType < 300) ? "truck" : "passenger";
     out.speed = static_cast<float>(v.Speed);
     out.positionX = static_cast<float>(v.Position_X);
     out.positionY = static_cast<float>(v.Position_Y);
     out.positionZ = static_cast<float>(v.Position_Z);
-    out.heading = static_cast<float>(v.Orient_Heading);
+    // PTV DrivingSimulatorProxy.h: Orient_Heading is "in radians, eastbound = zero,
+    // northbound = +Pi/2" (CCW from East). The FIXS protocol heading is degrees,
+    // north = 0, increasing clockwise (VirEnvHelper.cpp L613). Convert between them:
+    // compass_deg = 90 - math_deg.  (East: 90-0=90deg; North: 90-90=0deg.)
+    {
+        const float PI = 3.14159265358979f;
+        float hdg = 90.0f - static_cast<float>(v.Orient_Heading) * 180.0f / PI;
+        while (hdg < 0.0f)    hdg += 360.0f;
+        while (hdg >= 360.0f) hdg -= 360.0f;
+        out.heading = hdg;
+    }
     out.linkId = std::to_string(v.LinkID);
     out.laneId = v.LaneIndex;
     if (v.LeadingVehicleID > 0) {
@@ -73,9 +91,24 @@ Simulator_Veh_Data egoFromMsg(const VehFullData_t& v) {
     ego.Position_X = v.positionX;
     ego.Position_Y = v.positionY;
     ego.Position_Z = v.positionZ;
-    ego.Orient_Heading = v.heading;
+    // Inverse of toVehFull's heading conversion: FIXS heading (deg, north=0, CW)
+    // -> VISSIM Orient_Heading (rad, east=0, CCW). VISSIM normalizes the range.
+    {
+        const float PI = 3.14159265358979f;
+        ego.Orient_Heading = (90.0f - v.heading) * PI / 180.0f;
+    }
     ego.Orient_Pitch = v.grade;
     ego.Speed = v.speed;
+    // The ego's length/appearance in VISSIM comes entirely from its VehicleType
+    // (PTV Simulator_Veh_Data has no length field). v.type carries
+    // CarMakerSetup.EgoType; if unset/non-numeric, default to the network's car
+    // type (100) so the ego renders as a car instead of a default long vehicle.
+    {
+        int egoType = 100;
+        try { if (!v.type.empty()) egoType = std::stoi(v.type); } catch (...) {}
+        if (egoType <= 0) egoType = 100;
+        ego.VehicleType = egoType;
+    }
     ego.ControlledByVissim = false;
     // VehicleID + Create flag are managed by the caller (CreateID round-trip)
     return ego;
@@ -425,6 +458,19 @@ int runDSProxyMode(const ConfigHelper& config) {
         if (tick - lastReportedTick >= 25) {
             printf("tick %5d: vehicles=%3zu signals=%3zu egos=%zu\n",
                    tick, vehicles.size(), signals.size(), egos.size());
+            // [verify] record what TrafficLayer transmits for up to 3 background
+            // vehicles: id, VISSIM type, and absolute position — so it can be
+            // checked against the (matching) VISSIM/CarMaker coordinates.
+            int shown = 0;
+            for (const auto& v : vehicles) {
+                if (egoVissimId != 0 && v.VehicleID == egoVissimId) continue;  // skip ego
+                float fixsHdg = 90.0f - static_cast<float>(v.Orient_Heading) * 180.0f / 3.14159265358979f;
+                while (fixsHdg < 0.0f) fixsHdg += 360.0f;
+                printf("        bg veh id=%d type=%d pos=(%.1f, %.1f) vissim=%.3frad -> fixs=%.0fdeg\n",
+                       v.VehicleID, v.VehicleType,
+                       v.Position_X, v.Position_Y, v.Orient_Heading, fixsHdg);
+                if (++shown >= 3) break;
+            }
             lastReportedTick = tick;
         }
     }
