@@ -842,6 +842,15 @@ int SocketHelper::recvData(int sock, int* simState, float* simTime, MsgHelper& M
 	// Parser received message
 	//+++++++++
 
+	if (recvSize == 0) {
+		// Peer closed the connection gracefully (recv returned EOF). In the
+		// co-sim this is CarMaker stopping / closing its socket (the GUI Stop
+		// button, or the run ending). Signal the caller (e.g. DSProxyMode) to
+		// break the lockstep and tear VISSIM down, instead of spinning on a
+		// dead socket -- which left VISSIM hanging when CarMaker was stopped.
+		return -1;
+	}
+
 	uint32_t msgProcessed = Msg_c.msgHeaderSize;
 	uint8_t simStateRecv;
 	uint32_t totalMsgSizeRecv;
