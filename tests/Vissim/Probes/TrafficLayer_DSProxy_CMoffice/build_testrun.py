@@ -42,7 +42,12 @@ N_TRAFFIC = 20
 # ego runs the whole demo window; co-simulation (ego pose -> VISSIM, VISSIM
 # traffic -> CarMaker) runs throughout.
 EGO_SPEED_KMH = 18.0
-RUN_SECONDS = 120
+# Run duration = config.yaml's SimulationEndTime, so it's set in ONE place (that
+# value also drives TrafficLayer's tick count). To change the run length: edit
+# SimulationEndTime in config.yaml, then re-run this script.
+_cfg = (pathlib.Path(__file__).resolve().parent / "config.yaml").read_text(encoding="utf-8")
+_m = re.search(r"^\s*SimulationEndTime:\s*(\d+)", _cfg, re.M)
+RUN_SECONDS = int(_m.group(1)) if _m else 120
 
 
 def add_route_to_road() -> None:
