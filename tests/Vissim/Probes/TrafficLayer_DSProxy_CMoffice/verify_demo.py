@@ -28,7 +28,7 @@ import pathlib
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parents[3]
 TL = REPO / "TrafficLayer" / "x64" / "Release" / "TrafficLayer.exe"
-CMEXE = REPO / "ProprietaryFiles" / "CM13_proj" / "src" / "CarMaker.win64.exe"
+CMEXE = REPO / "ProprietaryFiles" / "CM13_proj" / "src" / "CarMaker_headless.win64.exe"
 CMPROJ = REPO / "ProprietaryFiles" / "CM13_proj"
 SRC_INPX = HERE / "simple_loop_ds.inpx"
 STAGE = HERE / "stage_network"
@@ -53,8 +53,32 @@ def stage_and_config() -> None:
     print(f"[verify] staged network + wrote {RUNCFG.name}")
 
 
+def ensure_headless_exe() -> None:
+    """(Re)build CarMaker_headless.win64.exe if missing or older than the co-sim
+    sources, so verify_demo always exercises the CURRENT .lib + User.c. This is
+    the self-test harness (gates the .lib connect on SCState_Start so the -screen
+    co-sim connects); the shipped GUI exe is separate and untouched."""
+    srcs = [
+        REPO / "CommonLib" / "VirEnv_Wrapper.cpp",
+        REPO / "CommonLib" / "SocketHelper.cpp",
+        REPO / "CommonLib" / "VirEnvHelper.cpp",
+        REPO / "ProprietaryFiles" / "CM13_proj" / "src" / "User.c",
+        REPO / "ProprietaryFiles" / "CM13_proj" / "src" / "CarMaker.props",
+    ]
+    stale = CMEXE.is_file() and any(
+        s.is_file() and s.stat().st_mtime > CMEXE.stat().st_mtime for s in srcs)
+    if CMEXE.is_file() and not stale:
+        return
+    why = "missing" if not CMEXE.is_file() else "stale (co-sim source changed)"
+    print(f"[verify] headless harness exe {why}; building via build_headless_exe.bat ...")
+    r = subprocess.run(["cmd", "/c", str(HERE / "build_headless_exe.bat")], cwd=str(HERE))
+    if r.returncode != 0 or not CMEXE.is_file():
+        raise SystemExit("[verify] FAIL: headless exe build failed (see output above)")
+
+
 def main() -> int:
-    for p, label in [(TL, "TrafficLayer.exe"), (CMEXE, "CarMaker.win64.exe"), (SRC_INPX, "simple_loop_ds.inpx")]:
+    ensure_headless_exe()
+    for p, label in [(TL, "TrafficLayer.exe"), (CMEXE, "CarMaker_headless.win64.exe"), (SRC_INPX, "simple_loop_ds.inpx")]:
         if not p.is_file():
             print(f"[verify] FAIL: missing {label}: {p}")
             return 2
