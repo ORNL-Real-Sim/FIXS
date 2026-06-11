@@ -46,8 +46,25 @@ extern "C" {
 	void VirEnv_runStep(VirEnvHelper* VirEnv_c, double simTime) {
 		const char* errorMsg;
 		if (VirEnv_c->runStep(SimCore.Time, &errorMsg) < 0) {
-			VirEnv_c->CM_LogErrF(errorMsg);
-			VirEnv_c->CM_Log("RealSim error run step \n");
+			// A SOCKET failure here means the traffic-simulator side (TrafficLayer
+			// / VISSIM) closed the co-sim connection: the normal end-of-run
+			// (TrafficLayer finishes its tick budget and closes its sockets) or the
+			// user stopping a peer (TrafficLayer / VISSIM / CarMaker) first. In
+			// every such case it is a GRACEFUL end of the co-simulation, so end the
+			// CarMaker run cleanly (SCState_End -> SIM_END) instead of CM_LogErrF,
+			// which is EC_General and makes CarMaker SIM_ABORT (the spurious
+			// "Receive from traffic simulator failed" abort at the run boundary).
+			// Genuine data faults (traffic-object init/update) keep the abort.
+			const bool peerClosed = errorMsg != NULL &&
+				(strstr(errorMsg, "Receive from traffic simulator") != NULL ||
+				 strstr(errorMsg, "Send ego states") != NULL);
+			if (peerClosed) {
+				VirEnv_c->CM_Log("RealSim: traffic simulator closed -- ending run cleanly (SIM_END)\n");
+				SimCore_State_Set(SCState_End);
+			} else {
+				VirEnv_c->CM_LogErrF(errorMsg);
+				VirEnv_c->CM_Log("RealSim error run step \n");
+			}
 		}
 	}
 
