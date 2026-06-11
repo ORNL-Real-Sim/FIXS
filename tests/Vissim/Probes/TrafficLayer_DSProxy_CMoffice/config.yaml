@@ -18,7 +18,7 @@ SimulationSetup:
     EnableRealSim: false            # DSProxy mode uses its own code path; this stays off
     EnableVerboseLog: false
     SelectedTrafficSimulator: VISSIM  # informational; DSProxy dispatch bypasses it
-    SimulationEndTime: 120          # 1200 ticks at 10 Hz -- long enough to record a demo
+    SimulationEndTime: 1000          # 1200 ticks at 10 Hz -- long enough to record a demo
 
     # Mandatory fields for CarMaker's VirtualEnvironment.lib:
     #   id, speed, vehicleClass, heading, grade, speedDesired (or accelerationDesired)

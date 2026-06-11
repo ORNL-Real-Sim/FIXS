@@ -29,6 +29,7 @@ CMPROJ = REPO / "ProprietaryFiles" / "CM13_proj"
 RD = CMPROJ / "Data" / "Road" / "simple_loop.rd5"
 TR_EGO = CMPROJ / "Data" / "TestRun" / "SimpleLoop_VISSIM"
 TR_DEMO = CMPROJ / "Data" / "TestRun" / "SimpleLoop_VISSIM_rs"
+EGO_CAR = CMPROJ / "Data" / "Vehicle" / "SimpleLoop_VISSIM_Ego"
 
 ROUTE_ID = 900
 DRVPATH_ID = 901
@@ -36,18 +37,28 @@ DRVPATH_ID = 901
 # by derive_drvpath() -- the authored junction loop's 8 LanePaths (4 straights +
 # 4 R15 corner-junction connectors) chained 1->5->2->6->3->7->4->8.
 ROUTE_LEN = 774.25  # 4x170 straights + 4x23.56 R15 arcs; roadutil -rlen 0 = 774.25
-N_TRAFFIC = 20
+N_TRAFFIC = 50          # >= the VISSIM inflow cap (~40) + buffer. Safe to overshoot:
+                        # the .lib parks all RS_C at z=-5000 at init and only lifts
+                        # the ones mapped to a live VISSIM vehicle, so spare slots are
+                        # invisible. Too FEW slots = VISSIM cars (incl. the ego's
+                        # leader) with no CM object -> ego sees clear road, won't follow.
 # The loop now has real R15 corner junctions (authored xodr -> osc2cm), so
 # IPGDriver follows the full 774 m loop and rounds every corner smoothly. The
 # ego runs the whole demo window; co-simulation (ego pose -> VISSIM, VISSIM
 # traffic -> CarMaker) runs throughout.
-EGO_SPEED_KMH = 18.0
-# Run duration = config.yaml's SimulationEndTime, so it's set in ONE place (that
-# value also drives TrafficLayer's tick count). To change the run length: edit
-# SimulationEndTime in config.yaml, then re-run this script.
-_cfg = (pathlib.Path(__file__).resolve().parent / "config.yaml").read_text(encoding="utf-8")
-_m = re.search(r"^\s*SimulationEndTime:\s*(\d+)", _cfg, re.M)
-RUN_SECONDS = int(_m.group(1)) if _m else 120
+EGO_SPEED_KMH = 18.0     # ego start velocity
+EGO_CRUISE_KMH = 30.0    # IPGDriver cruise target -- above the VISSIM loop traffic
+                         # so the ego catches leaders, but low enough that the R18
+                         # corners stay well under rollover (this generic car has a
+                         # tall CG). With LapDriving off the IPGDriver slows further
+                         # for the corners on its own.
+# The ego MANEUVER must never be the run limiter -- set it effectively forever
+# (9999 s). The actual run length comes from the CO-SIMULATION, not CarMaker:
+# config.yaml's SimulationEndTime drives TrafficLayer's tick budget, and the run
+# ends when TrafficLayer closes the co-sim socket (-> CarMaker SIM_END). Tying the
+# maneuver to the config duration (the old behaviour) made CarMaker cap the run
+# itself at t=SimulationEndTime regardless of VISSIM.
+RUN_SECONDS = 9999
 
 
 def add_route_to_road() -> None:
@@ -103,9 +114,16 @@ def fix_ego_testrun(tr: pathlib.Path) -> None:
         elif l.startswith("DrivMan.Global.EndCond"):
             out.append(f"DrivMan.Global.EndCond = rise(Time > {RUN_SECONDS}.00)")
         elif l.startswith("DrivMan.Man.0.LongStep.0.Dyn"):
-            out.append(f"DrivMan.Man.0.LongStep.0.Dyn = VelTransition {EGO_SPEED_KMH:.3f} step")
+            # Hand the longitudinal to the IPGDriver (not a scripted VelTransition)
+            # so the ego adapts its speed to VISSIM traffic -- brakes for leaders
+            # and keeps a gap. The lateral already follows Route 900.
+            out.append("DrivMan.Man.0.LongStep.0.Dyn = Driver 1 0")
         elif l.startswith("DrivMan.Man.Start.Velocity"):
             out.append(f"DrivMan.Man.Start.Velocity = {EGO_SPEED_KMH:.3f}")
+        elif l.startswith("Driver.Vel.CruisingSpeed"):
+            out.append(f"Driver.Vel.CruisingSpeed = {EGO_CRUISE_KMH:.1f}")
+        elif l.startswith("Driver.Consider.Traffic"):
+            out.append("Driver.Consider.Traffic = 1")
         elif l.startswith("Vehicle.Routing.Type"):
             out.append("Vehicle.Routing.Type = Route")
         elif l.startswith("Vehicle.Routing.ObjId"):
@@ -127,10 +145,10 @@ def fix_ego_testrun(tr: pathlib.Path) -> None:
 
 
 def traffic_obj(i: int) -> list[str]:
-    # Spread the 20 load-time positions around the full ~774 m loop route. They
-    # are free-motion-teleported to the VISSIM-driven positions at runtime, so
-    # these are just valid load-time anchors.
-    s = 5.0 + (i % 20) * 38.0
+    # Spread the load-time positions EVENLY around the ~774 m loop (no overlap for
+    # any N_TRAFFIC). The .lib parks them at z=-5000 at init and only lifts those
+    # mapped to a live VISSIM vehicle, so these are just valid load anchors.
+    s = (i + 0.5) * ROUTE_LEN / N_TRAFFIC
     return [
         f"Traffic.{i}.Name = RS_C{i:03d}", f"Traffic.{i}.Info:",
         f"Traffic.{i}.DetectMask = 1 1", f"Traffic.{i}.UpdRate = 1000",
@@ -169,6 +187,29 @@ def rewrite_traffic(tr: pathlib.Path) -> None:
     print(f"[build_testrun] wrote {N_TRAFFIC} CM13-format RS_C traffic objects in {tr.name}")
 
 
+EGO_CG_HEIGHT = 0.60  # m. osc2cm emits a 1.30 m CG (truck-tall) for this generic
+                      # passenger car, which rolls it on the loop's corners and
+                      # floats the body above the wheels. 0.60 matches the body
+                      # mount (Flex.JointFr1Fr1B) and CarMaker's validated DemoCar.
+
+
+def fix_ego_car(car: pathlib.Path) -> None:
+    # osc2cm regenerates the ego .car from the .xosc each import, dropping in the
+    # unvalidated 1.30 m CG. Force the CG height back to a sane value so the ego
+    # stays upright on the corners (and the body sits on its wheels, not above).
+    if not car.is_file():
+        return
+    out = []
+    for l in car.read_text(encoding="utf-8").splitlines():
+        if l.startswith("Body.pos = "):
+            p = l.split()  # Body.pos = x y z
+            out.append(f"Body.pos = {p[2]} {p[3]} {EGO_CG_HEIGHT:.2f}")
+        else:
+            out.append(l)
+    car.write_text("\n".join(out) + "\n", encoding="utf-8")
+    print(f"[build_testrun] set ego CG height -> {EGO_CG_HEIGHT} m in {car.name}")
+
+
 def main() -> int:
     if not RD.is_file():
         raise SystemExit(f"ERROR: {RD} missing -- run import_road.bat (osc2cm) first")
@@ -179,6 +220,7 @@ def main() -> int:
     if TR_DEMO.is_file():
         fix_ego_testrun(TR_DEMO)
         rewrite_traffic(TR_DEMO)
+    fix_ego_car(EGO_CAR)
     print("[build_testrun] done")
     return 0
 

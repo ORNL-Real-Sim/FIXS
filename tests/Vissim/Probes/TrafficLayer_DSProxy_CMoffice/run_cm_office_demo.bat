@@ -42,6 +42,8 @@ REM a 2nd socket the DSProxy TrafficLayer does not service, and the co-sim
 REM deadlocks. Killing here guarantees a clean launch on the demo config.
 echo Closing any stale CarMaker / TrafficLayer / VISSIM so the GUI starts fresh...
 taskkill /F /IM CM_Office.exe        >nul 2>&1
+taskkill /F /IM HIL.exe              >nul 2>&1
+taskkill /F /IM Movie.exe            >nul 2>&1
 taskkill /F /IM CarMaker.win64.exe   >nul 2>&1
 taskkill /F /IM TrafficLayer.exe     >nul 2>&1
 taskkill /F /IM VISSIM220.exe        >nul 2>&1
@@ -65,7 +67,26 @@ start "FIXS TrafficLayer (DSProxy)" cmd /k "%TL% -f %RUNCFG%"
 
 REM --- 3. open CarMaker Office GUI on the project ---------------------------
 echo [3/3] Opening CarMaker Office GUI...
-start "" "%CM_OFFICE%" -projectdir "%CMPROJ%"
+REM Pass the TestRun as a trailing arg so the GUI opens with it already loaded
+REM (CarMaker's standard "CM [opts] [testrun]" form). If your build ignores it,
+REM say so and we'll fall back to the session-restore approach.
+start "" "%CM_OFFICE%" -projectdir "%CMPROJ%" "%TESTRUN%"
+
+REM Open IPGMovie AFTER the GUI is up so it can connect/snap to it. Launched too
+REM early it starts before the GUI (which comes up a bit delayed) and won't connect.
+set MOVIE=C:\IPG\carmaker\win64-13.1.3\GUI\Movie.exe
+if not exist "%MOVIE%" ( echo NOTE: Movie.exe not at %MOVIE% - open it manually & goto :skipmovie )
+echo Waiting for the CarMaker GUI (HIL.exe) to come up before launching IPGMovie...
+set /a _w=0
+:waitgui
+timeout /t 1 /nobreak >nul
+tasklist /fi "imagename eq HIL.exe" 2>nul | find /i "HIL.exe" >nul && goto :guiup
+set /a _w+=1
+if %_w% lss 40 goto :waitgui
+:guiup
+timeout /t 3 /nobreak >nul
+start "" "%MOVIE%"
+:skipmovie
 
 echo.
 echo ============================================================

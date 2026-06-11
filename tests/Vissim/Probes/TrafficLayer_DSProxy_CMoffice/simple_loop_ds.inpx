@@ -3405,7 +3405,7 @@
 			</model2D3DSegs>
 		</model2D3D>
 	</models2D3D>
-	<netPara concatMaxLen="255" concatSeparator="," drivSimActive="true" drivSimPedType="200" drivSimVehType="200" linkGradBas="ZCOORDINATES" northDir="0" pedDefCellSize="0.15" pedDefObstDist="0.5" pedDirChgAngle="4" pedDirChgClip="true" pedNbhSearGridSize="5" pedQueueOrder="0.7" pedQueueStraight="0.6" powWghtRatioMax="30" powWghtRatioMin="7" radExper="2" sigHead3DArrowColorRedAmb="BLACKARROWONCOLOR" trafReg="RIGHTHANDTRAFFIC" underScenMngm="false" unitAccel="METERSPERSQUARESECOND" unitLenLong="KILOMETERS" unitLenShort="METERS" unitLenVeryShort="MILLIMETERS" unitSpeed="KILOMETERSPERHOUR" unitSpeedSmall="METERSPERSECOND">
+	<netPara concatMaxLen="255" concatSeparator="," drivSimActive="true" drivSimPedType="200" drivSimVehType="100" linkGradBas="ZCOORDINATES" northDir="0" pedDefCellSize="0.15" pedDefObstDist="0.5" pedDirChgAngle="4" pedDirChgClip="true" pedNbhSearGridSize="5" pedQueueOrder="0.7" pedQueueStraight="0.6" powWghtRatioMax="30" powWghtRatioMin="7" radExper="2" sigHead3DArrowColorRedAmb="BLACKARROWONCOLOR" trafReg="RIGHTHANDTRAFFIC" underScenMngm="false" unitAccel="METERSPERSQUARESECOND" unitLenLong="KILOMETERS" unitLenShort="METERS" unitLenVeryShort="MILLIMETERS" unitSpeed="KILOMETERSPERHOUR" unitSpeedSmall="METERSPERSECOND">
 		<defRefsElevator areaBehavTypAlight="2" areaBehavTypInCab="1" displTypCabCeil="45" displTypCabFloor="44" displTypCabWall="43" displTypDoor="42" displTypShaft="41"/>
 		<defRefsParkingLot dirChgDurDist="3"/>
 		<refPointMap x="99.999999999991246" y="100"/>
@@ -3520,6 +3520,7 @@
 		<timeIntervalSet no="VEHICLEINPUT">
 			<timeInts>
 				<timeInterval start="0"/>
+				<timeInterval start="240"/>
 			</timeInts>
 		</timeIntervalSet>
 		<timeIntervalSet no="VEHICLEROUTESTATIC">
@@ -3614,6 +3615,7 @@
 		<vehicleInput anmFlag="false" link="1" name="" no="1">
 			<timeIntVehVols>
 				<timeIntervalVehVolume cont="false" timeInt="1 0" vehComp="1" volType="STOCHASTIC" volume="600"/>
+				<timeIntervalVehVolume cont="false" timeInt="1 240000" vehComp="1" volType="STOCHASTIC" volume="0"/>
 			</timeIntVehVols>
 		</vehicleInput>
 	</vehicleInputs>
