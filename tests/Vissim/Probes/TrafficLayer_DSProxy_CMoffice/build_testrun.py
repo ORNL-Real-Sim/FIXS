@@ -19,6 +19,7 @@ Usage:  python build_testrun.py
         (paths are fixed to ProprietaryFiles/CM13_proj)
 """
 from __future__ import annotations
+import os
 import pathlib
 import re
 
@@ -29,7 +30,13 @@ CMPROJ = REPO / "ProprietaryFiles" / "CM13_proj"
 RD = CMPROJ / "Data" / "Road" / "simple_loop.rd5"
 TR_EGO = CMPROJ / "Data" / "TestRun" / "SimpleLoop_VISSIM"
 TR_DEMO = CMPROJ / "Data" / "TestRun" / "SimpleLoop_VISSIM_rs"
-EGO_CAR = CMPROJ / "Data" / "Vehicle" / "SimpleLoop_VISSIM_Ego"
+# Ego is the CM-shipped McLaren MP4 race car (copied into the project Data/Vehicle):
+# CG 0.25 m -- cannot roll on the loop corners -- and the McLaren_MP4_2016.mobj visual
+# is already wired into the .car. Replaces the osc2cm-generated SimpleLoop_VISSIM_Ego
+# (which came out truck-tall at 1.30 m CG and rolled). Its tyres/brake/visual resolve
+# from the standard CarMaker install.
+EGO_VEHICLE = "Demo_McLaren_F1"
+DRIVER_TPL = CMPROJ / "Data" / "Driver" / "Template" / "Car_Normal_osc"
 
 ROUTE_ID = 900
 DRVPATH_ID = 901
@@ -37,21 +44,27 @@ DRVPATH_ID = 901
 # by derive_drvpath() -- the authored junction loop's 8 LanePaths (4 straights +
 # 4 R15 corner-junction connectors) chained 1->5->2->6->3->7->4->8.
 ROUTE_LEN = 774.25  # 4x170 straights + 4x23.56 R15 arcs; roadutil -rlen 0 = 774.25
-N_TRAFFIC = 50          # >= the VISSIM inflow cap (~40) + buffer. Safe to overshoot:
-                        # the .lib parks all RS_C at z=-5000 at init and only lifts
-                        # the ones mapped to a live VISSIM vehicle, so spare slots are
-                        # invisible. Too FEW slots = VISSIM cars (incl. the ego's
-                        # leader) with no CM object -> ego sees clear road, won't follow.
+N_TRAFFIC = int(os.environ.get("RS_N_TRAFFIC", "50"))  # RS_N_TRAFFIC overrides (perf sweep).
+                        # Size this JUST ABOVE the real VISSIM peak (~40), NOT a big buffer.
+                        # The sweep_traffic.py study showed each CM traffic object costs
+                        # ~0.73 ms/step in CarMaker's core EVEN WHEN PARKED (idle slots at
+                        # z=-5000 are NOT free): per-step wall time is ~linear in N_TRAFFIC
+                        # (RTF 7.2 @20, 2.7 @50, 0.94 @150, all at ~13 active vehicles), so
+                        # N_TRAFFIC=150 already runs slower than real-time. Too FEW slots =
+                        # VISSIM cars (incl. the ego's leader) with no CM object -> ego sees
+                        # clear road, won't follow. 50 balances coverage vs cost.
 # The loop now has real R15 corner junctions (authored xodr -> osc2cm), so
 # IPGDriver follows the full 774 m loop and rounds every corner smoothly. The
 # ego runs the whole demo window; co-simulation (ego pose -> VISSIM, VISSIM
 # traffic -> CarMaker) runs throughout.
 EGO_SPEED_KMH = 18.0     # ego start velocity
-EGO_CRUISE_KMH = 30.0    # IPGDriver cruise target -- above the VISSIM loop traffic
-                         # so the ego catches leaders, but low enough that the R18
-                         # corners stay well under rollover (this generic car has a
-                         # tall CG). With LapDriving off the IPGDriver slows further
-                         # for the corners on its own.
+EGO_CRUISE_KMH = 50.0    # IPGDriver cruise cap, KM/H. CarMaker stores
+                         # Driver.Vel.CruisingSpeed in km/h (shipped Car_Normal=150,
+                         # Car_Aggressive=250) -- NOT m/s. Set to the VISSIM loop traffic's
+                         # desired speed (50 km/h) so the ego paces the flow; with
+                         # Consider.Traffic=1 it still follows leaders at a gap. The
+                         # McLaren's 0.25 m CG means the corners are no rollover risk. Used
+                         # for BOTH the TestRun and the driver template (kept consistent).
 # The ego MANEUVER must never be the run limiter -- set it effectively forever
 # (9999 s). The actual run length comes from the CO-SIMULATION, not CarMaker:
 # config.yaml's SimulationEndTime drives TrafficLayer's tick budget, and the run
@@ -124,6 +137,8 @@ def fix_ego_testrun(tr: pathlib.Path) -> None:
             out.append(f"Driver.Vel.CruisingSpeed = {EGO_CRUISE_KMH:.1f}")
         elif l.startswith("Driver.Consider.Traffic"):
             out.append("Driver.Consider.Traffic = 1")
+        elif l.startswith("Vehicle = "):
+            out.append(f"Vehicle = {EGO_VEHICLE}")
         elif l.startswith("Vehicle.Routing.Type"):
             out.append("Vehicle.Routing.Type = Route")
         elif l.startswith("Vehicle.Routing.ObjId"):
@@ -187,27 +202,33 @@ def rewrite_traffic(tr: pathlib.Path) -> None:
     print(f"[build_testrun] wrote {N_TRAFFIC} CM13-format RS_C traffic objects in {tr.name}")
 
 
-EGO_CG_HEIGHT = 0.60  # m. osc2cm emits a 1.30 m CG (truck-tall) for this generic
-                      # passenger car, which rolls it on the loop's corners and
-                      # floats the body above the wheels. 0.60 matches the body
-                      # mount (Flex.JointFr1Fr1B) and CarMaker's validated DemoCar.
-
-
-def fix_ego_car(car: pathlib.Path) -> None:
-    # osc2cm regenerates the ego .car from the .xosc each import, dropping in the
-    # unvalidated 1.30 m CG. Force the CG height back to a sane value so the ego
-    # stays upright on the corners (and the body sits on its wheels, not above).
-    if not car.is_file():
+def fix_driver_template(tpl: pathlib.Path) -> None:
+    # osc2cm regenerates Car_Normal_osc from the .xosc each import, dropping the ego's
+    # traffic-respect (Driver.Consider.Traffic) and leaving an uncapped cruise speed --
+    # so after a fresh import the ego ignores VISSIM traffic and (with the McLaren) races
+    # off. Force the two settings the demo needs so it stays reproducible without a manual
+    # GUI re-save: respect traffic (brake for leaders, hold a gap) + a tame cruise cap.
+    if not tpl.is_file():
         return
+    forced = {
+        "Driver.Consider.Traffic": "1",
+        "Driver.Vel.CruisingSpeed": f"{EGO_CRUISE_KMH:.1f}",   # km/h (CarMaker unit)
+    }
+    seen = set()
     out = []
-    for l in car.read_text(encoding="utf-8").splitlines():
-        if l.startswith("Body.pos = "):
-            p = l.split()  # Body.pos = x y z
-            out.append(f"Body.pos = {p[2]} {p[3]} {EGO_CG_HEIGHT:.2f}")
+    for l in tpl.read_text(encoding="utf-8").splitlines():
+        # match only "Key = value" lines (skip "Key:" table headers and indented data)
+        key = l.split("=", 1)[0].strip() if ("=" in l and not l.rstrip().endswith(":")) else None
+        if key in forced:
+            out.append(f"{key} = {forced[key]}")
+            seen.add(key)
         else:
             out.append(l)
-    car.write_text("\n".join(out) + "\n", encoding="utf-8")
-    print(f"[build_testrun] set ego CG height -> {EGO_CG_HEIGHT} m in {car.name}")
+    for key, val in forced.items():  # add any key osc2cm's output omitted entirely
+        if key not in seen:
+            out.append(f"{key} = {val}")
+    tpl.write_text("\n".join(out) + "\n", encoding="utf-8")
+    print(f"[build_testrun] forced traffic-respect + cruise cap in {tpl.name}")
 
 
 def main() -> int:
@@ -220,7 +241,7 @@ def main() -> int:
     if TR_DEMO.is_file():
         fix_ego_testrun(TR_DEMO)
         rewrite_traffic(TR_DEMO)
-    fix_ego_car(EGO_CAR)
+    fix_driver_template(DRIVER_TPL)
     print("[build_testrun] done")
     return 0
 
