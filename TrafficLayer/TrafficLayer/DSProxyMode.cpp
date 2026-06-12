@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 #include <fstream>
+#include <chrono>
 
 namespace FIXS {
 namespace DSProxy {
@@ -363,10 +364,36 @@ int runDSProxyMode(const ConfigHelper& config) {
         }
 
         // PHASE 2 — Collect canonical state from DSProxy.
+#ifdef RS_DEBUG
+        auto _gtv0 = std::chrono::high_resolution_clock::now();
+#endif
         const auto vehicles = proxy.getTrafficVehicles();
         const auto signals  = proxy.getSignalStates();
 #ifdef RS_DEBUG
-        { static std::ofstream s_rsVsPos("rs_vissim_pos.csv"); static bool h=(s_rsVsPos<<"tick,vissimId,vissimX,vissimY"<<std::endl,true); for(const auto& dv:vehicles) s_rsVsPos<<tick<<","<<dv.VehicleID<<","<<dv.Position_X<<","<<dv.Position_Y<<std::endl; }
+        {
+            // --- RS_DEBUG perf: DSProxy round-trip cost (VISSIM advance + extract) and
+            // the FULL per-tick interval. Bucketed every 100 ticks so the CSV write is cheap.
+            double gtv_us = (double)std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::high_resolution_clock::now() - _gtv0).count();
+            static auto s_prevTick = std::chrono::high_resolution_clock::now();
+            auto nowT = std::chrono::high_resolution_clock::now();
+            double tick_us = (double)std::chrono::duration_cast<std::chrono::microseconds>(nowT - s_prevTick).count();
+            s_prevTick = nowT;
+            static double s_accTick = 0.0, s_accGtv = 0.0; static long s_cnt = 0, s_lastBucket = -1;
+            s_accTick += tick_us; s_accGtv += gtv_us; s_cnt++;
+            long bucket = tick / 100;
+            if (bucket != s_lastBucket) {
+                static std::ofstream f("rs_timing_tl.csv");
+                static bool h = (f << "tick,nVeh,avg_tick_us,avg_getTraffic_us,ticks" << std::endl, true);
+                f << tick << "," << vehicles.size() << "," << (s_cnt ? s_accTick / s_cnt : 0.0) << ","
+                  << (s_cnt ? s_accGtv / s_cnt : 0.0) << "," << s_cnt << std::endl;
+                s_accTick = 0.0; s_accGtv = 0.0; s_cnt = 0; s_lastBucket = bucket;
+            }
+            // position dump (offsync debug)
+            static std::ofstream s_rsVsPos("rs_vissim_pos.csv");
+            static bool h2 = (s_rsVsPos << "tick,vissimId,vissimX,vissimY" << std::endl, true);
+            for (const auto& dv : vehicles) s_rsVsPos << tick << "," << dv.VehicleID << "," << dv.Position_X << "," << dv.Position_Y << std::endl;
+        }
 #endif
 
         // Resolve egoVissimId once the Create round-trips. Intra-PHASE-2

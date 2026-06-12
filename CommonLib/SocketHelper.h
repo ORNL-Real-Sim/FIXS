@@ -51,9 +51,9 @@
 	#pragma comment (lib, "Mswsock.lib")
 	#pragma comment (lib, "AdvApi32.lib")
 
-#ifdef RS_DEBUG
-#include <CarMaker.h>
-#endif
+// NOTE: RS_DEBUG must NOT pull <CarMaker.h> here. SocketHelper is shared with
+// TrafficLayer, whose build has no CarMaker SDK on its include path -- so the
+// RS_DEBUG breadcrumbs in SocketHelper.cpp use std::cout, not CarMaker's Log().
 
 #endif
 
@@ -92,6 +92,15 @@ public:
 	void disableClient();
 
 	int initConnection(std::string errorLogName="");
+
+	// RS_DEBUG master-log target. The host assigns it (TrafficLayer sets it to its
+	// RealSim_tmp/TrafficLayer_<timestamp>.log). When empty -- e.g. the VirtualEnvironment
+	// .lib running inside CarMaker -- RS_DEBUG breadcrumbs fall back to
+	// RealSim_tmp/RealSim_debug.log so there is always a persistent log on disk.
+	std::string MasterLogName = "";
+#ifdef RS_DEBUG
+	void rsDebugLog(const char* msg);
+#endif
 
 	void socketShutdown();
 

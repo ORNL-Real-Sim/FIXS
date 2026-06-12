@@ -307,6 +307,24 @@ void SocketHelper::disableClient() {
 	NCLIENT = 0;
 }
 
+#ifdef RS_DEBUG
+void SocketHelper::rsDebugLog(const char* msg) {
+	// RS_DEBUG breadcrumbs -> the TrafficLayer master log if one was assigned, else a
+	// persistent fallback under RealSim_tmp/ (gitignored). Plain C file I/O so this behaves
+	// identically in TrafficLayer AND the VirtualEnvironment .lib: no CarMaker dependency,
+	// no std::filesystem (CommonLib stays C++14).
+	std::string path = !MasterLogName.empty() ? MasterLogName : std::string("RealSim_tmp\\RealSim_debug.log");
+	FILE* f = fopen(path.c_str(), "a");
+	if (!f && MasterLogName.empty()) {
+#ifdef WIN32
+		CreateDirectoryA("RealSim_tmp", NULL);   // the .lib's CWD may lack it; best-effort
+#endif
+		f = fopen(path.c_str(), "a");
+	}
+	if (f) { fputs(msg, f); fclose(f); }
+}
+#endif
+
 int SocketHelper::initConnection(std::string errorLogName) {
 	const int RECVCLIENTBUFSIZE = 2048;
 	const int SENDCLIENTBUFSIZE = 8096;
@@ -340,7 +358,7 @@ int SocketHelper::initConnection(std::string errorLogName) {
 	==============================*/
 	if (ENABLE_SERVER) {
 #ifdef RS_DEBUG
-		Log("RealSim start server task\n");	
+		rsDebugLog("RealSim start server task\n");
 #endif
 		for (int iS = 0; iS < NSERVER; iS++) {
 			memset(&serverAddr[iS], 0, sizeof(serverAddr[iS]));   /* Zero out structure */
@@ -381,7 +399,7 @@ int SocketHelper::initConnection(std::string errorLogName) {
 				// placeholder
 			}
 #ifdef RS_DEBUG
-			Log("RealSim start server connection\n");	
+			rsDebugLog("RealSim start server connection\n");
 #endif
 			// Connect to server.
 			if (connect(serverSock[iS], (struct sockaddr*)&serverAddr[iS], sizeof(serverAddr[iS])) < 0) {
@@ -408,7 +426,7 @@ int SocketHelper::initConnection(std::string errorLogName) {
 				return -1;
 			}
 #ifdef RS_DEBUG
-			Log("RealSim server connected\n");	
+			rsDebugLog("RealSim server connected\n");
 #endif
 
 		}
@@ -807,9 +825,6 @@ int SocketHelper::initConnection(std::string errorLogName) {
 	}
 
 	cout << "RealSim Initialized" << endl;
-#ifdef RS_DEBUG
-	Log("RealSim Initialized\n");	
-#endif 
 
 	return 0;
 }

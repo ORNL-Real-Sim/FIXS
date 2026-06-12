@@ -4,6 +4,7 @@
 // #define ENABLE_PERF_TIMING
 #include "PerformanceTimer.h"
 #include <fstream>
+#include <chrono>
 
 using namespace std;
 
@@ -588,6 +589,32 @@ int VirEnvHelper::runStep(double simTime, const char** errorMsg) {
 		// ===========================================================================
 		#ifdef RS_DEBUG
 		{ static std::ofstream s_rsMap("rs_mapping.csv"); static long st=-1; long s=(long)TrafficSimulatorId2CarMakerId.size()*1000000+(long)CmAvailableCarId_queue.size()*1000+(long)CmAvailableTruckId_queue.size(); if(s!=st){ static bool hh=(s_rsMap<<"simTime,mapN,carQfree,truckQfree"<<std::endl,true); s_rsMap<<simTime<<","<<TrafficSimulatorId2CarMakerId.size()<<","<<CmAvailableCarId_queue.size()<<","<<CmAvailableTruckId_queue.size()<<std::endl; st=s; } }
+#endif
+		// --- RS_DEBUG perf: inter-call wall-clock per CarMaker step (real-time factor) ---
+		// Interval between consecutive runStep() calls = the FULL per-step wall time
+		// (CarMaker core + this .lib + any VISSIM-wait). RTF = sim_dt / wall_dt.
+		// Bucketed to 0.1 s so the 10 Hz CSV write does not perturb the ~1 kHz step.
+#ifdef RS_DEBUG
+		{
+			static auto s_prevWall = std::chrono::high_resolution_clock::now();
+			static double s_prevSim = simTime;
+			static double s_accWall = 0.0, s_accSim = 0.0; static long s_cnt = 0, s_lastSlot = -1;
+			auto nowW = std::chrono::high_resolution_clock::now();
+			double wall_us = (double)std::chrono::duration_cast<std::chrono::microseconds>(nowW - s_prevWall).count();
+			double sim_us = (simTime - s_prevSim) * 1e6;
+			s_prevWall = nowW; s_prevSim = simTime;
+			s_accWall += wall_us; s_accSim += sim_us; s_cnt++;
+			long slot = (long)(simTime * 10.0);
+			if (slot != s_lastSlot) {
+				static std::ofstream f("rs_timing_cm.csv");
+				static bool h = (f << "simTime,nVeh,wall_us_per_step,sim_us_per_step,rtf,ticks" << std::endl, true);
+				double rtf = (s_accWall > 0.0) ? (s_accSim / s_accWall) : 0.0;
+				f << simTime << "," << TrafficSimulatorId2CarMakerId.size() << ","
+				  << (s_cnt ? s_accWall / s_cnt : 0.0) << "," << (s_cnt ? s_accSim / s_cnt : 0.0) << ","
+				  << rtf << "," << s_cnt << std::endl;
+				s_accWall = 0.0; s_accSim = 0.0; s_cnt = 0; s_lastSlot = slot;
+			}
+		}
 #endif
 		PERF_TIC("update_traffic_state");
 		try {
