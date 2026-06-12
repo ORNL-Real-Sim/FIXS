@@ -8,6 +8,36 @@
 
 using namespace std;
 
+#ifdef RS_DEBUG
+// Times one runStep() entry->exit (the .lib's OWN per-step cost) AND the interval between
+// consecutive runStep() entries (the FULL CarMaker step). Bucketed to 0.1 s so the CSV
+// write does not perturb the loop. Proves whether the .lib time is flat in N_TRAFFIC
+// while the full step scales -> i.e. the O(N_TRAFFIC) cost is CarMaker core, not FIXS.
+struct RsRunStepTimer {
+	double simTime; size_t n;
+	std::chrono::high_resolution_clock::time_point t0;
+	RsRunStepTimer(double st, size_t n_)
+		: simTime(st), n(n_), t0(std::chrono::high_resolution_clock::now()) {}
+	~RsRunStepTimer() {
+		auto now = std::chrono::high_resolution_clock::now();
+		double runstep_us = (double)std::chrono::duration_cast<std::chrono::microseconds>(now - t0).count();
+		static std::chrono::high_resolution_clock::time_point s_prevEntry = t0;
+		double inter_us = (double)std::chrono::duration_cast<std::chrono::microseconds>(t0 - s_prevEntry).count();
+		s_prevEntry = t0;
+		static double accRun = 0.0, accInter = 0.0; static long cnt = 0, lastSlot = -1;
+		accRun += runstep_us; accInter += inter_us; cnt++;
+		long slot = (long)(simTime * 10.0);
+		if (slot != lastSlot) {
+			static std::ofstream f("rs_runstep_cm.csv");
+			static bool h = (f << "simTime,nVeh,lib_runstep_us,full_step_us,lib_frac" << std::endl, true);
+			double r = cnt ? accRun / cnt : 0.0, i = cnt ? accInter / cnt : 0.0;
+			f << simTime << "," << n << "," << r << "," << i << "," << (i > 0.0 ? r / i : 0.0) << std::endl;
+			accRun = 0.0; accInter = 0.0; cnt = 0; lastSlot = slot;
+		}
+	}
+};
+#endif
+
 VirEnvHelper::VirEnvHelper() {
 
 }
@@ -307,6 +337,9 @@ int VirEnvHelper::readSignalTable(const char* signalTablePathInput) {
 }
 
 int VirEnvHelper::runStep(double simTime, const char** errorMsg) {
+#ifdef RS_DEBUG
+	RsRunStepTimer _rsRunStepTimer(simTime, TrafficSimulatorId2CarMakerId.size());
+#endif
 	//FOR veh in RealSimReceived
 	//  IF veh.id NOT in sumo2ipg :
 	//      IF no available space

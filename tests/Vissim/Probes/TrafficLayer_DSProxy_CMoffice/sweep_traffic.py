@@ -25,7 +25,7 @@ CMPROJ = REPO / "ProprietaryFiles" / "CM13_proj"
 PY = sys.executable
 RESULTS = HERE / "RS_tmp"          # gitignored (**/RS_tmp/*)
 RESULTS.mkdir(exist_ok=True)
-N_SWEEP = [20, 50, 150]
+N_SWEEP = [20, 50, 100, 150]
 WARMUP_S = 60.0                    # ignore the first WARMUP_S sim-seconds (loop filling)
 
 
@@ -40,13 +40,14 @@ def run_one(n):
     time.sleep(2)
     env = dict(os.environ, RS_N_TRAFFIC=str(n))
     subprocess.run([PY, str(HERE / "build_testrun.py")], env=env, check=True)
-    for f in (CMPROJ / "rs_timing_cm.csv", HERE / "rs_timing_tl.csv"):
+    for f in (CMPROJ / "rs_timing_cm.csv", CMPROJ / "rs_runstep_cm.csv", HERE / "rs_timing_tl.csv"):
         try:
             f.unlink()
         except FileNotFoundError:
             pass
     subprocess.run([PY, str(HERE / "verify_demo.py")], env=env)
     for src, dst in [(CMPROJ / "rs_timing_cm.csv", RESULTS / f"rs_timing_cm_N{n}.csv"),
+                     (CMPROJ / "rs_runstep_cm.csv", RESULTS / f"rs_runstep_cm_N{n}.csv"),
                      (HERE / "rs_timing_tl.csv", RESULTS / f"rs_timing_tl_N{n}.csv")]:
         if src.exists():
             shutil.copy2(src, dst)
@@ -89,6 +90,25 @@ def summarize_tl(path):
     return dict(tick_us=statistics.mean(ticks[-tail:]), gtv_us=statistics.mean(gtv[-tail:]))
 
 
+def summarize_runstep(path):
+    lib, full, frac, nveh = [], [], [], []
+    with open(path) as f:
+        for row in csv.DictReader(f):
+            try:
+                if float(row["simTime"]) < WARMUP_S:
+                    continue
+                lib.append(float(row["lib_runstep_us"]))
+                full.append(float(row["full_step_us"]))
+                frac.append(float(row["lib_frac"]))
+                nveh.append(int(float(row["nVeh"])))
+            except (ValueError, KeyError):
+                continue
+    if not lib:
+        return None
+    return dict(lib_us=statistics.mean(lib), full_us=statistics.mean(full),
+                frac=statistics.mean(frac), nveh=int(statistics.median(nveh)), samples=len(lib))
+
+
 if __name__ == "__main__":
     for n in N_SWEEP:
         run_one(n)
@@ -112,5 +132,17 @@ if __name__ == "__main__":
             print(f"{n:>10} {s['tick_us']:>10.1f} {s['gtv_us']:>14.1f}")
         else:
             print(f"{n:>10} {'(no data)':>10}")
+    print("\n========== .lib vs CarMaker-core breakdown (the root-cause proof) ==========")
+    print(f"{'N_TRAFFIC':>10} {'active':>7} {'lib_us':>9} {'full_us':>9} {'CMcore_us':>10} {'lib_%':>7}")
+    for n in N_SWEEP:
+        p = RESULTS / f"rs_runstep_cm_N{n}.csv"
+        s = summarize_runstep(p) if p.exists() else None
+        if s:
+            cmcore = s['full_us'] - s['lib_us']
+            print(f"{n:>10} {s['nveh']:>7} {s['lib_us']:>9.1f} {s['full_us']:>9.1f} {cmcore:>10.1f} {100*s['frac']:>6.1f}%")
+        else:
+            print(f"{n:>10} {'(no data)':>7}")
     print("\nReading: if RTF falls as N_TRAFFIC rises while the TL side stays flat, the cost is")
     print("CarMaker's per-traffic-object processing (the slots), not VISSIM/DSProxy.")
+    print("And if lib_us stays ~flat while full_us / CMcore_us scale with N_TRAFFIC, that")
+    print("cost is CarMaker CORE -- the FIXS .lib only ever touches the active vehicles.")
