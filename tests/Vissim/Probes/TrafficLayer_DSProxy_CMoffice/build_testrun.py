@@ -159,14 +159,13 @@ def fix_ego_testrun(tr: pathlib.Path) -> None:
     print(f"[build_testrun] fixed ego maneuver + routing in {tr.name}")
 
 
-# CM traffic UpdRate (Hz) + motion model -- perf knobs (RS_UPD_RATE / RS_MOTION_KIND).
-# UpdRate gates how often CarMaker recomputes each object's road-network state + sensor
-# envelope -- the dominant per-object cost (CarMaker core, NOT the .lib; see PERF_N_TRAFFIC.md).
-# Default 200 Hz: CarMaker's FreeMotion default is 1000, but VISSIM never steps faster than
-# 100 ms (10 Hz) and we follow at a gap, so 200 Hz (5 ms) is ample AND ~15x cheaper per object
-# (measured CMcore 7.1 -> 0.47 us/obj at N=100). MOTION_KIND has no effect (FreeMotion skips
-# the dynamics solver -- Course measured identical to 4Wheel).
-UPD_RATE = int(os.environ.get("RS_UPD_RATE", "200"))
+# CM traffic UpdRate (Hz). KEEP AT 1000. Lowering it FREEZES the teleported FreeMotion
+# traffic (verified: UpdRate=200 stalled the whole co-sim -- the cars cluster and the ego
+# stops behind them), because below CarMaker's FreeMotion default it stops applying the
+# .lib's per-step position. The earlier "UpdRate = free 15x" claim was WRONG -- it measured
+# STATIC traffic. RS_UPD_RATE overrides this only for the correctness-checked sweep
+# (sweep_updrate.py). MOTION_KIND has no effect (FreeMotion skips the dynamics solver).
+UPD_RATE = int(os.environ.get("RS_UPD_RATE", "1000"))
 MOTION_KIND = os.environ.get("RS_MOTION_KIND", "").strip()
 
 
