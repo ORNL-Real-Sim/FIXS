@@ -159,14 +159,25 @@ def fix_ego_testrun(tr: pathlib.Path) -> None:
     print(f"[build_testrun] fixed ego maneuver + routing in {tr.name}")
 
 
+# CM traffic UpdRate (Hz) + motion model -- perf knobs (RS_UPD_RATE / RS_MOTION_KIND).
+# UpdRate gates how often CarMaker recomputes each object's road-network state + sensor
+# envelope -- the dominant per-object cost (CarMaker core, NOT the .lib; see PERF_N_TRAFFIC.md).
+# Default 200 Hz: CarMaker's FreeMotion default is 1000, but VISSIM never steps faster than
+# 100 ms (10 Hz) and we follow at a gap, so 200 Hz (5 ms) is ample AND ~15x cheaper per object
+# (measured CMcore 7.1 -> 0.47 us/obj at N=100). MOTION_KIND has no effect (FreeMotion skips
+# the dynamics solver -- Course measured identical to 4Wheel).
+UPD_RATE = int(os.environ.get("RS_UPD_RATE", "200"))
+MOTION_KIND = os.environ.get("RS_MOTION_KIND", "").strip()
+
+
 def traffic_obj(i: int) -> list[str]:
     # Spread the load-time positions EVENLY around the ~774 m loop (no overlap for
     # any N_TRAFFIC). The .lib parks them at z=-5000 at init and only lifts those
     # mapped to a live VISSIM vehicle, so these are just valid load anchors.
     s = (i + 0.5) * ROUTE_LEN / N_TRAFFIC
-    return [
+    lines = [
         f"Traffic.{i}.Name = RS_C{i:03d}", f"Traffic.{i}.Info:",
-        f"Traffic.{i}.DetectMask = 1 1", f"Traffic.{i}.UpdRate = 1000",
+        f"Traffic.{i}.DetectMask = 1 1", f"Traffic.{i}.UpdRate = {UPD_RATE}",
         f"Traffic.{i}.Lighting = 0", f"Traffic.{i}.FreeMotion = 1",
         f"Traffic.{i}.TrailerName =",
         f"Traffic.{i}.Template.FName = 1_Vehicles/IPG_CompanyCar_2018_Blue",
@@ -187,6 +198,9 @@ def traffic_obj(i: int) -> list[str]:
         f"Traffic.{i}.Man.0.LongStep.0.Limit = t 0.0",
         f"Traffic.{i}.Man.0.LatStep.0.Limit = t 0.0",
     ]
+    if MOTION_KIND:
+        lines.append(f"Traffic.{i}.Motion.Kind = {MOTION_KIND}")
+    return lines
 
 
 def rewrite_traffic(tr: pathlib.Path) -> None:
