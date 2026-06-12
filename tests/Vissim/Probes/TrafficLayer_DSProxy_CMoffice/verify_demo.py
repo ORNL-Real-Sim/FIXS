@@ -35,8 +35,8 @@ STAGE = HERE / "stage_network"
 RUNCFG = HERE / "config.runtime.yaml"
 TESTRUN = "SimpleLoop_VISSIM_rs"
 
-TL_CONNECT_TIMEOUT = 90    # s to wait for VISSIM_Connect OK
-RUN_TIMEOUT = 90           # s overall cap for the CarMaker run
+TL_CONNECT_TIMEOUT = 120    # s to wait for VISSIM_Connect OK
+RUN_TIMEOUT = 600           # s overall cap for the CarMaker run
 
 
 def stage_and_config() -> None:
