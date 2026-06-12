@@ -9,6 +9,7 @@
 #include <cstring>
 #include <string>
 #include <vector>
+#include <fstream>
 
 namespace FIXS {
 namespace DSProxy {
@@ -364,6 +365,9 @@ int runDSProxyMode(const ConfigHelper& config) {
         // PHASE 2 — Collect canonical state from DSProxy.
         const auto vehicles = proxy.getTrafficVehicles();
         const auto signals  = proxy.getSignalStates();
+#ifdef RS_DEBUG
+        { static std::ofstream s_rsVsPos("rs_vissim_pos.csv"); static bool h=(s_rsVsPos<<"tick,vissimId,vissimX,vissimY"<<std::endl,true); for(const auto& dv:vehicles) s_rsVsPos<<tick<<","<<dv.VehicleID<<","<<dv.Position_X<<","<<dv.Position_Y<<std::endl; }
+#endif
 
         // Resolve egoVissimId once the Create round-trips. Intra-PHASE-2
         // bookkeeping.

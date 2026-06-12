@@ -204,5 +204,8 @@ TODO.md
 
 **/nul
 
+# RS_DEBUG instrumentation dumps (opt-in via -p:RS_DEBUG=1)
+rs_*.csv
+
 # Ignore Claude Code configuration
 .claude/

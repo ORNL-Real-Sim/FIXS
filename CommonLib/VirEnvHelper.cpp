@@ -3,6 +3,7 @@
 // Uncomment the line below to enable performance timing
 // #define ENABLE_PERF_TIMING
 #include "PerformanceTimer.h"
+#include <fstream>
 
 using namespace std;
 
@@ -585,6 +586,9 @@ int VirEnvHelper::runStep(double simTime, const char** errorMsg) {
 		// ===========================================================================
 		// 			move traffic position
 		// ===========================================================================
+		#ifdef RS_DEBUG
+		{ static std::ofstream s_rsMap("rs_mapping.csv"); static long st=-1; long s=(long)TrafficSimulatorId2CarMakerId.size()*1000000+(long)CmAvailableCarId_queue.size()*1000+(long)CmAvailableTruckId_queue.size(); if(s!=st){ static bool hh=(s_rsMap<<"simTime,mapN,carQfree,truckQfree"<<std::endl,true); s_rsMap<<simTime<<","<<TrafficSimulatorId2CarMakerId.size()<<","<<CmAvailableCarId_queue.size()<<","<<CmAvailableTruckId_queue.size()<<std::endl; st=s; } }
+#endif
 		PERF_TIC("update_traffic_state");
 		try {
 			// update state
@@ -641,6 +645,9 @@ int VirEnvHelper::runStep(double simTime, const char** errorMsg) {
 					vehDataPrevious.pitch = TrfObj->r_zyx[1];
 				}
 				TrafficStatePrevious_um[idTs] = make_pair(simTime, vehDataPrevious);
+#ifdef RS_DEBUG
+					{ static std::ofstream s_rsCmPos("rs_cm_pos.csv"); static bool h=(s_rsCmPos<<"simTime,vissimId,cmId,drawnX,drawnY,targetX,targetY"<<std::endl,true); s_rsCmPos<<simTime<<","<<idTs<<","<<idCm<<","<<TrfObj->t_0[0]<<","<<TrfObj->t_0[1]<<","<<vehDataNext.positionX<<","<<vehDataNext.positionY<<std::endl; }
+#endif
 			}
 		}
 		catch (const std::exception& e) {
@@ -821,7 +828,13 @@ int VirEnvHelper::runStep(double simTime, const char** errorMsg) {
 #else
 		int refreshRate = (int)1 / Config_s.TrafficRefreshRate;
 #endif
-		if (abs(simTime * refreshRate - ceil(simTime * refreshRate - 0.5)) < 1e-5) {
+		// FP-robust refresh gate: the old fabs(simTime*rate - round)<1e-5 test silently
+		// failed once accumulated FP error in simTime exceeded 1e-5 (~715s at rate=1000),
+		// freezing ALL traffic interpolation. Compare integer refresh slots instead.
+		static long s_lastRefreshSlot = -1;
+		long s_refreshSlot = (long)std::llround((double)simTime * refreshRate);
+		if (s_refreshSlot != s_lastRefreshSlot) {
+			s_lastRefreshSlot = s_refreshSlot;
 
 			for (auto iter : TrafficSimulatorId2CarMakerId) {
 				string idTs = iter.first;
@@ -864,6 +877,9 @@ int VirEnvHelper::runStep(double simTime, const char** errorMsg) {
 				TrfObj->t_0[0] = posX;
 				TrfObj->t_0[1] = posY;
 				TrfObj->t_0[2] = posZ;
+#ifdef RS_DEBUG
+					{ static std::ofstream s_rsRef("rs_refresh.csv"); static bool h2=(s_rsRef<<"simTime,vissimId,cmId,tPrev,tNext,prevX,nextX,posX,posY"<<std::endl,true); if(std::fabs(simTime*10.0-std::floor(simTime*10.0+0.5))<0.01) s_rsRef<<simTime<<","<<idTs<<","<<idCm<<","<<tPrevious<<","<<tNext<<","<<vehDataPrevious.positionX<<","<<vehDataNext.positionX<<","<<posX<<","<<posY<<std::endl; }
+#endif
 
 				TrfObj->r_zyx[1] = pitch;
 				TrfObj->r_zyx[2] = yaw;
