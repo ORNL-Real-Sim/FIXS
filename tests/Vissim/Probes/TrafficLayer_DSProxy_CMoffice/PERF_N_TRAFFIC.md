@@ -118,6 +118,13 @@ together to the same value; do not go below ~600.
   example (`Traffic.UpdRate=200`, **`FreeMotion=0`**, 8 cars) run by the **stock install exe**
   (zero FIXS) completes fine — ego travels **5940 m**. `UpdRate=200` is CarMaker's *normal
   default* for normal traffic; it is NOT a CarMaker-core limit.
+- **Isolation — flip ONLY `FreeMotion` on that stock example** (`diag_stock_fm.py`): `FreeMotion=0`
+  → 5940 m (moves); `FreeMotion=1` → **33 m (frozen) at BOTH UpdRate=200 and 1000**. One field,
+  same road/AutoDriver/ego, turns a working run into a frozen one — `FreeMotion=1` is the pivot.
+  Note it freezes at 1000 too: `FreeMotion=1` does not self-drive (it is "position set
+  externally"), so with no source (vanilla) it is static at any UpdRate. The *UpdRate*-dependence
+  appears only **with** a source: the FIXS `.lib` drives it, and CarMaker applies that drive at
+  `UpdRate` Hz — fine at ≥600, too coarse at ≤500.
 
 So the freeze is **specific to `FreeMotion=1`** — the externally-positioned mode the `.lib`
 teleport requires. CarMaker writes a FreeMotion object's position only at its `UpdRate`; below
