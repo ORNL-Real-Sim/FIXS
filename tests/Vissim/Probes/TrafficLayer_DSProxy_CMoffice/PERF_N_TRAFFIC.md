@@ -141,6 +141,26 @@ teleported (`FreeMotion=1`) traffic** — it is a property of the teleport model
 runtime and not CarMaker core. FIXS is bound to `UpdRate ≥ 600` unless it abandons exact teleport
 for a CarMaker-driven traffic model (route + occasional correction) — a real redesign.
 
+## Result 4 — UpdRate=200 actually WORKS for driven FreeMotion; the FIXS freeze is a BUG
+
+The cleanest possible test (`diag_mover.py` + a minimal `User.c` mover gated on `RS_TEST_MOVER`,
+**no `.lib`, no VISSIM**): move one `FreeMotion=1` object at 13.9 m/s by writing its `t_0` every
+step, and log CarMaker's applied read-back vs the target.
+
+| UpdRate | read-back moved | target moved | |
+|---|---:|---:|:---:|
+| 1000 | 417.0 m | 417.0 m | ✅ tracks |
+| **200** | **416.3 m** | 417.0 m | ✅ **tracks** |
+
+**A correct external mover drives FreeMotion perfectly at `UpdRate=200`** — identical to 1000. So
+`UpdRate=200` is **not** inherently broken for driven FreeMotion; **Results 2–3's "inherent / bound
+to ≥600" framing was wrong** — built on the confounded FIXS co-sim (where the ego stalls first).
+**The `.lib`'s 200-freeze is a FIXS implementation bug, and UpdRate=200 is reachable** (the ~5×
+cheaper traffic). What the `.lib` does differently from the plain mover — and where the bug must
+live: it throttles `t_0` writes to `TrafficRefreshRate` (200 Hz when matched) and
+interpolates/parks 50 slots, vs the mover's plain every-step direct write. Isolating that
+difference is the path to the fix.
+
 ## Levers (corrected)
 1. **Fewer slots — the ONLY confirmed-safe lever.** Size `N_TRAFFIC` to the real VISSIM
    peak (~40–50), not a buffer; each slot costs ~7.4 µs/step in CarMaker's core whether or
