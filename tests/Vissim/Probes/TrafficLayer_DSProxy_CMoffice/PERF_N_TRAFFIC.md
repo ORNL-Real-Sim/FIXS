@@ -68,9 +68,16 @@ blocks VISSIM's inflow, so few vehicles ever enter (which is why earlier degrade
 `peak=0/1` — a frozen co-sim, not a license-seat shortage). **Matching the rates is not the
 fix — there is no easy UpdRate lever via YAML.**
 
-**Possible future lever (untested):** if the `.lib` also wrote `TrfObj->v_0` (velocity)
-alongside `t_0`, CarMaker could integrate the motion at a lower UpdRate without freezing,
-which would unlock the geometry savings. That's a `.lib` change for a later issue.
+**Tried — `v_0` does NOT work either.** Publishing `TrfObj->v_0` (the interpolation slope
+already computed for `t_0`) was implemented, the `.lib` + headless exe rebuilt, and tested at
+UpdRate=200: the traffic **still froze** (ego 3 m, peak 1). FreeMotion objects are pure
+teleport — they do not integrate `v_0` — so feeding them velocity is inert, and the freeze is
+an *absolute* low-UpdRate effect (1000/1000 moves; both 200/200 matched and 200 + `v_0` freeze),
+not a rate-mismatch or a missing-velocity one. **Definitive: `UpdRate` is not a usable lever
+for the teleport approach** — CarMaker's FreeMotion needs a high `UpdRate` to render the
+external position stream. A genuinely cheaper traffic would require abandoning exact teleport
+for CarMaker-integrated motion (an accuracy tradeoff and a much larger `.lib` redesign), not a
+config knob.
 
 ## Levers (corrected)
 1. **Fewer slots — the ONLY confirmed-safe lever.** Size `N_TRAFFIC` to the real VISSIM
