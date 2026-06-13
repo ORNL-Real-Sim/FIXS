@@ -33,7 +33,11 @@ optimizing it cannot help: the O(N_TRAFFIC) cost is CarMaker's own traffic engin
 Reference Manual §22.9: even FreeMotion objects recompute road-network state + envelope +
 bounding box every update.) The TL/DSProxy side stays small and near-flat.
 
-## Result 2 — UpdRate is NOT a usable lever (it FREEZES the traffic)
+## Result 2 — lowering UpdRate freezes FIXS's *teleported* (`FreeMotion`) traffic
+
+> Note: this freeze is **specific to `FreeMotion=1`** (the mode FIXS needs for the `.lib` to
+> teleport VISSIM cars). `UpdRate=200` is fine — in fact CarMaker's *default* — for normal
+> (`FreeMotion=0`) traffic; see the stock-CarMaker control in Result 3.
 
 > An earlier version of this study claimed lowering UpdRate gave a free ~15×. **That was
 > WRONG**: a low UpdRate FREEZES the FreeMotion traffic, and the "cheap" cost was just the
@@ -104,18 +108,24 @@ together to the same value; do not go below ~600.
   at 3 m → chokes VISSIM's inflow → no background is ever released → the `.lib` stays idle (which
   is why `rs_cm_pos`/`rs_freeze` are empty at 500).
 
-**Two control experiments (`diag_vanilla.py`) pin the cause and rule out the obvious suspects:**
-- **Co-sim OFF (vanilla, `.lib` inert via `EnableCosimulation=false`)** reproduces the freeze
-  *identically*: 200 → 3 m frozen, 600 → 1648 m moves. With the `.lib` not even connecting, it
-  cannot be the `.lib` runtime.
+**Three control experiments rule out the obvious suspects and pin the cause:**
+- **Co-sim OFF** (`diag_vanilla.py`, `.lib` inert via `EnableCosimulation=false`) reproduces the
+  freeze *identically*: 200 → 3 m frozen, 600 → 1648 m moves. With the `.lib` not even connecting,
+  it cannot be the `.lib` runtime.
 - **Dropping the slots' `AutoDriver`** (`RS_NO_AUTODRIVER=1`) does **not** unfreeze 200 (still
-  3 m). So it is not the AutoDriver either.
+  3 m). Not the AutoDriver either.
+- **Stock CarMaker, normal traffic, UpdRate=200** (`diag_stock.py`): CarMaker's own `Overtaking`
+  example (`Traffic.UpdRate=200`, **`FreeMotion=0`**, 8 cars) run by the **stock install exe**
+  (zero FIXS) completes fine — ego travels **5940 m**. `UpdRate=200` is CarMaker's *normal
+  default* for normal traffic; it is NOT a CarMaker-core limit.
 
-So the freeze is **CarMaker not applying the per-step FreeMotion position often enough below
-~600 Hz** — exactly what the original `build_testrun.py` comment (L162) warned. It is intrinsic
-to the **FreeMotion** traffic model the `.lib` teleport requires (FreeMotion = position set
-externally), not a `.lib` bug and not a single fixable knob. Going below 600 would need a
-non-FreeMotion traffic model — a redesign, not a config change.
+So the freeze is **specific to `FreeMotion=1`** — the externally-positioned mode the `.lib`
+teleport requires. CarMaker writes a FreeMotion object's position only at its `UpdRate`; below
+~600 Hz that is too coarse to hold the teleported cars in place, so they drift onto the ego's
+route and stall it. **`UpdRate=200` works for normal (CarMaker-driven) traffic but not for FIXS's
+teleported (`FreeMotion=1`) traffic** — it is a property of the teleport model, not the `.lib`
+runtime and not CarMaker core. FIXS is bound to `UpdRate ≥ 600` unless it abandons exact teleport
+for a CarMaker-driven traffic model (route + occasional correction) — a real redesign.
 
 ## Levers (corrected)
 1. **Fewer slots — the ONLY confirmed-safe lever.** Size `N_TRAFFIC` to the real VISSIM
