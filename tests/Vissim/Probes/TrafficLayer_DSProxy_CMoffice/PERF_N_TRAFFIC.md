@@ -192,6 +192,13 @@ CarMaker-core geometry drops **12.7×** (367 → 29 µs; full step ~10.8×). The
 the saving is real and *larger* than the naive 5× (per-object 7.4 → 0.58 µs/obj). The re-park loop
 is O(slots²)/refresh as written but only **+1 µs** measured; cache the RS_C ids at init if optimizing.
 
+**Sync verified** (`diag_sync.py`, robust gap, entry-transient + loop-seam excluded): rendered-vs-
+intended position at UpdRate=200 vs 1000 — median **1.24 vs 1.18 m**, p95 1.54 vs 1.46 m. The
+~1.2 m is the inherent 0.1 s VISSIM-tick interpolation lag (identical at both rates); `UpdRate=200`
+adds only **~7 cm** (5 ms sample staleness). So `refresh ≠ UpdRate` (required — refresh must lead
+UpdRate so each read is fresh) causes **no meaningful sync error**; the ego↔VISSIM lockstep is a
+separate 10 Hz path, untouched. The 12.7× saving costs ~7 cm of rendered traffic position.
+
 ## Levers (corrected)
 1. **Fewer slots — the ONLY confirmed-safe lever.** Size `N_TRAFFIC` to the real VISSIM
    peak (~40–50), not a buffer; each slot costs ~7.4 µs/step in CarMaker's core whether or
