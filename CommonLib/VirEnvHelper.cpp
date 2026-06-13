@@ -895,6 +895,27 @@ int VirEnvHelper::runStep(double simTime, const char** errorMsg) {
 		long s_refreshSlot = (long)std::llround((double)simTime * refreshRate);
 		if (s_refreshSlot != s_lastRefreshSlot) {
 			s_lastRefreshSlot = s_refreshSlot;
+#ifdef RS_DEBUG
+			// SLOT PROBE (#168): read the first RS_C slots' positions DIRECTLY each refresh-slot,
+			// regardless of whether the .lib has mapped/teleported them, to test whether CarMaker's
+			// OWN per-object UpdRate update advances the AutoDriver-driven slots. If they freeze at
+			// their StartPos at low UpdRate, the first slot blocks the ego -> the freeze is CarMaker's
+			// traffic update, NOT the .lib teleport. ~10 Hz, first 30 s.
+			{
+				int sstep = refreshRate / 10; if (sstep < 1) sstep = 1;
+				if (simTime < 30.0 && (s_refreshSlot % sstep == 0)) {
+					static std::ofstream s_rsSlot("rs_slots.csv");
+					static bool hS = (s_rsSlot << "simTime,nMapped,s0x,s1x,s2x,s5x,s10x" << std::endl, true);
+					tTrafficObj* T0 = Traffic_GetByTrfId(0); tTrafficObj* T1 = Traffic_GetByTrfId(1);
+					tTrafficObj* T2 = Traffic_GetByTrfId(2); tTrafficObj* T5 = Traffic_GetByTrfId(5);
+					tTrafficObj* T10 = Traffic_GetByTrfId(10);
+					s_rsSlot << simTime << "," << TrafficSimulatorId2CarMakerId.size() << ","
+					         << (T0 ? T0->t_0[0] : -999) << "," << (T1 ? T1->t_0[0] : -999) << ","
+					         << (T2 ? T2->t_0[0] : -999) << "," << (T5 ? T5->t_0[0] : -999) << ","
+					         << (T10 ? T10->t_0[0] : -999) << std::endl;
+				}
+			}
+#endif
 
 			for (auto iter : TrafficSimulatorId2CarMakerId) {
 				string idTs = iter.first;
@@ -933,6 +954,24 @@ int VirEnvHelper::runStep(double simTime, const char** errorMsg) {
 
 				tTrafficObj* TrfObj = Traffic_GetByTrfId(idCm);
 
+#ifdef RS_DEBUG
+				// FREEZE DIAGNOSTIC (#168): capture CarMaker's t_0 immediately BEFORE we overwrite
+				// it -- i.e. the value CarMaker left after ITS own traffic update last step -- vs
+				// the position we are about to teleport to (t0_set). If t0_pre stays static while
+				// t0_set advances across refreshes, CarMaker is CLOBBERING our teleport every step
+				// (the freeze). If t0_pre tracks t0_set but the car still doesn't move, the teleport
+				// survives but isn't rendered as motion. Logged for the first 3 s (freeze is instant).
+				{
+					int fstep = refreshRate / 20; if (fstep < 1) fstep = 1;   // ~20 Hz throttle
+					if (simTime < 30.0 && (s_refreshSlot % fstep == 0)) {
+						static std::ofstream s_rsF("rs_freeze.csv");
+						static bool hF = (s_rsF << "simTime,slot,vissimId,t0_pre_x,t0_pre_y,t0_set_x,t0_set_y,tPrev,tNext" << std::endl, true);
+						s_rsF << simTime << "," << s_refreshSlot << "," << idTs << ","
+						      << TrfObj->t_0[0] << "," << TrfObj->t_0[1] << ","
+						      << posX << "," << posY << "," << tPrevious << "," << tNext << std::endl;
+					}
+				}
+#endif
 
 				TrfObj->t_0[0] = posX;
 				TrfObj->t_0[1] = posY;

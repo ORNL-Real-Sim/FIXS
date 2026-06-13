@@ -73,23 +73,58 @@ already computed for `t_0`) was implemented, the `.lib` + headless exe rebuilt, 
 UpdRate=200: the traffic **still froze** (ego 3 m, peak 1). FreeMotion objects are pure
 teleport — they do not integrate `v_0` — so feeding them velocity is inert, and the freeze is
 an *absolute* low-UpdRate effect (1000/1000 moves; both 200/200 matched and 200 + `v_0` freeze),
-not a rate-mismatch or a missing-velocity one. **Definitive: `UpdRate` is not a usable lever
-for the teleport approach** — CarMaker's FreeMotion needs a high `UpdRate` to render the
-external position stream. A genuinely cheaper traffic would require abandoning exact teleport
-for CarMaker-integrated motion (an accuracy tradeoff and a much larger `.lib` redesign), not a
-config knob.
+not a rate-mismatch or a missing-velocity one (UpdRate=200 is well below the threshold). **But
+`UpdRate` is NOT a hard wall at 1000 — there is a sharp threshold, and below it the freeze is
+not the `.lib` at all. See Result 3.**
+
+## Result 3 — the real threshold (~550) and the real cause (CarMaker, not the `.lib`)
+
+A matched-pair sweep (`sweep_matched.py`, `TrafficRefreshRate = 1/UpdRate`) shows the freeze is
+a **sharp cliff**, not a wall at 1000:
+
+| matched UpdRate | ego dist | moves? |
+|---|---:|:---:|
+| 1000 / 900 / 800 / 600 / 550 | ~1600 m | ✅ |
+| 500 / 400 / 300 / 200 | 3 m | ❌ |
+
+(700 runs with moving traffic — `peak=17` — but has a separate end-of-run parse glitch; it is
+not a freeze.) So **matched `UpdRate ≥ 600` is a usable lever** — a ~1.67× cheaper traffic step
+than 1000, with the co-sim still moving. Lower `Traffic.<i>.UpdRate` **and** `TrafficRefreshRate`
+together to the same value; do not go below ~600.
+
+**Where/why it freezes** (RS_DEBUG probes via `diag_freeze.py` with `RS_DEBUG_BUILD=1` —
+`rs_cm_pos.csv`, `rs_freeze.csv`, `rs_slots.csv`):
+
+- In the **moving** case the `.lib` teleport is exact: `t_0` read-back tracks the target to a
+  **0.024 m** mean gap. The `.lib` is not the problem.
+- In the **frozen** case the `.lib` receives **zero** background traffic (`nMapped=0`) — it is
+  completely idle. The freeze is **upstream of the `.lib`**.
+- Direct slot reads (`Traffic_GetByTrfId(i)->t_0`, mapped or not) show the cause: in the working
+  case the 50 `RS_C` placeholder slots sit **dormant at the origin** until the `.lib` assigns
+  them a VISSIM vehicle; at low `UpdRate` CarMaker's per-object update lets them **spuriously
+  activate** (AutoDriver free-runs them into the scene at erratic speeds), which stalls the ego
+  at 3 m → chokes VISSIM's inflow → no background is ever released → the `.lib` stays idle.
+
+So the freeze is **CarMaker's own traffic-object update at low `UpdRate`**, before the co-sim
+teleport engages — the opposite of "the `.lib` froze the teleport". The exact CarMaker-internal
+trigger (why low `UpdRate` wakes the dormant slots) is a CarMaker-side question
+(DataDict/IPGMovie), not the `.lib`.
 
 ## Levers (corrected)
 1. **Fewer slots — the ONLY confirmed-safe lever.** Size `N_TRAFFIC` to the real VISSIM
    peak (~40–50), not a buffer; each slot costs ~7.4 µs/step in CarMaker's core whether or
    not it's mapped to a live vehicle.
-2. **UpdRate: do NOT lower it** (freezes the traffic — Result 2). Keep it at 1000.
+2. **UpdRate: matched `≥ 600` is safe (~1.67× cheaper), `≤ 500` freezes** (Result 3). Lower
+   `Traffic.UpdRate` and `TrafficRefreshRate` together to the same value; do not go below ~600.
+   The freeze below that is CarMaker-side (placeholder slots mis-activate), not the `.lib`.
 3. **Lighter templates / no AutoDriver:** untested; the measured per-step cost is the
    road-network + envelope geometry, which a lighter template may not change. Worth a
    *correctness-checked* experiment, not an assumption.
 4. **GUI render (IPGMovie):** a separate per-object cost on top, excluded by this headless
    study — likely the user-visible extra GUI slowdown, stacked on the core cost here.
 
-Reproduce: `python sweep_traffic.py` (N_TRAFFIC, `.lib`-vs-core) and `python
-sweep_updrate.py` (UpdRate, **with the ego-distance correctness check — the cost column is
-only valid where the ego moved**). Needs the RS_DEBUG builds + a short SimulationEndTime.
+Reproduce: `python sweep_traffic.py` (N_TRAFFIC, `.lib`-vs-core); `python sweep_updrate.py`
+(UpdRate, refresh fixed); `python sweep_matched.py` (matched-pair threshold — Result 3); and
+`RS_DEBUG_BUILD=1 python diag_freeze.py` (the freeze mechanism — `rs_slots.csv` etc.). The
+matched/freeze scripts edit `config.yaml` in place and restore it. Needs the RS_DEBUG builds
+(`RS_DEBUG_BUILD=1`, env-gated in `build_headless_exe.bat`) + a short SimulationEndTime.
