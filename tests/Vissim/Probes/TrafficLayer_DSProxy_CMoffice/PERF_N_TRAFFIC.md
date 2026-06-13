@@ -126,6 +126,13 @@ together to the same value; do not go below ~600.
   appears only **with** a source: the FIXS `.lib` drives it, and CarMaker applies that drive at
   `UpdRate` Hz — fine at ≥600, too coarse at ≤500.
 
+- **CarMaker's own convention** (`SimNet/Highway_3EgoVhcls_Traffic_*` examples): where CarMaker
+  itself feeds a `FreeMotion=1` object externally (cross-instance ego vehicles via SimNet), every
+  one of them is set to **`UpdRate=1000`** — vs `UpdRate=200` for its normal `FreeMotion=0`
+  traffic. CarMaker's own authors treat externally-driven FreeMotion as a 1000-Hz thing. FIXS's
+  `FreeMotion=1 @ 1000` matches that; `@ 200` is below it. (Confirms it from the *producer* side,
+  independent of any FIXS run.)
+
 So the freeze is **specific to `FreeMotion=1`** — the externally-positioned mode the `.lib`
 teleport requires. CarMaker writes a FreeMotion object's position only at its `UpdRate`; below
 ~600 Hz that is too coarse to hold the teleported cars in place, so they drift onto the ego's
