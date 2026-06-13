@@ -55,8 +55,18 @@ moving co-sim lets the ego follow + travel; a frozen one leaves it stalled near 
 `TrfObj->t_0` **directly** every refresh (1 kHz, `VirEnvHelper.cpp` ~L937). Below that
 rate CarMaker's FreeMotion sub-samples and re-derives the object from its own
 velocity-less state, so the car reverts to static and the ego then stalls behind it.
-Lowering **both** refreshRate and UpdRate together (200/200, matched) **also froze** — so
-there is no easy UpdRate lever.
+Lowering **both** refreshRate and UpdRate together (200/200, matched) **also froze**,
+confirmed by a clean back-to-back A/B on a properly-licensed CarMaker:
+
+| run (refresh/UpdRate) | ego dist | peak veh | `drawnX` vs `targetX` | |
+|---|---:|---:|---|:---:|
+| baseline 1000/1000 | **1606 m** | 17 | 206 m vs 206 m (tracks) | ✅ moves |
+| matched 200/200    | **3 m**    | 1  | (no bg traffic to log)  | ❌ frozen |
+
+The peak collapse is itself a *symptom* of the freeze, not a VISSIM problem: the stalled ego
+blocks VISSIM's inflow, so few vehicles ever enter (which is why earlier degraded runs showed
+`peak=0/1` — a frozen co-sim, not a license-seat shortage). **Matching the rates is not the
+fix — there is no easy UpdRate lever via YAML.**
 
 **Possible future lever (untested):** if the `.lib` also wrote `TrfObj->v_0` (velocity)
 alongside `t_0`, CarMaker could integrate the motion at a lower UpdRate without freezing,
