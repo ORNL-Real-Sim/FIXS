@@ -99,16 +99,23 @@ together to the same value; do not go below ~600.
   **0.024 m** mean gap. The `.lib` is not the problem.
 - In the **frozen** case the `.lib` receives **zero** background traffic (`nMapped=0`) — it is
   completely idle. The freeze is **upstream of the `.lib`**.
-- Direct slot reads (`Traffic_GetByTrfId(i)->t_0`, mapped or not) show the cause: in the working
-  case the 50 `RS_C` placeholder slots sit **dormant at the origin** until the `.lib` assigns
-  them a VISSIM vehicle; at low `UpdRate` CarMaker's per-object update lets them **spuriously
-  activate** (AutoDriver free-runs them into the scene at erratic speeds), which stalls the ego
-  at 3 m → chokes VISSIM's inflow → no background is ever released → the `.lib` stays idle.
+- Direct slot reads (`Traffic_GetByTrfId(i)->t_0`, mapped or not): at `UpdRate ≥ 600` the slots
+  stay correctly parked; at `≤ 500` they end up on the ego's route and block it. The ego stalls
+  at 3 m → chokes VISSIM's inflow → no background is ever released → the `.lib` stays idle (which
+  is why `rs_cm_pos`/`rs_freeze` are empty at 500).
 
-So the freeze is **CarMaker's own traffic-object update at low `UpdRate`**, before the co-sim
-teleport engages — the opposite of "the `.lib` froze the teleport". The exact CarMaker-internal
-trigger (why low `UpdRate` wakes the dormant slots) is a CarMaker-side question
-(DataDict/IPGMovie), not the `.lib`.
+**Two control experiments (`diag_vanilla.py`) pin the cause and rule out the obvious suspects:**
+- **Co-sim OFF (vanilla, `.lib` inert via `EnableCosimulation=false`)** reproduces the freeze
+  *identically*: 200 → 3 m frozen, 600 → 1648 m moves. With the `.lib` not even connecting, it
+  cannot be the `.lib` runtime.
+- **Dropping the slots' `AutoDriver`** (`RS_NO_AUTODRIVER=1`) does **not** unfreeze 200 (still
+  3 m). So it is not the AutoDriver either.
+
+So the freeze is **CarMaker not applying the per-step FreeMotion position often enough below
+~600 Hz** — exactly what the original `build_testrun.py` comment (L162) warned. It is intrinsic
+to the **FreeMotion** traffic model the `.lib` teleport requires (FreeMotion = position set
+externally), not a `.lib` bug and not a single fixable knob. Going below 600 would need a
+non-FreeMotion traffic model — a redesign, not a config change.
 
 ## Levers (corrected)
 1. **Fewer slots — the ONLY confirmed-safe lever.** Size `N_TRAFFIC` to the real VISSIM

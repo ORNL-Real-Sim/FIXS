@@ -71,7 +71,7 @@ EGO_CRUISE_KMH = 50.0    # IPGDriver cruise cap, KM/H. CarMaker stores
 # ends when TrafficLayer closes the co-sim socket (-> CarMaker SIM_END). Tying the
 # maneuver to the config duration (the old behaviour) made CarMaker cap the run
 # itself at t=SimulationEndTime regardless of VISSIM.
-RUN_SECONDS = 9999
+RUN_SECONDS = int(os.environ.get("RS_RUN_SECONDS", "9999"))  # standalone tests set this short
 
 
 def add_route_to_road() -> None:
@@ -167,6 +167,9 @@ def fix_ego_testrun(tr: pathlib.Path) -> None:
 # (sweep_updrate.py). MOTION_KIND has no effect (FreeMotion skips the dynamics solver).
 UPD_RATE = int(os.environ.get("RS_UPD_RATE", "1000"))
 MOTION_KIND = os.environ.get("RS_MOTION_KIND", "").strip()
+# #168 freeze diagnostic: drop the slots' AutoDriver to test the FreezePos-vs-AutoDriver
+# conflict that surfaces at low UpdRate (slots self-propel out of the z=-5000 parking).
+AUTO_DRIVER = "" if os.environ.get("RS_NO_AUTODRIVER") else "Car_HDM_Normal"
 
 
 def traffic_obj(i: int) -> list[str]:
@@ -180,7 +183,7 @@ def traffic_obj(i: int) -> list[str]:
         f"Traffic.{i}.Lighting = 0", f"Traffic.{i}.FreeMotion = 1",
         f"Traffic.{i}.TrailerName =",
         f"Traffic.{i}.Template.FName = 1_Vehicles/IPG_CompanyCar_2018_Blue",
-        f"Traffic.{i}.AutoDriver.FName = Car_HDM_Normal",
+        f"Traffic.{i}.AutoDriver.FName = {AUTO_DRIVER}",
         f"Traffic.{i}.Routing.Type = Route", f"Traffic.{i}.Routing.ObjId = {ROUTE_ID}",
         f"Traffic.{i}.StartPos.Type = Route", f"Traffic.{i}.StartPos.ObjId = {ROUTE_ID}",
         f"Traffic.{i}.StartPos = {s:.3f} 0.0",
