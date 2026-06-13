@@ -893,6 +893,19 @@ int VirEnvHelper::runStep(double simTime, const char** errorMsg) {
 		// freezing ALL traffic interpolation. Compare integer refresh slots instead.
 		static long s_lastRefreshSlot = -1;
 		long s_refreshSlot = (long)std::llround((double)simTime * refreshRate);
+#ifdef RS_DEBUG
+		// #168 .lib SEQUENCE PROOF: log an unmapped slot's z (t_0[2]) every runStep. The .lib
+		// re-parks it to -5000 each refresh; at refresh=UpdRate the held value is reset back (the
+		// write is discarded -> z drifts up), at refresh>UpdRate it holds. Same reconciliation the
+		// mover showed for a mapped slot's x, now on the .lib's own write path (no ego confound).
+		if (simTime > 1.0 && simTime < 1.2) {
+			tTrafficObj* Tz = Traffic_GetByTrfId(0);
+			static std::ofstream s_libseq("rs_libseq.csv");
+			static bool hLq = (s_libseq << "simTime,z_readback,slot,didRefresh" << std::endl, true);
+			int dR = (s_refreshSlot != s_lastRefreshSlot) ? 1 : 0;
+			if (Tz != NULL) s_libseq << simTime << "," << Tz->t_0[2] << "," << s_refreshSlot << "," << dR << std::endl;
+		}
+#endif
 		if (s_refreshSlot != s_lastRefreshSlot) {
 			s_lastRefreshSlot = s_refreshSlot;
 #ifdef RS_DEBUG
@@ -916,6 +929,21 @@ int VirEnvHelper::runStep(double simTime, const char** errorMsg) {
 				}
 			}
 #endif
+
+			// #168: re-park UNMAPPED RS_C slots EVERY refresh so they HOLD at low UpdRate. The
+			// one-time init park (t_0[2]=-5000) drifts when UpdRate < ~600 -- CarMaker needs an
+			// external FreeMotion position written every step, not once (proven: diag_mover_hz.py).
+			// Mapped slots are driven by the loop below; here we keep the spares buried off-road.
+			for (int iReObj = 0; iReObj < Traffic.nObjs; iReObj++) {
+				bool isMapped = false;
+				for (auto &kvm : TrafficSimulatorId2CarMakerId) { if (kvm.second == iReObj) { isMapped = true; break; } }
+				if (isMapped) continue;
+				tTrafficObj* Tpark = Traffic_GetByTrfId(iReObj);
+				if (Tpark == NULL) continue;
+				string nmPark = Tpark->Cfg.Name;
+				if (nmPark.find(RealSimCarNamePattern) == string::npos && nmPark.find(RealSimTruckNamePattern) == string::npos) continue;
+				Tpark->t_0[2] = -5000;
+			}
 
 			for (auto iter : TrafficSimulatorId2CarMakerId) {
 				string idTs = iter.first;

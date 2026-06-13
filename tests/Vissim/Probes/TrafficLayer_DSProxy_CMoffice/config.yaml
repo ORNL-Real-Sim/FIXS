@@ -47,6 +47,8 @@ XilSetup:
 # subscription above so there is one source of truth for the port + ego id.
 CarMakerSetup:
     EnableCosimulation: true        # drives ENABLE_REALSIM in VirtualEnvironment.lib
+    TrafficRefreshRate: 0.001       # write t_0 every sim step (1 kHz) -- REQUIRED so UpdRate=200
+                                    # traffic doesn't phase-lock/freeze (#168). Do not raise.
     EnableEgoSimulink: false        # ego pose comes from User.c (office), not Simulink
     SynchronizeTrafficSignal: false # SimpleEcho has no signals; skip signal sync entirely
     EgoId: egoCm

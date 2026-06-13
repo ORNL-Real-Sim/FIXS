@@ -28,7 +28,7 @@ TESTRUN = "SimpleLoop_VISSIM_rs"
 PY = sys.executable
 RESULTS = HERE / "RS_tmp"
 RESULTS.mkdir(exist_ok=True)
-HZS = ["0", "1000", "200", "100"]   # 0 = every step
+HZS = os.environ.get("RS_HZS", "0,1000,200,100").split(",")   # write rates to sweep; 0 = every step
 
 
 def make_cfg() -> None:
@@ -39,7 +39,7 @@ def make_cfg() -> None:
 
 
 def run(hz: str) -> bool:
-    env = dict(os.environ, RS_N_TRAFFIC="1", RS_UPD_RATE="200",
+    env = dict(os.environ, RS_N_TRAFFIC="1", RS_UPD_RATE=os.environ.get("RS_UPD", "200"),
                RS_RUN_SECONDS="30", RS_TEST_MOVER="1", RS_MOVER_HZ=hz)
     subprocess.run([PY, str(HERE / "build_testrun.py")], env=env, check=True, capture_output=True)
     try:

@@ -159,13 +159,15 @@ def fix_ego_testrun(tr: pathlib.Path) -> None:
     print(f"[build_testrun] fixed ego maneuver + routing in {tr.name}")
 
 
-# CM traffic UpdRate (Hz). KEEP AT 1000. Lowering it FREEZES the teleported FreeMotion
-# traffic (verified: UpdRate=200 stalled the whole co-sim -- the cars cluster and the ego
-# stops behind them), because below CarMaker's FreeMotion default it stops applying the
-# .lib's per-step position. The earlier "UpdRate = free 15x" claim was WRONG -- it measured
-# STATIC traffic. RS_UPD_RATE overrides this only for the correctness-checked sweep
-# (sweep_updrate.py). MOTION_KIND has no effect (FreeMotion skips the dynamics solver).
-UPD_RATE = int(os.environ.get("RS_UPD_RATE", "1000"))
+# CM traffic UpdRate (Hz). 200 is SAFE and default since the freeze was fixed (#168): the
+# earlier stall came from a phase-lock alias -- the .lib throttled t_0 writes to a rate
+# matched/harmonic with CarMaker's FreeMotion reconcile at UpdRate, so CarMaker discarded
+# the writes and reset the cars. Fix = write t_0 EVERY sim step (config TrafficRefreshRate
+# = 0.001) + re-park unmapped slots each refresh; CarMaker then samples a fresh position at
+# UpdRate. With that, UpdRate=200 cuts the geometry recompute 12.7x (367->29 us/step) for
+# ~5 us/step of .lib work -- real-time at scale. See PERF_N_TRAFFIC.md.
+# MOTION_KIND has no effect (FreeMotion skips the dynamics solver).
+UPD_RATE = int(os.environ.get("RS_UPD_RATE", "200"))
 MOTION_KIND = os.environ.get("RS_MOTION_KIND", "").strip()
 # #168 freeze diagnostic: drop the slots' AutoDriver to test the FreezePos-vs-AutoDriver
 # conflict that surfaces at low UpdRate (slots self-propel out of the z=-5000 parking).
