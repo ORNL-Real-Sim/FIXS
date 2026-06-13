@@ -161,6 +161,28 @@ live: it throttles `t_0` writes to `TrafficRefreshRate` (200 Hz when matched) an
 interpolates/parks 50 slots, vs the mover's plain every-step direct write. Isolating that
 difference is the path to the fix.
 
+## Result 5 — UpdRate=200 UNLOCKED (the fix, verified)
+
+Confirmed cause (`diag_mover_hz.py`, UpdRate=200 fixed, sweeping the mover's write rate): every
+step / 1000 Hz → tracks (416 m); 200 Hz / 100 Hz → flat. **CarMaker at `UpdRate=R` needs `t_0`
+written faster than R.** Two changes then make the full co-sim run at `UpdRate=200`:
+
+1. **Keep `TrafficRefreshRate` high** (`0.001` = write `t_0` every step) and lower *only* `UpdRate`.
+   The matched sweep's `TrafficRefreshRate = 1/UpdRate` (200 Hz writes) was exactly the freeze.
+2. **Re-park unmapped RS_C slots every refresh** (`VirEnvHelper.cpp` refresh loop): the spares are
+   parked once at init (`t_0[2]=-5000`) but drift at low UpdRate and block the ego; re-parking them
+   every refresh keeps them buried.
+
+| co-sim | ego | peak | |
+|---|---:|---:|:---:|
+| before fix, UpdRate=200 | 3 m | 1 | ❌ frozen |
+| **after fix, UpdRate=200** | **1620 m** | 17 | ✅ moves |
+| baseline, UpdRate=1000 | 1606 m | 17 | ✅ moves |
+
+So `UpdRate=200` now runs identically to 1000 while updating the per-object geometry 5× less often
+— the ~5× cheaper traffic. (The re-park loop is O(slots²)/refresh as written; cache the RS_C ids at
+init to optimize.)
+
 ## Levers (corrected)
 1. **Fewer slots — the ONLY confirmed-safe lever.** Size `N_TRAFFIC` to the real VISSIM
    peak (~40–50), not a buffer; each slot costs ~7.4 µs/step in CarMaker's core whether or
