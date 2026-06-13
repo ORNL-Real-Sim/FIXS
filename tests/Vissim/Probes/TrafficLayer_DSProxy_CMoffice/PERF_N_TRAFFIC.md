@@ -179,9 +179,18 @@ written faster than R.** Two changes then make the full co-sim run at `UpdRate=2
 | **after fix, UpdRate=200** | **1620 m** | 17 | ✅ moves |
 | baseline, UpdRate=1000 | 1606 m | 17 | ✅ moves |
 
-So `UpdRate=200` now runs identically to 1000 while updating the per-object geometry 5× less often
-— the ~5× cheaper traffic. (The re-park loop is O(slots²)/refresh as written; cache the RS_C ids at
-init to optimize.)
+So `UpdRate=200` runs identically to 1000 while updating the per-object geometry 5× less often.
+**Cost measured** (`diag_cost.py`, RS_DEBUG, steady-state µs / CarMaker step):
+
+| UpdRate | full | `.lib` | CMcore (geometry) |
+|---|---:|---:|---:|
+| 1000 | 371 | 4.4 | 367 |
+| **200** | **34** | 5.5 | **29** |
+
+CarMaker-core geometry drops **12.7×** (367 → 29 µs; full step ~10.8×). The geometry is gated by
+`UpdRate`, **not** re-triggered by the 1 kHz `t_0` writes (those stay ~5 µs incl. the re-park) — so
+the saving is real and *larger* than the naive 5× (per-object 7.4 → 0.58 µs/obj). The re-park loop
+is O(slots²)/refresh as written but only **+1 µs** measured; cache the RS_C ids at init if optimizing.
 
 ## Levers (corrected)
 1. **Fewer slots — the ONLY confirmed-safe lever.** Size `N_TRAFFIC` to the real VISSIM
