@@ -65,6 +65,34 @@ but driver junction-routing on the synthetic OpenDRIVE road is a follow-up). The
 co-simulation (ego→VISSIM, VISSIM traffic→CarMaker) is fully exercised in that
 window. Looping the ego is tracked as future work.
 
+## Run at another site (ORNL) — no build
+
+For a quick out-of-box test, the `feature/168_cm_office_xil` branch **ships the two
+built binaries** (`CarMaker.win64.exe` in ProprietaryFiles, `TrafficLayer.exe`) so
+you do **not** need Visual Studio or the build chain. The road, TestRun, ego, and
+DS-network are already committed too.
+
+**On the test box you still need installed (cannot be shipped):**
+- **CarMaker 13.1.3** office at the default `C:\IPG\carmaker\win64-13.1.3\`. The
+  shipped exe is **version-locked to 13.1.3** — a different CarMaker version will not
+  load it and you must rebuild (see *Build prerequisites* below).
+- **VISSIM 2022** with a working CodeMeter license (provides `DrivingSimulatorProxy.dll`).
+- **Python 3** on PATH (used only to stage files — no packages needed).
+
+**Steps:**
+```cmd
+git clone <FIXS repo> && cd FIXS
+git checkout feature/168_cm_office_xil
+git submodule update --init --recursive
+tests\Vissim\Probes\TrafficLayer_DSProxy_CMoffice\run_cm_office_demo.bat
+```
+Then in the CarMaker GUI: wait for the TrafficLayer window to print
+`VISSIM_Connect OK`, load TestRun `SimpleLoop_VISSIM_rs`, press the green **Start**.
+
+> The committed binaries are **temporary** for this cross-site test and are stripped
+> before the ProprietaryFiles PR merges (no multi-MB blob on `PF/main`). If CarMaker
+> is not 13.1.3, ignore them and build per *Build prerequisites*.
+
 ## First-time setup
 
 The CarMaker road + TestRun are generated headlessly from the VISSIM network's

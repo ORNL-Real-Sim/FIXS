@@ -28,7 +28,11 @@ set CMPROJ=%RepoRoot%\ProprietaryFiles\CM13_proj
 set CM_OFFICE=C:\IPG\carmaker\win64-13.1.3\bin\CM_Office.exe
 set TESTRUN=SimpleLoop_VISSIM_rs
 set RUNCFG=%HERE%config.runtime.yaml
-set PYTHON=C:\Users\yshao\miniconda3\envs\realsim_dev\python.exe
+REM Python is used ONLY to stage files (setup_gui.py is pure stdlib) -- ANY Python 3
+REM works, no packages needed. Honor a preset %PYTHON%; else try the 'py' launcher,
+REM then 'python' on PATH. Override with:  set PYTHON=C:\full\path\python.exe
+if not defined PYTHON set "PYTHON=py"
+"%PYTHON%" --version >nul 2>&1 || set "PYTHON=python"
 
 echo ============================================================
 echo  FIXS #168 CarMaker-VISSIM co-simulation demo (SimpleEcho)
@@ -52,7 +56,7 @@ REM --- preflight -----------------------------------------------------------
 if not exist "%TL%"        ( echo ERROR: TrafficLayer.exe missing: %TL%        & echo  build: scripts\dispatch\2_core_components.bat & pause & exit /b 1 )
 if not exist "%CMEXE%"     ( echo ERROR: custom CarMaker.win64.exe missing: %CMEXE% & pause & exit /b 1 )
 if not exist "%CM_OFFICE%" ( echo ERROR: CM_Office.exe not found: %CM_OFFICE%   & pause & exit /b 1 )
-if not exist "%PYTHON%"    ( echo ERROR: python env not found: %PYTHON%         & pause & exit /b 1 )
+"%PYTHON%" --version >nul 2>&1 || ( echo ERROR: no Python 3 found ^(install Python 3, or set PYTHON=full\path\python.exe^) & pause & exit /b 1 )
 if not exist "%CMPROJ%\Data\TestRun\%TESTRUN%" ( echo ERROR: TestRun %TESTRUN% missing. Run import_road.bat then build_testrun.py. & pause & exit /b 1 )
 
 REM --- 1. stage network + write config.runtime.yaml + patch GUI config ------
