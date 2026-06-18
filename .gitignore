@@ -212,8 +212,5 @@ config.runtime.yaml
 config.vanilla.yaml
 stage_network/
 
-# VISSIM auto-backup of the .inpx (written on open/save)
-*.inp0
-
 # Ignore Claude Code configuration
 .claude/
