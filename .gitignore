@@ -207,5 +207,13 @@ TODO.md
 # RS_DEBUG instrumentation dumps (opt-in via -p:RS_DEBUG=1)
 rs_*.csv
 
+# Generated at launch / by the DSProxy_CMoffice diag+perf probes -- never commit
+config.runtime.yaml
+config.vanilla.yaml
+stage_network/
+
+# VISSIM auto-backup of the .inpx (written on open/save)
+*.inp0
+
 # Ignore Claude Code configuration
 .claude/
