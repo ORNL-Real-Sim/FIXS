@@ -17,3 +17,7 @@ dependencies:
   - pip
   - pip:
       - ./Carla/carla-0.9.15-cp310-cp310-win_amd64.whl
+      # SUMO Python bindings (also shipped with a SUMO system install, but
+      # pinned here so the `realsim` env can run SUMO<->CARLA co-sim standalone)
+      - traci
+      - sumolib

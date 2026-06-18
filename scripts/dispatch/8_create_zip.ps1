@@ -72,6 +72,20 @@ try {
         }
     }
 
+    # Include the conda env spec + its Carla wheel so the fetched FIXS/ folder
+    # is a self-contained 'realsim' environment definition (environment.yml
+    # references ./Carla/carla-*.whl relative to itself).
+    $EnvYml = Join-Path $RepoRoot 'environment.yml'
+    if (Test-Path $EnvYml) {
+        Copy-Item -Path $EnvYml -Destination $StagingDir -Force
+        Write-Host "  + environment.yml"
+    }
+    $CarlaDir = Join-Path $RepoRoot 'Carla'
+    if (Test-Path $CarlaDir) {
+        Copy-Item -Path $CarlaDir -Destination $StagingDir -Recurse -Force
+        Write-Host "  + Carla/ (carla wheel)"
+    }
+
     Compress-Archive -Path "$StagingDir\*" -DestinationPath $ZipPath -CompressionLevel Optimal
     Remove-Item $StagingDir -Recurse -Force
 
