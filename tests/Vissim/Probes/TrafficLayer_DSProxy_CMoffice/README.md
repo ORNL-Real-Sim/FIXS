@@ -16,7 +16,7 @@ CarMaker.win64.exe ──[ego "egoCm" VehFullData @ port 2444]──▶ TrafficL
         ▲                                                  VISSIM_SetDriverVehicles
         │                                                             ▼
         └──[all background traffic, ego restamped "egoCm"]──  VISSIM (via DrivingSimulatorProxy.dll)
-                                                              SimpleEcho 4-edge loop, 600 veh/h
+                                                              SimpleEcho 4-edge loop, 700 veh/h
 ```
 
 ## What you see

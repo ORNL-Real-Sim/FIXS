@@ -3614,7 +3614,7 @@
 	<vehicleInputs>
 		<vehicleInput anmFlag="false" link="1" name="" no="1">
 			<timeIntVehVols>
-				<timeIntervalVehVolume cont="false" timeInt="1 0" vehComp="1" volType="STOCHASTIC" volume="600"/>
+				<timeIntervalVehVolume cont="false" timeInt="1 0" vehComp="1" volType="STOCHASTIC" volume="700"/>
 				<timeIntervalVehVolume cont="false" timeInt="1 240000" vehComp="1" volType="STOCHASTIC" volume="0"/>
 			</timeIntVehVols>
 		</vehicleInput>
