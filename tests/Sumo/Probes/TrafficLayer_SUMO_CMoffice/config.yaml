@@ -1,0 +1,76 @@
+# =============================================================================
+# FIXS #174 -- SUMO <-> CarMaker (office) co-simulation on the SimpleLoop net.
+# Vehicles only, NO traffic-signal sync (SimpleLoop has no signals).
+#
+# This is the SUMO sibling of tests/Vissim/Probes/TrafficLayer_DSProxy_CMoffice
+# (which drives the SAME CarMaker side from VISSIM via DSProxy). Together they
+# exercise the VirtualEnvironment .lib through one pipeline from two traffic
+# sources -- the cross-simulator differential the #174 consolidation needs.
+#
+# Data flow (CarMaker owns ego dynamics = "mode A"):
+#
+#   CarMaker.win64.exe --[ego 'egoCm' VehFullData on port 2444]--> TrafficLayer
+#   TrafficLayer --[TraCI moveToXY / inject]--------------------->  SUMO
+#   SUMO --[TraCI background vehicle states]--------------------->  TrafficLayer
+#   TrafficLayer --[all background VehFullData on 2444]---------->  CarMaker (RS_Cxxx traffic objects)
+#
+# Unlike the VISSIM/DSProxy probe, this uses the NORMAL FIXS SUMO path
+# (EnableRealSim: true, libsumo/TraCI), not a DSProxy bypass.
+# =============================================================================
+
+SimulationSetup:
+    # Master switch for the FIXS interface. SUMO path needs this ON.
+    EnableRealSim: true
+    EnableVerboseLog: false
+
+    SelectedTrafficSimulator: 'SUMO'
+
+    # 1200 ticks at 10 Hz -- long enough to record a demo / smoke the round-trip.
+    SimulationEndTime: 1000
+
+    # Mandatory fields for CarMaker's VirtualEnvironment.lib:
+    #   id, speed, vehicleClass, heading, grade, speedDesired
+    # (VirEnvHelper::initialization returns ERROR_INIT_MSG_FIELD otherwise.)
+    VehicleMessageField: [id, type, vehicleClass, speed, speedDesired, positionX, positionY, positionZ, heading, linkId, laneId, grade]
+
+    # TraCI endpoint SUMO is launched on (see run_sumo_cm_demo.bat: --remote-port 1337).
+    TrafficSimulatorIP: '127.0.0.1'
+    TrafficSimulatorPort: 1337
+
+SumoSetup:
+    # 32 = all TraCI speed/safety checks off (ego pose is externally driven by
+    # CarMaker, so SUMO must not override it). Matches tests/SumoIpg.
+    SpeedMode: 32
+
+ApplicationSetup:
+    EnableApplicationLayer: false
+
+# The ego is delivered to / from CarMaker over the FIXS socket. CarMaker's
+# VirtualEnvironment.lib connects here as a client on ip/port[0]; with no
+# explicit CarMakerSetup.CarMakerIP/Port below, ConfigHelper falls back to this
+# subscription, and the subscription id ('egoCm') becomes CarMakerSetup.EgoId.
+# One block => one source of truth for the port and the ego match key.
+XilSetup:
+    EnableXil: true
+    VehicleSubscription:
+    -   type: ego
+        # 'egoCm' is created in SUMO by the interface at sim start (the SUMO
+        # path injects the ego rather than reading an existing vehicle). radius
+        # 100 m => background traffic within 100 m of the ego is forwarded to CM.
+        attribute: { id: ['egoCm'], radius: [100] }
+        ip: ['127.0.0.1']
+        port: [2444]
+
+# CarMaker side. EgoId / CarMakerPort / CarMakerIP fall back to the XIL
+# subscription above so there is a single source of truth for port + ego id.
+CarMakerSetup:
+    EnableCosimulation: true        # drives ENABLE_REALSIM in VirtualEnvironment.lib
+    EnableEgoSimulink: false        # ego pose comes from User.c (office IPGDriver), not Simulink
+    SynchronizeTrafficSignal: false # SimpleLoop has no signals; skip signal sync entirely
+    TrafficRefreshRate: 0.001       # write t_0 every sim step (1 kHz). Keep low so traffic
+                                    # objects don't phase-lock/freeze at high UpdRate (#168).
+    EgoId: egoCm
+    # SUMO vType for the injected ego. 'car' matches the vType defined in
+    # tests/Sumo/SimpleLoop/simple_loop.rou.xml. If absent, SUMO's default type
+    # is used.
+    EgoType: car

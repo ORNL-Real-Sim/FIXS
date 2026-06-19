@@ -168,9 +168,14 @@ int main(int argc, const char* argv[]) {
     // ===========================================================================
     std::unordered_map<std::string, std::unordered_map<int, TrafficLight>> trafficLightMap = BridgeHelper::readTrafficLightTable(trafficLightMapPath);
 
+    // A signal-free scenario (e.g. SimpleLoop) legitimately has no traffic-light
+    // table. Do NOT abort: an empty map is safe because the per-tick TLS sync
+    // below only touches trafficLightMap for junctions that actually arrive in
+    // TlsDataRecv_um, which stays empty when FIXS sends no signals. Treat it as a
+    // notice so vehicle-only co-simulation still runs.
     if (trafficLightMap.empty()) {
-		std::cerr << "No traffic light data found in the file: " << trafficLightMapPath << std::endl;
-		return -1;
+		std::cerr << "Notice: no traffic-light data in '" << trafficLightMapPath
+		          << "' -- running vehicles-only (no traffic-signal sync)." << std::endl;
 	}
 
     if (socketHelper.initConnection(CarlaClientLogFile) < 0) {

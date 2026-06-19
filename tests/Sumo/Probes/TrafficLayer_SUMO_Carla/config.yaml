@@ -1,0 +1,87 @@
+# =============================================================================
+# FIXS #174 -- SUMO <-> Carla co-simulation on the SimpleLoop net.
+# Vehicles only, NO traffic-signal sync (SimpleLoop has no signals).
+#
+# Sibling of tests/Sumo/Probes/TrafficLayer_SUMO_CMoffice: same SUMO traffic
+# source, same shared net, but the virtual environment is Carla instead of
+# CarMaker. Together they drive the (to-be-consolidated) VirEnvCore from one
+# pipeline into two backends -- the cross-simulator differential of #174.
+#
+# Data flow (visualization-first; ego stays SUMO-driven):
+#
+#   SUMO --[TraCI vehicle states]--> TrafficLayer --[VehFullData @ port 440]--> VirCarlaEnv.exe
+#                                                                                   │
+#                                                                          spawn / SetTransform
+#                                                                                   ▼
+#                                                                              Carla server (PhysX off)
+#
+# Flip CarlaSetup.EnableExternalControl to true to have Carla read the ego state
+# back and publish it to FIXS (the "L4-as-today" / mode A readback path).
+# =============================================================================
+
+SimulationSetup:
+    EnableRealSim: true
+    EnableVerboseLog: false
+
+    SelectedTrafficSimulator: 'SUMO'
+
+    SimulationEndTime: 1000
+
+    # Carla's bridge needs pose + extent: positionX/Y/Z, heading, grade, and
+    # length/width/height (mainVirCarla builds the actor bounding box from them).
+    VehicleMessageField: [id, type, vehicleClass, speed, speedDesired, positionX, positionY, positionZ, heading, grade, length, width, height, color, linkId, laneId]
+
+    TrafficSimulatorIP: '127.0.0.1'
+    TrafficSimulatorPort: 1337
+
+SumoSetup:
+    SpeedMode: 32
+
+# Carla connects to the FIXS Application publish endpoint (ip/port[0] below).
+# CarlaSetup.CarlaClientPort must match this port (440).
+ApplicationSetup:
+    EnableApplicationLayer: true
+    VehicleSubscription:
+    -   type: ego
+        # 'ego' matches the vehicle defined in
+        # tests/Sumo/SimpleLoop/simple_loop.rou.xml. radius 100 m forwards
+        # background traffic near the ego to Carla.
+        attribute: { id: ['ego'], radius: [100] }
+        ip: ['127.0.0.1']
+        port: [440]
+
+XilSetup:
+    EnableXil: false
+
+CarlaSetup:
+    # verbose ON so the bridge prints spawn/update/despawn lines -- this is the
+    # output verify_sumo_carla.py reads to reason about whether the bridge's
+    # decisions make sense (active ids, spawns, poses).
+    EnableVerboseLog: true
+    EnableCosimulation: true
+
+    # false => Carla VISUALIZES the SUMO vehicles (ego included), no readback.
+    #          This is the simplest pipeline (#77 visualization-only).
+    # true  => Carla reads InterestedIds' pose/velocity back and publishes to
+    #          FIXS (mode A readback; the L4-as-today path).
+    EnableExternalControl: false
+
+    # false => map SUMO vClass -> a Carla blueprint. true => use the vehicle
+    # 'type' string directly as the blueprint id (needs matching blueprints).
+    UseVehicleTypeAsBlueprint: false
+
+    # Carla server (CarlaUE4.exe) -- started separately, see README.
+    CarlaServerIP: 127.0.0.1
+    CarlaServerPort: 2000
+
+    # Where VirCarlaEnv connects to TrafficLayer (must equal ApplicationSetup port).
+    CarlaClientIP: 127.0.0.1
+    CarlaClientPort: 440
+
+    TrafficRefreshRate: 0.1
+
+    # Subset of the subscription ids that Carla treats as "interested" (ego).
+    InterestedIds: ['ego']
+
+    # Spectator camera follows this id (must be an interested id).
+    CenteredViewId: ego

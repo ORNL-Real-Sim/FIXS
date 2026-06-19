@@ -3,13 +3,26 @@
 <!-- Routes for simple loop scenario -->
 <routes xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/routes_file.xsd">
 
-    <!-- Vehicle type -->
-    <vType id="car" vClass="passenger" length="5.0" minGap="2.5" maxSpeed="20.0" accel="2.6" decel="4.5" sigma="0.5"/>
+    <!-- Background vehicle type: YELLOW. -->
+    <vType id="car" vClass="passenger" length="5.0" minGap="2.5" maxSpeed="20.0" accel="2.6" decel="4.5" sigma="0.5" color="1,1,0"/>
 
-    <!-- Loop route: bottom -> right -> top -> left -> repeat -->
-    <route id="loop" edges="bottom right top left" repeat="100"/>
+    <!-- Loop edge ids come from netconvert: simple_loop.net.xml is generated from
+         tests/Vissim/SimpleEcho/simple_loop.xodr so SUMO, the CarMaker road, and
+         the Carla world share ONE geometry. Loop is node 4->1->2->3->4, i.e.
+         edges -1 -> -2 -> -3 -> -4. repeat is large so vehicles circulate the
+         loop ENDLESSLY (they never reach the end / never exit). -->
+    <route id="loop" edges="-1 -2 -3 -4" repeat="100000"/>
 
-    <!-- Single ego vehicle that drives in a loop -->
+    <!-- Background demand mimicking the VISSIM SimpleEcho counterpart: inject at
+         ~700 veh/h (simple_loop_ds.inpx vehicleInput volume="700") until 40
+         vehicles are on the loop, then stop injecting. Because the route repeats,
+         those 40 circulate persistently and never exit, so the population holds
+         at ~40 (VISSIM shows ~40 after ~240 s). 40 @ 700 veh/h fills in ~206 s. -->
+    <flow id="bg" type="car" route="loop" begin="0" number="40" vehsPerHour="700" departLane="best" departSpeed="max"/>
+
+    <!-- Single ego vehicle: RED, also circulates endlessly. (SUMO-Carla visualizes
+         it; on SUMO-CM the interface injects egoCm and this is one of the vehicles
+         CarMaker renders.) -->
     <vehicle id="ego" type="car" route="loop" depart="0" color="1,0,0"/>
 
 </routes>
