@@ -12,6 +12,7 @@ dependencies:
   - pygame
   - protobuf
   - pyyaml
+  - lxml
   - vs2015_runtime
   - vc14_runtime
   - pip
