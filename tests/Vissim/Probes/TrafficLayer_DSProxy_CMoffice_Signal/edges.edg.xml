@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<edges>
+    <edge id="corridor_wc_e" from="int_west" to="int_center" numLanes="3" speed="13.89" priority="3"/>
+    <edge id="corridor_wc_w" from="int_center" to="int_west" numLanes="2" speed="13.89" priority="3"/>
+    <edge id="corridor_ce_e" from="int_center" to="int_east" numLanes="3" speed="13.89" priority="3"/>
+    <edge id="corridor_ce_w" from="int_east" to="int_center" numLanes="2" speed="13.89" priority="3"/>
+    <edge id="west_N_in" from="west_north" to="int_west" numLanes="1" speed="13.89" priority="3"/>
+    <edge id="west_N_out" from="int_west" to="west_north" numLanes="1" speed="13.89" priority="3"/>
+    <edge id="west_S_in" from="west_south" to="int_west" numLanes="1" speed="13.89" priority="3"/>
+    <edge id="west_S_out" from="int_west" to="west_south" numLanes="1" speed="13.89" priority="3"/>
+    <edge id="center_N_in" from="center_north" to="int_center" numLanes="1" speed="13.89" priority="3"/>
+    <edge id="center_N_out" from="int_center" to="center_north" numLanes="1" speed="13.89" priority="3"/>
+    <edge id="center_S_in" from="center_south" to="int_center" numLanes="1" speed="13.89" priority="3"/>
+    <edge id="center_S_out" from="int_center" to="center_south" numLanes="1" speed="13.89" priority="3"/>
+    <edge id="east_N_in" from="east_north" to="int_east" numLanes="1" speed="13.89" priority="3"/>
+    <edge id="east_N_out" from="int_east" to="east_north" numLanes="1" speed="13.89" priority="3"/>
+    <edge id="east_S_in" from="east_south" to="int_east" numLanes="1" speed="13.89" priority="3"/>
+    <edge id="east_S_out" from="int_east" to="east_south" numLanes="1" speed="13.89" priority="3"/>
+    <edge id="corridor_e_out" from="int_east" to="rbe_W" numLanes="2" speed="13.89" priority="3"/>
+    <edge id="corridor_e_in" from="rbe_W" to="int_east" numLanes="3" speed="13.89" priority="3"/>
+    <edge id="corridor_w_in" from="rbw_E" to="int_west" numLanes="3" speed="13.89" priority="3"/>
+    <edge id="corridor_w_out" from="int_west" to="rbw_E" numLanes="2" speed="13.89" priority="3"/>
+    <edge id="rbe_arc0" from="rbe_E" to="rbe_N" numLanes="1" speed="8.33" priority="3" shape="1045.00,0.00 1043.87,10.01 1040.54,19.52 1035.18,28.06 1028.06,35.18 1019.52,40.54 1010.01,43.87 1000.00,45.00"/>
+    <edge id="rbe_arc1" from="rbe_N" to="rbe_W" numLanes="1" speed="8.33" priority="3" shape="1000.00,45.00 989.99,43.87 980.48,40.54 971.94,35.18 964.82,28.06 959.46,19.52 956.13,10.01 955.00,0.00"/>
+    <edge id="rbe_arc2" from="rbe_W" to="rbe_S" numLanes="1" speed="8.33" priority="3" shape="955.00,0.00 956.13,-10.01 959.46,-19.52 964.82,-28.06 971.94,-35.18 980.48,-40.54 989.99,-43.87 1000.00,-45.00"/>
+    <edge id="rbe_arc3" from="rbe_S" to="rbe_E" numLanes="1" speed="8.33" priority="3" shape="1000.00,-45.00 1010.01,-43.87 1019.52,-40.54 1028.06,-35.18 1035.18,-28.06 1040.54,-19.52 1043.87,-10.01 1045.00,-0.00"/>
+    <edge id="rbw_arc0" from="rbw_E" to="rbw_N" numLanes="1" speed="8.33" priority="3" shape="-955.00,0.00 -956.13,10.01 -959.46,19.52 -964.82,28.06 -971.94,35.18 -980.48,40.54 -989.99,43.87 -1000.00,45.00"/>
+    <edge id="rbw_arc1" from="rbw_N" to="rbw_W" numLanes="1" speed="8.33" priority="3" shape="-1000.00,45.00 -1010.01,43.87 -1019.52,40.54 -1028.06,35.18 -1035.18,28.06 -1040.54,19.52 -1043.87,10.01 -1045.00,0.00"/>
+    <edge id="rbw_arc2" from="rbw_W" to="rbw_S" numLanes="1" speed="8.33" priority="3" shape="-1045.00,0.00 -1043.87,-10.01 -1040.54,-19.52 -1035.18,-28.06 -1028.06,-35.18 -1019.52,-40.54 -1010.01,-43.87 -1000.00,-45.00"/>
+    <edge id="rbw_arc3" from="rbw_S" to="rbw_E" numLanes="1" speed="8.33" priority="3" shape="-1000.00,-45.00 -989.99,-43.87 -980.48,-40.54 -971.94,-35.18 -964.82,-28.06 -959.46,-19.52 -956.13,-10.01 -955.00,-0.00"/>
+</edges>

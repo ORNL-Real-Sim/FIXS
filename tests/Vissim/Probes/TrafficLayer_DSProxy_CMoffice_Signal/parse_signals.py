@@ -1,0 +1,140 @@
+"""
+Phase 1c analyzer (read-only, no VISSIM): derive the VISSIM signal plan from the
+SUMO tlLogic + the exported xodr signal positions, so head placement + .sig
+authoring are faithful to SUMO.
+
+Inputs:
+  - SUMO net  : tlLogic (phases: state string + duration + offset), and the
+                <connection ... tl=... linkIndex=...> map (linkIndex -> approach).
+  - xodr      : <signal id="<tl>_<linkIndex>" s=...> inside a <road id=...>, giving
+                each controlled movement's road + longitudinal position.
+
+Output: signal_plan.json + a printed summary. For each controller:
+  - cycle time, offset
+  - signal groups = sets of linkIndices sharing an identical per-second state
+    timeline (so VISSIM SGs reproduce SUMO movement-by-movement)
+  - per group: the green/amber/red/redamber transition seconds (for the .sig)
+  - per signal: linkIndex -> (xodr road id, s position, side t) for head placement
+"""
+from __future__ import annotations
+import json, pathlib, xml.etree.ElementTree as ET
+
+HERE = pathlib.Path(__file__).resolve().parent
+NET = HERE.parent.parent.parent / "Python" / "SimpleTrafficLight" / "simple_traffic_light.net.xml"
+XODR = HERE / "simple_traffic_light.xodr"
+
+# SUMO signal-state char -> canonical display
+#   r=red  y=amber  g/G=green  u(=redamber, rare)  O/o=off
+SUMO_CHAR = {"r": "RED", "y": "AMBER", "g": "GREEN", "G": "GREEN",
+             "u": "REDAMBER", "O": "OFF", "o": "OFF"}
+
+
+def parse_connections(net_path):
+    """(tl, linkIndex) -> {fromEdge, fromLane, toEdge, dir} for signalized connections."""
+    root = ET.parse(net_path).getroot()
+    conn = {}
+    for c in root.findall("connection"):
+        tl = c.get("tl")
+        if tl is None:
+            continue
+        conn[(tl, int(c.get("linkIndex")))] = {
+            "fromEdge": c.get("from"), "fromLane": int(c.get("fromLane")),
+            "toEdge": c.get("to"), "dir": c.get("dir"),
+        }
+    return conn
+
+
+def parse_tls(net_path):
+    root = ET.parse(net_path).getroot()
+    tls = {}
+    for tl in root.findall("tlLogic"):
+        tid = tl.get("id")
+        phases = [(int(float(p.get("duration"))), p.get("state")) for p in tl.findall("phase")]
+        cycle = sum(d for d, _ in phases)
+        # per-second state per linkIndex
+        n = len(phases[0][1])
+        timeline = {i: [] for i in range(n)}
+        for dur, state in phases:
+            for sec in range(dur):
+                for i in range(n):
+                    timeline[i].append(SUMO_CHAR.get(state[i], "?"))
+        tls[tid] = {"offset": int(tl.get("offset", "0")), "cycle": cycle,
+                    "phases": phases, "timeline": timeline, "nlinks": n}
+    return tls
+
+
+def parse_xodr_signals(xodr_path):
+    root = ET.parse(xodr_path).getroot()
+    sigs = {}   # signal id -> {road, s, t}
+    for road in root.findall("road"):
+        rid = road.get("id")
+        for sg in road.findall("./signals/signal"):
+            sigs[sg.get("id")] = {"road": rid, "s": float(sg.get("s")),
+                                  "t": float(sg.get("t")), "orient": sg.get("orientation")}
+    return sigs
+
+
+def group_by_timeline(timeline):
+    """linkIndices with identical per-second state -> one signal group."""
+    groups = {}
+    for idx, seq in timeline.items():
+        key = tuple(seq)
+        groups.setdefault(key, []).append(idx)
+    return groups
+
+
+def transitions(seq):
+    """seconds (begin) at which each steady display starts, for the .sig cmds."""
+    out = []
+    prev = None
+    for sec, st in enumerate(seq):
+        if st != prev:
+            out.append((sec, st))
+            prev = st
+    return out
+
+
+def main():
+    tls = parse_tls(NET)
+    sigs = parse_xodr_signals(XODR)
+    conns = parse_connections(NET)
+    plan = {}
+    for tid, t in tls.items():
+        groups = group_by_timeline(t["timeline"])
+        gstruct = []
+        for gi, (seq_key, idxs) in enumerate(sorted(groups.items(), key=lambda kv: min(kv[1])), start=1):
+            members = []
+            for idx in idxs:
+                sid = f"{tid}_{idx}"
+                c = conns.get((tid, idx), {})
+                members.append({"linkIndex": idx, **sigs.get(sid, {"road": None, "s": None}),
+                                "fromEdge": c.get("fromEdge"), "fromLane": c.get("fromLane"),
+                                "dir": c.get("dir")})
+            gstruct.append({
+                "sg": gi,
+                "states": sorted(set(seq_key)),
+                "transitions": transitions(list(seq_key)),
+                "members": members,
+            })
+        plan[tid] = {"cycle": t["cycle"], "offset": t["offset"],
+                     "nlinks": t["nlinks"], "groups": gstruct}
+
+    (HERE / "signal_plan.json").write_text(json.dumps(plan, indent=2), encoding="utf-8")
+
+    # ---- printed summary ----
+    for tid, p in plan.items():
+        matched = sum(1 for g in p["groups"] for m in g["members"] if m["road"])
+        total = sum(len(g["members"]) for g in p["groups"])
+        print(f"\n=== {tid}: cycle={p['cycle']}s offset={p['offset']}s "
+              f"links={p['nlinks']} groups={len(p['groups'])} "
+              f"(heads matched to xodr: {matched}/{total}) ===")
+        for g in p["groups"]:
+            roads = sorted({m["road"] for m in g["members"] if m["road"]})
+            print(f"  SG{g['sg']:2d}  states={'/'.join(g['states']):20s} "
+                  f"links={[m['linkIndex'] for m in g['members']]} roads={roads}")
+            print(f"        transitions(sec->state): {g['transitions']}")
+    print(f"\nwrote signal_plan.json ({len(plan)} controllers)")
+
+
+if __name__ == "__main__":
+    main()
