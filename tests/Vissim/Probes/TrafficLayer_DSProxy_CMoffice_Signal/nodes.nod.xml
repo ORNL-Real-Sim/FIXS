@@ -10,9 +10,9 @@
     <node id="east_north" x="400" y="300" type="priority"/>
     <node id="east_south" x="400" y="-300" type="priority"/>
     <node id="rbe_neck" x="550.0" y="0.0" type="priority"/>
-    <node id="rbe_t1" x="588.97" y="22.5" type="priority"/>
-    <node id="rbe_t2" x="588.97" y="-22.5" type="priority"/>
+    <node id="rbe_t1" x="588.97" y="-22.5" type="priority"/>
+    <node id="rbe_t2" x="588.97" y="22.5" type="priority"/>
     <node id="rbw_neck" x="-550.0" y="0.0" type="priority"/>
-    <node id="rbw_t1" x="-588.97" y="-22.5" type="priority"/>
-    <node id="rbw_t2" x="-588.97" y="22.5" type="priority"/>
+    <node id="rbw_t1" x="-588.97" y="22.5" type="priority"/>
+    <node id="rbw_t2" x="-588.97" y="-22.5" type="priority"/>
 </nodes>

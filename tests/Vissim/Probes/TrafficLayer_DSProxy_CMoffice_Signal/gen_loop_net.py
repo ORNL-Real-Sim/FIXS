@@ -25,6 +25,8 @@ RAMP_R = 45.0           # curved-ramp radius (m)
 LOOP_R = 45.0           # loop radius (m)
 DS = 2.0                # polyline sample step (m)
 LOOP_SPEED = 8.33       # m/s (~30 km/h) on ramps + loop
+RAMP_TURN = -1          # entry/exit ramp turn sign (-1 = eastbound peels SOUTH -> loop runs CCW)
+LOOP_LANES = 2          # lanes on ramps + loop (2 -> both corridor lanes feed it, wider road)
 
 BASE_NODES = [
     ("int_west", -400, 0, "traffic_light"), ("int_center", 0, 0, "traffic_light"),
@@ -68,10 +70,10 @@ def turnaround(x0, y0, h0, t1_deg):
     """3 phases from (x0,y0,h0): entry ramp +t1, loop -(2*t1+180), exit ramp +t1.
     Returns (ramp_in_pts, loop_pts, ramp_out_pts, end_x, end_y, end_h)."""
     t1 = math.radians(t1_deg)
-    t2 = 2 * t1 + math.pi                      # loop sweep so net = -180 deg
-    p1, x, y, h = arc(x0, y0, h0, RAMP_R, +1, t1)
-    p2, x, y, h = arc(x, y, h, LOOP_R, -1, t2)
-    p3, x, y, h = arc(x, y, h, RAMP_R, +1, t1)
+    t2 = 2 * t1 + math.pi                      # loop sweep so net = 180 deg (a U-turn)
+    p1, x, y, h = arc(x0, y0, h0, RAMP_R, RAMP_TURN, t1)        # ramp peels off
+    p2, x, y, h = arc(x, y, h, LOOP_R, -RAMP_TURN, t2)         # loop (opposite turn = the big loop)
+    p3, x, y, h = arc(x, y, h, RAMP_R, RAMP_TURN, t1)          # ramp back to corridor
     return p1, p2, p3, x, y, h
 
 
@@ -111,9 +113,9 @@ def loop_at(prefix, sign):
         (f"{prefix}_t2", round(T2[0], 2), round(T2[1], 2), "priority"),
     ]
     edges = [
-        (f"{prefix}_ramp_in", neck, f"{prefix}_t1", 1, shp([A] + p1)),
-        (f"{prefix}_loop", f"{prefix}_t1", f"{prefix}_t2", 1, shp(p2)),
-        (f"{prefix}_ramp_out", f"{prefix}_t2", neck, 1, shp(p3 + [A])),
+        (f"{prefix}_ramp_in", neck, f"{prefix}_t1", LOOP_LANES, shp([A] + p1)),
+        (f"{prefix}_loop", f"{prefix}_t1", f"{prefix}_t2", LOOP_LANES, shp(p2)),
+        (f"{prefix}_ramp_out", f"{prefix}_t2", neck, LOOP_LANES, shp(p3 + [A])),
     ]
     return nodes, edges, neck, neck, t1, math.degrees(eh)
 
