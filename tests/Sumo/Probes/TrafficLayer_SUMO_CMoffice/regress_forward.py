@@ -71,7 +71,9 @@ def main():
     ap.add_argument("--end", type=float, default=60.0)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--step", type=float, default=0.1)
+    ap.add_argument("--tl-exe", default=str(TL_EXE), help="TrafficLayer.exe to run (perf A/B compare)")
     a = ap.parse_args()
+    tl_exe = a.tl_exe
     test_dir = pathlib.Path(a.test_dir).resolve()
     sumocfg = (test_dir / a.sumocfg).resolve()
 
@@ -97,7 +99,7 @@ def main():
         libdir = str(REPO / "CommonLib" / "libsumo" / "bin")
         sumobin = str(SUMO.parent)
         tl_env["PATH"] = libdir + os.pathsep + sumobin + os.pathsep + tl_env.get("PATH", "")
-        tl_proc = subprocess.Popen([str(TL_EXE), "-f", str(derived)], cwd=str(test_dir), env=tl_env)
+        tl_proc = subprocess.Popen([str(tl_exe), "-f", str(derived)], cwd=str(test_dir), env=tl_env)
         time.sleep(3.0)  # let TL connect to SUMO and open the client port
 
         # 3) act as the FIXS application client: load config via CommonLib
@@ -114,11 +116,15 @@ def main():
             raise RuntimeError("could not connect to TrafficLayer client port")
 
         steps = 0
+        step_ms = []
         while True:
             sh.clear_data()
-            sim_state, sim_time = sh.recv_data(cs)
+            _t0 = time.perf_counter()
+            sim_state, sim_time = sh.recv_data(cs)   # blocks until TL finishes the step
             if sim_state == 0:
                 break
+            if steps > 0:
+                step_ms.append((time.perf_counter() - _t0) * 1e3)
             for veh in sh.vehicle_data_receive_list:
                 rec = " ".join(f"{fl}={fmt(getattr(veh, fl, ''))}" for fl in fields)
                 records.append((round(float(sim_time), 3), getattr(veh, "id", b"").decode(errors="replace").strip()
@@ -128,7 +134,10 @@ def main():
             sh.sendData(sim_state, sim_time, cs)
             steps += 1
         cs.close()
-        print(f"[regress] captured {steps} steps, {len(records)} veh-records", file=sys.stderr)
+        import statistics as _st
+        ms = f"{_st.median(step_ms):.3f}" if step_ms else "n/a"
+        print(f"[regress] captured {steps} steps, {len(records)} veh-records, "
+              f"median TL step wait = {ms} ms", file=sys.stderr)
     finally:
         for p in (tl_proc, sumo_proc):
             if p and p.poll() is None:
