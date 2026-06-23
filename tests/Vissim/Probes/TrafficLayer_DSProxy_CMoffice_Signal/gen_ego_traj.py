@@ -11,27 +11,52 @@ from __future__ import annotations
 import math, pathlib
 
 HERE = pathlib.Path(__file__).resolve().parent
-SPEED = 13.0   # m/s pace along the recorded path
+V_MAX = 13.0    # m/s on the straight corridor (~47 km/h)
+V_MIN = 5.0     # m/s floor
+A_LAT = 1.6     # m/s^2 comfortable lateral accel -> sets curve speed v = sqrt(A_LAT / kappa)
+
+
+def _angdiff(a, b):
+    return abs((a - b + math.pi) % (2 * math.pi) - math.pi)
 
 
 def main():
     pts = []
     for line in (HERE / "sumo_path.txt").read_text().split("\n"):
         if line.strip():
-            x, y, ad = map(float, line.split())
-            pts.append((x, y, math.radians(90.0 - ad)))
+            x, y, ad, *_ = line.split()
+            pts.append((float(x), float(y), math.radians(90.0 - float(ad))))
+
+    # CURVATURE-based speed profile (deterministic, decoupled from SUMO signals):
+    # slow through the curved loop, fast on the straight. So FollowTraj no longer
+    # barrels through the curve at corridor speed and drift off the road.
+    n = len(pts)
+    v = [V_MAX] * n
+    for i in range(1, n - 1):
+        d = math.hypot(pts[i+1][0]-pts[i-1][0], pts[i+1][1]-pts[i-1][1]) / 2.0
+        kappa = _angdiff(pts[i+1][2], pts[i-1][2]) / max(d, 0.1)
+        vi = math.sqrt(A_LAT / kappa) if kappa > 1e-4 else V_MAX
+        v[i] = max(V_MIN, min(V_MAX, vi))
+    # smooth (moving average) so the speed changes gradually
+    vs = v[:]
+    for _ in range(8):
+        vs = [vs[0]] + [(vs[i-1]+vs[i]+vs[i+1])/3.0 for i in range(1, n-1)] + [vs[-1]]
+    v = vs
 
     verts, t = [], 0.0
     for i, (x, y, h) in enumerate(pts):
         if i > 0:
-            t += math.hypot(x-pts[i-1][0], y-pts[i-1][1]) / SPEED
+            d = math.hypot(x-pts[i-1][0], y-pts[i-1][1])
+            t += d / ((v[i] + v[i-1]) / 2.0)
         verts.append((t, x, y, h))
+    init_speed_val = v[0]
     vx = "\n".join(
         f'                            <Vertex time="{t:.2f}"><Position>'
         f'<WorldPosition x="{x:.3f}" y="{y:.3f}" z="0" h="{h:.4f}"/></Position></Vertex>'
         for (t, x, y, h) in verts)
 
     x0, y0, h0 = verts[0][1], verts[0][2], verts[0][3]
+    init_speed = init_speed_val   # start at the curvature-profile entry speed
     xosc = f'''<?xml version="1.0" encoding="UTF-8"?>
 <OpenSCENARIO>
   <FileHeader revMajor="1" revMinor="0" date="2026-06-22T00:00:00" description="FIXS #172 SimpleTrafficLight demo (ego path recorded from SUMO, lane 0, no lane change)" author="FIXS"/>
@@ -51,7 +76,7 @@ def main():
     <Init><Actions><Private entityRef="Ego">
       <PrivateAction><LongitudinalAction><SpeedAction>
         <SpeedActionDynamics dynamicsShape="step" value="0" dynamicsDimension="time"/>
-        <SpeedActionTarget><AbsoluteTargetSpeed value="{SPEED:.1f}"/></SpeedActionTarget>
+        <SpeedActionTarget><AbsoluteTargetSpeed value="{init_speed:.1f}"/></SpeedActionTarget>
       </SpeedAction></LongitudinalAction></PrivateAction>
       <PrivateAction><TeleportAction><Position>
         <WorldPosition x="{x0:.3f}" y="{y0:.3f}" z="0" h="{h0:.4f}"/>

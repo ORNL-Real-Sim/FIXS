@@ -38,7 +38,8 @@ def run(dep_lane):
                     lanes.append(lid)
                 x, y = traci.vehicle.getPosition("ego")
                 ang_deg = traci.vehicle.getAngle("ego")  # SUMO angle: deg, 0=North, CW
-                pos.append((x, y, ang_deg))
+                spd = traci.vehicle.getSpeed("ego")      # SUMO slows to the loop's speed limit in the loop
+                pos.append((x, y, ang_deg, spd))
             elif lanes:
                 break
         seq = []
@@ -72,12 +73,14 @@ def main():
     dl, loop, seq, multi, pos = best
     print(f"\nBEST departLane {dl}: lane-change edges={list(multi)}, {len(pos)} path points")
     (HERE / "sumo_lane_seq.txt").write_text("\n".join(seq) + "\n", encoding="utf-8")
-    # path: x y angle_deg (SUMO angle 0=N, CW). thin to ~every 3 m for a clean trajectory.
+    # path: x y angle_deg speed (SUMO angle 0=N, CW; speed m/s -> slows in the loop).
+    # thin to ~every 3 m for a clean trajectory.
     thinned, last = [], None
-    for (x, y, ad) in pos:
+    for (x, y, ad, sp) in pos:
         if last is None or math.hypot(x-last[0], y-last[1]) >= 3.0:
-            thinned.append((x, y, ad)); last = (x, y)
-    (HERE / "sumo_path.txt").write_text("\n".join(f"{x:.3f} {y:.3f} {ad:.2f}" for x, y, ad in thinned) + "\n", encoding="utf-8")
+            thinned.append((x, y, ad, sp)); last = (x, y)
+    (HERE / "sumo_path.txt").write_text(
+        "\n".join(f"{x:.3f} {y:.3f} {ad:.2f} {sp:.3f}" for x, y, ad, sp in thinned) + "\n", encoding="utf-8")
     print(f"wrote sumo_lane_seq.txt ({len(seq)}) + sumo_path.txt ({len(thinned)} pts)")
 
 
