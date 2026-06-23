@@ -388,14 +388,21 @@ int ConfigHelper::getConfig(string configName) {
 		CarMakerSetup.EgoId = parserString(node, "EgoId");
 	}
 	else {
-		// try to parser ego vehicle info, if and only if there is just one vehicle subscribed
+		// Derive the ego id from the lone subscription if there is exactly one;
+		// otherwise the config is ambiguous about which vehicle is the ego. Do
+		// NOT silently fabricate a magic default (the old "egoCm" / Carla "ego"
+		// defaults differed per backend and bred cross-backend id mismatches).
+		// Fail loudly so a missing/typo'd ego is caught at parse time.
 		if (SubscriptionVehicleList.vehicleSubscribeId_v.size() == 1) {
 			CarMakerSetup.EgoId = SubscriptionVehicleList.vehicleSubscribeId_v.begin()->first;
 		}
 		else {
-			CarMakerSetup.EgoId = "egoCm";
+			printf("ERROR: CarMakerSetup.EgoId is not defined and cannot be inferred "
+			       "(expected an explicit 'EgoId' or exactly one ego VehicleSubscription, "
+			       "found %zu). Define the ego id in config.yaml.\n",
+			       SubscriptionVehicleList.vehicleSubscribeId_v.size());
+			exit(-1);
 		}
-		//printf("\nCarMaker IP not specified! Will use localhost 127.0.0.1 as default!\n");
 	}
 	if (node["EgoType"]) {
 		CarMakerSetup.EgoType = parserString(node, "EgoType");
