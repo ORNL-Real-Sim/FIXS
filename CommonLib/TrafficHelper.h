@@ -140,6 +140,12 @@ public:
 	bool ENABLE_CARLA = false;
 	bool ENABLE_CARLA_EXTERNAL_CONTROL = false;
 
+	// #177: skip per-vehicle TraCI getters whose output is never sent. Derived
+	// once from VehicleMessageField_set in connectionSetup -- getNextTLS is only
+	// needed for the signalLight* fields, getLeader/getSpeed for precedingVehicle*.
+	bool NEED_NEXT_TLS = false;
+	bool NEED_PRECEDING_VEH = false;
+
 	double tSimuEnd = 90000;
 
 

@@ -404,6 +404,21 @@ void TrafficHelper::getConfig() {
 		VehicleMessageField_set.insert(VehicleMessageField_v[i]);
 	}
 
+	// #177: only run the expensive per-vehicle TraCI getters in
+	// parserSumoSubscription when their output is actually forwarded. getNextTLS
+	// (O(upcoming-route length)) feeds the signalLight* fields; getLeader/getSpeed
+	// feed the precedingVehicle* fields. MsgHelper gates packing on the same set.
+	NEED_NEXT_TLS =
+		VehicleMessageField_set.count("signalLightId") ||
+		VehicleMessageField_set.count("signalLightHeadId") ||
+		VehicleMessageField_set.count("signalLightDistance") ||
+		VehicleMessageField_set.count("signalLightColor");
+	NEED_PRECEDING_VEH =
+		VehicleMessageField_set.count("precedingVehicleId") ||
+		VehicleMessageField_set.count("precedingVehicleDistance") ||
+		VehicleMessageField_set.count("precedingVehicleSpeed") ||
+		VehicleMessageField_set.count("hasPrecedingVehicle");
+
 	// get subscription information
 	// variable to store subscription that need to check
 	// if application layer is disabled, xil is enabled then use subscription of xil, this means traffic layer directly connects to xil
@@ -1509,19 +1524,28 @@ void TrafficHelper::parserSumoSubscription(libsumo::TraCIResults VehDataSubscrib
 	//=================
 	// get preceding vehicle
 	//=================
-	pair<string, double> leaderIdNSpeed = SUMO_TRACI_NAMESPACE::Vehicle::getLeader(vehId, 1000);
-	CurVehData.precedingVehicleId = get<0>(leaderIdNSpeed);
-	CurVehData.precedingVehicleDistance = get<1>(leaderIdNSpeed);
+	// #177: getLeader(...,1000) + getSpeed are per-vehicle TraCI round-trips; only
+	// pay them when a precedingVehicle* field is actually forwarded (NEED_PRECEDING_VEH).
+	CurVehData.precedingVehicleId = "";
+	CurVehData.precedingVehicleDistance = -1.0;
 	CurVehData.hasPrecedingVehicle = 0;
 	CurVehData.precedingVehicleSpeed = -1.0;
-	if (CurVehData.precedingVehicleId.compare("") != 0) {
-		CurVehData.hasPrecedingVehicle = 1;
-		CurVehData.precedingVehicleSpeed = SUMO_TRACI_NAMESPACE::Vehicle::getSpeed(CurVehData.precedingVehicleId);
+	if (NEED_PRECEDING_VEH) {
+		pair<string, double> leaderIdNSpeed = SUMO_TRACI_NAMESPACE::Vehicle::getLeader(vehId, 1000);
+		CurVehData.precedingVehicleId = get<0>(leaderIdNSpeed);
+		CurVehData.precedingVehicleDistance = get<1>(leaderIdNSpeed);
+		if (CurVehData.precedingVehicleId.compare("") != 0) {
+			CurVehData.hasPrecedingVehicle = 1;
+			CurVehData.precedingVehicleSpeed = SUMO_TRACI_NAMESPACE::Vehicle::getSpeed(CurVehData.precedingVehicleId);
+		}
 	}
 
 	//=================
 	// get signal information
 	//=================
+	// #177: getNextTLS walks the upcoming route (O(route length)) every step;
+	// only call it when a signalLight* field is actually forwarded (NEED_NEXT_TLS).
+	if (NEED_NEXT_TLS) {
 	vector <libsumo::TraCINextTLSData> nextTlsList = SUMO_TRACI_NAMESPACE::Vehicle::getNextTLS(vehId);
 
 	if (nextTlsList.size() > 0) {
@@ -1564,6 +1588,15 @@ void TrafficHelper::parserSumoSubscription(libsumo::TraCIResults VehDataSubscrib
 		}
 	}
 	else {
+		CurVehData.signalLightId = "";
+		CurVehData.signalLightHeadId = -1;
+		CurVehData.signalLightDistance = -1.0;
+		CurVehData.signalLightColor = -1;
+	}
+	}
+	else {
+		// signalLight* not forwarded -> skip the route walk; emit the same
+		// "no TLS" defaults the original code produced when none was found.
 		CurVehData.signalLightId = "";
 		CurVehData.signalLightHeadId = -1;
 		CurVehData.signalLightDistance = -1.0;

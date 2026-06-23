@@ -214,3 +214,6 @@ stage_network/
 
 # Ignore Claude Code configuration
 .claude/
+
+# #177 regression harness: generated derived configs
+tests/Python/*/_regress_config.yaml
