@@ -55,9 +55,16 @@ XilSetup:
     VehicleSubscription:
     -   type: ego
         # 'egoCm' is created in SUMO by the interface at sim start (the SUMO
-        # path injects the ego rather than reading an existing vehicle). radius
-        # 100 m => background traffic within 100 m of the ego is forwarded to CM.
-        attribute: { id: ['egoCm'], radius: [100] }
+        # path injects the ego rather than reading an existing vehicle).
+        # radius is the Euclidean context-subscription distance from the ego
+        # (the only working SUMO visibility lever -- the YAML 'all' flag is dead
+        # code, #176). The SimpleLoop net is 200x200 m, so the far corner is
+        # ~283 m (the diagonal) from the ego; radius 500 m guarantees ALL ~40
+        # background vehicles forward to CM regardless of ego position, matching
+        # the VISSIM-CM (DSProxy publish-all) vehicle set so both backends drive
+        # the same pipeline with the same traffic (the #174 cross-sim
+        # differential). Drop once #176 makes the displayed set config-driven.
+        attribute: { id: ['egoCm'], radius: [500] }
         ip: ['127.0.0.1']
         port: [2444]
 
@@ -71,6 +78,6 @@ CarMakerSetup:
                                     # objects don't phase-lock/freeze at high UpdRate (#168).
     EgoId: egoCm
     # SUMO vType for the injected ego. 'car' matches the vType defined in
-    # tests/Sumo/SimpleLoop/simple_loop.rou.xml. If absent, SUMO's default type
-    # is used.
+    # tests/Sumo/network/simple_loop/simple_loop.rou.xml. If absent, SUMO's
+    # default type is used.
     EgoType: car

@@ -43,7 +43,7 @@ TL = REPO / "TrafficLayer" / "x64" / "Release" / "TrafficLayer.exe"
 CMEXE = REPO / "ProprietaryFiles" / "CM13_proj" / "src" / "CarMaker_headless.win64.exe"
 CMPROJ = REPO / "ProprietaryFiles" / "CM13_proj"
 CONFIG = HERE / "config.yaml"
-SUMOCFG = REPO / "tests" / "Sumo" / "SimpleLoop" / "simple_loop.sumocfg"
+SUMOCFG = REPO / "tests" / "Sumo" / "network" / "simple_loop" / "simple_loop.sumocfg"
 TESTRUN = "SimpleLoop_VISSIM_rs"
 # The headless build helper lives in the VISSIM probe (config-agnostic: it builds
 # VirtualEnvironment.lib + the RS_HEADLESS CarMaker exe). Reuse it, don't fork it.
@@ -177,7 +177,9 @@ def main() -> int:
     tl_started = "Traffic Simulator: SUMO" in tl_text
     tl_sumo_fail = "Connect to SUMO failed" in tl_text
     tl_clean_end = "Simulation end time reached." in tl_text
-    steps = len(re.findall(r"New time step", tl_text))
+    # TrafficLayer prints one "===========SimTime <t>==============" banner per
+    # step it advances; count those (not "New time step", which it never emits).
+    steps = len(re.findall(r"SimTime\s+[\d.]+", tl_text))
     # Mid-stream errors (ignore the benign SUMO-not-up message before connect).
     err_lines = [l for l in tl_out + cm_out if "ERROR" in l]
 

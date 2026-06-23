@@ -28,7 +28,7 @@ set VCE=%RepoRoot%\VirCarlaEnv\x64\Release\VirCarlaEnv.exe
 if not exist "%VCE%" set VCE=%RepoRoot%\tests\SumoCarla\VirCarlaEnv.exe
 set CONFIG=%HERE%config.yaml
 set TLS=%HERE%traffic_light_table.csv
-set SUMOCFG=%RepoRoot%\tests\Sumo\SimpleLoop\simple_loop.sumocfg
+set SUMOCFG=%RepoRoot%\tests\Sumo\network\simple_loop\simple_loop_ego.sumocfg
 set XODR=%RepoRoot%\tests\Vissim\SimpleEcho\simple_loop.xodr
 
 REM --- load carla.env (for PY + carla host/port) ------------------------------

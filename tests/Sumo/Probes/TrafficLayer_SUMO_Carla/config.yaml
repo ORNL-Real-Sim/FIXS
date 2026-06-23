@@ -43,10 +43,15 @@ ApplicationSetup:
     EnableApplicationLayer: true
     VehicleSubscription:
     -   type: ego
-        # 'ego' matches the vehicle defined in
-        # tests/Sumo/SimpleLoop/simple_loop.rou.xml. radius 100 m forwards
-        # background traffic near the ego to Carla.
-        attribute: { id: ['ego'], radius: [100] }
+        # 'ego' matches the overlay vehicle defined in
+        # tests/Sumo/network/simple_loop/simple_loop.ego.rou.xml (loaded via
+        # simple_loop_ego.sumocfg). radius is the Euclidean
+        # context-subscription distance from the ego (the only working SUMO
+        # visibility lever; the YAML 'all' flag is dead code, #176). The
+        # SimpleLoop net is 200x200 m so the far corner is ~283 m (diagonal)
+        # from the ego; radius 500 m forwards ALL ~40 vehicles to Carla
+        # regardless of ego position, matching the SUMO-CM probe's vehicle set.
+        attribute: { id: ['ego'], radius: [500] }
         ip: ['127.0.0.1']
         port: [440]
 
