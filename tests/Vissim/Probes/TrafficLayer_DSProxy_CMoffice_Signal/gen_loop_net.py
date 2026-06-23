@@ -1,23 +1,31 @@
 """
 FIXS #172: generate SUMO node/edge sources for the SimpleTrafficLight corridor
-with a big CIRCULAR loop (roundabout-style balloon) at each end.
+with a COMPACT, CURVED turnaround loop at each end (per the user's spec):
 
-The main E-W corridor (3 signalized intersections + cross-streets) stays straight
-and divided. Each end's corridor connects to a one-way circular loop (R=LOOP_R);
-a vehicle enters from the in-bound corridor, circulates ~360 deg around the
-circle, and exits onto the out-bound corridor reversed -- a clean round U-turn
-loop like the reference figure, with no bending of the main corridor.
+  straight corridor  ->  CURVED ramp (peels off, turns up)  ->  LOOP (car goes
+  ~300 deg around the circle)  ->  CURVED ramp (turns back down)  ->  straight
+  corridor, reversed.
 
-Writes nodes.nod.xml + edges.edg.xml; run netconvert afterwards.
+No long straight tangent ramps. The shape is defined by a CURVATURE profile and
+integrated, so it is smooth (tangent-continuous) everywhere and provably closes
+back onto the corridor centreline (y=0) heading the opposite way:
+  entry ramp turns +T1 (one way),  loop turns -(2*T1+180) (the other way, the big
+  loop),  exit ramp turns +T1.  Net heading change = -180 deg (a U-turn).
+The ramp angle T1 is solved numerically so the path lands back on y=0.
+
+The main corridor (between the 3 signals) stays dead straight; the loop is past
+the last signal. Writes nodes.nod.xml + edges.edg.xml; run netconvert afterwards.
 """
 from __future__ import annotations
 import math, pathlib
 
 HERE = pathlib.Path(__file__).resolve().parent
-LOOP_R = 45.0          # loop radius (m) -> ~90 m circle
-ARC_PTS = 7            # points per quarter arc (smoothness)
+STRAIGHT_PAST = 150.0   # straight corridor past the last intersection before the loop (m)
+RAMP_R = 45.0           # curved-ramp radius (m)
+LOOP_R = 45.0           # loop radius (m)
+DS = 2.0                # polyline sample step (m)
+LOOP_SPEED = 8.33       # m/s (~30 km/h) on ramps + loop
 
-# corridor + cross-street nodes (original SimpleTrafficLight coords, y=0 centerline)
 BASE_NODES = [
     ("int_west", -400, 0, "traffic_light"), ("int_center", 0, 0, "traffic_light"),
     ("int_east", 400, 0, "traffic_light"),
@@ -25,7 +33,6 @@ BASE_NODES = [
     ("center_north", 0, 300, "priority"), ("center_south", 0, -300, "priority"),
     ("east_north", 400, 300, "priority"), ("east_south", 400, -300, "priority"),
 ]
-# corridor + cross edges (the straight, divided corridor -- unchanged)
 BASE_EDGES = [
     ("corridor_wc_e", "int_west", "int_center", 3), ("corridor_wc_w", "int_center", "int_west", 2),
     ("corridor_ce_e", "int_center", "int_east", 3), ("corridor_ce_w", "int_east", "int_center", 2),
@@ -38,45 +45,88 @@ BASE_EDGES = [
 ]
 
 
-def arc_shape(cx, cy, r, a0_deg, a1_deg):
-    """polyline points (SUMO 'x,y x,y ...') along the arc from a0 to a1 (CCW if a1>a0)."""
+def arc(x, y, h, radius, turn_sign, total_ang, ds=DS):
+    """Integrate a constant-curvature arc. turn_sign +1 = left/CCW, -1 = right/CW.
+    Returns (points, x, y, h_end). Heading h in radians."""
+    n = max(2, int(round(radius * total_ang / ds)))
+    dphi = turn_sign * total_ang / n
     pts = []
-    for k in range(ARC_PTS + 1):
-        a = math.radians(a0_deg + (a1_deg - a0_deg) * k / ARC_PTS)
-        pts.append(f"{cx + r*math.cos(a):.2f},{cy + r*math.sin(a):.2f}")
-    return " ".join(pts)
+    for _ in range(n):
+        h += dphi / 2.0
+        x += ds_step(radius, dphi) * math.cos(h)
+        y += ds_step(radius, dphi) * math.sin(h)
+        h += dphi / 2.0
+        pts.append((x, y))
+    return pts, x, y, h
 
 
-def loop(prefix, cx, cy, conn_angle_deg):
-    """4 circle nodes + 4 CCW arc edges around (cx,cy). conn_angle = where the
-    corridor connects (the W point for east loop=180, the E point for west=0)."""
-    # node at each cardinal angle
-    cards = {0: "E", 90: "N", 180: "W", 270: "S"}
-    nodes = {}
-    for ang, tag in cards.items():
-        nodes[ang] = (f"{prefix}_{tag}", cx + LOOP_R*math.cos(math.radians(ang)),
-                      cy + LOOP_R*math.sin(math.radians(ang)))
-    node_lines = [(n, round(x, 2), round(y, 2), "priority") for (n, x, y) in nodes.values()]
-    # CCW arc edges: 0->90->180->270->360
-    seq = [0, 90, 180, 270, 0]
-    edge_lines = []
-    for i in range(4):
-        a0, a1 = seq[i], seq[i+1] if seq[i+1] != 0 else 360
-        fr, to = nodes[a0 % 360][0], nodes[a1 % 360][0]
-        sh = arc_shape(cx, cy, LOOP_R, a0, a1)
-        edge_lines.append((f"{prefix}_arc{i}", fr, to, 1, sh))
-    return node_lines, edge_lines, nodes[conn_angle_deg][0]
+def ds_step(radius, dphi):
+    return radius * abs(dphi)
+
+
+def turnaround(x0, y0, h0, t1_deg):
+    """3 phases from (x0,y0,h0): entry ramp +t1, loop -(2*t1+180), exit ramp +t1.
+    Returns (ramp_in_pts, loop_pts, ramp_out_pts, end_x, end_y, end_h)."""
+    t1 = math.radians(t1_deg)
+    t2 = 2 * t1 + math.pi                      # loop sweep so net = -180 deg
+    p1, x, y, h = arc(x0, y0, h0, RAMP_R, +1, t1)
+    p2, x, y, h = arc(x, y, h, LOOP_R, -1, t2)
+    p3, x, y, h = arc(x, y, h, RAMP_R, +1, t1)
+    return p1, p2, p3, x, y, h
+
+
+def solve_t1(x0, y0, h0):
+    """Find ramp angle t1 (deg) so the turnaround lands back on the corridor (end y == y0)."""
+    def endy(t1d):
+        return turnaround(x0, y0, h0, t1d)[4] - y0
+    lo, hi = 20.0, 89.0
+    flo, fhi = endy(lo), endy(hi)
+    for _ in range(60):
+        mid = (lo + hi) / 2
+        fm = endy(mid)
+        if (flo < 0) == (fm < 0):
+            lo, flo = mid, fm
+        else:
+            hi, fhi = mid, fm
+    return (lo + hi) / 2
+
+
+def shp(pts):
+    return " ".join(f"{x:.2f},{y:.2f}" for x, y in pts)
+
+
+def loop_at(prefix, sign):
+    """Build a curved turnaround past the intersection at x = sign*400.
+    sign +1 = east end (car arrives heading +x), -1 = west end (heading -x)."""
+    x0 = sign * (400 + STRAIGHT_PAST)
+    h0 = 0.0 if sign > 0 else math.pi          # heading into the loop
+    t1 = solve_t1(x0, 0.0, h0)
+    p1, p2, p3, ex, ey, eh = turnaround(x0, 0.0, h0, t1)
+    # entry A and exit B coincide (solver closes the loop) -> one shared "neck" junction
+    A = (x0, 0.0); T1 = p1[-1]; T2 = p2[-1]
+    neck = f"{prefix}_neck"
+    nodes = [
+        (neck, round(A[0], 2), 0.0, "priority"),
+        (f"{prefix}_t1", round(T1[0], 2), round(T1[1], 2), "priority"),
+        (f"{prefix}_t2", round(T2[0], 2), round(T2[1], 2), "priority"),
+    ]
+    edges = [
+        (f"{prefix}_ramp_in", neck, f"{prefix}_t1", 1, shp([A] + p1)),
+        (f"{prefix}_loop", f"{prefix}_t1", f"{prefix}_t2", 1, shp(p2)),
+        (f"{prefix}_ramp_out", f"{prefix}_t2", neck, 1, shp(p3 + [A])),
+    ]
+    return nodes, edges, neck, neck, t1, math.degrees(eh)
 
 
 def main():
-    e_nodes, e_edges, e_conn = loop("rbe", 400 + 600, 0, 180)   # east loop center (1000,0), connect at W
-    w_nodes, w_edges, w_conn = loop("rbw", -400 - 600, 0, 0)     # west loop center (-1000,0), connect at E
-
+    e_nodes, e_edges, e_a, e_b, e_t1, e_eh = loop_at("rbe", +1)
+    w_nodes, w_edges, w_a, w_b, w_t1, w_eh = loop_at("rbw", -1)
     nodes = BASE_NODES + e_nodes + w_nodes
-    # corridor ends connect to the loop connection nodes
+
+    # corridor connects straight (y=0) to the loop entry (A) and from the loop exit (B)
     end_edges = [
-        ("corridor_e_out", "int_east", e_conn, 2), ("corridor_e_in", e_conn, "int_east", 3),
-        ("corridor_w_in", w_conn, "int_west", 3),  ("corridor_w_out", "int_west", w_conn, 2),
+        ("corridor_e_out", "int_east", e_a, 2, None), ("corridor_e_in", e_b, "int_east", 3, None),
+        ("corridor_w_out", "int_west", w_a, 2, None),  ("corridor_w_in", w_b, "int_west", 3, None),
     ]
 
     nl = ['<?xml version="1.0" encoding="UTF-8"?>', "<nodes>"]
@@ -86,17 +136,18 @@ def main():
     (HERE / "nodes.nod.xml").write_text("\n".join(nl) + "\n", encoding="utf-8")
 
     el = ['<?xml version="1.0" encoding="UTF-8"?>', "<edges>"]
-    for e in BASE_EDGES + end_edges:
-        eid, fr, to, nl_ = e
-        el.append(f'    <edge id="{eid}" from="{fr}" to="{to}" numLanes="{nl_}" speed="13.89" priority="3"/>')
-    for e in e_edges + w_edges:
-        eid, fr, to, nl_, sh = e
-        el.append(f'    <edge id="{eid}" from="{fr}" to="{to}" numLanes="{nl_}" speed="8.33" priority="3" shape="{sh}"/>')
+    for eid, fr, to, nlanes in [(e[0], e[1], e[2], e[3]) for e in BASE_EDGES]:
+        el.append(f'    <edge id="{eid}" from="{fr}" to="{to}" numLanes="{nlanes}" speed="13.89" priority="3"/>')
+    for eid, fr, to, nlanes, sh in end_edges + e_edges + w_edges:
+        spd = "13.89" if (sh is None and eid.startswith("corridor")) else f"{LOOP_SPEED}"
+        shape = f' shape="{sh}"' if sh else ""
+        el.append(f'    <edge id="{eid}" from="{fr}" to="{to}" numLanes="{nlanes}" speed="{spd}" priority="3"{shape}/>')
     el.append("</edges>")
     (HERE / "edges.edg.xml").write_text("\n".join(el) + "\n", encoding="utf-8")
 
-    print(f"[gen_loop_net] wrote nodes.nod.xml + edges.edg.xml; loop R={LOOP_R} m")
-    print(f"  east loop conn node={e_conn}, west loop conn node={w_conn}")
+    print(f"[gen_loop_net] curved turnaround: ramp_R={RAMP_R} loop_R={LOOP_R} straight_past={STRAIGHT_PAST}")
+    print(f"  east: ramp_angle={e_t1:.1f} deg, A={e_a}, B={e_b}, end_heading={e_eh:.1f} deg")
+    print(f"  west: ramp_angle={w_t1:.1f} deg, A={w_a}, B={w_b}, end_heading={w_eh:.1f} deg")
 
 
 if __name__ == "__main__":

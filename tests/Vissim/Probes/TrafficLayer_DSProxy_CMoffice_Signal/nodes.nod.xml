@@ -9,12 +9,10 @@
     <node id="center_south" x="0" y="-300" type="priority"/>
     <node id="east_north" x="400" y="300" type="priority"/>
     <node id="east_south" x="400" y="-300" type="priority"/>
-    <node id="rbe_E" x="1045.0" y="0.0" type="priority"/>
-    <node id="rbe_N" x="1000.0" y="45.0" type="priority"/>
-    <node id="rbe_W" x="955.0" y="0.0" type="priority"/>
-    <node id="rbe_S" x="1000.0" y="-45.0" type="priority"/>
-    <node id="rbw_E" x="-955.0" y="0.0" type="priority"/>
-    <node id="rbw_N" x="-1000.0" y="45.0" type="priority"/>
-    <node id="rbw_W" x="-1045.0" y="0.0" type="priority"/>
-    <node id="rbw_S" x="-1000.0" y="-45.0" type="priority"/>
+    <node id="rbe_neck" x="550.0" y="0.0" type="priority"/>
+    <node id="rbe_t1" x="588.97" y="22.5" type="priority"/>
+    <node id="rbe_t2" x="588.97" y="-22.5" type="priority"/>
+    <node id="rbw_neck" x="-550.0" y="0.0" type="priority"/>
+    <node id="rbw_t1" x="-588.97" y="-22.5" type="priority"/>
+    <node id="rbw_t2" x="-588.97" y="22.5" type="priority"/>
 </nodes>
