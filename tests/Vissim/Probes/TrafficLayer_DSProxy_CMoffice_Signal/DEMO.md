@@ -49,11 +49,19 @@ launches TrafficLayer (→ VISSIM) and the headless CarMaker exe (with `-f confi
 `-s RSsignalTable.csv`), and asserts the round-trip: `.lib` connected, **signal
 client connected (2445)**, per-tick **vehicles>0 AND signals>0**, ego=1, SIM_END.
 
-**GUI (3D view):** launch TrafficLayer with `config.yaml` (wait for
-`VISSIM_Connect OK` + `signal listener bound on port 2445`), then open CarMaker
-Office on `SimpleTL_Cosim`, ensuring the exe is started with `-s` pointing at the
-signal table. Stop order: **Stop in CarMaker → close VISSIM → Ctrl-C TrafficLayer**
-(never `taskkill` VISSIM while it holds the `.inpx` — leaks CodeMeter sessions).
+**GUI (3D view), one click:**
+```cmd
+run_cm_office_signal_demo.bat
+```
+Builds the assets, stages the network, registers the custom exe + `-f config -s
+RSsignalTable.csv` into the CM GUI config (via `setup_gui.py`), launches
+TrafficLayer (→ VISSIM, serving ports 2444 + 2445), and opens CarMaker Office +
+IPGMovie on `SimpleTL_Cosim`. Then, once the TrafficLayer window prints
+`VISSIM_Connect OK` **and** `signal listener bound on port 2445`: load TestRun
+`SimpleTL_Cosim` and press **Start**. The ego drives the corridor and brakes at
+the VISSIM-driven red; VISSIM background traffic renders as `RS_C` cars. Stop
+order: **Stop in CarMaker → close VISSIM → Ctrl-C TrafficLayer** (never `taskkill`
+VISSIM while it holds the `.inpx` — leaks CodeMeter sessions).
 
 ## Files (added for #172 co-sim)
 
