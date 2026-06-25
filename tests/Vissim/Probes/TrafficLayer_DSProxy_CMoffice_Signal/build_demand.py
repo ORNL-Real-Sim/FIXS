@@ -22,7 +22,9 @@ import pythoncom, win32com.client
 
 PROGID = "VISSIM.Vissim.2200"
 HERE = pathlib.Path(__file__).resolve().parent
-NET = HERE.parent.parent.parent / "Python" / "SimpleTrafficLight" / "simple_traffic_light.net.xml"
+# Canonical SUMO net = probe-local one, coordinate-matched with the CM xodr.
+# (The Python/SimpleTrafficLight copy is the stale 2000 m network.)
+NET = HERE / "simple_traffic_light.net.xml"
 XODR = HERE / "simple_traffic_light.xodr"
 INPX_IN = HERE / "simple_traffic_light_signals.inpx"
 INPX_OUT = HERE / "simple_traffic_light.inpx"
@@ -97,12 +99,18 @@ def main():
     v.LoadNet(str(INPX_IN), False)
     net = v.Net
 
-    r2l = {}
+    # road token -> the LONGEST link carrying it. ImportOpenDrive splits a road
+    # into several links (the long approach + short connector stubs); the first
+    # one may be a <1 m stub, so pick the longest so vehicle inputs + routing
+    # decisions land on the real approach segment.
+    r2l, r2l_len = {}, {}
     for lk in net.Links:
         nm = lk.AttValue("Name") or ""
         tok = nm.split("-")[0]
         if tok.isdigit():
-            r2l.setdefault(tok, int(lk.AttValue("No")))
+            L = float(lk.AttValue("Length2D"))
+            if tok not in r2l_len or L > r2l_len[tok]:
+                r2l[tok] = int(lk.AttValue("No")); r2l_len[tok] = L
 
     def link_for(edge):
         rid = e2r[edge][0]
@@ -122,10 +130,13 @@ def main():
                 vi.SetAttValue(attr, float(vol)); break
             except Exception:
                 continue
-        # routing decision on entry -> route to exit link end
+        # routing decision on entry -> route to exit link end. Clamp the position
+        # to the entry link length (compact links can be <5 m).
         dec_key += 1
+        elen = float(net.Links.ItemByKey(eln).AttValue("Length2D"))
+        dec_pos = min(5.0, max(0.5, elen - 0.5))
         dec = net.VehicleRoutingDecisionsStatic.AddVehicleRoutingDecisionStatic(
-            dec_key, net.Links.ItemByKey(eln), 5.0)
+            dec_key, net.Links.ItemByKey(eln), dec_pos)
         rt_key += 1
         xlen = float(net.Links.ItemByKey(xln).AttValue("Length2D"))
         dec.VehRoutSta.AddVehicleRouteStatic(rt_key, net.Links.ItemByKey(xln), max(1.0, xlen - 3.0))

@@ -2,7 +2,7 @@
   "int_center": {
     "cycle": 90,
     "offset": 0,
-    "nlinks": 19,
+    "nlinks": 15,
     "groups": [
       {
         "sg": 1,
@@ -28,7 +28,7 @@
         "members": [
           {
             "linkIndex": 0,
-            "road": "110",
+            "road": "150",
             "s": 289.6,
             "t": -1.6,
             "orient": "+",
@@ -38,7 +38,7 @@
           },
           {
             "linkIndex": 1,
-            "road": "110",
+            "road": "150",
             "s": 289.6,
             "t": -1.6,
             "orient": "+",
@@ -48,7 +48,7 @@
           },
           {
             "linkIndex": 2,
-            "road": "110",
+            "road": "150",
             "s": 289.6,
             "t": -1.6,
             "orient": "+",
@@ -57,18 +57,8 @@
             "dir": "l"
           },
           {
-            "linkIndex": 3,
-            "road": "110",
-            "s": 289.6,
-            "t": -1.6,
-            "orient": "+",
-            "fromEdge": "center_N_in",
-            "fromLane": 0,
-            "dir": "t"
-          },
-          {
-            "linkIndex": 9,
-            "road": "112",
+            "linkIndex": 7,
+            "road": "152",
             "s": 286.4,
             "t": -1.6,
             "orient": "+",
@@ -77,8 +67,8 @@
             "dir": "r"
           },
           {
-            "linkIndex": 10,
-            "road": "112",
+            "linkIndex": 8,
+            "road": "152",
             "s": 286.4,
             "t": -1.6,
             "orient": "+",
@@ -87,24 +77,14 @@
             "dir": "s"
           },
           {
-            "linkIndex": 11,
-            "road": "112",
+            "linkIndex": 9,
+            "road": "152",
             "s": 286.4,
             "t": -1.6,
             "orient": "+",
             "fromEdge": "center_S_in",
             "fromLane": 0,
             "dir": "l"
-          },
-          {
-            "linkIndex": 12,
-            "road": "112",
-            "s": 286.4,
-            "t": -1.6,
-            "orient": "+",
-            "fromEdge": "center_S_in",
-            "fromLane": 0,
-            "dir": "t"
           }
         ]
       },
@@ -131,8 +111,8 @@
         ],
         "members": [
           {
-            "linkIndex": 4,
-            "road": "115",
+            "linkIndex": 3,
+            "road": "155",
             "s": 385.6,
             "t": -4.8,
             "orient": "+",
@@ -141,28 +121,28 @@
             "dir": "r"
           },
           {
-            "linkIndex": 5,
-            "road": "115",
+            "linkIndex": 4,
+            "road": "155",
             "s": 385.6,
             "t": -4.8,
             "orient": "+",
             "fromEdge": "corridor_ce_w",
             "fromLane": 0,
+            "dir": "s"
+          },
+          {
+            "linkIndex": 5,
+            "road": "155",
+            "s": 385.6,
+            "t": -1.6,
+            "orient": "+",
+            "fromEdge": "corridor_ce_w",
+            "fromLane": 1,
             "dir": "s"
           },
           {
             "linkIndex": 6,
-            "road": "115",
-            "s": 385.6,
-            "t": -1.6,
-            "orient": "+",
-            "fromEdge": "corridor_ce_w",
-            "fromLane": 1,
-            "dir": "s"
-          },
-          {
-            "linkIndex": 7,
-            "road": "115",
+            "road": "155",
             "s": 385.6,
             "t": -1.6,
             "orient": "+",
@@ -171,18 +151,8 @@
             "dir": "l"
           },
           {
-            "linkIndex": 8,
-            "road": "115",
-            "s": 385.6,
-            "t": -1.6,
-            "orient": "+",
-            "fromEdge": "corridor_ce_w",
-            "fromLane": 1,
-            "dir": "t"
-          },
-          {
-            "linkIndex": 13,
-            "road": "120",
+            "linkIndex": 10,
+            "road": "160",
             "s": 385.6,
             "t": -8.0,
             "orient": "+",
@@ -191,8 +161,8 @@
             "dir": "r"
           },
           {
-            "linkIndex": 14,
-            "road": "120",
+            "linkIndex": 11,
+            "road": "160",
             "s": 385.6,
             "t": -8.0,
             "orient": "+",
@@ -201,8 +171,8 @@
             "dir": "s"
           },
           {
-            "linkIndex": 15,
-            "road": "120",
+            "linkIndex": 12,
+            "road": "160",
             "s": 385.6,
             "t": -4.8,
             "orient": "+",
@@ -211,8 +181,8 @@
             "dir": "s"
           },
           {
-            "linkIndex": 16,
-            "road": "120",
+            "linkIndex": 13,
+            "road": "160",
             "s": 385.6,
             "t": -1.6,
             "orient": "+",
@@ -221,24 +191,14 @@
             "dir": "s"
           },
           {
-            "linkIndex": 17,
-            "road": "120",
+            "linkIndex": 14,
+            "road": "160",
             "s": 385.6,
             "t": -1.6,
             "orient": "+",
             "fromEdge": "corridor_wc_e",
             "fromLane": 2,
             "dir": "l"
-          },
-          {
-            "linkIndex": 18,
-            "road": "120",
-            "s": 385.6,
-            "t": -1.6,
-            "orient": "+",
-            "fromEdge": "corridor_wc_e",
-            "fromLane": 2,
-            "dir": "t"
           }
         ]
       }
@@ -247,7 +207,7 @@
   "int_east": {
     "cycle": 90,
     "offset": 0,
-    "nlinks": 18,
+    "nlinks": 14,
     "groups": [
       {
         "sg": 1,
@@ -273,7 +233,7 @@
         "members": [
           {
             "linkIndex": 0,
-            "road": "122",
+            "road": "162",
             "s": 286.4,
             "t": -1.6,
             "orient": "+",
@@ -283,7 +243,7 @@
           },
           {
             "linkIndex": 1,
-            "road": "122",
+            "road": "162",
             "s": 286.4,
             "t": -1.6,
             "orient": "+",
@@ -293,7 +253,7 @@
           },
           {
             "linkIndex": 2,
-            "road": "122",
+            "road": "162",
             "s": 286.4,
             "t": -1.6,
             "orient": "+",
@@ -302,18 +262,8 @@
             "dir": "l"
           },
           {
-            "linkIndex": 3,
-            "road": "122",
-            "s": 286.4,
-            "t": -1.6,
-            "orient": "+",
-            "fromEdge": "east_N_in",
-            "fromLane": 0,
-            "dir": "t"
-          },
-          {
-            "linkIndex": 9,
-            "road": "124",
+            "linkIndex": 7,
+            "road": "164",
             "s": 286.4,
             "t": -1.6,
             "orient": "+",
@@ -322,8 +272,8 @@
             "dir": "r"
           },
           {
-            "linkIndex": 10,
-            "road": "124",
+            "linkIndex": 8,
+            "road": "164",
             "s": 286.4,
             "t": -1.6,
             "orient": "+",
@@ -332,24 +282,14 @@
             "dir": "s"
           },
           {
-            "linkIndex": 11,
-            "road": "124",
+            "linkIndex": 9,
+            "road": "164",
             "s": 286.4,
             "t": -1.6,
             "orient": "+",
             "fromEdge": "east_S_in",
             "fromLane": 0,
             "dir": "l"
-          },
-          {
-            "linkIndex": 12,
-            "road": "124",
-            "s": 286.4,
-            "t": -1.6,
-            "orient": "+",
-            "fromEdge": "east_S_in",
-            "fromLane": 0,
-            "dir": "t"
           }
         ]
       },
@@ -376,9 +316,9 @@
         ],
         "members": [
           {
-            "linkIndex": 4,
-            "road": "116",
-            "s": 592.8,
+            "linkIndex": 3,
+            "road": "156",
+            "s": 112.80944994,
             "t": -8.0,
             "orient": "+",
             "fromEdge": "corridor_e_in",
@@ -386,9 +326,9 @@
             "dir": "r"
           },
           {
-            "linkIndex": 5,
-            "road": "116",
-            "s": 592.8,
+            "linkIndex": 4,
+            "road": "156",
+            "s": 112.80944994,
             "t": -8.0,
             "orient": "+",
             "fromEdge": "corridor_e_in",
@@ -396,9 +336,9 @@
             "dir": "s"
           },
           {
-            "linkIndex": 6,
-            "road": "116",
-            "s": 592.8,
+            "linkIndex": 5,
+            "road": "156",
+            "s": 112.80944994,
             "t": -4.8,
             "orient": "+",
             "fromEdge": "corridor_e_in",
@@ -406,8 +346,8 @@
             "dir": "s"
           },
           {
-            "linkIndex": 13,
-            "road": "114",
+            "linkIndex": 10,
+            "road": "154",
             "s": 385.6,
             "t": -8.0,
             "orient": "+",
@@ -416,8 +356,8 @@
             "dir": "r"
           },
           {
-            "linkIndex": 14,
-            "road": "114",
+            "linkIndex": 11,
+            "road": "154",
             "s": 385.6,
             "t": -8.0,
             "orient": "+",
@@ -426,8 +366,8 @@
             "dir": "s"
           },
           {
-            "linkIndex": 15,
-            "road": "114",
+            "linkIndex": 12,
+            "road": "154",
             "s": 385.6,
             "t": -4.8,
             "orient": "+",
@@ -460,9 +400,9 @@
         ],
         "members": [
           {
-            "linkIndex": 7,
-            "road": "116",
-            "s": 592.8,
+            "linkIndex": 6,
+            "road": "156",
+            "s": 112.80944994,
             "t": -1.6,
             "orient": "+",
             "fromEdge": "corridor_e_in",
@@ -470,34 +410,14 @@
             "dir": "l"
           },
           {
-            "linkIndex": 8,
-            "road": "116",
-            "s": 592.8,
-            "t": -1.6,
-            "orient": "+",
-            "fromEdge": "corridor_e_in",
-            "fromLane": 2,
-            "dir": "t"
-          },
-          {
-            "linkIndex": 16,
-            "road": "114",
+            "linkIndex": 13,
+            "road": "154",
             "s": 385.6,
             "t": -1.6,
             "orient": "+",
             "fromEdge": "corridor_ce_e",
             "fromLane": 2,
             "dir": "l"
-          },
-          {
-            "linkIndex": 17,
-            "road": "114",
-            "s": 385.6,
-            "t": -1.6,
-            "orient": "+",
-            "fromEdge": "corridor_ce_e",
-            "fromLane": 2,
-            "dir": "t"
           }
         ]
       }
@@ -506,7 +426,7 @@
   "int_west": {
     "cycle": 90,
     "offset": 0,
-    "nlinks": 19,
+    "nlinks": 15,
     "groups": [
       {
         "sg": 1,
@@ -532,7 +452,7 @@
         "members": [
           {
             "linkIndex": 0,
-            "road": "126",
+            "road": "172",
             "s": 289.6,
             "t": -1.6,
             "orient": "+",
@@ -542,7 +462,7 @@
           },
           {
             "linkIndex": 1,
-            "road": "126",
+            "road": "172",
             "s": 289.6,
             "t": -1.6,
             "orient": "+",
@@ -552,7 +472,7 @@
           },
           {
             "linkIndex": 2,
-            "road": "126",
+            "road": "172",
             "s": 289.6,
             "t": -1.6,
             "orient": "+",
@@ -561,18 +481,8 @@
             "dir": "l"
           },
           {
-            "linkIndex": 3,
-            "road": "126",
-            "s": 289.6,
-            "t": -1.6,
-            "orient": "+",
-            "fromEdge": "west_N_in",
-            "fromLane": 0,
-            "dir": "t"
-          },
-          {
-            "linkIndex": 9,
-            "road": "128",
+            "linkIndex": 7,
+            "road": "174",
             "s": 286.4,
             "t": -1.6,
             "orient": "+",
@@ -581,8 +491,8 @@
             "dir": "r"
           },
           {
-            "linkIndex": 10,
-            "road": "128",
+            "linkIndex": 8,
+            "road": "174",
             "s": 286.4,
             "t": -1.6,
             "orient": "+",
@@ -591,24 +501,14 @@
             "dir": "s"
           },
           {
-            "linkIndex": 11,
-            "road": "128",
+            "linkIndex": 9,
+            "road": "174",
             "s": 286.4,
             "t": -1.6,
             "orient": "+",
             "fromEdge": "west_S_in",
             "fromLane": 0,
             "dir": "l"
-          },
-          {
-            "linkIndex": 12,
-            "road": "128",
-            "s": 286.4,
-            "t": -1.6,
-            "orient": "+",
-            "fromEdge": "west_S_in",
-            "fromLane": 0,
-            "dir": "t"
           }
         ]
       },
@@ -635,8 +535,8 @@
         ],
         "members": [
           {
-            "linkIndex": 4,
-            "road": "121",
+            "linkIndex": 3,
+            "road": "161",
             "s": 385.6,
             "t": -4.8,
             "orient": "+",
@@ -645,28 +545,28 @@
             "dir": "r"
           },
           {
-            "linkIndex": 5,
-            "road": "121",
+            "linkIndex": 4,
+            "road": "161",
             "s": 385.6,
             "t": -4.8,
             "orient": "+",
             "fromEdge": "corridor_wc_w",
             "fromLane": 0,
+            "dir": "s"
+          },
+          {
+            "linkIndex": 5,
+            "road": "161",
+            "s": 385.6,
+            "t": -1.6,
+            "orient": "+",
+            "fromEdge": "corridor_wc_w",
+            "fromLane": 1,
             "dir": "s"
           },
           {
             "linkIndex": 6,
-            "road": "121",
-            "s": 385.6,
-            "t": -1.6,
-            "orient": "+",
-            "fromEdge": "corridor_wc_w",
-            "fromLane": 1,
-            "dir": "s"
-          },
-          {
-            "linkIndex": 7,
-            "road": "121",
+            "road": "161",
             "s": 385.6,
             "t": -1.6,
             "orient": "+",
@@ -675,19 +575,9 @@
             "dir": "l"
           },
           {
-            "linkIndex": 8,
-            "road": "121",
-            "s": 385.6,
-            "t": -1.6,
-            "orient": "+",
-            "fromEdge": "corridor_wc_w",
-            "fromLane": 1,
-            "dir": "t"
-          },
-          {
-            "linkIndex": 13,
-            "road": "118",
-            "s": 592.8,
+            "linkIndex": 10,
+            "road": "158",
+            "s": 112.80944994,
             "t": -8.0,
             "orient": "+",
             "fromEdge": "corridor_w_in",
@@ -695,9 +585,9 @@
             "dir": "r"
           },
           {
-            "linkIndex": 14,
-            "road": "118",
-            "s": 592.8,
+            "linkIndex": 11,
+            "road": "158",
+            "s": 112.80944994,
             "t": -8.0,
             "orient": "+",
             "fromEdge": "corridor_w_in",
@@ -705,9 +595,9 @@
             "dir": "s"
           },
           {
-            "linkIndex": 15,
-            "road": "118",
-            "s": 592.8,
+            "linkIndex": 12,
+            "road": "158",
+            "s": 112.80944994,
             "t": -4.8,
             "orient": "+",
             "fromEdge": "corridor_w_in",
@@ -715,9 +605,9 @@
             "dir": "s"
           },
           {
-            "linkIndex": 16,
-            "road": "118",
-            "s": 592.8,
+            "linkIndex": 13,
+            "road": "158",
+            "s": 112.80944994,
             "t": -1.6,
             "orient": "+",
             "fromEdge": "corridor_w_in",
@@ -725,24 +615,14 @@
             "dir": "s"
           },
           {
-            "linkIndex": 17,
-            "road": "118",
-            "s": 592.8,
+            "linkIndex": 14,
+            "road": "158",
+            "s": 112.80944994,
             "t": -1.6,
             "orient": "+",
             "fromEdge": "corridor_w_in",
             "fromLane": 2,
             "dir": "l"
-          },
-          {
-            "linkIndex": 18,
-            "road": "118",
-            "s": 592.8,
-            "t": -1.6,
-            "orient": "+",
-            "fromEdge": "corridor_w_in",
-            "fromLane": 2,
-            "dir": "t"
           }
         ]
       }
