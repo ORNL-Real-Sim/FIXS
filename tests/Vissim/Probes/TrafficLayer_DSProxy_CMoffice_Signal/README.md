@@ -78,6 +78,7 @@ PASS: 110/110 stops occurred at a red referenced controller (ego respects the si
 | File | Role |
 |---|---|
 | `add_signal_stops.py` | builds `simple_traffic_light_signalstop.rd5` (straight DrvStops + far-side heads + head spread) + the `SimpleTL_SignalStop` TestRun (`Car_Normal`) |
+| `build_signal_table.py` | renames the CM controllers to the VISSIM convention + emits `simple_traffic_light_signalstop_RSsignalTable.csv` (runs after `add_signal_stops.py`) |
 | `verify_signalstop.py` | parses the ERG, reports each stop episode + whether the referenced controller was red |
 | `parse_erg.py` | minimal CarMaker ERG reader |
 | `run_cm_scene_only.bat` | one-click build + GUI + IPGMovie (or headless `verify`) |
@@ -85,8 +86,32 @@ PASS: 110/110 stops occurred at a red referenced controller (ego respects the si
 Base probe files (`gen_*.py`, `build_*.py`, `import_*.py`, SUMO/VISSIM nets, `signal_plan.json`,
 `WORKING_ROUTE_reference.txt`) are unchanged.
 
-## Still open (Q2)
-- `build_signal_table.py` — emit the VISSIM↔CM `RSsignalTable.csv` (format confirmed:
-  `signalControllerName, signalGroupId, signalHeadId, CmTrafficLightIndex, CmControllerId`).
-- Rename signals to the FIXS controller_group convention.
+## Signal naming + table (Q2)
+
+`build_signal_table.py` wires each CM traffic-light object to the VISSIM signal
+group that drives it, and renames the controllers so the rd5 is self-documenting.
+
+The runtime contract (read from the code, not guessed): `DSProxyMode::toTlsData()`
+sends **one message per (controller, signal group)** with `name = "<SCno>_<sg>"`
+and a **single-char** state; `VirEnvHelper::runStep` then sets
+`TrfLight.Objs[CmTrafficLightIndex].State = tlsChar2CmState(state.at(SignalHeadId))`.
+Because each name carries one char, `SignalHeadId` is always `0`.
+
+`RSsignalTable.csv` columns → values:
+
+| Column | Value | Meaning |
+|---|---|---|
+| `SignalControllerId` | `"<SCno>_<sg>"` e.g. `2_1` | the runtime match key (`tlsId`); SC numbering `int_west=1, int_center=2, int_east=3` |
+| `SignalGroupId` | `-1` | unused by the reader |
+| `SignalHeadId` | `0` | single-char state per name |
+| `CmTrafficLightIndex` | `0..43` | the `Control.TrfLight.<i>` array index |
+| `CmControllerId` | `"<SCno>_<sg>_<linkIndex>"` | unique CM label, also written into `Control.TrfLight` |
+
+The CM-head → VISSIM-group join uses the `odrSignalId` tag osc2cm leaves on each
+head part (`<intersection>_<linkIndex>`), resolved to a group via `signal_plan.json`.
+All 44 heads map across the 7 groups (`1_1..3_3`); several heads share one group
+(a SUMO signal group controls several movements), so the sync sets them together.
+
+## Still open
 - Automated route re-derivation after an osc2cm re-import (currently the route is committed).
+- Wire `SignalTableFilename` into the CM-side co-sim config for the live VISSIM↔CM run.

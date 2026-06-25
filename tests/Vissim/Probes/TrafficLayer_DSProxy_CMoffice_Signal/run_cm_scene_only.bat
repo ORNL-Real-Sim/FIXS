@@ -50,6 +50,11 @@ echo Building signal-stop road ^(DrvStops + far-side heads^) + Car_Normal TestRu
 "%PYTHON%" "%HERE%add_signal_stops.py"
 if errorlevel 1 ( echo Build failed -- is Python on PATH? Set PYTHON=... & pause & exit /b 1 )
 
+REM --- name CM controllers to the VISSIM convention + emit RSsignalTable.csv -
+REM  (must run AFTER add_signal_stops.py, which rewrites the rd5 with osc2cm names)
+echo Building RSsignalTable.csv + renaming controllers to VISSIM convention ...
+"%PYTHON%" "%HERE%build_signal_table.py"
+
 REM --- start fresh: close any stale CarMaker so it opens on THIS testrun ----
 echo Closing any stale CarMaker windows...
 taskkill /F /IM CM_Office.exe      >nul 2>&1
