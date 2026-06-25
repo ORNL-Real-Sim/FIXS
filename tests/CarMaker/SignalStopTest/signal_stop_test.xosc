@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Minimal ego on the straight road, just so osc2cm emits the rd5 + a TestRun.
+     The TestRun is rewritten to IPGDriver by build_signal_stop_test.py. -->
+<OpenSCENARIO>
+  <FileHeader revMajor="1" revMinor="0" date="2026-06-24T00:00:00" description="FIXS signal-stop test" author="FIXS"/>
+  <ParameterDeclarations><ParameterDeclaration name="owner" parameterType="string" value="Ego"/></ParameterDeclarations>
+  <CatalogLocations>
+    <VehicleCatalog><Directory path="./Catalogs/Vehicles"/></VehicleCatalog>
+    <ControllerCatalog><Directory path="./Catalogs/Controllers"/></ControllerCatalog>
+  </CatalogLocations>
+  <RoadNetwork><LogicFile filepath="./signal_stop_test.xodr"/></RoadNetwork>
+  <Entities>
+    <ScenarioObject name="Ego">
+      <CatalogReference catalogName="VehicleCatalog" entryName="car_ego"/>
+      <ObjectController><CatalogReference catalogName="ControllerCatalog" entryName="DefaultDriver"/></ObjectController>
+    </ScenarioObject>
+  </Entities>
+  <Storyboard>
+    <Init><Actions><Private entityRef="Ego">
+      <PrivateAction><LongitudinalAction><SpeedAction>
+        <SpeedActionDynamics dynamicsShape="step" value="0" dynamicsDimension="time"/>
+        <SpeedActionTarget><AbsoluteTargetSpeed value="11.0"/></SpeedActionTarget>
+      </SpeedAction></LongitudinalAction></PrivateAction>
+      <PrivateAction><TeleportAction><Position>
+        <WorldPosition x="10.0" y="-1.75" z="0" h="0.0"/>
+      </Position></TeleportAction></PrivateAction>
+    </Private></Actions></Init>
+    <Story name="S"><Act name="A">
+      <ManeuverGroup maximumExecutionCount="1" name="MG">
+        <Actors selectTriggeringEntities="false"><EntityRef entityRef="Ego"/></Actors>
+        <Maneuver name="M"><Event maximumExecutionCount="1" name="E" priority="overwrite">
+          <Action name="Act"><PrivateAction><RoutingAction>
+            <FollowTrajectoryAction>
+              <Trajectory name="straight" closed="false"><Shape><Polyline>
+                <Vertex time="0.0"><Position><WorldPosition x="10.0" y="-1.75" z="0" h="0.0"/></Position></Vertex>
+                <Vertex time="25.0"><Position><WorldPosition x="285.0" y="-1.75" z="0" h="0.0"/></Position></Vertex>
+              </Polyline></Shape></Trajectory>
+              <TimeReference><Timing domainAbsoluteRelative="absolute" offset="0.0" scale="1.0"/></TimeReference>
+              <TrajectoryFollowingMode followingMode="follow"/>
+            </FollowTrajectoryAction>
+          </RoutingAction></PrivateAction></Action>
+          <StartTrigger><ConditionGroup><Condition conditionEdge="none" delay="0" name="st">
+            <ByValueCondition><SimulationTimeCondition rule="greaterThan" value="0"/></ByValueCondition>
+          </Condition></ConditionGroup></StartTrigger>
+        </Event></Maneuver>
+      </ManeuverGroup>
+      <StartTrigger><ConditionGroup><Condition name="as" delay="0" conditionEdge="rising">
+        <ByValueCondition><SimulationTimeCondition value="0" rule="greaterThan"/></ByValueCondition>
+      </Condition></ConditionGroup></StartTrigger>
+    </Act></Story>
+    <StopTrigger><ConditionGroup><Condition name="end" delay="0" conditionEdge="rising">
+      <ByValueCondition><SimulationTimeCondition value="9999" rule="greaterThan"/></ByValueCondition>
+    </Condition></ConditionGroup></StopTrigger>
+  </Storyboard>
+</OpenSCENARIO>
