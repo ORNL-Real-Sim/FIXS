@@ -1,17 +1,26 @@
 @echo off
 REM ============================================================================
-REM  FIXS #172 - Open the SimpleTrafficLight scene in CarMaker Office (NO VISSIM)
+REM  FIXS #172 - SimpleTrafficLight signal-STOP scene in CarMaker (NO VISSIM)
 REM ----------------------------------------------------------------------------
-REM  DOUBLE-CLICK this to just LOOK AT / drive the imported scene in CarMaker:
-REM    - the corridor + 3 signalized intersections + cross-streets + U-turns
-REM    - the 56 traffic-signal objects osc2cm imported from the .xodr
+REM  DOUBLE-CLICK this to drive the imported scene in CarMaker with the ego that
+REM  STOPS at red lights:
+REM    - corridor + 3 signalized intersections, looping ego
+REM    - far-side signal heads (mounted at the start of the edge across the
+REM      junction, facing back at the stop line)
+REM    - a DrvStop per crossing -> the ego brakes at the stop line on red
 REM
-REM  It does NOT launch VISSIM or TrafficLayer (no co-simulation, no signal sync
-REM  yet). Pressing START drives the ego with CarMaker's own IPGDriver only.
-REM  For the full VISSIM signal-sync co-sim, a separate run_*.bat will follow.
+REM  It builds the signal-stop road/TestRun from the committed base road via
+REM  add_signal_stops.py, then opens CarMaker + IPGMovie on the TestRun.
+REM  Press START: standalone the 44 controllers cycle on their own (green/red);
+REM  the ego stops at the reds. (In the full VISSIM co-sim the same controllers
+REM  are driven live by VISSIM; the stopping mechanism is identical.)
 REM
-REM  Prereq: run import_road first (osc2cm) so SimpleTL_VISSIM exists. Already
-REM  done if Data/TestRun/SimpleTL_VISSIM is present.
+REM  Usage:
+REM     run_cm_scene_only.bat            -> build + open CarMaker GUI + IPGMovie
+REM     run_cm_scene_only.bat verify     -> build + run headless + stop-at-red report
+REM
+REM  Prereq: base road Data/Road/simple_traffic_light.rd5 (with the ego Route)
+REM  must exist - it is committed; else run import_road.bat first + re-inject route.
 REM ============================================================================
 
 setlocal
@@ -21,19 +30,25 @@ for %%I in ("%HERE%..\..\..\..") do set RepoRoot=%%~fI
 set CMPROJ=%RepoRoot%\ProprietaryFiles\CM13_proj
 set CM_OFFICE=C:\IPG\carmaker\win64-13.1.3\bin\CM_Office.exe
 set MOVIE=C:\IPG\carmaker\win64-13.1.3\GUI\Movie.exe
-set TESTRUN=SimpleTL_VISSIM
+set TESTRUN=SimpleTL_SignalStop
+if "%PYTHON%"=="" set PYTHON=python
 
 echo ============================================================
-echo  FIXS #172 - SimpleTrafficLight scene in CarMaker (no VISSIM)
+echo  FIXS #172 - SignalStop scene in CarMaker (no VISSIM)
 echo ============================================================
 
 REM --- preflight ----------------------------------------------------------
 if not exist "%CM_OFFICE%" ( echo ERROR: CM_Office.exe not found: %CM_OFFICE% & pause & exit /b 1 )
-if not exist "%CMPROJ%\Data\TestRun\%TESTRUN%" (
-    echo ERROR: TestRun %TESTRUN% missing under %CMPROJ%\Data\TestRun
-    echo   Run import_road first ^(osc2cm^) to generate the road + TestRun.
+if not exist "%CMPROJ%\Data\Road\simple_traffic_light.rd5" (
+    echo ERROR: base road simple_traffic_light.rd5 missing under %CMPROJ%\Data\Road
+    echo   Run import_road.bat first ^(osc2cm^) + re-inject the route, then retry.
     pause & exit /b 1
 )
+
+REM --- build the signal-stop road + TestRun -------------------------------
+echo Building signal-stop road ^(DrvStops + far-side heads^) + Car_Normal TestRun ...
+"%PYTHON%" "%HERE%add_signal_stops.py"
+if errorlevel 1 ( echo Build failed -- is Python on PATH? Set PYTHON=... & pause & exit /b 1 )
 
 REM --- start fresh: close any stale CarMaker so it opens on THIS testrun ----
 echo Closing any stale CarMaker windows...
@@ -41,8 +56,17 @@ taskkill /F /IM CM_Office.exe      >nul 2>&1
 taskkill /F /IM HIL.exe            >nul 2>&1
 taskkill /F /IM Movie.exe          >nul 2>&1
 
+REM --- verify mode: headless run + stop-at-red report ---------------------
+if /I "%~1"=="verify" (
+    echo [verify] running %TESTRUN% headless ^(loops; runs the full TestRun^) ...
+    "%CM_OFFICE%" -projectdir "%CMPROJ%" -cmd "SaveMode save" -run "%TESTRUN%"
+    for /f "delims=" %%E in ('dir /b /s /o-d "%CMPROJ%\SimOutput\*%TESTRUN%_*.erg" 2^>nul') do ( set ERG=%%E& goto parsed )
+    :parsed
+    "%PYTHON%" "%HERE%verify_signalstop.py" "%ERG%" "%CMPROJ%\Data\Road\simple_traffic_light_signalstop.rd5"
+    goto done
+)
+
 REM --- open the GUI on the project with the TestRun preloaded --------------
-REM CarMaker "CM [opts] [testrun]" form: pass the TestRun as the trailing arg.
 echo Opening CarMaker Office on TestRun %TESTRUN% ...
 start "" "%CM_OFFICE%" -projectdir "%CMPROJ%" "%TESTRUN%"
 
@@ -63,9 +87,9 @@ start "" "%MOVIE%"
 echo.
 echo ============================================================
 echo  Opened CarMaker on %TESTRUN%.
-echo    - Inspect the road, the 3 intersections, and the signal objects.
-echo    - Press START to drive the ego (IPGDriver only; no VISSIM signal sync).
-echo  NOTE: signals will NOT change yet - that needs the VISSIM co-sim run.
+echo    - Press START: the ego loops the corridor and STOPS at red lights.
+echo    - Far-side signal heads sit across each junction, facing the stop line.
+echo  NOTE: standalone, signals cycle on their own; full sync needs the VISSIM co-sim.
 echo ============================================================
 echo.
 pause
