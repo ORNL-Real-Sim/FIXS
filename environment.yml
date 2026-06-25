@@ -13,6 +13,8 @@ dependencies:
   - protobuf
   - pyyaml
   - lxml
+  - shapely   # used by utils/extract_sumo_tls_as_table.py
+  - pytest    # tests/Sumo/Carla logic tests
   - vs2015_runtime
   - vc14_runtime
   - pip
