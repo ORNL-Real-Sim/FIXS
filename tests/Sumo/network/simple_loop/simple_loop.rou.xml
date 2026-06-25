@@ -21,9 +21,12 @@
     <!-- Loop edge ids come from netconvert: simple_loop.net.xml is generated from
          tests/Vissim/SimpleEcho/simple_loop.xodr so SUMO, the CarMaker road, and
          the Carla world share ONE geometry. Loop is node 4->1->2->3->4, i.e.
-         edges -1 -> -2 -> -3 -> -4. repeat is large so vehicles circulate the
-         loop ENDLESSLY (they never reach the end / never exit). -->
-    <route id="loop" edges="-1 -2 -3 -4" repeat="100000"/>
+         edges -1 -> -2 -> -3 -> -4. repeat sizes the route to circulate well past
+         any sim end (1000 laps ~= 40000 s at 20 m/s); kept modest because `repeat`
+         literally EXPANDS the edge list (#177: repeat=100000 -> 400k-edge route made
+         per-veh getNextTLS O(route) ~2.5 ms/veh; 1000 -> ~0.03 ms). For a truly
+         unbounded run use a rerouter loop instead (SUMO "Driving in Circles"). -->
+    <route id="loop" edges="-1 -2 -3 -4" repeat="1000"/>
 
     <!-- Background demand mimicking the VISSIM SimpleEcho counterpart: inject at
          ~700 veh/h (simple_loop_ds.inpx vehicleInput volume="700") until 40

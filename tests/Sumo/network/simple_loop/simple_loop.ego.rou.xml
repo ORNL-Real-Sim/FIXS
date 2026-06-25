@@ -22,8 +22,11 @@
     <!-- Ego vehicle type: RED, otherwise identical to the background 'car'. -->
     <vType id="egoCar" vClass="passenger" length="5.0" minGap="2.5" maxSpeed="20.0" accel="2.6" decel="4.5" sigma="0.5" color="1,0,0"/>
 
-    <!-- Same geometry/edges as the background 'loop' route, distinct id. -->
-    <route id="egoLoop" edges="-1 -2 -3 -4" repeat="100000"/>
+    <!-- Same geometry/edges as the background 'loop' route, distinct id.
+         repeat=1000 (not 100000): `repeat` expands the edge list literally, and a
+         400k-edge route made per-veh getNextTLS O(route) ~2.5 ms/veh (#177). 1000
+         laps still circulate well past any sim end. -->
+    <route id="egoLoop" edges="-1 -2 -3 -4" repeat="1000"/>
 
     <!-- Single ego vehicle: RED, circulates endlessly. -->
     <vehicle id="ego" type="egoCar" route="egoLoop" depart="0" color="1,0,0"/>
