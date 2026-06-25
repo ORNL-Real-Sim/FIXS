@@ -1,0 +1,30 @@
+# FIXS #172 — KNOWN-GOOD ego route (hand-made in CM on the enlarged-junction geometry)
+# Captured 2026-06-24. roadutil -rlen 0 = 2861.45 m (full loop, connected).
+# NOTE: lane-path IDs are tied to this osc2cm rd5 generation; re-deriving from a
+#       fresh import must re-map (ERG main-links + connector search), not reuse IDs.
+
+## rd5 Route (Data/Road/simple_traffic_light.rd5):
+nRoutes = 1
+Route.0.Length = 2861.45275464
+Route.0.ID = 3
+Route.0.Name = Route_0
+Route.0.DrvPath.ID = 4
+Route.0.DrvPath (28 = 14 mains + 14 connectors, interleaved, wraps):
+  374   2476   477   1758   163   2113   323   2617   949   2645   905   2673   981   2533   273   1936   213   1571   529   2289   426   2701   1265   2813   1221   2841   1297   2729
+
+## TestRun driving setup (Data/TestRun/SimpleTL_VISSIM):
+Vehicle.DriverTemplate.FName = Car_Normal_osc
+Vehicle.Routing.Type = Route
+Vehicle.Routing.ObjId = 3
+Vehicle.StartPos.Type = Route
+Vehicle.StartPos.ObjId = 3
+Vehicle.StartPos = 0.0 0.0
+Vehicle.StartPos.Orientation.Type = Absolute
+Vehicle.StartPos.Orientation = 0.0
+DrivMan.Global.EndCond = rise(Time > 9999.00)
+DrivMan.VhclOperator.Kind = IPGOperator 1
+DrivMan.Man.0.LongStep.0.Dyn = Driver 1 0
+DrivMan.Man.0.LatStep.0.Dyn = Driver 0
+Driver.Course.LapDriving = 1
+Driver.Acc.ayMax = 4.0
+Driver.Consider.TrfLight = 1

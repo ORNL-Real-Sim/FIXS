@@ -26,7 +26,10 @@ LOOP_R = 45.0           # loop radius (m)
 DS = 2.0                # polyline sample step (m)
 LOOP_SPEED = 8.33       # m/s (~30 km/h) on ramps + loop
 RAMP_TURN = -1          # entry/exit ramp turn sign (-1 = eastbound peels SOUTH -> loop runs CCW)
-LOOP_LANES = 2          # lanes on ramps + loop (2 -> both corridor lanes feed it, wider road)
+LOOP_LANES = 1          # single-lane loop+ramps -> clean merge (no multi-lane tangle at the neck)
+NECK_RADIUS = 30.0      # big junction radius at the loop neck -> long/gentle internal connectors
+                        # (avoids the sharp lane-change area CM/IPGDriver choke on)
+T_RADIUS = 12.0         # modest radius at the ramp<->loop tangent nodes
 
 BASE_NODES = [
     ("int_west", -400, 0, "traffic_light"), ("int_center", 0, 0, "traffic_light"),
@@ -133,7 +136,10 @@ def main():
 
     nl = ['<?xml version="1.0" encoding="UTF-8"?>', "<nodes>"]
     for n, x, y, t in nodes:
-        nl.append(f'    <node id="{n}" x="{x}" y="{y}" type="{t}"/>')
+        # enlarge the loop junctions so their internal connectors are long + gentle
+        r = NECK_RADIUS if n.endswith("_neck") else (T_RADIUS if (n.endswith("_t1") or n.endswith("_t2")) else None)
+        extra = f' radius="{r}" keepClear="false"' if r else ""
+        nl.append(f'    <node id="{n}" x="{x}" y="{y}" type="{t}"{extra}/>')
     nl.append("</nodes>")
     (HERE / "nodes.nod.xml").write_text("\n".join(nl) + "\n", encoding="utf-8")
 

@@ -7,7 +7,9 @@ corridor_ce_e_0
 corridor_e_out_0
 :rbe_neck_3_0
 rbe_ramp_in_0
+:rbe_t1_0_0
 rbe_loop_0
+:rbe_t2_0_0
 rbe_ramp_out_0
 :rbe_neck_0_0
 corridor_e_in_0
@@ -21,6 +23,6 @@ corridor_w_out_0
 rbw_ramp_in_0
 :rbw_t1_0_0
 rbw_loop_0
-rbw_ramp_out_0
-:rbw_neck_2_0
+:rbw_t2_0_0
+:rbw_neck_1_0
 corridor_w_in_0
