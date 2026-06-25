@@ -1,0 +1,77 @@
+# =============================================================================
+# FIXS #172 -- CarMaker (office) <-> VISSIM co-simulation via DSProxy, WITH
+# traffic-signal sync. Signalized 3-intersection corridor (simple_traffic_light).
+# =============================================================================
+#
+# Data flow (lockstep, CarMaker-triggered) -- TWO sockets when signals are on:
+#
+#   CarMaker.win64.exe --[ego VehFullData on 2444]------> TrafficLayer.exe (DSProxy)
+#   TrafficLayer --[VISSIM_SetDriverVehicles]-----------> VISSIM (via DSProxy)
+#   VISSIM --[GetTrafficVehicles + GetSignalStates]-----> TrafficLayer
+#   TrafficLayer --[background VehFullData on 2444]------> CarMaker (renders RS_Cxxx)
+#   TrafficLayer --[per-(ctrl,sg) TlsData on 2445]------> CarMaker (drives TrfLight.Objs)
+#
+# The signal socket (2445) is a SECOND connection CarMaker's VirtualEnvironment.lib
+# opens when SynchronizeTrafficSignal is on; DSProxyMode serves it (Plan A, #172).
+# CarMaker maps VISSIM signal-group state -> CM traffic light via the signal table
+# (-s <...RSsignalTable.csv>); the ego brakes at the DrvStop when its light is red.
+#
+# The ego id round-trips as 'egoCm' (CarMaker tags it; TrafficLayer maps egoCm <->
+# the VISSIM VehicleID and re-stamps it back so the .lib skips its own ego).
+
+SimulationSetup:
+    EnableRealSim: false             # DSProxy mode uses its own code path; this stays off
+    EnableVerboseLog: false
+    SelectedTrafficSimulator: VISSIM # informational; DSProxy dispatch bypasses it
+    SimulationEndTime: 300           # 3000 ticks at 10 Hz -- ego loops the ~206 m/s corridor
+                                     # and meets several signal cycles (90 s cycle) in the window
+
+    # Mandatory fields for CarMaker's VirtualEnvironment.lib:
+    #   id, speed, vehicleClass, heading, grade, speedDesired (or accelerationDesired)
+    VehicleMessageField: [id, type, vehicleClass, speed, speedDesired, positionX, positionY, positionZ, heading, linkId, laneId, grade]
+
+ApplicationSetup:
+    EnableApplicationLayer: true
+
+    # The first subscription's ip/port[0] is the canonical publish endpoint.
+    # CarMaker's VirtualEnvironment.lib connects here; the subscription id 'egoCm'
+    # also becomes CarMakerSetup.EgoId by fallback (the ego match key for re-stamp).
+    VehicleSubscription:
+    -   type: ego
+        attribute: { id: ['egoCm'], radius: [0] }
+        ip: ['127.0.0.1']
+        port: [2444]
+
+XilSetup:
+    EnableXil: false
+
+# CarMaker side. EgoId / CarMakerPort / CarMakerIP fall back to the subscription
+# above so there is one source of truth for the vehicle port + ego id.
+CarMakerSetup:
+    EnableCosimulation: true         # drives ENABLE_REALSIM in VirtualEnvironment.lib
+    TrafficRefreshRate: 0.001        # write t_0 every sim step (1 kHz) -- REQUIRED so UpdRate=200
+                                     # traffic doesn't phase-lock/freeze (#168). Do not raise.
+    EnableEgoSimulink: false         # ego pose comes from User.c (office), not Simulink
+
+    SynchronizeTrafficSignal: true   # >>> #172: drive CM traffic lights from VISSIM signal state
+    TrafficSignalPort: 2445          # MUST differ from the vehicle port (2444); the .lib opens a
+                                     # dedicated signal socket here and DSProxyMode (Plan A) serves it
+    EgoId: egoCm
+    EgoType: '100'                   # standard VISSIM car type (no dedicated red ego type seeded in
+                                     # this network yet; recoloring the ego is a later polish step)
+
+# DSProxy: TrafficLayer spawns VISSIM via DrivingSimulatorProxy.dll and ticks it.
+VissimSetup:
+    EnableDSProxy: true
+    EnableDriverModelRelay: false    # no FIXS DriverModel / CAV controller in this demo
+
+    # Staged writable copy of the signalized network (the launcher mirrors the
+    # network + its .sig signal-controller files into stage_network/).
+    NetworkFile: 'stage_network\simple_traffic_light_ds.inpx'
+
+    VissimVersion: 2022
+    SimulatorFrequency: 10           # Hz
+    VisibilityRadius: -1.0           # unlimited
+    MaxSimulatorVeh: 50
+    MaxTotalVeh: 50000
+    MaxVissimSigGrp: 1000
