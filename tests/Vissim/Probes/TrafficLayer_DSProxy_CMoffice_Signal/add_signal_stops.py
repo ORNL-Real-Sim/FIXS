@@ -42,7 +42,8 @@ OUT_RD = CMPROJ / "Data" / "Road" / "simple_traffic_light_signalstop.rd5"
 BASE_TR = CMPROJ / "Data" / "TestRun" / "SimpleTL_VISSIM"
 OUT_TR = CMPROJ / "Data" / "TestRun" / "SimpleTL_SignalStop"
 
-STOP_BACK = 12.0      # DrvStop = this many metres before the approach lane-path's downstream end
+STOP_BACK = 2.0       # DrvStop this many metres before the approach lane-path's downstream end
+                      # (the junction) -> at the stop line, near the end of the approach edge
 HEAD_S = 1.0          # mount the relocated head this many metres into the across edge
 HEAD_SPREAD = 0.5     # lateral spacing between heads on one mount (m) -> cluster them close together
 
