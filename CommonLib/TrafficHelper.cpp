@@ -414,7 +414,14 @@ void TrafficHelper::getConfig() {
 	else {
 		Config_c->getVehSubscriptionList(Config_c->ApplicationSetup.VehicleSubscription, edgeSubscribeId_v, vehicleSubscribeId_v, subscribeAllVehicle, pointSubscribeId_v, vehicleTypeSubscribedId_v);
 	}
-	
+
+	// #176: the `all` subscription means every vehicle in the network, unbounded.
+	// If a radius was also configured alongside `all`, it is ignored — warn so the
+	// config author is not surprised.
+	if (get<0>(subscribeAllVehicle) && get<1>(subscribeAllVehicle) != 0) {
+		printf("WARNING (#176): 'all' vehicle subscription is enabled; configured radius %.1f is ignored (all vehicles in the network are sent).\n", get<1>(subscribeAllVehicle));
+	}
+
 	vehicleHasSubscribed_v.clear();
 	vehicleHasSubscribed_v.resize(vehicleSubscribeId_v.size());
 	fill(vehicleHasSubscribed_v.begin(), vehicleHasSubscribed_v.end(), false);
@@ -1056,19 +1063,27 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 
 			}
 
-			// !!! need to sub all vehicles
-
-			//while Simulation::getMinExpectedNumber() > 0:
-			//for veh_id in Simulation::getDepartedIDList() :
-			//	traci.vehicle.subscribe(veh_id, [traci.constants.VAR_POSITION])
-			//	positions = traci.vehicle.getAllSubscriptionResults()
-			//	traci.simulationStep()
-
-
 		}
 		else {
 			int aa = 1;
 
+		}
+
+		// -------------------------------------------------------------------
+		//  #176: subscribe ALL vehicles when the YAML `all` flag is set.
+		//  `all` means every vehicle in the network, unbounded (the configured radius is
+		//  ignored, see init warning). We issue a plain per-vehicle subscription for each
+		//  vehicle as it ENTERS, using the same getDepartedIDList() pattern as the per-ego
+		//  radius path above. SUMO removes a vehicle's subscription automatically when it
+		//  leaves the network, so no client-side tracking set and no explicit unsubscribe
+		//  are needed (unsubscribing an already-departed id would error). Results are read
+		//  below via Vehicle::getAllSubscriptionResults().
+		// -------------------------------------------------------------------
+		if (get<0>(subscribeAllVehicle)) {
+			vector <string> vehDepartedAll_v = SUMO_TRACI_NAMESPACE::Simulation::getDepartedIDList();
+			for (const string& vid : vehDepartedAll_v) {
+				SUMO_TRACI_NAMESPACE::Vehicle::subscribe(vid, VehDataSubscribeList, 0, tSimuEnd);
+			}
 		}
 
 		// this might make it slightly faster to not get repeated vehicles
@@ -1122,6 +1137,36 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 
 				}
 
+			}
+		}
+
+		// -------------------------------------------------------------------
+		//  #176: read ALL-vehicle subscription results (plain per-vehicle
+		//  subscriptions issued above when the `all` flag is set). Same parser as
+		//  the context results; dedup against processedVehId_us so a vehicle already
+		//  returned by a context/edge/point subscription is not counted twice.
+		// -------------------------------------------------------------------
+		if (get<0>(subscribeAllVehicle)) {
+			libsumo::SubscriptionResults VehAllSubscribeRaw = SUMO_TRACI_NAMESPACE::Vehicle::getAllSubscriptionResults();
+			for (auto& iter : VehAllSubscribeRaw) {
+				string tempvehId = iter.first;
+				if (processedVehId_us.find(tempvehId) != processedVehId_us.end()) {
+					continue;
+				}
+				processedVehId_us.insert(tempvehId);
+
+				VehFullData_t CurVehData;
+				this->parserSumoSubscription(iter.second, tempvehId, CurVehData);
+				VehDataRecv_um_tmp[tempvehId] = CurVehData;
+
+				if (ENABLE_VERBOSE) {
+					float speed = CurVehData.speed;
+					printf("recv SUMO (all) veh id %s veh speed %.4f\n", tempvehId.c_str(), speed);
+
+					FILE* f = fopen(MasterLogName.c_str(), "a");
+					fprintf(f, "recv SUMO (all) veh id %s veh speed %.4f\n", tempvehId.c_str(), speed);
+					fclose(f);
+				}
 			}
 		}
 
