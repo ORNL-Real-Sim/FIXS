@@ -390,8 +390,13 @@ class MsgHelper:
         if self.vehicle_msg_field_valid.get('height'):
             byte_data[byte_index:byte_index+4] = struct.pack('f', veh_data.height)
             byte_index += 4
-        
-        return byte_data, msg_size, byte_index
+
+        # Return the FULL record size (header + body), matching the size written into the
+        # per-record header and the bytes advanced in byte_index. Returning the body-only
+        # msg_size here made callers under-count total_msg_size by msg_each_header_size per
+        # record, so a message with >=2 records declared a header total shorter than the
+        # bytes actually sent -> the receiver stopped early and desynced the stream (#176).
+        return byte_data, veh_msg_size, byte_index
 
     def depack_traffic_light_data(self, byte_data: bytes)-> TrafficLightData:
         # Wire format (matches CommonLib/MsgHelper.cpp::packTrafficLightData):
@@ -449,7 +454,8 @@ class MsgHelper:
         if self.traffic_light_msg_field_valid.get('state'):
             byte_data, byte_index = MsgHelper.pack_string(byte_data, byte_index, traffic_light_data.state)
 
-        return byte_data, msg_size, byte_index
+        # Return the FULL record size (header + body); see pack_veh_data for why (#176).
+        return byte_data, traffic_light_msg_size, byte_index
     
     def pack_msg_header(self, byte_data: bytearray, simulation_state: int, t: float, total_msg_size: int):
         byte_index = 0
@@ -496,7 +502,8 @@ class MsgHelper:
             byte_data[byte_index] = detector_data.state
             byte_index += 1
 
-        return byte_data, msg_size, byte_index
+        # Return the FULL record size (header + body); see pack_veh_data for why (#176).
+        return byte_data, detector_msg_size, byte_index
     
     def depack_detector_data(self, byte_data: bytes)-> DetectorData:
         detector_data = DetectorData()
