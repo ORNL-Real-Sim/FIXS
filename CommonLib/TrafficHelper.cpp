@@ -6,6 +6,27 @@
 
 using namespace std;
 
+// #177: lane id "edge_index" -> "edge" (strip the trailing _<laneIndex>).
+static std::string edgeOfLane(const std::string& laneId) {
+	size_t p = laneId.rfind('_');
+	return (p == std::string::npos) ? laneId : laneId.substr(0, p);
+}
+
+// #177: SUMO TLS state char -> FIXS signalLightColor code. Identical mapping to the
+// original inline getNextTLS handling, factored out so the cached path reuses it.
+static int tlsStateToColor(char tlsState) {
+	switch (tlsState) {
+	case 'r': return 1;
+	case 'y': return 2;
+	case 'g': case 'G': return 3;
+	case 'u': return 4;
+	case 'o': return 5;
+	case 'O': return 6;
+	case 's': return 7;
+	default:  return 0;
+	}
+}
+
 //CentralCtrl CentralCtrl_g;
 
 // The convention is that, Server always provide service to the Client. 
@@ -136,6 +157,10 @@ void TrafficHelper::connectionSetup(string trafficIp, int trafficPort, int nClie
 	VehDataSubscribeList.push_back(libsumo::VAR_LANE_ID);
 	VehDataSubscribeList.push_back(libsumo::VAR_VEHICLECLASS);
 	VehDataSubscribeList.push_back(libsumo::VAR_ROUTE_INDEX);
+	// #177 Phase 2: route id keys the per-route TLS map and detects reroutes
+	// (a reroute changes the route id), so the map is never stale. Subscribed
+	// (not per-veh getRouteID) to keep it free per step.
+	VehDataSubscribeList.push_back(libsumo::VAR_ROUTE_ID);
 
 	// testing new data
 	VehDataSubscribeList.push_back(libsumo::VAR_ACCELERATION);
@@ -1091,6 +1116,28 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 
 		// temp buffer to store all vehicle received
 		std::unordered_map <std::string, VehFullData_t> VehDataRecv_um_tmp;
+
+		// #177 Phase 2: build the static controlled-link topology once (TLS list is
+		// available after the net is loaded). tlsID -> incomingLane -> [(idx, outEdge)].
+		if (NEED_NEXT_TLS && !tlsTopologyBuilt) {
+			vector<string> tlsIds = SUMO_TRACI_NAMESPACE::TrafficLight::getIDList();
+			for (auto& tls : tlsIds) {
+				auto links = SUMO_TRACI_NAMESPACE::TrafficLight::getControlledLinks(tls);
+				auto& laneMap = TlsTopology_um[tls];
+				for (int idx = 0; idx < (int)links.size(); idx++) {
+					for (auto& lk : links[idx]) {
+						laneMap[lk.fromLane].push_back(std::make_pair(idx, edgeOfLane(lk.toLane)));
+					}
+				}
+			}
+			tlsTopologyBuilt = true;
+		}
+
+		// #177 Phase 2: fresh per-step TLS-state snapshot; filled on demand in
+		// parserSumoSubscription for the (sparse) set of TLS that are some vehicle's
+		// next signal this step, then reused across vehicles sharing that signal.
+		CurTlsState_um.clear();
+
 		// ===========================================================================
 		// 			GET SUBSCRIBED VEHICLE
 		// ===========================================================================
@@ -1306,6 +1353,7 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 		vector <string> vehArrivedIdList = SUMO_TRACI_NAMESPACE::Simulation::getArrivedIDList();
 		for (int i = 0; i < vehArrivedIdList.size(); i++) {
 			VehicleId2EdgeList_um.erase(vehArrivedIdList[i]);
+			VehicleId2Tls_um.erase(vehArrivedIdList[i]);   // #177 Phase 2 TLS cache
 		}
 
 	}
@@ -1543,64 +1591,94 @@ void TrafficHelper::parserSumoSubscription(libsumo::TraCIResults VehDataSubscrib
 	//=================
 	// get signal information
 	//=================
-	// #177: getNextTLS walks the upcoming route (O(route length)) every step;
-	// only call it when a signalLight* field is actually forwarded (NEED_NEXT_TLS).
+	// #177: getNextTLS is O(remaining route length) and was called per vehicle per
+	// step. Its result depends only on the route, so seed it ONCE per vehicle (and on
+	// reroute) and reconstruct the nearest signal every step by O(1) arithmetic. Only
+	// when a signalLight* field is actually forwarded (NEED_NEXT_TLS).
+	CurVehData.signalLightId = "";
+	CurVehData.signalLightHeadId = -1;
+	CurVehData.signalLightDistance = -1.0;
+	CurVehData.signalLightColor = -1;
 	if (NEED_NEXT_TLS) {
-	vector <libsumo::TraCINextTLSData> nextTlsList = SUMO_TRACI_NAMESPACE::Vehicle::getNextTLS(vehId);
+		// route id (subscribed, free) keys the cache and flags reroutes.
+		std::shared_ptr<libsumo::TraCIString> routeIdPtr =
+			static_pointer_cast<libsumo::TraCIString>(VehDataSubscribeTraciResults[libsumo::VAR_ROUTE_ID]);
+		string routeId = routeIdPtr->value;
+		// raw DOUBLE odometer (CurVehData.distanceTravel is cast to float, which would
+		// round cumDist-odo off getNextTLS's double dist by ~1 float ULP).
+		double odo = static_pointer_cast<libsumo::TraCIDouble>(
+			VehDataSubscribeTraciResults[libsumo::VAR_DISTANCE])->value;
 
-	if (nextTlsList.size() > 0) {
-		CurVehData.signalLightId = nextTlsList[0].id;
-		CurVehData.signalLightHeadId = nextTlsList[0].tlIndex;
-		CurVehData.signalLightDistance = nextTlsList[0].dist;
-		char tlsState = nextTlsList[0].state;
-		CurVehData.signalLightColor = 0;
-
-		if (tlsState == 'r') {
-			CurVehData.signalLightColor = 1;
-		}
-		else if (tlsState == 'y') {
-			CurVehData.signalLightColor = 2;
-		}
-		else if (tlsState == 'g' || tlsState == 'G') {
-			CurVehData.signalLightColor = 3;
-		}
-		else if (tlsState == 'u') {
-			CurVehData.signalLightColor = 4;
-		}
-		else if (tlsState == 'o') {
-			CurVehData.signalLightColor = 5;
-		}
-		else if (tlsState == 'O') {
-			CurVehData.signalLightColor = 6;
-		}
-		else if (tlsState == 's') {
-			CurVehData.signalLightColor = 7;
+		// seed once per vehicle (or when the route changed): one getNextTLS walk
+		// captures every TLS ahead of this vehicle for the rest of its route.
+		auto cacheIt = VehicleId2Tls_um.find(vehId);
+		if (cacheIt == VehicleId2Tls_um.end() || cacheIt->second.routeId != routeId) {
+			VehTlsCache entry;
+			entry.routeId = routeId;
+			vector<libsumo::TraCINextTLSData> seed = SUMO_TRACI_NAMESPACE::Vehicle::getNextTLS(vehId);
+			entry.list.reserve(seed.size());
+			for (auto& t : seed) {
+				entry.list.push_back(TlsOnRoute{ t.id, t.tlIndex, t.dist + odo });
+			}
+			VehicleId2Tls_um[vehId] = std::move(entry);
+			cacheIt = VehicleId2Tls_um.find(vehId);
 		}
 
-		if (nextTlsList.size() > 1) {
-			if (ENABLE_VERBOSE) {
+		// nearest TLS still ahead: distance = cumDist - odo, first strictly positive
+		// (matches getNextTLS, which only returns upcoming signals and drops one the
+		// step the vehicle passes it). State fetched once per step per distinct TLS
+		// and reused across vehicles sharing it.
+		for (auto& t : cacheIt->second.list) {
+			double dist = t.cumDist - odo;
+			if (dist > 0.0) {
+				CurVehData.signalLightId = t.id;
+				CurVehData.signalLightDistance = dist;
 
-				FILE* f = fopen(MasterLogName.c_str(), "a");
-				fprintf(f, "received more than 1 nextTLS vehId %s \n", vehId.c_str());
-				fclose(f);
+				// tlIndex (signal head) is LANE-dependent, not route-static, so the
+				// seed value goes stale after a lane change. Fast path: reconstruct it
+				// byte-exact from the static controlled-link topology keyed on the
+				// subscribed CURRENT lane + the next route edge (the connection this
+				// vehicle takes through the signal).
+				int headIdx = -1;
+				auto topoIt = TlsTopology_um.find(t.id);
+				if (topoIt != TlsTopology_um.end()) {
+					string curLaneId = static_pointer_cast<libsumo::TraCIString>(
+						VehDataSubscribeTraciResults[libsumo::VAR_LANE_ID])->value;
+					int ridx = static_pointer_cast<libsumo::TraCIInt>(
+						VehDataSubscribeTraciResults[libsumo::VAR_ROUTE_INDEX])->value;
+					vector<string>& routeEdges = VehicleId2EdgeList_um[vehId];
+					string outEdge = (ridx + 1 < (int)routeEdges.size()) ? routeEdges[ridx + 1] : "";
+					auto laneIt = topoIt->second.find(curLaneId);
+					if (laneIt != topoIt->second.end()) {
+						for (auto& pr : laneIt->second) {
+							if (pr.second == outEdge) { headIdx = pr.first; break; }
+						}
+					}
+				}
+				if (headIdx < 0) {
+					// Slow path (rare): the vehicle is mid-junction on an internal lane,
+					// or the signal is several edges ahead so its incoming lane is a
+					// best-lane projection rather than the current lane. Get the exact
+					// head straight from getNextTLS for just this step.
+					vector<libsumo::TraCINextTLSData> nt =
+						SUMO_TRACI_NAMESPACE::Vehicle::getNextTLS(vehId);
+					headIdx = nt.empty() ? t.index : nt[0].tlIndex;
+				}
+				CurVehData.signalLightHeadId = headIdx;
 
+				// state for this TLS, fetched once per step per distinct TLS and reused
+				// across vehicles sharing it; indexed by the reconstructed head.
+				auto sIt = CurTlsState_um.find(t.id);
+				if (sIt == CurTlsState_um.end()) {
+					sIt = CurTlsState_um.emplace(
+						t.id, SUMO_TRACI_NAMESPACE::TrafficLight::getRedYellowGreenState(t.id)).first;
+				}
+				const string& state = sIt->second;
+				char tlsState = (headIdx >= 0 && headIdx < (int)state.size()) ? state[headIdx] : 0;
+				CurVehData.signalLightColor = tlsStateToColor(tlsState);
+				break;
 			}
 		}
-	}
-	else {
-		CurVehData.signalLightId = "";
-		CurVehData.signalLightHeadId = -1;
-		CurVehData.signalLightDistance = -1.0;
-		CurVehData.signalLightColor = -1;
-	}
-	}
-	else {
-		// signalLight* not forwarded -> skip the route walk; emit the same
-		// "no TLS" defaults the original code produced when none was found.
-		CurVehData.signalLightId = "";
-		CurVehData.signalLightHeadId = -1;
-		CurVehData.signalLightDistance = -1.0;
-		CurVehData.signalLightColor = -1;
 	}
 
 	//=================
