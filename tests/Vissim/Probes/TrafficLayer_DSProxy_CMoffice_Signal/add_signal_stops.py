@@ -44,7 +44,7 @@ OUT_TR = CMPROJ / "Data" / "TestRun" / "SimpleTL_SignalStop"
 
 STOP_BACK = 12.0      # DrvStop = this many metres before the approach lane-path's downstream end
 HEAD_S = 1.0          # mount the relocated head this many metres into the across edge
-HEAD_SPREAD = 0.8     # lateral spacing between heads on one mount (m), to de-overlap
+HEAD_SPREAD = 0.5     # lateral spacing between heads on one mount (m) -> cluster them close together
 
 
 def parse_route(t):
@@ -90,6 +90,23 @@ def main():
     nodes = rl_nodes(t)
     lines = t.split("\n")
 
+    # Each head's correct lateral position comes from the xodr signal's t, matched EXACTLY by the
+    # odrSignalId tag (= the xodr signal id). CM hOff = -t + 1.0 puts the head over its lane
+    # (t=-1.6->2.6, -4.8->5.8, -8.0->9.0). IMPORTANT: join on the xodr signal id, NOT
+    # signal_plan.json's linkIndex -- signal_plan uses its own numbering that differs from
+    # netconvert's signal ids in the rd5 tags. osc2cm itself mis-placed ~half the heads laterally
+    # (piling them on one lane); this recomputes hOff from the xodr t so each sits over its lane.
+    id2t = {}
+    try:
+        xtext = (HERE / "simple_traffic_light.xodr").read_text(errors="ignore")
+        id2t = {m.group(1): float(m.group(2))
+                for m in re.finditer(r'<signal id="([^"]+)"[^>]*\bt="([\d.-]+)"', xtext)}
+    except Exception:
+        pass
+
+    def hoff_of(tval):
+        return (-tval + 1.0) if tval is not None else 2.6
+
     # straight controller per RL (read BEFORE relocating the heads)
     straight_ctrl = {}
     for ln in lines:
@@ -97,9 +114,35 @@ def main():
         if hm and int(hm.group(3)) == 1:
             straight_ctrl.setdefault(int(hm.group(1)), int(hm.group(2)))
 
-    # ---- 1. relocate each ego-crossing approach mount to the BEGINNING of the route's NEXT
-    #         edge (route[i+2], i.e. the edge after the junction), facing back at the stop line.
-    #         Using the ROUTE (not geometric matching) avoids the 2-way-corridor mismatch. ----
+    # ---- 1. relocate EVERY head-bearing mount (main corridor AND minor cross streets) to the
+    #         BEGINNING of its across edge -- the edge after the junction. The across edge is the
+    #         collinear edge whose Node0 (its forward start) sits just past this edge's downstream
+    #         end (a1), going the same direction. Matching only on the departure edge's Node0
+    #         (forward traversal) avoids the undivided-2-way mismatch -- it reproduces the ego
+    #         ROUTE's far-side targets on the corridor and also resolves the cross streets.
+    #         osc2cm's head facing is kept; the heads on each mount are CLUSTERED close together. ----
+    GAP_MIN, GAP_MAX, DIR_DOT = 0.5, 45.0, 0.95
+
+    def unit(a, b):
+        dx, dy = b[0] - a[0], b[1] - a[1]; d = math.hypot(dx, dy) or 1.0
+        return (dx / d, dy / d)
+
+    def across_edge(rl_a):
+        a0, a1 = nodes[rl_a]; da = unit(a0, a1)          # travel dir N0->N1; downstream end = a1
+        best = None
+        for rl_d, (d0, d1) in nodes.items():
+            if rl_d == rl_a:
+                continue
+            gap = math.dist(a1, d0)                       # across edge is entered at its Node0
+            if not (GAP_MIN <= gap <= GAP_MAX):
+                continue
+            dd = unit(d0, d1)
+            if da[0] * dd[0] + da[1] * dd[1] < DIR_DOT:   # must continue the same direction
+                continue
+            if best is None or gap < best[0]:
+                best = (gap, rl_d)
+        return None if best is None else best[1]
+
     mblk = {}                                # (rl, mi) -> [start_line, end_line]
     for i, ln in enumerate(lines):
         m = re.match(r"RL\.(\d+)\.Mount\.(\d+)(?:\.|\s|$)", ln)
@@ -112,44 +155,48 @@ def main():
                for rl in nodes}
 
     drop, moved_blocks, moved_log = set(), [], []
-    n = len(route)
-    for i, lp in enumerate(route):
-        rl_a = lp2rl.get(lp)
-        if rl_a not in nodes:
+    for (r, mi), (s_i, e_i) in head_mounts.items():
+        rl_d = across_edge(r) if r in nodes else None
+        if rl_d is None:                                 # no across edge (ramp/stub) -> leave it
             continue
-        mounts = [(r, mi) for (r, mi) in head_mounts if r == rl_a]
-        if not mounts:
-            continue
-        rl_d = lp2rl.get(route[(i + 2) % n])      # the edge after the junction (on the route)
-        if rl_d not in nodes:
-            continue
-        a0, a1 = nodes[rl_a]; d0, d1 = nodes[rl_d]
-        # departure edge's BEGINNING = its node nearest the approach (the shared junction corner)
-        dn_name, dn = min([("n0", d0), ("n1", d1)],
-                          key=lambda c: min(math.dist(c[1], a0), math.dist(c[1], a1)))
-        lonR_d = 0 if dn_name == "n0" else 1
-        facing = -1 if dn_name == "n0" else 1     # face back toward the junction / stop line
-        for (r, mi) in mounts:
-            s_i, e_i = head_mounts[(r, mi)]
-            new_mi = next_mi[rl_d]; next_mi[rl_d] += 1
-            out = []
-            for ln in lines[s_i:e_i + 1]:
-                # re-key the whole block to the departure RL/mount index; keep osc2cm's head
-                # fields (hOff spread + facing) EXACTLY -- only the mount line's s/lonR change,
-                # so the gantry renders just as it did, at the new (across-junction) position.
-                ln2 = ln.replace(f"RL.{r}.Mount.{mi}", f"RL.{rl_d}.Mount.{new_mi}")
-                mm = re.match(rf"RL\.{rl_d}\.Mount\.{new_mi}\.ID = (\d+) (\d+)$", ln2)
-                ml = re.match(rf"RL\.{rl_d}\.Mount\.{new_mi} = (.+)$", ln2)
-                if mm:                                  # mount .ID: fix dependsOnObjId -> rl_d
-                    ln2 = f"RL.{rl_d}.Mount.{new_mi}.ID = {mm.group(1)} {rl_d}"
-                elif ml:                                # mount line: only s + lonR change
-                    pp = ml.group(1).split(); pp[0] = f"{HEAD_S}"; pp[1] = f"{lonR_d}"
-                    ln2 = f"RL.{rl_d}.Mount.{new_mi} = " + " ".join(pp)
-                out.append(ln2)
-            moved_blocks.append("\n".join(out))
-            for j in range(s_i, e_i + 1):
-                drop.add(j)
-            moved_log.append((rl_a, rl_d, dn_name, facing))
+        new_mi = next_mi[rl_d]; next_mi[rl_d] += 1
+        block = lines[s_i:e_i + 1]
+        # head part-index -> SUMO lateral t (via its odrSignalId tag's linkIndex)
+        part_t = {}
+        for ln in block:
+            tg = re.match(rf"RL\.{r}\.Mount\.{mi}\.(\d+)\.Tag = odrSignalId:(\S+)$", ln)
+            if tg:
+                part_t[int(tg.group(1))] = id2t.get(tg.group(2))
+        # group heads by lane (t); place each lane at hOff=-t+1, heads SHARING a lane cluster
+        lanes = {}
+        for p, tv in part_t.items():
+            lanes.setdefault(tv, []).append(p)
+        part_hoff = {}
+        for tv, ps in lanes.items():
+            base = hoff_of(tv)
+            for j2, p in enumerate(sorted(ps)):
+                part_hoff[p] = base + (j2 - (len(ps) - 1) / 2) * HEAD_SPREAD
+        out = []
+        for ln in block:
+            ln2 = ln.replace(f"RL.{r}.Mount.{mi}", f"RL.{rl_d}.Mount.{new_mi}")
+            mm = re.match(rf"RL\.{rl_d}\.Mount\.{new_mi}\.ID = (\d+) (\d+)$", ln2)
+            ml = re.match(rf"RL\.{rl_d}\.Mount\.{new_mi} = (.+)$", ln2)
+            hd = re.match(rf"RL\.{rl_d}\.Mount\.{new_mi}\.(\d+) = 1 (.+)$", ln2)
+            if mm:                                       # mount .ID: fix dependsOnObjId -> rl_d
+                ln2 = f"RL.{rl_d}.Mount.{new_mi}.ID = {mm.group(1)} {rl_d}"
+            elif ml:                                     # mount line: move to the across edge's start
+                pp = ml.group(1).split(); pp[0] = f"{HEAD_S}"; pp[1] = "0"
+                ln2 = f"RL.{rl_d}.Mount.{new_mi} = " + " ".join(pp)
+            elif hd:                                     # set hOff to the head's own SUMO lane
+                part = int(hd.group(1)); pp = hd.group(2).split()
+                if part in part_hoff:
+                    pp[2] = f"{part_hoff[part]:.2f}"
+                ln2 = f"RL.{rl_d}.Mount.{new_mi}.{part} = 1 " + " ".join(pp)
+            out.append(ln2)
+        moved_blocks.append("\n".join(out))
+        for j in range(s_i, e_i + 1):
+            drop.add(j)
+        moved_log.append((r, rl_d))
 
     lines = [ln for j, ln in enumerate(lines) if j not in drop]
     t = "\n".join(lines)
@@ -189,8 +236,8 @@ def main():
     OUT_RD.write_text(t, encoding="utf-8")
     print(f"[rd5] {OUT_RD.name}: relocated {len(moved_log)} mount(s) to the across edge (after the "
           f"junction), {len(stops)} straight DrvStop(s) (stop {STOP_BACK} m before the junction)")
-    for rl_a, rl_d, dn, fc in moved_log:
-        print(f"      head mount RL.{rl_a} -> RL.{rl_d} @{dn} facing={fc}")
+    for rl_a, rl_d in sorted(moved_log):
+        print(f"      head mount RL.{rl_a} -> RL.{rl_d} (across-edge start)")
 
     # ---- 3. TestRun: SimpleTL_VISSIM with new road + Car_Normal driver ----
     tr = BASE_TR.read_text(encoding="utf-8", errors="ignore")
