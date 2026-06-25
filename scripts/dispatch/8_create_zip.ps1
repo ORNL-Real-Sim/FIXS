@@ -81,6 +81,22 @@ try {
         Write-Host "  + environment.yml"
     }
 
+    # Include the SUMO<->CARLA co-sim RUNTIME scripts so consumers (e.g.
+    # FIXS_Applications) get them from the fetched FIXS release. Test-only files
+    # (fixtures/, test_tl_logic.py, verify_demo.py) stay source-side.
+    $SumoCarlaSrc = Join-Path $RepoRoot 'tests\Sumo\Carla'
+    if (Test-Path $SumoCarlaSrc) {
+        $scDest = Join-Path $StagingDir 'SumoCarla'
+        New-Item -ItemType Directory -Path $scDest -Force | Out-Null
+        foreach ($item in @('helper_scripts', 'utils', 'run_cosim.py', 'run_cosim.bat', 'run_cosim.sh', 'README.md')) {
+            $p = Join-Path $SumoCarlaSrc $item
+            if (Test-Path $p) { Copy-Item -Path $p -Destination $scDest -Recurse -Force }
+        }
+        Get-ChildItem -Path $scDest -Recurse -Directory -Filter '__pycache__' -ErrorAction SilentlyContinue |
+            Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Host "  + SumoCarla/ co-sim scripts"
+    }
+
     Compress-Archive -Path "$StagingDir\*" -DestinationPath $ZipPath -CompressionLevel Optimal
     Remove-Item $StagingDir -Recurse -Force
 
