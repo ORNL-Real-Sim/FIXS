@@ -37,6 +37,12 @@ CarMaker maps the VISSIM signal-group state to its traffic-light objects via the
 README section). The ego brakes because the in-road `DrvStop` references a
 controller whose state is now driven by VISSIM.
 
+> **Gotcha:** pass the signal table to `-s` **without** the `.csv` extension. The
+> CarMaker GUI/HIL auto-parses a `.csv` argument as an InfoFile and fatals at
+> startup (`Syntax error ... Unknown line type`). `readSignalTable` appends `.csv`
+> itself, so the file stays `*.csv` on disk; `setup_gui.py`/`verify_signal_demo.py`
+> already pass the extension-less path.
+
 ## Run it
 
 **Headless, self-checking (recommended proof / CI):**

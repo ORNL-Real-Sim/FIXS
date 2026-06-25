@@ -55,7 +55,11 @@ def patch_gui_config() -> None:
     # CarMaker's GUI config is an INFOFILE that treats '\' as an escape char, so
     # use forward slashes -- CarMaker accepts them everywhere.
     runcfg_fwd = RUNCFG.as_posix()
-    sig_fwd = SIGNAL_TABLE.as_posix()
+    # Pass the signal table WITHOUT the .csv extension: CarMaker's GUI/HIL tries to
+    # auto-parse a ".csv" argument as an InfoFile and fatals ("Unknown line type")
+    # at startup. readSignalTable appends ".csv" itself, so the file stays .csv on
+    # disk but CarMaker never sees a .csv argument.
+    sig_fwd = SIGNAL_TABLE.with_suffix("").as_posix()
     lines = GUICFG.read_text(encoding="utf-8").splitlines()
     out = []
     found_exe = found_args = False

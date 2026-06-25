@@ -115,8 +115,11 @@ def main() -> int:
 
     cm_out: list[str] = []
     cm = subprocess.Popen(
+        # Pass the signal table WITHOUT the .csv extension -- CarMaker's GUI/HIL
+        # fatals trying to auto-parse a ".csv" argument as an InfoFile; readSignalTable
+        # appends ".csv" itself. (Headless tolerates either, but keep it consistent.)
         [str(CMEXE), "-screen", "-dstore", "-f", str(RUNCFG),
-         "-s", str(SIGNAL_TABLE), f"Data/TestRun/{TESTRUN}"],
+         "-s", str(SIGNAL_TABLE.with_suffix("")), f"Data/TestRun/{TESTRUN}"],
         cwd=str(CMPROJ), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
     threading.Thread(target=pump, args=(cm, cm_out, "CarMaker"), daemon=True).start()
 
