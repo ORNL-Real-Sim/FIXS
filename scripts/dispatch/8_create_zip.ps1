@@ -81,6 +81,22 @@ try {
         Write-Host "  + environment.yml"
     }
 
+    # Ship the self-contained Carla/ co-sim component (sumo/ runtime + utils/ +
+    # run_cosim), minus the carla wheel. After fetch + unzip, FIXS/Carla is ready
+    # to run. Test-only files (tests/Sumo/Carla) and the .ps1 build tooling under
+    # scripts/ stay source-side.
+    $CarlaSrc = Join-Path $RepoRoot 'Carla'
+    if (Test-Path $CarlaSrc) {
+        $carlaDest = Join-Path $StagingDir 'Carla'
+        New-Item -ItemType Directory -Path $carlaDest -Force | Out-Null
+        Get-ChildItem -Path $CarlaSrc -Exclude '*.whl' | ForEach-Object {
+            Copy-Item -Path $_.FullName -Destination $carlaDest -Recurse -Force
+        }
+        Get-ChildItem -Path $carlaDest -Recurse -Directory -Filter '__pycache__' -ErrorAction SilentlyContinue |
+            Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Host "  + Carla/ co-sim component"
+    }
+
     Compress-Archive -Path "$StagingDir\*" -DestinationPath $ZipPath -CompressionLevel Optimal
     Remove-Item $StagingDir -Recurse -Force
 
