@@ -139,23 +139,57 @@ def main():
             dec_key, net.Links.ItemByKey(eln), dec_pos)
         rt_key += 1
         xlen = float(net.Links.ItemByKey(xln).AttValue("Length2D"))
-        dec.VehRoutSta.AddVehicleRouteStatic(rt_key, net.Links.ItemByKey(xln), max(1.0, xlen - 3.0))
-        print(f"  {name:10s} input {vol} veh/h on link {eln} -> route to link {xln}")
+        # Terminate the route at the END of the corridor-exit link so VISSIM drops
+        # the vehicle there. Ending it short (e.g. xlen-3) lets the vehicle free-flow
+        # the last few metres onto the only connector (-> the teardrop loop), which
+        # is how some leaked into the ego's loop. The ego is positioned externally
+        # so it never uses this connector; only background traffic does.
+        dec.VehRoutSta.AddVehicleRouteStatic(rt_key, net.Links.ItemByKey(xln), max(1.0, xlen - 0.1))
+        print(f"  {name:10s} input {vol} veh/h on link {eln} -> route to link {xln} (end {xlen:.1f}m)")
 
     v.SaveNetAs(str(INPX_OUT), False)
     print(f"saved {INPX_OUT.name}")
 
-    # validate: run + count vehicles in network
+    # validate: run + count vehicles in network, AND probe whether background
+    # traffic enters the teardrop loop (it should NOT -- only the ego loops). Map
+    # the loop edges -> xodr roads -> VISSIM links, then count vehicles there.
     v.LoadNet(str(INPX_OUT), False)
-    v.Simulation.SetAttValue("SimPeriod", 120)
+    net = v.Net
+    loop_edges = ["rbe_loop", "rbw_loop", "rbe_ramp_in", "rbw_ramp_in",
+                  "rbe_ramp_out", "rbw_ramp_out"]
+    loop_e2r = match_edge_to_road(edges, roads, [e for e in loop_edges if e in edges])
+    r2l2 = {}
+    for lk in net.Links:
+        tok = (lk.AttValue("Name") or "").split("-")[0]
+        if tok.isdigit():
+            r2l2.setdefault(tok, set()).add(int(lk.AttValue("No")))
+    loop_links = set()
+    for e in loop_edges:
+        rid = loop_e2r.get(e, (None,))[0]
+        for ln in r2l2.get(rid, ()):
+            loop_links.add(ln)
+    print(f"loop links (VISSIM No): {sorted(loop_links)}")
+    v.Simulation.SetAttValue("SimPeriod", 200)
     v.Simulation.SetAttValue("SimRes", 1)
     counts = []
-    for s in range(120):
+    peak_loop = 0
+    for s in range(200):
         v.Simulation.RunSingleStep()
         if s % 20 == 19:
-            counts.append((s + 1, v.Net.Vehicles.Count))
+            nloop = 0
+            for veh in net.Vehicles:
+                try:
+                    lk = int(str(veh.AttValue("Lane")).split("-")[0])
+                    if lk in loop_links:
+                        nloop += 1
+                except Exception:
+                    pass
+            peak_loop = max(peak_loop, nloop)
+            counts.append((s + 1, net.Vehicles.Count, nloop))
     v.Simulation.Stop()
-    print("=== vehicles in network (sec, count) ===", counts)
+    print("=== (sec, total veh, veh ON LOOP) ===", counts)
+    print(f"PEAK background vehicles on the teardrop loop: {peak_loop}  "
+          f"({'OK - traffic exits before the loop' if peak_loop == 0 else 'LOOPING - need route fix'})")
     v = None
     return 0
 
