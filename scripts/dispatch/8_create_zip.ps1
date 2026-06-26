@@ -81,21 +81,29 @@ try {
         Write-Host "  + environment.yml"
     }
 
-    # Include the SUMO<->CARLA co-sim RUNTIME scripts so consumers (e.g.
-    # FIXS_Applications) get them from the fetched FIXS release. Test-only files
-    # (fixtures/, test_tl_logic.py, verify_demo.py) stay source-side.
-    $SumoCarlaSrc = Join-Path $RepoRoot 'tests\Sumo\Carla'
-    if (Test-Path $SumoCarlaSrc) {
-        $scDest = Join-Path $StagingDir 'SumoCarla'
-        New-Item -ItemType Directory -Path $scDest -Force | Out-Null
-        foreach ($item in @('helper_scripts', 'utils', 'run_cosim.py', 'run_cosim.bat', 'run_cosim.sh', 'README.md')) {
-            $p = Join-Path $SumoCarlaSrc $item
-            if (Test-Path $p) { Copy-Item -Path $p -Destination $scDest -Recurse -Force }
+    # Include the SUMO<->CARLA co-sim runtime (Carla/, minus the carla wheel) and
+    # its shared Python utils (scripts/*.py) so the fetched FIXS release carries
+    # the co-sim with its import layout (Carla/ + scripts/ side by side). Test-only
+    # files (tests/Sumo/Carla) and the .ps1 build tooling stay source-side.
+    $CarlaSrc = Join-Path $RepoRoot 'Carla'
+    if (Test-Path $CarlaSrc) {
+        $carlaDest = Join-Path $StagingDir 'Carla'
+        New-Item -ItemType Directory -Path $carlaDest -Force | Out-Null
+        foreach ($item in @('helper_scripts', 'run_cosim.py', 'run_cosim.bat', 'run_cosim.sh', 'README.md')) {
+            $p = Join-Path $CarlaSrc $item
+            if (Test-Path $p) { Copy-Item -Path $p -Destination $carlaDest -Recurse -Force }
         }
-        Get-ChildItem -Path $scDest -Recurse -Directory -Filter '__pycache__' -ErrorAction SilentlyContinue |
+        Get-ChildItem -Path $carlaDest -Recurse -Directory -Filter '__pycache__' -ErrorAction SilentlyContinue |
             Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-        Write-Host "  + SumoCarla/ co-sim scripts"
+        Write-Host "  + Carla/ co-sim runtime"
     }
+    $scriptsDest = Join-Path $StagingDir 'scripts'
+    New-Item -ItemType Directory -Path $scriptsDest -Force | Out-Null
+    foreach ($u in @('trafficlight_helper.py', 'extract_sumo_tls_as_table.py', 'unreal_remove_tl.py')) {
+        $p = Join-Path (Join-Path $RepoRoot 'scripts') $u
+        if (Test-Path $p) { Copy-Item -Path $p -Destination $scriptsDest -Force }
+    }
+    Write-Host "  + scripts/ co-sim utils"
 
     Compress-Archive -Path "$StagingDir\*" -DestinationPath $ZipPath -CompressionLevel Optimal
     Remove-Item $StagingDir -Recurse -Force

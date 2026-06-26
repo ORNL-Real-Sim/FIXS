@@ -5,8 +5,11 @@ vehicle co-simulation, built on CARLA's `sumo_integration` bridge.
 
 ## Layout
 
+The co-sim **runtime** lives here (`Carla/`, a first-class module); shared
+**utilities** are elevated to `scripts/`; the **tests** stay under `tests/`:
+
 ```
-tests/Sumo/Carla/
+Carla/                        <- this module (co-sim runtime)
   helper_scripts/
     run_synchronization/      full CARLA<->SUMO co-sim (vehicles + TL table)
       sumo_integration/       CARLA's bridge (bridge_helper, sumo/carla simulation, ...)
@@ -14,15 +17,19 @@ tests/Sumo/Carla/
     auto_place_tls.py         headless TL-actor placement (run inside the UE4 editor)
     unreal_placing_tls.py     spawns BP_TrafficLight actors from the table
     set_spectator_view.py     move the CARLA spectator over the junctions
-  utils/
-    extract_sumo_tls_as_table.py   generate traffic_light_table.csv from a SUMO net
-    trafficlight_helper.py         SUMO<->CARLA<->Unreal coordinate transforms
-    unreal_remove_tl.py            remove placed TL actors
-  fixtures/                   tiny SUMO grid net + table (Tier-1 test data, no assets)
   run_cosim.py                cross-platform launcher (Windows/Linux)
   run_cosim.bat / run_cosim.sh  thin per-OS wrappers
-  verify_demo.py              gated end-to-end smoke test (needs CARLA_ROOT)
+  README.md                   (this file)
+
+scripts/                      <- shared, reusable utilities
+  extract_sumo_tls_as_table.py   generate traffic_light_table.csv from a SUMO net
+  trafficlight_helper.py         SUMO<->CARLA<->Unreal coordinate transforms
+  unreal_remove_tl.py            remove placed TL actors
+
+tests/Sumo/Carla/             <- tests only (no runtime code)
   test_tl_logic.py            Tier-1 logic tests (no CARLA server / GPU / map asset)
+  verify_demo.py              gated end-to-end smoke test (needs CARLA_ROOT)
+  fixtures/                   tiny SUMO grid net + table (Tier-1 test data, no assets)
 ```
 
 ## Environment
@@ -36,17 +43,17 @@ Use the `realsim` conda env (`environment.yml` at the repo root): Python 3.10 +
 **Tier 1 - logic tests, run anywhere** (no CARLA server, no GPU, no map asset):
 
 ```bash
-pytest test_tl_logic.py
+pytest tests/Sumo/Carla/test_tl_logic.py
 ```
 
 Validates the junction&harr;net consistency, link-index bounds, coordinate
-transforms, and SUMO-char &rarr; CARLA-state mapping against the tiny `fixtures/`
-grid net. This is the portable automated test.
+transforms, and SUMO-char &rarr; CARLA-state mapping against the tiny grid fixture
+under `tests/Sumo/Carla/fixtures/`. This is the portable automated test.
 
 **Tier 2 - end-to-end smoke test, gated on `CARLA_ROOT`** (skips cleanly if unset):
 
 ```bash
-CARLA_ROOT=/path/to/carla python verify_demo.py
+CARLA_ROOT=/path/to/carla python tests/Sumo/Carla/verify_demo.py
 ```
 
 Launches CARLA headless, loads stock **Town01**, runs the co-sim on CARLA's
@@ -61,7 +68,8 @@ and runs the synchronization:
 
 ```bash
 # launch CARLA + run on stock Town01
-CARLA_ROOT=/opt/carla python run_cosim.py --sumocfg fixtures/grid_tls.sumocfg --map Town01
+CARLA_ROOT=/opt/carla python Carla/run_cosim.py \
+    --sumocfg tests/Sumo/Carla/fixtures/grid_tls.sumocfg --map Town01
 
 # CARLA already running, RoadRunner-imported map (vehicles need --no-net-offset)
 python run_cosim.py --no-launch --map RP_Ver0529 \

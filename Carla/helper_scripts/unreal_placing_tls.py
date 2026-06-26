@@ -8,11 +8,10 @@ import importlib
 script_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(script_dir)
 sys.path.append(os.path.join(script_dir, ".."))
-sys.path.append(os.path.join(script_dir, "..", "carla_scripts"))
-sys.path.append(os.path.join(script_dir, "..", "utils"))
-sys.path.append(os.path.join(script_dir, "..", "test_scenarios"))
+# shared utilities live at the repo root: FIXS_root/scripts
+sys.path.append(os.path.normpath(os.path.join(script_dir, "..", "..", "scripts")))
 
-import utils.trafficlight_helper as trafficlight_helper
+import trafficlight_helper
 importlib.reload(trafficlight_helper)
 TrafficLightHelper = trafficlight_helper.TrafficLightHelper
 

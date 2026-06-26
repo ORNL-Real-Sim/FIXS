@@ -20,8 +20,11 @@ import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, "helper_scripts"))
-sys.path.insert(0, os.path.join(HERE, "helper_scripts", "run_synchronization"))
+# the co-sim runtime lives at the repo root: FIXS_root/Carla
+CARLA = os.path.normpath(os.path.join(HERE, "..", "..", "..", "Carla"))
+sys.path.insert(0, CARLA)  # for run_cosim
+sys.path.insert(0, os.path.join(CARLA, "helper_scripts"))
+sys.path.insert(0, os.path.join(CARLA, "helper_scripts", "run_synchronization"))
 
 CARLA_ROOT = os.environ.get("CARLA_ROOT")
 STEPS = int(os.environ.get("VERIFY_STEPS", "200"))
