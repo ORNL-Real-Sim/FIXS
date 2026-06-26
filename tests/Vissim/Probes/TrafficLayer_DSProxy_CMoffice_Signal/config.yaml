@@ -23,8 +23,9 @@ SimulationSetup:
     EnableRealSim: false             # DSProxy mode uses its own code path; this stays off
     EnableVerboseLog: false
     SelectedTrafficSimulator: VISSIM # informational; DSProxy dispatch bypasses it
-    SimulationEndTime: 300           # 3000 ticks at 10 Hz -- ego loops the ~206 m/s corridor
-                                     # and meets several signal cycles (90 s cycle) in the window
+    SimulationEndTime: 1000          # 10000 ticks at 10 Hz -- TrafficLayer runs this many ticks then
+                                     # closes the co-sim socket (-> CarMaker SIM_END), so THIS is the
+                                     # demo run length. The TestRun EndCond stays 9999 (never caps early).
 
     # Mandatory fields for CarMaker's VirtualEnvironment.lib:
     #   id, speed, vehicleClass, heading, grade, speedDesired (or accelerationDesired)
