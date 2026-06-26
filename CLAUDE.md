@@ -272,6 +272,62 @@ next to `VISSIM220.exe`.
   the floating PSL license). When refactoring tests, prefer having
   Python — not a child MATLAB — run the VISSIM bootstrap.
 
+## VISSIM ↔ CarMaker traffic-signal co-simulation (#172)
+
+The signal demo lives in
+[tests/Vissim/Probes/TrafficLayer_DSProxy_CMoffice_Signal/](tests/Vissim/Probes/TrafficLayer_DSProxy_CMoffice_Signal/)
+(`DEMO.md` there is the entry point). It drives CarMaker traffic lights from VISSIM
+signal state over the DSProxy co-sim, and the CM ego brakes at the VISSIM-driven red.
+One-click: `run_signal_demo.bat` (headless, self-checking) or
+`run_cm_office_signal_demo.bat` (GUI). The hard-won, non-obvious facts (a future
+agent WILL otherwise re-chase these — we spent a long time on signal placement):
+
+**Generation pipeline (one geometry, two simulators).** `gen_loop_net.py` writes the
+SUMO nodes/edges → `netconvert` → `simple_traffic_light.net.xml` → `netconvert
+--opendrive-output` → `simple_traffic_light.xodr` (the CM source; osc2cm → rd5) AND
+`import_to_vissim.py` (`ImportOpenDrive`) → the VISSIM `.inpx`. The co-sim exchanges
+ABSOLUTE X/Y, so VISSIM and CM **must** derive from the same geometry. If the VISSIM
+`.inpx` is stale (e.g. a 2000 m net while CM is the 1346 m loop), traffic/ego land
+off-road — regen VISSIM from the xodr, **never edit the CM side to match**. `parse_signals.py`
++ `build_demand.py` must read the PROBE-LOCAL `simple_traffic_light.net.xml`, not the
+stale `tests/Python/SimpleTrafficLight/` copy.
+
+**Signal identity is faithful SUMO → xodr → CM (1:1).** netconvert emits one
+`<signal id="<tls_id>_<linkIndex>">` per SUMO controlled connection, with the turn
+direction in `subtype` (10=left, 20=right, 30=straight). osc2cm stamps that id on each
+CM head as the `odrSignalId` tag and maps subtype → head type (1=straight,2=left,3=right).
+So the CM head NAME is the SUMO-canonical `<tls_id>_<head_id>` (== the tag); parse it by
+the LAST underscore (head_id = trailing int). THE ARROW TYPE IS ALWAYS CORRECT FROM THE
+SUBTYPE — never "fix" arrows by swapping the type.
+
+**Signal-head lateral placement — the bug we chased for a long time.** `add_signal_stops.py`
+relocates each approach's head mount to the ACROSS edge (past the junction) so the ego
+sees the heads ahead, then places each head over its SUMO lane via
+`hOff = t + gantry_len` (gantry_len = the mount beam length). CM mounts heads on a gantry
+and renders INCREASING hOff from the RIGHT lane to the LEFT; SUMO lateral `t` is negative
+and most-negative for the rightmost lane, so `t + gantry_len` puts the rightmost lane at
+the smallest hOff (CM right). The original `-t + 1.0` had the wrong sign → it MIRRORED the
+lane assignment (left-turn head on the right lane, etc.), which LOOKED like flipped arrows
+but was a flipped LANE mapping. Do NOT flip `facing` to "face the ego" — CM measures hOff
+in the facing frame, so flipping facing pushes heads OFF-ROAD.
+
+**Runtime sync (VISSIM is per-SignalGroup, NOT per-head).** The VISSIM driver DLL emits
+one state char per SignalGroup; `DSProxyMode::toTlsData` sends `name="<SCno>_<sg>"`,
+state = a single char. So `RSsignalTable.csv` (built by `build_signal_table.py`):
+`SignalControllerId=<SCno>_<sg>` (the runtime match key), `SignalHeadId=0` (single-char
+state), `CmTrafficLightIndex` = the `Control.TrfLight.<i>` array index, `CmControllerId` =
+the SUMO-canonical name. One SG fans out to several CM heads (multiple rows share the key).
+VISSIM hierarchy = SignalController(=tls) → SignalGroup(state unit) → SignalHead(unique No,
+NOT used by the sync). Today's net is one-head-per-light (the simple case).
+
+**Two co-sim gotchas:**
+- **Plan A:** with `SynchronizeTrafficSignal: true` the CM `.lib` opens a SECOND socket to
+  `TrafficSignalPort` (must differ from the vehicle port); `DSProxyMode` (TrafficLayer)
+  serves it and relays per-(controller,SG) `TlsData` there. The `.lib` is unchanged.
+- **Pass the signal table to CarMaker's `-s` WITHOUT the `.csv` extension** — the CM GUI/HIL
+  auto-parses a `.csv` argument as an InfoFile and FATALS at startup. `readSignalTable`
+  appends `.csv` itself, so the file stays `*.csv` on disk.
+
 ## Documentation
 
 - VISSIM-specific: [doc/VISSIMdoc.md](doc/VISSIMdoc.md)

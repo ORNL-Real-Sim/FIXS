@@ -12,20 +12,28 @@ This script post-processes the committed rd5 (route + heads + controllers alread
 does NOT re-run osc2cm, which would wipe the hand-made Route) into
 `simple_traffic_light_signalstop.rd5`:
 
-  1. Add ONE straight-movement DrvStop per approach the ego's Route crosses, on the ego's
-     lane-path, anchored to its downstream end (lonR=1, s=STOP_BACK). With the signal head at
-     the junction (the approach edge's downstream end), the ego stops ~STOP_BACK m before it --
-     so the head sits beyond the stop line. One marker per route->movement, never one per head
-     (a green movement-head would otherwise cancel a red one -- the Q1 finding).
-  2. Spread each approach mount's overlapping heads laterally so straight/left/right are
-     visually distinct (purely cosmetic; does NOT move heads off the approach edge).
-
-IMPORTANT -- why the heads are NOT moved across the junction: IPGDriver only fires a
-traffic-light DrvStop when the signal HEAD is on the APPROACH side (at/before the stop line).
-Relocating the head to the far side (the edge across the junction) makes the stop NOT fire and
-the ego runs the red (verified: with all controllers static-red, an across-junction layout
-stopped the ego at only 1 of 6 crossings). So the head stays at the approach's downstream end
-(at the junction, beyond the stop line) -- the most "far-side" placement that still stops.
+  1. RELOCATE each approach's signal-head mount to the ACROSS edge (the edge after the
+     junction, in the ego's travel direction) so the approaching ego sees the heads ahead,
+     beyond the stop line. The stop still fires: IPGDriver brakes whenever a DrvStop marker
+     AND a head referencing that controller both exist -- the head LOCATION is free (approach
+     or far-side). (An earlier "far-side breaks the stop" note was a corridor ROUTE bug,
+     since fixed -- see the cm-signal-stop-mechanism memory.)
+  2. Re-place each head laterally over its SUMO lane. CM mounts the heads on a gantry and
+     renders INCREASING hOff from the RIGHT lane to the LEFT. The SUMO lane lateral `t` is
+     negative (right of the road reference line) and MORE negative for the rightmost lane, so
+         hOff = t + gantry_len        (gantry_len = the mount's beam length, field 9)
+     maps the rightmost lane (most negative t) to the SMALLEST hOff (rendered on the right)
+     and the leftmost to the largest -- matching SUMO's lane order. THE BUG WE CHASED: the
+     old `hOff = -t + 1.0` had the wrong sign, so it MIRRORED the lanes (left-turn heads
+     landed on the right lane, etc.). That looked like "flipped arrows" but was a flipped
+     LANE mapping. The arrow TYPE is left exactly as osc2cm set it (faithful to the xodr
+     signal subtype 10/20/30 = left/right/straight = the SUMO movement dir -- do NOT
+     fake-swap it); `facing` is also kept -- flipping facing pushes heads OFF-ROAD because
+     CM measures hOff in the facing frame.
+  3. Add ONE straight-movement DrvStop per approach the ego's Route crosses, on the ego's
+     lane-path, anchored to its downstream end (lonR=1, s=STOP_BACK ~ at the stop line). One
+     marker per route->movement, never one per head (a green movement-head would otherwise
+     cancel a red one -- the Q1 finding).
 
 It also writes the TestRun `SimpleTL_SignalStop` = the working SimpleTL_VISSIM run with
 Road.FName -> the new rd5 and DriverTemplate.FName -> Car_Normal (McLaren + Route kept).
@@ -92,8 +100,8 @@ def main():
     lines = t.split("\n")
 
     # Each head's correct lateral position comes from the xodr signal's t, matched EXACTLY by the
-    # odrSignalId tag (= the xodr signal id). CM hOff = -t + 1.0 puts the head over its lane
-    # (t=-1.6->2.6, -4.8->5.8, -8.0->9.0). IMPORTANT: join on the xodr signal id, NOT
+    # odrSignalId tag (= the xodr signal id). CM hOff = t + gantry_len puts the head over its lane
+    # in SUMO's right->left order (see hoff_of). IMPORTANT: join on the xodr signal id, NOT
     # signal_plan.json's linkIndex -- signal_plan uses its own numbering that differs from
     # netconvert's signal ids in the rd5 tags. osc2cm itself mis-placed ~half the heads laterally
     # (piling them on one lane); this recomputes hOff from the xodr t so each sits over its lane.
@@ -105,8 +113,14 @@ def main():
     except Exception:
         pass
 
-    def hoff_of(tval):
-        return (-tval + 1.0) if tval is not None else 2.6
+    def hoff_of(tval, glen):
+        # Heads sit on a gantry of length `glen` spanning the road; CM renders
+        # increasing hOff from the RIGHT lane to the LEFT. SUMO lateral t is
+        # negative (right of the reference line) and MORE negative for the
+        # rightmost lane, so hOff = t + glen maps the rightmost lane (most negative
+        # t) to the SMALLEST hOff (rendered on the right) and the leftmost lane to
+        # the largest hOff -- matching SUMO's lane order. (Old -t+1.0 mirrored it.)
+        return (tval + glen) if tval is not None else glen / 2.0
 
     # straight controller per RL (read BEFORE relocating the heads)
     straight_ctrl = {}
@@ -168,13 +182,25 @@ def main():
             tg = re.match(rf"RL\.{r}\.Mount\.{mi}\.(\d+)\.Tag = odrSignalId:(\S+)$", ln)
             if tg:
                 part_t[int(tg.group(1))] = id2t.get(tg.group(2))
-        # group heads by lane (t); place each lane at hOff=-t+1, heads SHARING a lane cluster
+        # gantry length of THIS mount (field 9 of the mount value line) sizes hOff
+        glen = 10.6
+        for ln in block:
+            mlm = re.match(rf"RL\.{r}\.Mount\.{mi} = (.+)$", ln)
+            if mlm:
+                mt = mlm.group(1).split()
+                if len(mt) >= 10:
+                    try:
+                        glen = float(mt[9])
+                    except ValueError:
+                        pass
+                break
+        # group heads by lane (t); place each lane at hOff=t+glen, heads SHARING a lane cluster
         lanes = {}
         for p, tv in part_t.items():
             lanes.setdefault(tv, []).append(p)
         part_hoff = {}
         for tv, ps in lanes.items():
-            base = hoff_of(tv)
+            base = hoff_of(tv, glen)
             for j2, p in enumerate(sorted(ps)):
                 part_hoff[p] = base + (j2 - (len(ps) - 1) / 2) * HEAD_SPREAD
         out = []
