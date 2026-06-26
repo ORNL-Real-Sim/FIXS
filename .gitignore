@@ -212,5 +212,11 @@ config.runtime.yaml
 config.vanilla.yaml
 stage_network/
 
+# #172 signal demo: build_signals.py intermediate (consumed by build_demand.py ->
+# the tracked simple_traffic_light.inpx / _ds.inpx). Regenerable scratch.
+**/simple_traffic_light_signals.inpx
+**/simple_traffic_light_signals.inp0
+**/simple_traffic_light_signals.layx
+
 # Ignore Claude Code configuration
 .claude/
