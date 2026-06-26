@@ -4,7 +4,7 @@ REM  FIXS #172 - CarMaker (office) <-> VISSIM co-simulation demo WITH SIGNAL SYN
 REM  Signalized corridor (simple_traffic_light). Vehicles AND traffic signals.
 REM ----------------------------------------------------------------------------
 REM  DOUBLE-CLICK this. It:
-REM    1. builds the demo assets (rd5 + signal table + SimpleTL_Cosim TestRun),
+REM    1. builds the demo assets (rd5 + signal table + SimpleTrafficLight_Cosim TestRun),
 REM    2. (via setup_gui.py) stages the signalized DS network, writes
 REM       config.runtime.yaml, and registers the custom CarMaker exe +
 REM       "-f config.runtime.yaml -s <RSsignalTable.csv>" into the CM GUI config,
@@ -14,7 +14,7 @@ REM    4. opens the CarMaker Office GUI on the project + IPGMovie.
 REM
 REM  THEN, in the CarMaker GUI (after TrafficLayer prints "VISSIM_Connect OK" and
 REM  "signal listener bound on port 2445"):
-REM    - Load TestRun "SimpleTL_Cosim"
+REM    - Load TestRun "SimpleTrafficLight_Cosim"
 REM    - Press the green START button.
 REM  You'll see VISSIM background traffic as RS_C cars and the ego braking when
 REM  its light (driven by VISSIM) turns red.
@@ -31,7 +31,7 @@ set TL=%RepoRoot%\TrafficLayer\x64\Release\TrafficLayer.exe
 set CMEXE=%RepoRoot%\ProprietaryFiles\CM13_proj\src\CarMaker.win64.exe
 set CMPROJ=%RepoRoot%\ProprietaryFiles\CM13_proj
 set CM_OFFICE=C:\IPG\carmaker\win64-13.1.3\bin\CM_Office.exe
-set TESTRUN=SimpleTL_Cosim
+set TESTRUN=SimpleTrafficLight_Cosim
 set RUNCFG=%HERE%config.runtime.yaml
 set PYTHON=C:\Users\yshao\miniconda3\envs\realsim_dev\python.exe
 if not exist "%PYTHON%" set PYTHON=python
@@ -47,7 +47,7 @@ taskkill /F /IM HIL.exe              >nul 2>&1
 taskkill /F /IM Movie.exe            >nul 2>&1
 taskkill /F /IM CarMaker.win64.exe   >nul 2>&1
 taskkill /F /IM TrafficLayer.exe     >nul 2>&1
-taskkill /F /IM VISSIM220.exe        >nul 2>&1
+REM taskkill /F /IM VISSIM220.exe        >nul 2>&1
 
 REM --- preflight -----------------------------------------------------------
 if not exist "%TL%"        ( echo ERROR: TrafficLayer.exe missing: %TL%  ^(build: scripts\dispatch\2_core_components.bat^) & pause & exit /b 1 )
@@ -55,7 +55,7 @@ if not exist "%CMEXE%"     ( echo ERROR: custom CarMaker.win64.exe missing: %CME
 if not exist "%CM_OFFICE%" ( echo ERROR: CM_Office.exe not found: %CM_OFFICE% & pause & exit /b 1 )
 
 REM --- 1. build demo assets (idempotent) -----------------------------------
-echo [1/4] Building demo assets (rd5 + signal table + SimpleTL_Cosim)...
+echo [1/4] Building demo assets (rd5 + signal table + SimpleTrafficLight_Cosim)...
 "%PYTHON%" "%HERE%add_signal_stops.py"     || ( echo add_signal_stops FAILED & pause & exit /b 1 )
 "%PYTHON%" "%HERE%build_signal_table.py"   || ( echo build_signal_table FAILED & pause & exit /b 1 )
 "%PYTHON%" "%HERE%build_cosim_testrun.py"  || ( echo build_cosim_testrun FAILED & pause & exit /b 1 )

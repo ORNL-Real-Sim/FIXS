@@ -22,10 +22,12 @@ import pythoncom, win32com.client
 
 PROGID = "VISSIM.Vissim.2200"
 HERE = pathlib.Path(__file__).resolve().parent
-# Canonical SUMO net = probe-local one, coordinate-matched with the CM xodr.
-# (The Python/SimpleTrafficLight copy is the stale 2000 m network.)
-NET = HERE / "simple_traffic_light.net.xml"
-XODR = HERE / "simple_traffic_light.xodr"
+# Canonical SUMO scenario (net + xodr) lives under tests/Sumo/networks; the inpx
+# base/final are transient intermediates in the probe dir (gitignored) -- patch_ds_inpx.py
+# turns the final into the committed tests/Vissim/networks/simple_traffic_light.inpx.
+SUMO_NET = HERE.parents[3] / "tests" / "Sumo" / "networks" / "simple_traffic_light"
+NET = SUMO_NET / "simple_traffic_light.net.xml"
+XODR = SUMO_NET / "simple_traffic_light.xodr"
 INPX_IN = HERE / "simple_traffic_light_signals.inpx"
 INPX_OUT = HERE / "simple_traffic_light.inpx"
 

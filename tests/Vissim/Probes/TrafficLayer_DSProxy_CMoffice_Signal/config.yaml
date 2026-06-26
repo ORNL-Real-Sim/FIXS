@@ -68,7 +68,7 @@ VissimSetup:
 
     # Staged writable copy of the signalized network (the launcher mirrors the
     # network + its .sig signal-controller files into stage_network/).
-    NetworkFile: 'stage_network\simple_traffic_light_ds.inpx'
+    NetworkFile: 'stage_network\simple_traffic_light.inpx'
 
     VissimVersion: 2022
     SimulatorFrequency: 10           # Hz

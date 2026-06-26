@@ -27,11 +27,12 @@ REPO = HERE.parents[3]
 TL = REPO / "TrafficLayer" / "x64" / "Release" / "TrafficLayer.exe"
 CMEXE = REPO / "ProprietaryFiles" / "CM13_proj" / "src" / "CarMaker_headless.win64.exe"
 CMPROJ = REPO / "ProprietaryFiles" / "CM13_proj"
-SRC_INPX = HERE / "simple_traffic_light_ds.inpx"
+VIS_NET = REPO / "tests" / "Vissim" / "networks" / "simple_traffic_light"   # the one VISSIM scenario
+SRC_INPX = VIS_NET / "simple_traffic_light.inpx"                            # DS-enabled
 STAGE = HERE / "stage_network"
 RUNCFG = HERE / "config.runtime.yaml"
-TESTRUN = "SimpleTL_Cosim"
-SIGNAL_TABLE = CMPROJ / "Data" / "Road" / "simple_traffic_light_signalstop_RSsignalTable.csv"
+TESTRUN = "SimpleTrafficLight_Cosim"
+SIGNAL_TABLE = CMPROJ / "Data" / "Road" / "simple_traffic_light_RSsignalTable.csv"
 
 TL_CONNECT_TIMEOUT = 120
 RUN_TIMEOUT = 600
@@ -39,13 +40,13 @@ RUN_TIMEOUT = 600
 
 def stage_and_config() -> None:
     STAGE.mkdir(exist_ok=True)
-    staged_inpx = STAGE / "simple_traffic_light_ds.inpx"
+    staged_inpx = STAGE / "simple_traffic_light.inpx"
     shutil.copy2(SRC_INPX, staged_inpx)
-    # carry the layout + any external .sig signal programs alongside the network
-    for extra in list(HERE.glob("*.layx")) + list(HERE.glob("int_*.sig")):
+    # carry the layout + the external .sig signal programs alongside the network
+    for extra in list(VIS_NET.glob("*.layx")) + list(VIS_NET.glob("int_*.sig")):
         shutil.copy2(extra, STAGE / extra.name)
     cfg = (HERE / "config.yaml").read_text(encoding="utf-8")
-    cfg = cfg.replace("stage_network\\simple_traffic_light_ds.inpx", str(staged_inpx))
+    cfg = cfg.replace("stage_network\\simple_traffic_light.inpx", str(staged_inpx))
     RUNCFG.write_text(cfg, encoding="ascii")
     print(f"[verify] staged signalized network (+ .sig/.layx) + wrote {RUNCFG.name}")
 
@@ -73,7 +74,7 @@ def ensure_headless_exe() -> None:
 def main() -> int:
     ensure_headless_exe()
     for p, label in [(TL, "TrafficLayer.exe"), (CMEXE, "CarMaker_headless.win64.exe"),
-                     (SRC_INPX, "simple_traffic_light_ds.inpx"), (SIGNAL_TABLE, "RSsignalTable.csv")]:
+                     (SRC_INPX, "simple_traffic_light.inpx"), (SIGNAL_TABLE, "RSsignalTable.csv")]:
         if not p.is_file():
             print(f"[verify] FAIL: missing {label}: {p}")
             return 2
@@ -165,11 +166,11 @@ def main() -> int:
     try:
         import glob
         # CarMaker derives the ERG basename from the positional testrun arg with the
-        # path separators flattened, i.e. "Data_TestRun_SimpleTL_Cosim_<stamp>.erg".
+        # path separators flattened, i.e. "Data_TestRun_SimpleTrafficLight_Cosim_<stamp>.erg".
         ergs = sorted(glob.glob(str(CMPROJ / "SimOutput" / "*" / "*" / f"*{TESTRUN}_*.erg")),
                       key=os.path.getmtime)
         if ergs:
-            rd5 = CMPROJ / "Data" / "Road" / "simple_traffic_light_signalstop.rd5"
+            rd5 = CMPROJ / "Data" / "Road" / "simple_traffic_light.rd5"
             r = subprocess.run([sys.executable, str(HERE / "verify_signalstop.py"), ergs[-1], str(rd5)],
                                capture_output=True, text=True)
             print("\n--- ego-stops-at-red (co-sim ERG) ---")

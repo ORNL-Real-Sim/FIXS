@@ -20,7 +20,10 @@ import pythoncom, win32com.client
 
 PROGID = "VISSIM.Vissim.2200"
 HERE = pathlib.Path(__file__).resolve().parent
-PLAN = json.loads((HERE / "signal_plan.json").read_text())
+SUMO_NET = HERE.parents[3] / "tests" / "Sumo" / "networks" / "simple_traffic_light"
+PLAN = json.loads((SUMO_NET / "signal_plan.json").read_text())
+# inpx base + _signals are transient intermediates in the probe dir (gitignored);
+# patch_ds_inpx.py turns the final into tests/Vissim/networks/simple_traffic_light.inpx
 INPX_IN = HERE / "simple_traffic_light.inpx"
 INPX_OUT = HERE / "simple_traffic_light_signals.inpx"
 

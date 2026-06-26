@@ -141,7 +141,9 @@ def main():
         extra = f' radius="{r}" keepClear="false"' if r else ""
         nl.append(f'    <node id="{n}" x="{x}" y="{y}" type="{t}"{extra}/>')
     nl.append("</nodes>")
-    (HERE / "nodes.nod.xml").write_text("\n".join(nl) + "\n", encoding="utf-8")
+    SUMO_NET = HERE.parents[3] / "tests" / "Sumo" / "networks" / "simple_traffic_light"
+    SUMO_NET.mkdir(parents=True, exist_ok=True)
+    (SUMO_NET / "nodes.nod.xml").write_text("\n".join(nl) + "\n", encoding="utf-8")
 
     el = ['<?xml version="1.0" encoding="UTF-8"?>', "<edges>"]
     for eid, fr, to, nlanes in [(e[0], e[1], e[2], e[3]) for e in BASE_EDGES]:
@@ -151,7 +153,7 @@ def main():
         shape = f' shape="{sh}"' if sh else ""
         el.append(f'    <edge id="{eid}" from="{fr}" to="{to}" numLanes="{nlanes}" speed="{spd}" priority="3"{shape}/>')
     el.append("</edges>")
-    (HERE / "edges.edg.xml").write_text("\n".join(el) + "\n", encoding="utf-8")
+    (SUMO_NET / "edges.edg.xml").write_text("\n".join(el) + "\n", encoding="utf-8")
 
     print(f"[gen_loop_net] curved turnaround: ramp_R={RAMP_R} loop_R={LOOP_R} straight_past={STRAIGHT_PAST}")
     print(f"  east: ramp_angle={e_t1:.1f} deg, A={e_a}, B={e_b}, end_heading={e_eh:.1f} deg")

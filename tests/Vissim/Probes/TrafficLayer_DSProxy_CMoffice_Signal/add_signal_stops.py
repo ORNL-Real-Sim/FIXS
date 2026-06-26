@@ -10,7 +10,7 @@ but the ego drives straight through reds, because:
 
 This script post-processes the committed rd5 (route + heads + controllers already present; it
 does NOT re-run osc2cm, which would wipe the hand-made Route) into
-`simple_traffic_light_signalstop.rd5`:
+`simple_traffic_light.rd5`:
 
   1. RELOCATE each approach's signal-head mount to the ACROSS edge (the edge after the
      junction, in the ego's travel direction) so the approaching ego sees the heads ahead,
@@ -35,7 +35,7 @@ does NOT re-run osc2cm, which would wipe the hand-made Route) into
      marker per route->movement, never one per head (a green movement-head would otherwise
      cancel a red one -- the Q1 finding).
 
-It also writes the TestRun `SimpleTL_SignalStop` = the working SimpleTL_VISSIM run with
+It also writes the TestRun `SimpleTrafficLight_Scene` = the working SimpleTrafficLight_import run with
 Road.FName -> the new rd5 and DriverTemplate.FName -> Car_Normal (McLaren + Route kept).
 
 Run:  python add_signal_stops.py        (then run_cm_scene_only.bat to drive it in CarMaker)
@@ -44,11 +44,13 @@ from __future__ import annotations
 import re, pathlib
 
 HERE = pathlib.Path(__file__).resolve().parent
-CMPROJ = HERE.parents[3] / "ProprietaryFiles" / "CM13_proj"
-BASE_RD = CMPROJ / "Data" / "Road" / "simple_traffic_light.rd5"
-OUT_RD = CMPROJ / "Data" / "Road" / "simple_traffic_light_signalstop.rd5"
-BASE_TR = CMPROJ / "Data" / "TestRun" / "SimpleTL_VISSIM"
-OUT_TR = CMPROJ / "Data" / "TestRun" / "SimpleTL_SignalStop"
+REPO = HERE.parents[3]
+CMPROJ = REPO / "ProprietaryFiles" / "CM13_proj"
+SUMO_NET = REPO / "tests" / "Sumo" / "networks" / "simple_traffic_light"   # shared geometry (xodr)
+BASE_RD = CMPROJ / "Data" / "Road" / "simple_traffic_light_import.rd5"     # raw osc2cm import (intermediate)
+OUT_RD = CMPROJ / "Data" / "Road" / "simple_traffic_light.rd5"             # demo road (heads + DrvStops)
+BASE_TR = CMPROJ / "Data" / "TestRun" / "SimpleTrafficLight_import"        # raw osc2cm TestRun (intermediate)
+OUT_TR = CMPROJ / "Data" / "TestRun" / "SimpleTrafficLight_Scene"          # scene-only (CM, no VISSIM)
 
 STOP_BACK = 2.0       # DrvStop this many metres before the approach lane-path's downstream end
                       # (the junction) -> at the stop line, near the end of the approach edge
@@ -107,7 +109,7 @@ def main():
     # (piling them on one lane); this recomputes hOff from the xodr t so each sits over its lane.
     id2t = {}
     try:
-        xtext = (HERE / "simple_traffic_light.xodr").read_text(errors="ignore")
+        xtext = (SUMO_NET / "simple_traffic_light.xodr").read_text(errors="ignore")
         id2t = {m.group(1): float(m.group(2))
                 for m in re.finditer(r'<signal id="([^"]+)"[^>]*\bt="([\d.-]+)"', xtext)}
     except Exception:
@@ -285,7 +287,7 @@ def main():
     for rl_a, rl_d in sorted(moved_log):
         print(f"      head mount RL.{rl_a} -> RL.{rl_d} (across-edge start)")
 
-    # ---- 3. TestRun: SimpleTL_VISSIM with new road + Car_Normal driver ----
+    # ---- 3. TestRun: SimpleTrafficLight_import with new road + Car_Normal driver ----
     tr = BASE_TR.read_text(encoding="utf-8", errors="ignore")
     tr = re.sub(r"(?m)^Road\.FName = .*$", f"Road.FName = {OUT_RD.name}", tr, count=1)
     tr = re.sub(r"(?m)^Vehicle\.DriverTemplate\.FName = .*$",

@@ -3,7 +3,7 @@ Verify the SignalStop demo: confirm the looping ego comes to a full stop at the
 signalized junctions and that each stop coincides with its referenced straight-movement
 controller being RED (State==3).
 
-Usage: verify_signalstop.py <run.erg> <simple_traffic_light_signalstop.rd5>
+Usage: verify_signalstop.py <run.erg> <simple_traffic_light.rd5>
 """
 from __future__ import annotations
 import sys, re, pathlib

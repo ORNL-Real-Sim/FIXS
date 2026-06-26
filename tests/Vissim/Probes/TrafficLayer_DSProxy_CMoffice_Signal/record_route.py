@@ -15,7 +15,7 @@ sys.path.append(os.path.join(os.environ["SUMO_HOME"], "tools"))
 import traci
 
 HERE = pathlib.Path(__file__).resolve().parent
-NET = str(HERE / "simple_traffic_light.net.xml")
+NET = str(HERE.parents[3] / "tests" / "Sumo" / "networks" / "simple_traffic_light" / "simple_traffic_light.net.xml")
 SUMO = os.path.join(os.environ["SUMO_HOME"], "bin", "sumo.exe")
 
 

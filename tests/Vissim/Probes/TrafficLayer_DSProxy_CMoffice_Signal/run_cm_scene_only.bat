@@ -30,7 +30,7 @@ for %%I in ("%HERE%..\..\..\..") do set RepoRoot=%%~fI
 set CMPROJ=%RepoRoot%\ProprietaryFiles\CM13_proj
 set CM_OFFICE=C:\IPG\carmaker\win64-13.1.3\bin\CM_Office.exe
 set MOVIE=C:\IPG\carmaker\win64-13.1.3\GUI\Movie.exe
-set TESTRUN=SimpleTL_SignalStop
+set TESTRUN=SimpleTrafficLight_Scene
 if "%PYTHON%"=="" set PYTHON=python
 
 echo ============================================================
@@ -67,7 +67,7 @@ if /I "%~1"=="verify" (
     "%CM_OFFICE%" -projectdir "%CMPROJ%" -cmd "SaveMode save" -run "%TESTRUN%"
     for /f "delims=" %%E in ('dir /b /s /o-d "%CMPROJ%\SimOutput\*%TESTRUN%_*.erg" 2^>nul') do ( set ERG=%%E& goto parsed )
     :parsed
-    "%PYTHON%" "%HERE%verify_signalstop.py" "%ERG%" "%CMPROJ%\Data\Road\simple_traffic_light_signalstop.rd5"
+    "%PYTHON%" "%HERE%verify_signalstop.py" "%ERG%" "%CMPROJ%\Data\Road\simple_traffic_light.rd5"
     goto done
 )
 

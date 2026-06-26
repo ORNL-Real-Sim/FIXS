@@ -1,5 +1,5 @@
 """
-Finalize the SimpleTL_VISSIM ego (run AFTER osc2cm) for #172:
+Finalize the SimpleTrafficLight_import ego (run AFTER osc2cm) for #172:
   - Ego -> Demo_McLaren_F1 (handles the loop geometry; osc2cm ego is truck-tall).
   - Keep the osc2cm FollowTraj polyline (lat+long) -- it IS the SUMO-recorded path
     (lane 0, no lane change, full loop, on the real lanes). The ego follows it.
@@ -14,7 +14,7 @@ from __future__ import annotations
 import pathlib
 
 REPO = pathlib.Path(__file__).resolve().parents[4]
-TR = REPO / "ProprietaryFiles" / "CM13_proj" / "Data" / "TestRun" / "SimpleTL_VISSIM"
+TR = REPO / "ProprietaryFiles" / "CM13_proj" / "Data" / "TestRun" / "SimpleTrafficLight_import"
 EGO_VEHICLE = "Demo_McLaren_F1"
 
 

@@ -41,11 +41,10 @@ from __future__ import annotations
 import argparse, csv, json, pathlib, re, sys
 
 HERE = pathlib.Path(__file__).resolve().parent
-CM_ROAD = pathlib.Path(
-    r"C:/src_git/RS_FIXS/172_cm_signal_demo/ProprietaryFiles/CM13_proj/Data/Road"
-)
-RD5 = CM_ROAD / "simple_traffic_light_signalstop.rd5"
-PLAN = HERE / "signal_plan.json"
+REPO = HERE.parents[3]                                                     # repo root (transferable)
+CM_ROAD = REPO / "ProprietaryFiles" / "CM13_proj" / "Data" / "Road"
+RD5 = CM_ROAD / "simple_traffic_light.rd5"                                 # demo road
+PLAN = REPO / "tests" / "Sumo" / "networks" / "simple_traffic_light" / "signal_plan.json"
 
 SC_NO = {"int_west": 1, "int_center": 2, "int_east": 3}
 
