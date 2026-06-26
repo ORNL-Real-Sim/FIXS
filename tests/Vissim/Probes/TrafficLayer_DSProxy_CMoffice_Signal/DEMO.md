@@ -62,9 +62,9 @@ run_cm_office_signal_demo.bat
 Builds the assets, stages the network, registers the custom exe + `-f config -s
 RSsignalTable.csv` into the CM GUI config (via `setup_gui.py`), launches
 TrafficLayer (→ VISSIM, serving ports 2444 + 2445), and opens CarMaker Office +
-IPGMovie on `SimpleTL_Cosim`. Then, once the TrafficLayer window prints
+IPGMovie on `SimpleTrafficLight_Cosim`. Then, once the TrafficLayer window prints
 `VISSIM_Connect OK` **and** `signal listener bound on port 2445`: load TestRun
-`SimpleTL_Cosim` and press **Start**. The ego drives the corridor and brakes at
+`SimpleTrafficLight_Cosim` and press **Start**. The ego drives the corridor and brakes at
 the VISSIM-driven red; VISSIM background traffic renders as `RS_C` cars. Stop
 order: **Stop in CarMaker → close VISSIM → Ctrl-C TrafficLayer** (never `taskkill`
 VISSIM while it holds the `.inpx` — leaks CodeMeter sessions).
@@ -74,13 +74,13 @@ VISSIM while it holds the `.inpx` — leaks CodeMeter sessions).
 | File | Role |
 |---|---|
 | `config.yaml` | DSProxy + CarMaker config; `SynchronizeTrafficSignal: true`, `TrafficSignalPort: 2445` |
-| `build_cosim_testrun.py` | `SimpleTL_Cosim` = ego (Car_Normal + DrvStops) + 50 `RS_C` traffic slots on Route 3 |
+| `build_cosim_testrun.py` | `SimpleTrafficLight_Cosim` = ego (Car_Normal + DrvStops) + 50 `RS_C` traffic slots on Route 3 |
 | `verify_signal_demo.py` | headless end-to-end check (vehicles + signals), adapted from #168 `verify_demo.py` |
 | `run_signal_demo.bat` | one-click: build assets + headless verify |
-| `simple_traffic_light_ds.inpx` | DS-enabled signalized network (3 controllers) |
+| `tests/Vissim/networks/simple_traffic_light/simple_traffic_light.inpx` | DS-enabled signalized network (3 controllers) |
 
 Reuses the scene-only assets (`add_signal_stops.py`, `build_signal_table.py`,
-`simple_traffic_light_signalstop.rd5`, `..._RSsignalTable.csv`) — the SAME rd5
+`simple_traffic_light.rd5`, `..._RSsignalTable.csv`) — the SAME rd5
 serves both the scene-only and the co-sim demos.
 
 ## Prereqs

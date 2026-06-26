@@ -34,7 +34,7 @@ runtime, overriding the inline `Driver` block). Full investigation:
 `../../../CarMaker/SignalStopTest/README.md`.
 
 `add_signal_stops.py` post-processes the committed base road (it does **not** re-run osc2cm,
-which would wipe the Route) into `simple_traffic_light_signalstop.rd5`:
+which would wipe the Route) into `simple_traffic_light.rd5`:
 
 1. **One straight `DrvStop` per crossing** (6 = 3 intersections × both directions), on the
    ego's lane-path, anchored to the lane-path's downstream end (`lonR=1, s=12`) so the ego
@@ -45,7 +45,7 @@ which would wipe the Route) into `simple_traffic_light_signalstop.rd5`:
 2. Spreads each approach mount's overlapping heads laterally so straight/left/right are
    visually distinct (cosmetic; heads stay on the approach edge).
 
-and writes the TestRun `SimpleTL_SignalStop` = the working `SimpleTL_VISSIM` run with the new
+and writes the TestRun `SimpleTrafficLight_Scene` = the working `SimpleTrafficLight_import` run with the new
 road and `DriverTemplate.FName = Car_Normal` (McLaren + Route unchanged).
 
 ### Head placement & far-side (verified on a minimal junction scene)
@@ -77,8 +77,8 @@ PASS: 110/110 stops occurred at a red referenced controller (ego respects the si
 
 | File | Role |
 |---|---|
-| `add_signal_stops.py` | builds `simple_traffic_light_signalstop.rd5` (straight DrvStops + far-side heads + head spread) + the `SimpleTL_SignalStop` TestRun (`Car_Normal`) |
-| `build_signal_table.py` | renames the CM controllers to the VISSIM convention + emits `simple_traffic_light_signalstop_RSsignalTable.csv` (runs after `add_signal_stops.py`) |
+| `add_signal_stops.py` | builds `simple_traffic_light.rd5` (straight DrvStops + far-side heads + head spread) + the `SimpleTrafficLight_Scene` TestRun (`Car_Normal`) |
+| `build_signal_table.py` | renames the CM controllers to the VISSIM convention + emits `simple_traffic_light_RSsignalTable.csv` (runs after `add_signal_stops.py`) |
 | `verify_signalstop.py` | parses the ERG, reports each stop episode + whether the referenced controller was red |
 | `parse_erg.py` | minimal CarMaker ERG reader |
 | `run_cm_scene_only.bat` | one-click build + GUI + IPGMovie (or headless `verify`) |
