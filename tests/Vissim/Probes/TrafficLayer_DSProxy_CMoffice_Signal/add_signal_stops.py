@@ -192,6 +192,12 @@ def main():
                 part = int(hd.group(1)); pp = hd.group(2).split()
                 if part in part_hoff:
                     pp[2] = f"{part_hoff[part]:.2f}"
+                # Keep osc2cm's facing AND arrow type. The arrow type comes faithfully
+                # from the xodr signal subtype (= the SUMO movement dir), and osc2cm's
+                # facing keeps the head over its correct lane (CM measures hOff in the
+                # facing frame, so flipping facing pushes the head off-road). The head
+                # faces away from the ego so arrows currently render mirrored -- the
+                # orientation fix is tracked separately, not by faking the type.
                 ln2 = f"RL.{rl_d}.Mount.{new_mi}.{part} = 1 " + " ".join(pp)
             out.append(ln2)
         moved_blocks.append("\n".join(out))

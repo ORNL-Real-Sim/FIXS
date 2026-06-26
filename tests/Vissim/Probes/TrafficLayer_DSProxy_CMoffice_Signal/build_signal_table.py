@@ -1,36 +1,41 @@
 """
-Phase 2 (Q2): build the RSsignalTable.csv that wires VISSIM signal-group states
-to the CarMaker traffic-light objects, and rename the CM controllers to the
-VISSIM convention so the rd5 is self-documenting.
+Phase 2 (Q2): build the RSsignalTable.csv that wires the traffic-simulator signal
+state to the CarMaker traffic-light objects, and name the CM controllers by the
+SUMO-canonical signal id so the rd5 is portable across SUMO and VISSIM.
 
-WHY this mapping is what it is (verified against the runtime, not guessed):
+DESIGN -- two ids, kept distinct:
+  * CM controller NAME = the SUMO-canonical head id  "<tls_id>_<head_id>"
+    (== "<intersection>_<linkIndex>", which is exactly the osc2cm odrSignalId tag
+    already on every head). This pinpoints ONE SUMO movement 1:1 and is the same
+    id whether the co-sim source is SUMO or VISSIM.
+  * runtime sync key (RSsignalTable.SignalControllerId) = whatever the SOURCE
+    emits. The reader matches the received tlsId against this column.
 
-  DSProxyMode.cpp::toTlsData() sends ONE TlsData per (controller, signal group):
-      name  = "<ControllerID>_<SignalGroupID>"   e.g. "2_1"
-      state = a SINGLE char (that group's state)
-  SocketHelper keys TlsDataRecv_um by that name; VirEnvHelper::runStep then does
-      TrfLight.Objs[cmTrafficLightIndex].State = tlsChar2CmState(state.at(headId))
-  Because each name's state string has length 1, the head index is always 0.
+Why the VISSIM runtime key differs from the head id: VISSIM's co-sim state is
+emitted PER SIGNAL GROUP, not per head. DSProxyMode.cpp::toTlsData() sends one
+TlsData per (controller, signal group): name="<SCno>_<sg>", state = a SINGLE char.
+VirEnvHelper::runStep then sets TrfLight.Objs[CmTrafficLightIndex].State =
+tlsChar2CmState(state.at(SignalHeadId)) -- single char -> SignalHeadId always 0.
+So one SG fans out to MANY CM heads (several rows share a SignalControllerId).
+(SUMO would instead emit per linkIndex, i.e. SignalControllerId=<tls_id>,
+SignalHeadId=<head_id> -- 1:1; that variant is a future SUMO-path table.)
 
-  So in RSsignalTable.csv (cols: SignalControllerId, SignalGroupId, SignalHeadId,
-  CmTrafficLightIndex, CmControllerId):
-    SignalControllerId  = "<SCno>_<sg>"   <- the runtime match key (tlsId)
-    SignalGroupId       = -1              <- unused by the reader
-    SignalHeadId        = 0               <- single-char state per name
-    CmTrafficLightIndex = the Control.TrfLight.<i> array index in the rd5
-    CmControllerId      = "<SCno>_<sg>_<linkIndex>"  (unique CM label, also the
-                          name we write into Control.TrfLight so the rd5 shows
-                          which VISSIM group drives each head)
+RSsignalTable.csv columns (VISSIM path):
+    SignalControllerId  = "<SCno>_<sg>"        <- runtime match key (the SG)
+    SignalGroupId       = -1                   <- unused by the reader
+    SignalHeadId        = 0                     <- single-char state per name
+    CmTrafficLightIndex = Control.TrfLight.<i>  <- the CM head array index
+    CmControllerId      = "<tls_id>_<head_id>"  <- SUMO-canonical name (the tag)
 
-The CM-head -> VISSIM-group join is the odrSignalId tag osc2cm left on every head
-part ("<intersection>_<linkIndex>"), resolved to a signal group via signal_plan.json.
+NOTE (today's network): VISSIM here is one-SignalHead-per-light (one head per
+movement), so each SG still maps to a handful of heads but every head is a single
+movement. The design already supports one-SG-many-heads generally.
 
 SC numbering matches build_signals.py / the .sig files: int_west=1, int_center=2,
 int_east=3.
 
-Run AFTER add_signal_stops.py (it reads/renames simple_traffic_light_signalstop.rd5).
-Idempotent: the join is keyed on the stable odrSignalId tag, never on the current
-controller name, so re-running after add_signal_stops re-derives cleanly.
+Run AFTER add_signal_stops.py. Idempotent: the join is keyed on the stable
+odrSignalId tag, never on the current controller name.
 """
 from __future__ import annotations
 import argparse, csv, json, pathlib, re, sys
@@ -107,8 +112,9 @@ def build(rd5_path, plan_path, apply_rename):
         if sc is None or sg is None:
             problems.append(f"cmIdx {cmIdx}: tag {tag} -> sc={sc} sg={sg} (unmapped)")
             continue
-        vissim_key = f"{sc}_{sg}"
-        cm_name = f"{sc}_{sg}_{link}"
+        vissim_key = f"{sc}_{sg}"          # runtime sync key: what DSProxy emits per (controller, SG)
+        cm_name = f"{inter}_{link}"        # SUMO-canonical head id <tls_id>_<head_id> (== the odrSignalId tag);
+                                           # pinpoints the SUMO movement 1:1, portable across SUMO/VISSIM
         rows.append((vissim_key, -1, 0, cmIdx, cm_name))
         if cur_name != cm_name:
             renames.append((cmIdx, objId, cur_name, cm_name))
