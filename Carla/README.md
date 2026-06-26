@@ -5,32 +5,35 @@ vehicle co-simulation, built on CARLA's `sumo_integration` bridge.
 
 ## Layout
 
-The co-sim **runtime** lives here (`Carla/`, a first-class module); shared
-**utilities** are elevated to `scripts/`; the **tests** stay under `tests/`:
+`Carla/` is a **self-contained component** &mdash; it is shipped whole in the FIXS
+release zip, so `fetch + unzip` leaves `FIXS/Carla/` ready to run. The **tests**
+live separately under `tests/`.
 
 ```
-Carla/                        <- this module (co-sim runtime)
-  helper_scripts/
+Carla/                        <- self-contained co-sim component (shipped in the zip)
+  sumo/                       <- the SUMO <-> CARLA co-sim runtime
     run_synchronization/      full CARLA<->SUMO co-sim (vehicles + TL table)
       sumo_integration/       CARLA's bridge (bridge_helper, sumo/carla simulation, ...)
     sumo_carla_tl_sync.py     standalone SUMO->CARLA TL mirror
     auto_place_tls.py         headless TL-actor placement (run inside the UE4 editor)
     unreal_placing_tls.py     spawns BP_TrafficLight actors from the table
     set_spectator_view.py     move the CARLA spectator over the junctions
+  utils/                      <- co-sim helpers (kept inside Carla/ so it ships self-contained)
+    extract_sumo_tls_as_table.py   generate traffic_light_table.csv from a SUMO net
+    trafficlight_helper.py         SUMO<->CARLA<->Unreal coordinate transforms
+    unreal_remove_tl.py            remove placed TL actors
   run_cosim.py                cross-platform launcher (Windows/Linux)
   run_cosim.bat / run_cosim.sh  thin per-OS wrappers
   README.md                   (this file)
-
-scripts/                      <- shared, reusable utilities
-  extract_sumo_tls_as_table.py   generate traffic_light_table.csv from a SUMO net
-  trafficlight_helper.py         SUMO<->CARLA<->Unreal coordinate transforms
-  unreal_remove_tl.py            remove placed TL actors
 
 tests/Sumo/Carla/             <- tests only (no runtime code)
   test_tl_logic.py            Tier-1 logic tests (no CARLA server / GPU / map asset)
   verify_demo.py              gated end-to-end smoke test (needs CARLA_ROOT)
   fixtures/                   tiny SUMO grid net + table (Tier-1 test data, no assets)
 ```
+
+(`sumo/` is named for the partner simulator &mdash; a future CARLA co-sim with another
+tool would slot in as e.g. `Carla/vissim/`.)
 
 ## Environment
 

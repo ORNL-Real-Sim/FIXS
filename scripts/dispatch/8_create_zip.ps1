@@ -81,29 +81,21 @@ try {
         Write-Host "  + environment.yml"
     }
 
-    # Include the SUMO<->CARLA co-sim runtime (Carla/, minus the carla wheel) and
-    # its shared Python utils (scripts/*.py) so the fetched FIXS release carries
-    # the co-sim with its import layout (Carla/ + scripts/ side by side). Test-only
-    # files (tests/Sumo/Carla) and the .ps1 build tooling stay source-side.
+    # Ship the self-contained Carla/ co-sim component (sumo/ runtime + utils/ +
+    # run_cosim), minus the carla wheel. After fetch + unzip, FIXS/Carla is ready
+    # to run. Test-only files (tests/Sumo/Carla) and the .ps1 build tooling under
+    # scripts/ stay source-side.
     $CarlaSrc = Join-Path $RepoRoot 'Carla'
     if (Test-Path $CarlaSrc) {
         $carlaDest = Join-Path $StagingDir 'Carla'
         New-Item -ItemType Directory -Path $carlaDest -Force | Out-Null
-        foreach ($item in @('helper_scripts', 'run_cosim.py', 'run_cosim.bat', 'run_cosim.sh', 'README.md')) {
-            $p = Join-Path $CarlaSrc $item
-            if (Test-Path $p) { Copy-Item -Path $p -Destination $carlaDest -Recurse -Force }
+        Get-ChildItem -Path $CarlaSrc -Exclude '*.whl' | ForEach-Object {
+            Copy-Item -Path $_.FullName -Destination $carlaDest -Recurse -Force
         }
         Get-ChildItem -Path $carlaDest -Recurse -Directory -Filter '__pycache__' -ErrorAction SilentlyContinue |
             Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-        Write-Host "  + Carla/ co-sim runtime"
+        Write-Host "  + Carla/ co-sim component"
     }
-    $scriptsDest = Join-Path $StagingDir 'scripts'
-    New-Item -ItemType Directory -Path $scriptsDest -Force | Out-Null
-    foreach ($u in @('trafficlight_helper.py', 'extract_sumo_tls_as_table.py', 'unreal_remove_tl.py')) {
-        $p = Join-Path (Join-Path $RepoRoot 'scripts') $u
-        if (Test-Path $p) { Copy-Item -Path $p -Destination $scriptsDest -Force }
-    }
-    Write-Host "  + scripts/ co-sim utils"
 
     Compress-Archive -Path "$StagingDir\*" -DestinationPath $ZipPath -CompressionLevel Optimal
     Remove-Item $StagingDir -Recurse -Force

@@ -25,7 +25,7 @@ import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SYNC = os.path.join(HERE, "helper_scripts", "run_synchronization", "run_synchronization.py")
+SYNC = os.path.join(HERE, "sumo", "run_synchronization", "run_synchronization.py")
 
 
 def resolve_carla_exe(carla_root):
