@@ -266,9 +266,22 @@ def main():
         for old, new in remap.items():                      # phase 2: temp -> contiguous
             t = re.sub(rf"(?m)^(RL\.{rl}\.Mount\.){old + 1000}\b", rf"\g<1>{new}", t)
 
+    # Make every CM traffic-light controller PURELY EXTERNALLY DRIVEN (listen only to
+    # VISSIM): set initialPhase = 0 (off) and all 5 phase durations = 0. The
+    # Control.TrfLight format is `objId name "<startCond>" initialPhase d0 d1 d2 d3 d4`
+    # where d0..d4 are the seconds spent in off/green/yellow/red/red+yellow (per the
+    # CarMaker IPGRoad struct tRoadCtrlTrfLight + doc/CarMakerDoc.md). osc2cm emits a
+    # non-zero fixed-time cycle (e.g. "0 0 30 3 25 3"), which makes CM run its OWN
+    # countdown on top of the sync -- with all durations 0 the controller never
+    # advances a phase, so the only thing that changes its state is the VISSIM sync.
+    n_ext = 0
+    t, n_ext = re.subn(r'(?m)^(Control\.TrfLight\.\d+ = \d+ \S+ "[^"]*") .*$',
+                       r"\g<1> 0 0 0 0 0 0", t)
+
     OUT_RD.write_text(t, encoding="utf-8")
     print(f"[rd5] {OUT_RD.name}: relocated {len(moved_log)} mount(s) to the across edge (after the "
-          f"junction), {len(stops)} straight DrvStop(s) (stop {STOP_BACK} m before the junction)")
+          f"junction), {len(stops)} straight DrvStop(s) (stop {STOP_BACK} m before the junction), "
+          f"{n_ext} controller(s) set to external (timing 0, initial off)")
     for rl_a, rl_d in sorted(moved_log):
         print(f"      head mount RL.{rl_a} -> RL.{rl_d} (across-edge start)")
 
