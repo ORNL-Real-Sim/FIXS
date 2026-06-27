@@ -1,15 +1,19 @@
 """
 run_cosim.py - cross-platform SUMO <-> CARLA co-simulation launcher.
 
-Resolves the CARLA server from CARLA_ROOT (OS-aware), launches it, waits for the
-RPC port, loads the target map, and runs the SUMO <-> CARLA synchronization.
-Works on Windows and Linux. The same helpers back the gated smoke test in
-verify_demo.py.
+Reads the per-machine CARLA env saved by carla_env_setup.py (~/.fixs/carla.json),
+launches that CARLA (packaged build or source editor, OS-aware), waits for the RPC
+port, loads the target map, and runs the SUMO <-> CARLA synchronization. Works on
+Windows and Linux.
+
+The very first time this runs on a fresh clone there is no saved config, so it
+auto-invokes carla_env_setup.run_setup() to ask which CARLA to use and remember
+it; every run afterwards is seamless. To switch CARLA later, run carla_env_setup.py
+(or setup_carla.bat / setup_carla.sh), or pass --reconfigure here.
 
 Examples:
-  # let it launch CARLA (CARLA_ROOT points at a CARLA install):
-  CARLA_ROOT=/opt/carla-0.9.15 python run_cosim.py \
-      --sumocfg fixtures/grid_tls.sumocfg --map Town01
+  # first run prompts for CARLA, then launches and runs; later runs are seamless:
+  python run_cosim.py --sumocfg fixtures/grid_tls.sumocfg --map Town01
 
   # CARLA already running (e.g. an editor in Play, or a RoadRunner map):
   python run_cosim.py --no-launch --no-net-offset \
@@ -24,19 +28,23 @@ import subprocess
 import sys
 import time
 
+import carla_env_setup as env
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 SYNC = os.path.join(HERE, "sumo", "run_synchronization", "run_synchronization.py")
 
 
-def resolve_carla_exe(carla_root):
-    """Return the CARLA server executable for this OS, or None if not found."""
-    if platform.system() == "Windows":
-        cands = [os.path.join(carla_root, "CarlaUE4.exe"),
-                 os.path.join(carla_root, "WindowsNoEditor", "CarlaUE4.exe")]
-    else:
-        cands = [os.path.join(carla_root, "CarlaUE4.sh"),
-                 os.path.join(carla_root, "LinuxNoEditor", "CarlaUE4.sh")]
-    return next((c for c in cands if os.path.isfile(c)), None)
+def resolve_carla_env(reconfigure=False):
+    """Return the saved CARLA env, running the setup prompt if missing/forced."""
+    cfg = None if reconfigure else env.load_config()
+    if cfg is None:
+        if reconfigure:
+            print("[cosim] reconfiguring CARLA env ...")
+        else:
+            print(f"[cosim] no CARLA env configured ({env.CONFIG_PATH}); "
+                  "running first-time setup ...")
+        cfg = env.run_setup()
+    return cfg
 
 
 def wait_for_port(host, port, timeout=180):
@@ -50,15 +58,30 @@ def wait_for_port(host, port, timeout=180):
     return False
 
 
-def launch_carla(carla_root, port=2000, render_offscreen=False):
-    exe = resolve_carla_exe(carla_root)
-    if exe is None:
-        raise FileNotFoundError(
-            f"No CARLA launcher under CARLA_ROOT={carla_root} (CarlaUE4.exe / CarlaUE4.sh)")
-    cmd = [exe, f"-carla-rpc-port={port}"]
+def _carla_command(cfg, port, render_offscreen):
+    """Build the server launch command for a packaged build or source editor."""
+    if cfg["mode"] == "packaged":
+        exe = env.packaged_exe(cfg["carla_root"])
+        if exe is None:
+            raise FileNotFoundError(
+                f"No CarlaUE4 launcher under {cfg['carla_root']}. "
+                "Re-run carla_env_setup.py (or --reconfigure) to fix the path.")
+        cmd = [exe, f"-carla-rpc-port={port}"]
+    else:  # source build, launched through the Unreal editor in -game mode
+        uproject, editor = env.source_paths(cfg["carla_root"], cfg["ue4_root"])
+        if not os.path.isfile(editor) or not os.path.isfile(uproject):
+            raise FileNotFoundError(
+                f"Source CARLA not found (editor={editor}, uproject={uproject}). "
+                "Re-run carla_env_setup.py (or --reconfigure) to fix the paths.")
+        cmd = [editor, uproject, "-game", f"-carla-rpc-port={port}"]
     if render_offscreen:
         cmd.append("-RenderOffScreen")  # headless, no display (Linux/CI)
-    print(f"[CARLA] launching: {' '.join(cmd)}")
+    return cmd
+
+
+def launch_carla(cfg, port=2000, render_offscreen=False):
+    cmd = _carla_command(cfg, port, render_offscreen)
+    print(f"[CARLA] launching ({cfg['mode']}): {' '.join(cmd)}")
     if platform.system() == "Windows":
         return subprocess.Popen(cmd)
     return subprocess.Popen(cmd, preexec_fn=os.setsid)
@@ -87,6 +110,8 @@ def main():
     ap.add_argument("--carla-host", default="localhost")
     ap.add_argument("--carla-port", type=int, default=2000)
     ap.add_argument("--no-launch", action="store_true", help="CARLA is already running")
+    ap.add_argument("--reconfigure", action="store_true",
+                    help="re-run CARLA env setup before launching (pick a different CARLA)")
     ap.add_argument("--render-offscreen", action="store_true", help="headless CARLA")
     ap.add_argument("--sumo-gui", action="store_true")
     args = ap.parse_args()
@@ -94,11 +119,8 @@ def main():
     carla_proc = None
     try:
         if not args.no_launch:
-            carla_root = os.environ.get("CARLA_ROOT")
-            if not carla_root:
-                sys.exit("CARLA_ROOT not set. Set it to your CARLA install, or start CARLA "
-                         "yourself and pass --no-launch.")
-            carla_proc = launch_carla(carla_root, args.carla_port, args.render_offscreen)
+            cfg = resolve_carla_env(reconfigure=args.reconfigure)
+            carla_proc = launch_carla(cfg, args.carla_port, args.render_offscreen)
             if not wait_for_port(args.carla_host, args.carla_port):
                 sys.exit("CARLA RPC port did not open in time.")
 
