@@ -33,19 +33,44 @@ end, no errors) → prints PASS/FAIL. Auto-(re)builds the headless harness exe.
 
 **B) GUI:** double-click **`run_sumo_cm_demo.bat`**. It registers the FIXS config
 into the CM project, launches SUMO + TrafficLayer, and opens CarMaker Office.
-Then in the GUI: load TestRun **`SimpleLoop_VISSIM_rs`** and press **Start**.
+Then in the GUI: load TestRun **`SimpleLoop_rs`** and press **Start**.
 Stop order: **Stop in CarMaker → close SUMO → Ctrl+C TrafficLayer.**
+
+## Known issue: stochastic IPGDriver junction off-road (demo is seed-pinned)
+
+On some traffic realizations the ego **leaves the road at a junction curve**
+(around x≈8–23, y≈0–1) and the run aborts with `Vehicle leaves road…` (or
+`Embedded FARoadSensor Geo … not found on Road`). Root cause and scope, established
+by direct measurement (`rs_ego.csv`) and a seed campaign on this branch:
+
+- **Mechanism:** when background traffic halts the ego *on* the junction curve and
+  it restarts from ~0 m/s, CarMaker's IPGDriver fails to re-acquire the course —
+  its heading stays frozen, it drives nearly straight, and a tire crosses the inner
+  edge. A *moving* ego tracks the same corner fine. This is the #168 "drives
+  straight off the link end," a CarMaker-side junction-navigation defect.
+- **Stochastic + backend-agnostic.** It reproduces on **both** SUMO and VISSIM at
+  comparable rates (~10–30 % of random seeds) and is **independent of the SUMO
+  car-following model** (Krauss 2/13, W99 4/13 — both off-road; VISSIM 5/51). It is
+  **not** a SUMO-feed bug: the data CarMaker receives is clean at the abort.
+  `Driver.Course.CornerCutCoef=0` *reduces* it (fixed the SUMO fails) but does not
+  eliminate it (VISSIM still failed) — corner-cutting contributes; the real fix is
+  on the CarMaker junction/route side, tracked separately.
+- **So the demo pins a verified-clean realization:** `run_sumo_cm_demo.bat` launches
+  SUMO with **`--seed 5`** (and `verify_sumo_cm.py` defaults to seed 5) — that
+  realization runs the full 1000 s cleanly. Same seed ⇒ same outcome (deterministic).
+- **To reproduce the off-road** for study: `set RS_SUMO_SEED=10` (or `=none` for
+  SUMO's unseeded default, which also fails) before `verify_sumo_cm.py`.
 
 ## Files
 
 | File | Purpose |
 | --- | --- |
-| `verify_sumo_cm.py` | **Headless self-check** — runs the stack, records `_logs/*.log`, reasons PASS/FAIL |
+| `verify_sumo_cm.py` | **Headless self-check** — runs the stack, records `_logs/*.log`, reasons PASS/FAIL (env: `RS_SUMO_SEED` default 5, `RS_TESTRUN`, `RS_SUMOCFG`, `RS_RUN_TIMEOUT`) |
 | `run_sumo_cm_demo.bat` | **GUI one-click** (register exe+config → SUMO → TrafficLayer → CarMaker Office), mirrors the DSProxy `run_cm_office_demo.bat` |
 | `setup_gui.py` | Patches `Data/Config/GUI`: `CM.Exe = src/CarMaker.win64.exe`, `CM.Args = -f config.yaml` (pure stdlib) |
 | `config.yaml` | TrafficLayer config: `SelectedTrafficSimulator: SUMO` + `CarMakerSetup`, ego `egoCm` on port 2444, signals off |
 | (shared) `../../SimpleLoop/simple_loop.{net,rou,sumocfg}.xml` | The shared SUMO scenario (not duplicated here) |
-| (shared) CM road/TestRun in `ProprietaryFiles/CM13_proj` | `SimpleLoop_VISSIM_rs`, built by the VISSIM probe's `import_road.bat` + `build_testrun.py` |
+| (shared) CM road/TestRun in `ProprietaryFiles/CM13_proj` | `SimpleLoop_rs`, built by the VISSIM probe's `import_road.bat` + `build_testrun.py` |
 
 ## How this differs from the VISSIM/DSProxy probe
 

@@ -12,7 +12,7 @@ REM    4. Opens the CarMaker Office GUI on the CM project.
 REM
 REM  THEN, in the CarMaker GUI (after TrafficLayer prints "Waiting for all
 REM  clients to connect"):
-REM    - Load TestRun "SimpleLoop_VISSIM_rs"
+REM    - Load TestRun "SimpleLoop_rs"
 REM    - Press the green START button.
 REM  That Start begins the lockstep SUMO / CarMaker co-simulation.
 REM
@@ -31,7 +31,7 @@ set TL=%RepoRoot%\TrafficLayer\x64\Release\TrafficLayer.exe
 set CMEXE=%RepoRoot%\ProprietaryFiles\CM13_proj\src\CarMaker.win64.exe
 set CMPROJ=%RepoRoot%\ProprietaryFiles\CM13_proj
 set CM_OFFICE=C:\IPG\carmaker\win64-13.1.3\bin\CM_Office.exe
-set TESTRUN=SimpleLoop_VISSIM_rs
+set TESTRUN=SimpleLoop_rs
 set CONFIG=%HERE%config.yaml
 set SUMOCFG=%RepoRoot%\tests\Sumo\network\simple_loop\simple_loop.sumocfg
 
@@ -71,7 +71,12 @@ if errorlevel 1 ( echo ERROR: setup_gui.py failed. & pause & exit /b 1 )
 
 REM --- 2. launch SUMO on the shared SimpleLoop net ----------------------------
 echo [2/3] Launching SUMO (SimpleLoop, TraCI on port 1337)...
-start "FIXS SUMO" sumo-gui -c "%SUMOCFG%" --remote-port 1337 --step-length 0.1 --start
+REM --seed 5: SUMO's UNSEEDED default realization halts the ego on the junction
+REM curve and trips the stochastic IPGDriver off-road (~133 s). Seed 5 is a
+REM verified-CLEAN realization (runs the full 1000 s), so the demo "just works".
+REM (The off-road itself is a CarMaker IPGDriver junction defect, backend-agnostic;
+REM  reproduce it with another seed, e.g. --seed 10, if you want to see it fail.)
+start "FIXS SUMO" sumo-gui -c "%SUMOCFG%" --remote-port 1337 --step-length 0.1 --seed 5 --start
 
 REM --- 2b. launch TrafficLayer (SUMO path; serves CarMaker on 2444) ------------
 echo        Launching TrafficLayer (SUMO path). It connects to SUMO, then waits on port 2444...

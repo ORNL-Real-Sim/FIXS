@@ -24,7 +24,7 @@ Prints the key evidence + PASS/FAIL. Logs: _logs/tl.log, _logs/cm.log.
 
 Run:  python verify_sumo_cm.py
 Prereq: SUMO on PATH; TrafficLayer.exe built; the CM13 project + TestRun
-        SimpleLoop_VISSIM_rs present (shared with the VISSIM probe). The headless
+        SimpleLoop_rs present (shared with the VISSIM probe). The headless
         CarMaker harness exe is (re)built automatically if missing/stale.
 """
 from __future__ import annotations
@@ -44,7 +44,11 @@ CMEXE = REPO / "ProprietaryFiles" / "CM13_proj" / "src" / "CarMaker_headless.win
 CMPROJ = REPO / "ProprietaryFiles" / "CM13_proj"
 CONFIG = HERE / "config.yaml"
 SUMOCFG = REPO / "tests" / "Sumo" / "network" / "simple_loop" / "simple_loop.sumocfg"
-TESTRUN = "SimpleLoop_VISSIM_rs"
+# RS_SUMOCFG overrides the scenario (e.g. a W99 car-following variant) without
+# touching the committed network -- for the car-following-model comparison test.
+if os.environ.get("RS_SUMOCFG"):
+    SUMOCFG = pathlib.Path(os.environ["RS_SUMOCFG"])
+TESTRUN = os.environ.get("RS_TESTRUN", "SimpleLoop_rs")  # override to test a TestRun variant (e.g. CornerCutCoef)
 # The headless build helper lives in the VISSIM probe (config-agnostic: it builds
 # VirtualEnvironment.lib + the RS_HEADLESS CarMaker exe). Reuse it, don't fork it.
 BUILD_HEADLESS = REPO / "tests" / "Vissim" / "Probes" / "TrafficLayer_DSProxy_CMoffice" / "build_headless_exe.bat"
@@ -52,7 +56,7 @@ LOGS = HERE / "_logs"
 
 SUMO_PORT = 1337
 TL_READY_TIMEOUT = 60     # s for TrafficLayer to connect to SUMO
-RUN_TIMEOUT = 600         # s overall cap for the CarMaker run
+RUN_TIMEOUT = int(os.environ.get("RS_RUN_TIMEOUT", "600"))  # s wall cap (env-overridable; SUMO-CM is slow per #177, long sims need a big cap)
 
 
 def sumo_exe() -> str:
@@ -112,10 +116,21 @@ def main() -> int:
     procs = []
     try:
         # --- 1. SUMO headless: TraCI server, waits for TrafficLayer to connect ---
+        # RS_SUMO_SEED varies the random realization (insertion timing / lane
+        # choice / car-following sigma) WITHOUT changing the network.
+        # DEFAULT = "5": SUMO's UNSEEDED default realization happens to halt the
+        # ego on the junction curve and trip the stochastic IPGDriver off-road
+        # (~133 s) -- so the self-check uses a verified-CLEAN seed by default.
+        # Override: RS_SUMO_SEED=10 reproduces a fail; RS_SUMO_SEED=none = unseeded.
+        _sumo_args = [sumo_exe(), "-c", str(SUMOCFG), "--remote-port", str(SUMO_PORT),
+                      "--step-length", "0.1", "--start", "--quit-on-end"]
+        _seed = os.environ.get("RS_SUMO_SEED", "5")
+        if _seed and _seed.lower() != "none":
+            _sumo_args += ["--seed", _seed]
+            print(f"[verify] SUMO --seed {_seed}")
         print(f"[verify] launching SUMO (headless) on port {SUMO_PORT} ...")
         sumo = subprocess.Popen(
-            [sumo_exe(), "-c", str(SUMOCFG), "--remote-port", str(SUMO_PORT),
-             "--step-length", "0.1", "--start", "--quit-on-end"],
+            _sumo_args,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
         procs.append(sumo)
         sumo_out: list[str] = []

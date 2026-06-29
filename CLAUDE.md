@@ -258,6 +258,21 @@ If still failing after soft reset, reboot. Long-term fix is repair-installing
 VISSIM 2022 from PTV's installer so a healthy SxS VC runtime gets dropped
 next to `VISSIM220.exe`.
 
+### Automated self-heal in the CMoffice probes
+
+The DSProxy CarMaker probes now **automate** the dispatch check + soft reset so a
+single bad dispatch no longer wedges every run. `vissim_dispatch_probe.py` tests
+the `VISSIM.Vissim.2200` dispatch (exit 0 healthy / 1 poisoned, and self-closes
+its throwaway instance); `run_cm_office_demo.bat` runs it as a preflight and, only
+when it reports the zombie state, reaps `VISSIM220.exe` + clears `%TEMP%\VISSIM`
+locks and retries (×3). The headless `verify_demo.py` seed-sweep loop does the
+same check-and-clean between runs — that's why it can drive dozens of VISSIM runs
+unattended where the old bat would stall. The probe needs pywin32, so point
+`%PYTHON%` at the `realsim_dev` env; it skips harmlessly otherwise. The reap only
+fires when dispatch is *already* broken (a corpse, no live co-sim), so it does not
+leak CodeMeter sessions — which is why the blanket VISSIM kill stays off in the
+signal probe's bat.
+
 ### Other operational notes
 
 - **Never `taskkill /F` a process that holds an open VISSIM COM reference**
@@ -271,6 +286,41 @@ next to `VISSIM220.exe`.
   inherits half-initialized COM state from the parent and contends for
   the floating PSL license). When refactoring tests, prefer having
   Python — not a child MATLAB — run the VISSIM bootstrap.
+
+## SimpleLoop ego junction off-road (CarMaker IPGDriver) — demos are seed-pinned
+
+The CMoffice co-sim demos (SUMO and VISSIM) on the shared **SimpleLoop** scenario
+have a **stochastic ego off-road** at a junction curve: on some traffic
+realizations the ego leaves the road (around x≈8–23, y≈0–1) and CarMaker aborts
+with `Vehicle leaves road…` or `Embedded FARoadSensor … not found on Road`.
+
+Established by direct evidence on the #174 branch (don't re-derive — it's settled):
+
+- **Root cause is CarMaker-side, not the traffic feed.** When background traffic
+  halts the ego *on* the junction curve and it restarts from ~0 m/s, IPGDriver
+  fails to re-acquire its course — heading stays frozen, it drives nearly straight,
+  a tire crosses the inner edge (measured in `rs_ego.csv`). A *moving* ego tracks
+  the same corner fine. This is the #168 "drives straight off the link end."
+- **Stochastic + backend-agnostic.** Reproduced on BOTH backends at comparable
+  rates, driven only by the RNG seed (the traffic realization), NOT the simulator
+  or car-following model: SUMO Krauss **2/13**, SUMO W99 **4/13**, VISSIM **5/51**.
+  The traffic data CarMaker receives is clean at the abort. Do **not** chase this
+  as a SUMO-feed / sync / phantom-velocity bug — those were measured out.
+- `Driver.Course.CornerCutCoef=0` (TestRun `SimpleLoop_rs`) **reduces** it (fixed
+  the SUMO fails) but does **not** eliminate it (VISSIM still off-roaded) — corner
+  cutting contributes; the real fix is on the CarMaker junction/route side
+  (junction road topology in `simple_loop.rd5`), tracked separately.
+
+**Because of this the demos pin a verified-clean realization** (same seed ⇒ same
+outcome, deterministic):
+
+- **SUMO-CM:** `run_sumo_cm_demo.bat` launches SUMO with `--seed 5`;
+  `verify_sumo_cm.py` defaults to `RS_SUMO_SEED=5`. (The *unseeded* SUMO default is
+  the realization that crashes — that's why a seed must be pinned.)
+- **VISSIM-CM:** the committed default `randSeed=42` is already clean; no change.
+- **Reproduce a failure:** SUMO `RS_SUMO_SEED=10` (or `=none`); VISSIM
+  `RS_VISSIM_SEED=32` (also 25/31/21/40) — `setup_gui.py`/`verify_demo.py` rewrite
+  only the *staged* inpx randSeed, committed source untouched.
 
 ## Documentation
 
