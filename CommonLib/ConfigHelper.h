@@ -197,6 +197,19 @@ struct VissimSetup_t {
 	// Unlocks scenario 3a — Python CAV controller modulating background
 	// vehicles while DSProxy drives the ego.
 	bool EnableDriverModelRelay;
+
+	// Stage C / #173. Port for a DEDICATED CAV-controller client, distinct
+	// from the app/CarMaker socket. When EnableDriverModelRelay is true and
+	// this is > 0, DSProxyMode opens a third app-facing listener here. The
+	// CAV controller (e.g. an eco-driving GLOSA loop) connects, RECEIVES the
+	// whole-network readback every tick (so it can compute per-CAV targets),
+	// and SENDS back VehFullData_t behavior commands that TL routes to the
+	// DriverModel relay. This separates ego (CarMaker, app port) from CAV
+	// intent (controller, this port): in the cav_xil precedent a single client
+	// carried both, but here CarMaker owns the app port and only sends the ego.
+	// 0 (default) -> no dedicated CAV socket (CAV cmds, if any, still come from
+	// the app client's non-ego split, preserving the cav_xil single-client path).
+	int CavControllerPort;
 };
 
 typedef struct SubscriptionVehicleList_t {

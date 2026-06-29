@@ -618,6 +618,7 @@ int ConfigHelper::getConfig(string configName) {
 	VissimSetup.MaxVissimPed = 0;
 	VissimSetup.MaxVissimSigGrp = 1000;
 	VissimSetup.EnableDriverModelRelay = false;
+	VissimSetup.CavControllerPort = 0;
 
 	node = config["VissimSetup"];
 	if (node) {
@@ -634,6 +635,7 @@ int ConfigHelper::getConfig(string configName) {
 		if (node["MaxVissimPed"])            VissimSetup.MaxVissimPed            = parserInteger(node, "MaxVissimPed");
 		if (node["MaxVissimSigGrp"])         VissimSetup.MaxVissimSigGrp         = parserInteger(node, "MaxVissimSigGrp");
 		if (node["EnableDriverModelRelay"])  VissimSetup.EnableDriverModelRelay  = parserFlag(node, "EnableDriverModelRelay");
+			if (node["CavControllerPort"])       VissimSetup.CavControllerPort       = parserInteger(node, "CavControllerPort");
 	}
 
 	return 0;

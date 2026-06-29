@@ -212,29 +212,21 @@ int runDSProxyMode(const ConfigHelper& config) {
     int signalSock = -1;
     int signalListener = -1;
 
-    auto bindListener = [](int port) -> int {
-        WSADATA wsaData;
-        WSAStartup(MAKEWORD(2, 2), &wsaData);    // idempotent if already initialized elsewhere
-        int s = static_cast<int>(socket(AF_INET, SOCK_STREAM, IPPROTO_TCP));
-        if (s < 0) return -1;
-        BOOL reuse = TRUE;
-        setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (const char*)&reuse, sizeof(reuse));
-        sockaddr_in addr{};
-        addr.sin_family = AF_INET;
-        addr.sin_addr.s_addr = htonl(INADDR_ANY);
-        addr.sin_port = htons(static_cast<u_short>(port));
-        if (::bind(s, (sockaddr*)&addr, sizeof(addr)) < 0) {
-            fprintf(stderr, "ERROR: bind(%d) failed: %d\n", port, WSAGetLastError());
-            closesocket(s);
-            return -1;
-        }
-        if (::listen(s, 5) < 0) {
-            fprintf(stderr, "ERROR: listen(%d) failed: %d\n", port, WSAGetLastError());
-            closesocket(s);
-            return -1;
-        }
-        return s;
-    };
+    // Dedicated CAV-controller channel (#173). A THIRD app-facing socket,
+    // distinct from CarMaker's app port: the controller receives the whole-
+    // network readback every tick and returns per-CAV behavior commands that
+    // we route to the DriverModel relay. Only meaningful when the relay is on.
+    // (In the cav_xil precedent the single app client carried both ego and CAV
+    // cmds; here CarMaker owns the app port and sends only the ego.)
+    const bool relayCav = relayDM && appSock.enabled && cfg.CavControllerPort > 0;
+    const int cavPort = cfg.CavControllerPort;
+    int cavSock = -1;
+    int cavListener = -1;
+
+    // Listeners are created via SocketHelper::bindServerPort (#173) — bind+listen
+    // as a step SEPARATE from accept, because the DriverModel listener must be up
+    // BEFORE VISSIM_Connect (the DLL connects to TrafficSimulatorPort during the
+    // DSProxy handshake) while the app/signal/CAV clients are accepted AFTER.
 
     // Open the listeners BEFORE VISSIM_Connect. With
     // EnableDriverModelRelay: true and EnableRealSim: true in the par-
@@ -244,12 +236,12 @@ int runDSProxyMode(const ConfigHelper& config) {
     // aborts the DSProxy handshake.
     if (appSock.enabled) {
         if (relayDM) {
-            dmListener = bindListener(config.SimulationSetup.TrafficSimulatorPort);
+            dmListener = sockHelper.bindServerPort(config.SimulationSetup.TrafficSimulatorPort);
             if (dmListener < 0) { return 6; }
             printf("DriverModel listener bound on port %d\n",
                    config.SimulationSetup.TrafficSimulatorPort);
         }
-        appListener = bindListener(appSock.port);
+        appListener = sockHelper.bindServerPort(appSock.port);
         if (appListener < 0) {
             if (dmListener >= 0) closesocket(dmListener);
             return 6;
@@ -265,13 +257,36 @@ int runDSProxyMode(const ConfigHelper& config) {
                 closesocket(appListener);
                 return 6;
             }
-            signalListener = bindListener(signalPort);
+            signalListener = sockHelper.bindServerPort(signalPort);
             if (signalListener < 0) {
                 if (dmListener >= 0) closesocket(dmListener);
                 closesocket(appListener);
                 return 6;
             }
             printf("signal listener bound on port %d\n", signalPort);
+        }
+
+        if (relayCav) {
+            if (cavPort == appSock.port || cavPort == signalPort ||
+                cavPort == config.SimulationSetup.TrafficSimulatorPort) {
+                fprintf(stderr,
+                        "ERROR: CavControllerPort (%d) must differ from the app (%d), signal (%d) "
+                        "and DriverModel (%d) ports\n",
+                        cavPort, appSock.port, signalPort,
+                        config.SimulationSetup.TrafficSimulatorPort);
+                if (dmListener >= 0) closesocket(dmListener);
+                closesocket(appListener);
+                if (signalListener >= 0) closesocket(signalListener);
+                return 6;
+            }
+            cavListener = sockHelper.bindServerPort(cavPort);
+            if (cavListener < 0) {
+                if (dmListener >= 0) closesocket(dmListener);
+                closesocket(appListener);
+                if (signalListener >= 0) closesocket(signalListener);
+                return 6;
+            }
+            printf("CAV-controller listener bound on port %d\n", cavPort);
         }
     }
 
@@ -295,6 +310,7 @@ int runDSProxyMode(const ConfigHelper& config) {
         if (dmListener >= 0) closesocket(dmListener);
         if (appListener >= 0) closesocket(appListener);
         if (signalListener >= 0) closesocket(signalListener);
+        if (cavListener >= 0) closesocket(cavListener);
         return 4;
     }
     printf("VISSIM_Connect OK\n");
@@ -303,16 +319,11 @@ int runDSProxyMode(const ConfigHelper& config) {
     // connect during VISSIM_Connect. The app client connects after
     // VISSIM_Connect when the run_*.bat launches it.
     if (relayDM && dmListener >= 0) {
-        sockaddr_in dmAddr{};
-        int dmAddrLen = sizeof(dmAddr);
-        dmSock = static_cast<int>(accept(dmListener, (sockaddr*)&dmAddr, &dmAddrLen));
+        dmSock = sockHelper.acceptClient(dmListener);   // TCP_NODELAY on
         if (dmSock < 0) {
-            fprintf(stderr, "ERROR: accept DM failed: %d\n", WSAGetLastError());
+            fprintf(stderr, "ERROR: accept DM failed\n");
             return 6;
         }
-        int nodelay = 1;
-        setsockopt(dmSock, IPPROTO_TCP, TCP_NODELAY,
-                   reinterpret_cast<const char*>(&nodelay), sizeof(nodelay));
         printf("DriverModel connected (sock=%d)\n", dmSock);
         // No handshake exchange — the patched FIXS DriverModel calls
         // disableServerTrigger() before initConnection, so it doesn't send
@@ -320,28 +331,31 @@ int runDSProxyMode(const ConfigHelper& config) {
         // get the DM's state from its first VISSIM callback.
     }
     if (appSock.enabled && appListener >= 0) {
-        sockaddr_in appAddr{};
-        int appAddrLen = sizeof(appAddr);
-        clientSock = static_cast<int>(accept(appListener, (sockaddr*)&appAddr, &appAddrLen));
+        clientSock = sockHelper.acceptClient(appListener, /*noDelay=*/false);  // preserve prior app-socket behavior
         if (clientSock < 0) {
-            fprintf(stderr, "ERROR: accept app client failed: %d\n", WSAGetLastError());
+            fprintf(stderr, "ERROR: accept app client failed\n");
             return 6;
         }
         printf("app client connected (sock=%d)\n", clientSock);
         msgHelper.getConfig(const_cast<ConfigHelper&>(config));
     }
     if (syncSignals && signalListener >= 0) {
-        sockaddr_in sigAddr{};
-        int sigAddrLen = sizeof(sigAddr);
-        signalSock = static_cast<int>(accept(signalListener, (sockaddr*)&sigAddr, &sigAddrLen));
+        signalSock = sockHelper.acceptClient(signalListener);   // TCP_NODELAY on
         if (signalSock < 0) {
-            fprintf(stderr, "ERROR: accept signal client failed: %d\n", WSAGetLastError());
+            fprintf(stderr, "ERROR: accept signal client failed\n");
             return 6;
         }
-        int nodelay = 1;
-        setsockopt(signalSock, IPPROTO_TCP, TCP_NODELAY,
-                   reinterpret_cast<const char*>(&nodelay), sizeof(nodelay));
         printf("signal client connected (sock=%d)\n", signalSock);
+    }
+    if (relayCav && cavListener >= 0) {
+        // The CAV controller launches alongside the app client (from the
+        // run_*.bat), so it connects after VISSIM_Connect just like CarMaker.
+        cavSock = sockHelper.acceptClient(cavListener);   // TCP_NODELAY on
+        if (cavSock < 0) {
+            fprintf(stderr, "ERROR: accept CAV controller failed\n");
+            return 6;
+        }
+        printf("CAV controller connected (sock=%d)\n", cavSock);
     }
 
     const double endTime = config.SimulationSetup.SimulationEndTime;
@@ -585,6 +599,49 @@ int runDSProxyMode(const ConfigHelper& config) {
             // next tick's DM PHASE 4 send at the top of the loop.
         }
 
+        // CAV-controller channel (#173). A SECOND source of CAV behavior
+        // commands, on its own socket: publish the whole-network readback so
+        // the controller (e.g. eco-driving GLOSA) can compute per-CAV targets,
+        // then receive its commands and APPEND them to the DM relay queue the
+        // app-client split above just (re)built. Same one-tick latency: the
+        // queue is drained by next tick's DM PHASE 4 send at the loop top.
+        // Lockstep: we send-then-recv here, mirroring the controller's
+        // recv-then-send, exactly like the app/signal sockets.
+        if (relayCav && cavSock > 0) {
+            msgHelper.VehDataSend_um[cavSock].clear();
+            msgHelper.TlsDataSend_um[cavSock].clear();
+            msgHelper.DetDataSend_um[cavSock].clear();
+            for (const auto& v : vehicles) {
+                // Raw VISSIM ids (NOT ego-restamped): the controller addresses
+                // CAVs by VISSIM VehicleID so the DriverModel can match the
+                // relayed command. The ego rides along but the controller
+                // filters it out by vehicle type.
+                msgHelper.VehDataSend_um[cavSock].push_back(toVehFull(v));
+            }
+            for (const auto& s : signals) {
+                msgHelper.TlsDataSend_um[cavSock].push_back(toTlsData(s));
+            }
+            if (sockHelper.sendData(cavSock, 0, simTime, /*simState=*/1, msgHelper) < 0) {
+                fprintf(stderr, "ERROR tick %d: CAV sendData failed\n", tick);
+                rc = 7;
+                break;
+            }
+
+            msgHelper.VehDataRecv_um.clear();
+            int cavRecvState = 0;
+            float cavRecvTime = 0.0f;
+            if (sockHelper.recvData(cavSock, &cavRecvState, &cavRecvTime, msgHelper) < 0) {
+                fprintf(stderr, "ERROR tick %d: CAV recvData failed\n", tick);
+                rc = 8;
+                break;
+            }
+            if (relayDM && dmSock > 0) {
+                for (const auto& kv : msgHelper.VehDataRecv_um) {
+                    msgHelper.VehDataSend_um[dmSock].push_back(kv.second);
+                }
+            }
+        }
+
         if (tick - lastReportedTick >= 25) {
             printf("tick %5d: vehicles=%3zu signals=%3zu egos=%zu\n",
                    tick, vehicles.size(), signals.size(), egos.size());
@@ -610,6 +667,12 @@ int runDSProxyMode(const ConfigHelper& config) {
             msgHelper.TlsDataSend_um[dmSock].clear();
             msgHelper.DetDataSend_um[dmSock].clear();
             sockHelper.sendData(dmSock, 0, 0.0f, /*simState=*/0, msgHelper);
+        }
+        if (relayCav && cavSock > 0) {
+            msgHelper.VehDataSend_um[cavSock].clear();
+            msgHelper.TlsDataSend_um[cavSock].clear();
+            msgHelper.DetDataSend_um[cavSock].clear();
+            sockHelper.sendData(cavSock, 0, 0.0f, /*simState=*/0, msgHelper);
         }
         sockHelper.socketShutdown();
     }
