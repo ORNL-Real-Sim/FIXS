@@ -65,6 +65,38 @@ echo [2/4] Preparing GUI (stage network, write config, register exe + signal tab
 "%PYTHON%" "%HERE%setup_gui.py"
 if errorlevel 1 ( echo ERROR: setup_gui.py failed. & pause & exit /b 1 )
 
+REM --- 2b. VISSIM COM self-heal preflight (Win11 24H2) ----------------------
+REM  On 24H2, VISSIM crashes a fraction of COM dispatches at startup and leaves
+REM  a zombie VISSIM220.exe + stale FlexNet token + lock files; the NEXT launch
+REM  then fails with "Server execution failed" (0x80080005) and STAYS broken.
+REM  So: probe the dispatch; ONLY if it is already broken, reap the zombie and
+REM  clean locks, then retry. Reaping only a corpse (no live co-sim yet) avoids
+REM  leaking CodeMeter sessions -- which is why the blanket VISSIM kill above
+REM  stays commented out. This is the same check-and-clean the headless harness
+REM  (verify_demo.py loop) does, which is why it never wedges.
+echo [preflight] Checking VISSIM COM dispatch health...
+set _VTRY=0
+:vchk
+"%PYTHON%" "%HERE%vissim_dispatch_probe.py" >nul 2>&1
+if not errorlevel 1 goto vok
+set /a _VTRY+=1
+if %_VTRY% geq 3 goto vbad
+echo [preflight] VISSIM dispatch not responding (try %_VTRY%/3) -- clearing zombie VISSIM + stale locks...
+taskkill /F /IM VISSIM220.exe            >nul 2>&1
+del /Q "%TEMP%\VISSIM\*.lock"            >nul 2>&1
+del /Q "%TEMP%\VISSIM\vissim_msgs*.txt"  >nul 2>&1
+del /Q "%TEMP%\VISSIM\CommonDialogs.log" >nul 2>&1
+timeout /t 2 /nobreak >nul
+goto vchk
+:vbad
+echo [preflight] WARNING: VISSIM COM still unhealthy after cleanup.
+echo             Try the admin FlexNet bounce or a reboot (CLAUDE.md soft reset), then retry.
+echo             Continuing anyway; TrafficLayer may fail to spawn VISSIM.
+goto vdone
+:vok
+echo [preflight] VISSIM dispatch OK.
+:vdone
+
 REM --- 3. launch TrafficLayer (spawns VISSIM, serves 2444 + 2445, waits) ----
 echo [3/4] Launching TrafficLayer (DSProxy). It spawns VISSIM, then waits on ports 2444 + 2445...
 echo        (wait for "VISSIM_Connect OK" and "signal listener bound on port 2445" before Start)

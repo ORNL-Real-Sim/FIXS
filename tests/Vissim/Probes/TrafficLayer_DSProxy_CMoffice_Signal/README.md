@@ -105,7 +105,7 @@ Because each name carries one char, `SignalHeadId` is always `0`.
 | `SignalGroupId` | `-1` | unused by the reader |
 | `SignalHeadId` | `0` | single-char state per name |
 | `CmTrafficLightIndex` | `0..43` | the `Control.TrfLight.<i>` array index |
-| `CmControllerId` | `"<SCno>_<sg>_<linkIndex>"` | unique CM label, also written into `Control.TrfLight` |
+| `CmControllerId` | `"<tls_id>_<head_id>"` e.g. `int_center_10` | SUMO-canonical head id (= the `odrSignalId` tag, `<intersection>_<linkIndex>`); also written as the `Control.TrfLight` name so the rd5 is portable across SUMO/VISSIM |
 
 The CM-head → VISSIM-group join uses the `odrSignalId` tag osc2cm leaves on each
 head part (`<intersection>_<linkIndex>`), resolved to a group via `signal_plan.json`.
