@@ -148,6 +148,16 @@ struct CarlaSetup_t {
 
 	std::vector<std::string> InterestedIds;
 
+	// #174 ego dynamics ownership + control (per-ego mode, config-driven).
+	//  EgoDynamicsOwner: "Carla" (PhysX, mode A -- bridge reads ego back) |
+	//                    "Simulink" (external owns ego, mode B -- teleport in).
+	//  EgoControl:       "TM_Advisory" (L2 TM set_desired_speed) | "External"
+	//                    (CAV client) | "None".
+	//  EnableEgoSimulink: back-compat alias; true => EgoDynamicsOwner = "Simulink".
+	std::string EgoDynamicsOwner;
+	std::string EgoControl;
+	bool        EnableEgoSimulink;
+
 };
 
 struct SumoSetup_t {

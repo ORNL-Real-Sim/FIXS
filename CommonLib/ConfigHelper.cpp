@@ -510,12 +510,16 @@ int ConfigHelper::getConfig(string configName) {
 		CarlaSetup.EnableCosimulation = false;
 	}
 
-	//if (node["EnableEgoSimulink"]) {
-	//	CarlaSetup.EnableEgoSimulink = parserFlag(node, "EnableEgoSimulink");
-	//}
-	//else {
-	//	CarlaSetup.EnableEgoSimulink = false;
-	//}
+	// #174: parse ego dynamics ownership + control (mode A/B). EnableEgoSimulink
+	// is the back-compat alias; if EgoDynamicsOwner is unset it derives from it.
+	CarlaSetup.EnableEgoSimulink = node["EnableEgoSimulink"] ? parserFlag(node, "EnableEgoSimulink") : false;
+	if (node["EgoDynamicsOwner"]) {
+		CarlaSetup.EgoDynamicsOwner = parserString(node, "EgoDynamicsOwner");
+	}
+	else {
+		CarlaSetup.EgoDynamicsOwner = CarlaSetup.EnableEgoSimulink ? "Simulink" : "Carla";
+	}
+	CarlaSetup.EgoControl = node["EgoControl"] ? parserString(node, "EgoControl") : "None";
 	if (node["EnableExternalControl"]) {
 		CarlaSetup.EnableExternalControl = parserFlag(node, "EnableExternalControl");
 	}
