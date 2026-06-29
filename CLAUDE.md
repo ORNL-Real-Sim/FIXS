@@ -328,6 +328,25 @@ NOT used by the sync). Today's net is one-head-per-light (the simple case).
   auto-parses a `.csv` argument as an InfoFile and FATALS at startup. `readSignalTable`
   appends `.csv` itself, so the file stays `*.csv` on disk.
 
+**Interactive VISSIM zoom briefly stalls BOTH sides — inherent, not a bug (don't re-chase).**
+Zooming/panning the VISSIM window during the co-sim makes the whole lockstep hitch (cjffly
+flagged it on PR #170). We instrumented the DSProxy loop (`RS_DEBUG` → `rs_timing_tl.csv`,
+splitting the per-tick proxy calls): the cost is entirely in `proxy.getTrafficVehicles()`,
+which spikes from ~5–10 ms to **100–450 ms** while `setDriverVehicles`/`getSignalStates` stay
+flat. PTV's *Driving Simulator Interface* manual (`…\API\DrivingSimulator_DLL\doc\`) documents
+it: `VISSIM_GetTrafficVehicles` *"Blocks while the calculation of the time step in Vissim
+hasn't finished yet"* (§3, p.11), and §2 (p.6) says *"the visualization in Vissim should be
+switched off in order to achieve the highest possible simulation speed."* VISSIM runs the sim
+step and the network window on ONE thread, so an interactive zoom delays step completion and
+TL blocks longer. **Quick Mode does NOT fix it** (it only removes the autonomous per-step
+redraw — cuts *idle* `getVeh` ~6 ms→~2 ms — but can't offload an interactive zoom); **VISSIM
+2026 behaves identically** and no 2022/2026 release note touches it. Fix direction (NOT "don't
+touch VISSIM" — we want to watch it; and CarMaker can't pause in XIL/HIL real-time): automate
+the VISSIM launch to open already framed on the ego vehicle and follow it, so manual zoom/pan
+(the spike trigger) isn't needed — investigate VISSIM's COM camera/viewpoint API at startup, or
+bake the follow-viewpoint into the saved `.layx`. To re-measure: build TL with `-p:RS_DEBUG=1` to an isolated
+`OutDir`/`IntDir` (e.g. `x64\Release_dbg`, gitignored) so the shipped exe is untouched.
+
 ## Documentation
 
 - VISSIM-specific: [doc/VISSIMdoc.md](doc/VISSIMdoc.md)

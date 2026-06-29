@@ -116,6 +116,24 @@ head part (`<intersection>_<linkIndex>`), resolved to a group via `signal_plan.j
 All 44 heads map across the 7 groups (`1_1..3_3`); several heads share one group
 (a SUMO signal group controls several movements), so the sync sets them together.
 
+## Known behavior: interactive VISSIM zoom briefly stalls the co-sim
+
+Zooming/panning the VISSIM window mid-run makes both sides hitch (raised by cjffly on PR #170).
+This is **inherent to PTV's Driving Simulator interface, not a bug.** Instrumenting the DSProxy
+loop (`RS_DEBUG` → `rs_timing_tl.csv`) shows the cost is entirely in `proxy.getTrafficVehicles()`
+— it spikes ~5–10 ms → 100–450 ms during a zoom, while `setDriverVehicles`/`getSignalStates` stay
+flat. The PTV manual *"PTV Vissim API – Driving Simulator Interface"* (ships at
+`…\PTV Vissim 2022\API\DrivingSimulator_DLL\doc\`) documents it: `VISSIM_GetTrafficVehicles`
+*"Blocks while the calculation of the time step in Vissim hasn't finished yet"* (§3, p.11), and §2
+(p.6) advises *"the visualization in Vissim should be switched off … for the highest possible
+simulation speed."* VISSIM runs the sim step and the network window on one thread, so an
+interactive zoom delays the step and TrafficLayer blocks longer. Verified to persist with Quick
+Mode on **and on VISSIM 2026** (no related fix in either release note). Fix direction (NOT
+"don't touch VISSIM" — we want to watch it, and CarMaker can't pause in XIL/HIL real time):
+automate the VISSIM launch to open already framed on the ego vehicle and follow it, so manual
+zoom/pan (the spike trigger) isn't needed — investigating VISSIM's COM camera/viewpoint API at
+startup (or baking the follow-viewpoint into the saved `.layx`).
+
 ## Still open
 - Automated route re-derivation after an osc2cm re-import (currently the route is committed).
 - Wire `SignalTableFilename` into the CM-side co-sim config for the live VISSIM↔CM run.
