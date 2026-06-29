@@ -19,10 +19,19 @@ import argparse
 import json
 import os
 import platform
+import shutil
+import subprocess
 import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+# the canonical conda spec ships at the FIXS root (one level up from Carla/).
+ENV_YML = os.path.normpath(os.path.join(HERE, "..", "environment.yml"))
 
 CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".fixs")
 CONFIG_PATH = os.path.join(CONFIG_DIR, "carla.json")
+
+# SUMO-side deps that come from the realsim env regardless of CARLA flavour.
+SUMO_MODULES = ("traci", "sumolib")
 
 
 # ----------------------------------------------------------------- config io
@@ -67,6 +76,255 @@ def source_paths(carla_root, ue4_root):
     return uproject, editor
 
 
+# ------------------------------------------------ python interpreter / carla
+# The CARLA + SUMO clients live in a conda env (built from environment.yml). The
+# env name is NOT fixed (it may be `realsim`, `realsim_dev`, ...), so we resolve
+# the interpreter by *capability* - we scan standard conda locations and the
+# current interpreter, then test which one can actually import the modules. This
+# is fully generic: it works on any machine / any cloner, with a manual picker
+# fallback when auto-detection comes up empty.
+
+def _env_python(env_dir):
+    if platform.system() == "Windows":
+        return os.path.join(env_dir, "python.exe")
+    return os.path.join(env_dir, "bin", "python")
+
+
+def _python_can_import(py_exe, modules):
+    """True if py_exe can import every module in `modules`."""
+    try:
+        r = subprocess.run([py_exe, "-c", "import " + ", ".join(modules)],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=90)
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+def _python_tag(py_exe):
+    """e.g. 'cp310' for the interpreter's CPython version (best-effort)."""
+    try:
+        out = subprocess.check_output(
+            [py_exe, "-c", "import sys;print('cp%d%d' % sys.version_info[:2])"],
+            text=True, timeout=30).strip()
+        return out or None
+    except Exception:
+        return None
+
+
+def _conda_roots():
+    """Conda/mamba install roots discovered from env vars + the usual locations."""
+    roots = []
+    for var in ("CONDA_PREFIX", "CONDA_ROOT", "MAMBA_ROOT_PREFIX"):
+        if os.environ.get(var):
+            # a prefix like .../envs/foo -> also include the install root above it
+            roots.append(os.environ[var])
+            roots.append(os.path.dirname(os.path.dirname(os.environ[var])))
+    home = os.path.expanduser("~")
+    roots += [os.path.join(home, n) for n in
+              ("miniconda3", "anaconda3", "miniforge3", "mambaforge",
+               os.path.join("AppData", "Local", "miniconda3"),
+               os.path.join("AppData", "Local", "anaconda3"))]
+    seen, out = set(), []
+    for r in roots:
+        if r and os.path.isdir(r) and os.path.normcase(r) not in seen:
+            seen.add(os.path.normcase(r))
+            out.append(r)
+    return out
+
+
+def _conda_candidates():
+    """Candidate python executables: the current interpreter + every conda env
+    under the discovered roots (and each root's base env). Existing files only."""
+    cands = [sys.executable]
+    for root in _conda_roots():
+        cands.append(_env_python(root))  # base env
+        envs = os.path.join(root, "envs")
+        if os.path.isdir(envs):
+            for name in sorted(os.listdir(envs)):
+                cands.append(_env_python(os.path.join(envs, name)))
+    seen, out = set(), []
+    for c in cands:
+        c = os.path.normpath(c)
+        key = os.path.normcase(c)
+        if key not in seen and os.path.isfile(c):
+            seen.add(key)
+            out.append(c)
+    return out
+
+
+def _canonical_env_name():
+    """The env name from the shipped environment.yml (defaults to 'realsim')."""
+    try:
+        with open(ENV_YML, encoding="utf-8") as f:
+            for line in f:
+                if line.strip().startswith("name:"):
+                    return line.split(":", 1)[1].strip()
+    except OSError:
+        pass
+    return "realsim"
+
+
+def _named_env_python(name):
+    """python.exe of a conda env called `name`, searched across roots, or None."""
+    for root in _conda_roots():
+        py = _env_python(os.path.join(root, "envs", name))
+        if os.path.isfile(py):
+            return py
+    return None
+
+
+def _find_conda():
+    """Locate a conda/mamba executable, or None."""
+    for var in ("CONDA_EXE", "MAMBA_EXE"):
+        exe = os.environ.get(var)
+        if exe and os.path.isfile(exe):
+            return exe
+    for name in ("conda", "mamba"):
+        found = shutil.which(name)
+        if found:
+            return found
+    for root in _conda_roots():
+        for sub in (("Scripts", "conda.exe"), ("condabin", "conda.bat"), ("bin", "conda")):
+            c = os.path.join(root, *sub)
+            if os.path.isfile(c):
+                return c
+    return None
+
+
+def _conda_create_env(conda_exe, yml_path):
+    cmd = [conda_exe, "env", "create", "-f", yml_path]
+    print(f"[setup] {' '.join(cmd)}")
+    print("[setup] creating the env can take several minutes ...")
+    return subprocess.call(cmd) == 0
+
+
+def resolve_python():
+    """Resolve the interpreter that runs the co-sim.
+
+    Order:
+      1. the canonical env named in environment.yml ('realsim') if it exists;
+      2. else, if conda is available, offer to create it from environment.yml;
+      3. else fall back to any conda env that already has the co-sim deps
+         (carla + SUMO), then to a manual python picker.
+    This keeps the reproducible 'realsim' path primary while staying usable on
+    machines that named their env differently."""
+    name = _canonical_env_name()
+
+    # 1. canonical env already installed -> good to go.
+    py = _named_env_python(name)
+    if py:
+        print(f"[setup] found the '{name}' env: {py}")
+        return py
+
+    # 2. not installed, but conda is here -> offer to create it from the spec.
+    conda = _find_conda()
+    if conda and os.path.isfile(ENV_YML):
+        print(f"[setup] the '{name}' env is not installed (conda found: {conda}).")
+        ans = input(f"        create it now from {ENV_YML}? [Y/n]: ").strip().lower()
+        if ans in ("", "y", "yes"):
+            if _conda_create_env(conda, ENV_YML):
+                py = _named_env_python(name)
+                if py:
+                    print(f"[setup] created '{name}': {py}")
+                    return py
+            print("[setup] env creation did not produce a usable interpreter; "
+                  "falling back to detection.")
+    elif not conda:
+        print("[setup] conda/mamba not found on PATH.")
+
+    # 3. fall back: any env that already imports the co-sim deps, else pick.
+    cands = _conda_candidates()
+    full = [p for p in cands if _python_can_import(p, ("carla",) + SUMO_MODULES)]
+    sumo_only = [p for p in cands if p not in full and _python_can_import(p, SUMO_MODULES)]
+    ranked = full + sumo_only
+    if len(ranked) == 1:
+        print(f"[setup] using python env: {ranked[0]}")
+        return ranked[0]
+    if len(ranked) > 1:
+        print("[setup] found these python envs with the co-sim deps:")
+        for i, p in enumerate(ranked):
+            tag = " (carla+sumo)" if p in full else " (sumo only)"
+            print(f"   [{i}] {p}{tag}")
+        sel = input(f"pick 0-{len(ranked) - 1} (default 0): ").strip()
+        return ranked[int(sel)] if sel.isdigit() and int(sel) < len(ranked) else ranked[0]
+
+    print("[setup] no conda env with the co-sim deps found automatically.")
+    py = _pick_file(f"Select the python.exe of your '{name}' env (has carla + SUMO)")
+    if not py or not os.path.isfile(py):
+        sys.exit("[setup] no python interpreter selected.")
+    return py
+
+
+def find_source_wheel(carla_root, py_exe=None):
+    """Auto-resolve the source build's carla wheel under PythonAPI/carla/dist,
+    preferring one matching the interpreter's CPython tag. Returns a path or None."""
+    dist = os.path.join(carla_root, "PythonAPI", "carla", "dist")
+    if not os.path.isdir(dist):
+        return None
+    wheels = [os.path.join(dist, f) for f in os.listdir(dist) if f.endswith(".whl")]
+    if not wheels:
+        return None
+    tag = _python_tag(py_exe) if py_exe else None
+    if tag:
+        tagged = [w for w in wheels if tag in os.path.basename(w)]
+        if tagged:
+            wheels = tagged
+    return sorted(wheels)[-1]  # newest by name
+
+
+def _pip_install(py_exe, args):
+    cmd = [py_exe, "-m", "pip", "install", *args]
+    print(f"[setup] {' '.join(cmd)}")
+    return subprocess.call(cmd) == 0
+
+
+def _carla_version(py_exe):
+    try:
+        return subprocess.check_output(
+            [py_exe, "-c", "import carla,pkg_resources;"
+                           "print(pkg_resources.get_distribution('carla').version)"],
+            text=True, timeout=30).strip()
+    except Exception:
+        return "?"
+
+
+def ensure_carla(py_exe, mode, carla_root):
+    """Make `import carla` work under py_exe, with the client matched to the
+    chosen CARLA: PyPI wheel for packaged, the source build's wheel for source."""
+    has_carla = _python_can_import(py_exe, ("carla",))
+
+    if mode == "packaged":
+        if has_carla:
+            print(f"[setup] carla {_carla_version(py_exe)} already importable.")
+            return
+        print("[setup] carla missing in this env; installing carla==0.9.15 (PyPI) ...")
+        if not _pip_install(py_exe, ["carla==0.9.15"]):
+            sys.exit("[setup] pip install carla==0.9.15 failed.")
+        return None
+
+    # source: client should match the custom server -> install the build's wheel
+    wheel = find_source_wheel(carla_root, py_exe)
+    if has_carla:
+        print(f"[setup] carla {_carla_version(py_exe)} already importable.")
+        if wheel:
+            ans = input(f"[setup] reinstall carla from this source build's wheel to guarantee\n"
+                        f"        client/server match? {os.path.basename(wheel)} [y/N]: ").strip().lower()
+            if ans == "y" and not _pip_install(py_exe, ["--force-reinstall", "--no-deps", wheel]):
+                sys.exit("[setup] wheel reinstall failed.")
+        return wheel
+    # carla not importable -> must install the source wheel
+    if not wheel:
+        print(f"[setup] no wheel auto-found under {carla_root}\\PythonAPI\\carla\\dist.")
+        wheel = _pick_file("Select the source build's carla wheel (PythonAPI/carla/dist/*.whl)")
+    if not wheel or not os.path.isfile(wheel):
+        sys.exit("[setup] no carla wheel available; build CARLA's PythonAPI first "
+                 "(make PythonAPI) or select the wheel manually.")
+    print(f"[setup] installing source carla wheel: {wheel}")
+    if not _pip_install(py_exe, ["--no-deps", wheel]):
+        sys.exit("[setup] wheel install failed.")
+    return wheel
+
+
 # ----------------------------------------------------------------- prompting
 
 def _pick_dir(title):
@@ -87,13 +345,45 @@ def _pick_dir(title):
     return typed or None
 
 
-def run_setup():
+def _pick_file(title):
+    """Native file-explorer file picker; falls back to a typed path."""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk()
+        root.withdraw()
+        root.update()
+        path = filedialog.askopenfilename(title=title)
+        root.destroy()
+        if path:
+            return path
+    except Exception as exc:  # no display / no tkinter
+        print(f"[setup] file picker unavailable ({exc}); type the path instead.")
+    typed = input(f"{title}\n  path: ").strip().strip('"')
+    return typed or None
+
+
+def run_setup(allow_packaged_windows=False):
     """Interactive setup; writes and returns the config."""
     print("=== CARLA environment setup ===")
-    print("Which CARLA do you want to use?")
-    print("  [1] Packaged CARLA  (a released build with CarlaUE4.exe / CarlaUE4.sh)")
-    print("  [2] Source build    (run through the Unreal editor: UE4Editor -game)")
-    choice = input("Enter 1 or 2: ").strip()
+    # On Windows, importing a *custom* map into a packaged CARLA is unsupported
+    # by CARLA itself (map ingestion is Linux + Docker only - see
+    # Util/ImportAssets.sh; there is no ImportAssets.bat). Custom-map apps on
+    # Windows therefore need a source build. We skip the packaged option here to
+    # avoid a dead end; pass allow_packaged_windows=True (--allow-packaged-windows)
+    # if you only need stock maps (Town01, ...) from a packaged build.
+    offer_packaged = platform.system() != "Windows" or allow_packaged_windows
+    if offer_packaged:
+        print("Which CARLA do you want to use?")
+        print("  [1] Packaged CARLA  (a released build with CarlaUE4.exe / CarlaUE4.sh)")
+        print("  [2] Source build    (run through the Unreal editor: UE4Editor -game)")
+        choice = input("Enter 1 or 2: ").strip()
+    else:
+        print("On Windows, custom-map import requires a SOURCE build (packaged-map")
+        print("import is Linux+Docker only in CARLA). Using source build.")
+        print("(Only need stock maps from a packaged build? re-run:")
+        print("   carla_env_setup.py --allow-packaged-windows )")
+        choice = "2"
 
     if choice == "1":
         root = _pick_dir("Select your PACKAGED CARLA folder (contains CarlaUE4.exe / .sh)")
@@ -107,33 +397,54 @@ def run_setup():
         root = _pick_dir("Select your CARLA SOURCE folder (contains Unreal/CarlaUE4/CarlaUE4.uproject)")
         if not root:
             sys.exit("[setup] cancelled.")
-        ue4 = os.environ.get("UE4_ROOT") or _pick_dir("Select your Unreal Engine root (UE4_ROOT)")
+        # Prefer $UE4_ROOT, but only if it actually contains the editor; otherwise
+        # (unset OR wrong) fall back to the folder picker.
+        ue4 = os.environ.get("UE4_ROOT")
+        if ue4 and os.path.isfile(source_paths(root, ue4)[1]):
+            print(f"[setup] using UE4_ROOT from environment: {ue4}")
+        else:
+            if ue4:
+                print(f"[setup] UE4_ROOT={ue4} has no UE4Editor; please select it.")
+            ue4 = _pick_dir("Select your Unreal Engine root (folder containing Engine/)")
         if not ue4:
             sys.exit("[setup] cancelled.")
         uproject, editor = source_paths(root, ue4)
         if not os.path.isfile(uproject):
             sys.exit(f"[setup] no CarlaUE4.uproject at {uproject}.")
         if not os.path.isfile(editor):
-            sys.exit(f"[setup] no UE4Editor at {editor}.")
+            sys.exit(f"[setup] no UE4Editor at {editor} (is this the engine root?).")
         cfg = {"mode": "source", "carla_root": root, "ue4_root": ue4}
 
     else:
         sys.exit("[setup] invalid choice (expected 1 or 2).")
 
+    # Resolve the interpreter (carla + SUMO) and match the carla client to the
+    # chosen CARLA. Stored in the config so run_cosim re-execs under it on any
+    # machine, regardless of the env's name.
+    print("\n--- resolving the python env (carla + SUMO client) ---")
+    cfg["python"] = resolve_python()
+    wheel = ensure_carla(cfg["python"], cfg["mode"], cfg["carla_root"])
+    if wheel:
+        cfg["carla_wheel"] = wheel
+
     save_config(cfg)
-    print(f"[setup] done: {cfg['mode']} CARLA @ {cfg['carla_root']}")
+    print(f"\n[setup] done: {cfg['mode']} CARLA @ {cfg['carla_root']}")
+    print(f"[setup] python: {cfg['python']}")
     return cfg
 
 
 def main():
     ap = argparse.ArgumentParser(description="Configure which CARLA run_cosim.py uses.")
     ap.add_argument("--show", action="store_true", help="print the current config and exit")
+    ap.add_argument("--allow-packaged-windows", action="store_true",
+                    help="on Windows, also offer packaged CARLA (stock maps only; "
+                         "custom-map import is unsupported in Windows packages)")
     args = ap.parse_args()
     if args.show:
         cfg = load_config()
         print(json.dumps(cfg, indent=2) if cfg else f"(no config at {CONFIG_PATH})")
         return 0
-    run_setup()
+    run_setup(allow_packaged_windows=args.allow_packaged_windows)
     return 0
 
 

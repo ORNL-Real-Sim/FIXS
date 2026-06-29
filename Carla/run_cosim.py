@@ -47,6 +47,41 @@ def resolve_carla_env(reconfigure=False):
     return cfg
 
 
+def ensure_runtime(cfg):
+    """Repair a config that lacks a usable python env (e.g. written by an older
+    setup before env resolution existed): resolve the interpreter + matching
+    carla and save it, WITHOUT re-asking the CARLA / UE4 paths."""
+    py = cfg.get("python")
+    if py and os.path.isfile(py) and env._python_can_import(py, ("carla",)):
+        return cfg
+    print("[cosim] saved config has no usable python env (carla not importable); "
+          "resolving it now (CARLA paths kept) ...")
+    cfg["python"] = env.resolve_python()
+    wheel = env.ensure_carla(cfg["python"], cfg["mode"], cfg["carla_root"])
+    if wheel:
+        cfg["carla_wheel"] = wheel
+    env.save_config(cfg)
+    return cfg
+
+
+def maybe_reexec(cfg):
+    """Re-run this script under the configured python (the env that actually has
+    the carla + SUMO clients) if we are not already running under it. Lets the
+    .bat/.sh stay trivial and work on any machine, whatever the env is named."""
+    target = cfg.get("python")
+    if not target or not os.path.isfile(target):
+        return
+    same = os.path.normcase(os.path.normpath(target)) == \
+        os.path.normcase(os.path.normpath(sys.executable))
+    if same or os.environ.get("FIXS_REEXEC") == "1":
+        return
+    child_args = [a for a in sys.argv[1:] if a != "--reconfigure"]
+    cmd = [target, os.path.abspath(__file__), *child_args]
+    print(f"[cosim] switching to configured python env:\n        {target}")
+    osenv = dict(os.environ, FIXS_REEXEC="1")
+    sys.exit(subprocess.call(cmd, env=osenv))
+
+
 def wait_for_port(host, port, timeout=180):
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -58,7 +93,7 @@ def wait_for_port(host, port, timeout=180):
     return False
 
 
-def _carla_command(cfg, port, render_offscreen):
+def _carla_command(cfg, port, render_offscreen, quality_level=None):
     """Build the server launch command for a packaged build or source editor."""
     if cfg["mode"] == "packaged":
         exe = env.packaged_exe(cfg["carla_root"])
@@ -74,17 +109,92 @@ def _carla_command(cfg, port, render_offscreen):
                 f"Source CARLA not found (editor={editor}, uproject={uproject}). "
                 "Re-run carla_env_setup.py (or --reconfigure) to fix the paths.")
         cmd = [editor, uproject, "-game", f"-carla-rpc-port={port}"]
+    if quality_level:
+        cmd.append(f"-quality-level={quality_level}")  # Low is much cheaper to render
     if render_offscreen:
         cmd.append("-RenderOffScreen")  # headless, no display (Linux/CI)
     return cmd
 
 
-def launch_carla(cfg, port=2000, render_offscreen=False):
-    cmd = _carla_command(cfg, port, render_offscreen)
+def launch_carla(cfg, port=2000, render_offscreen=False, quality_level=None):
+    cmd = _carla_command(cfg, port, render_offscreen, quality_level)
     print(f"[CARLA] launching ({cfg['mode']}): {' '.join(cmd)}")
     if platform.system() == "Windows":
         return subprocess.Popen(cmd)
     return subprocess.Popen(cmd, preexec_fn=os.setsid)
+
+
+def _frame_from_actors(world):
+    """Centroid + span (m) of the placed traffic-light actors, in CARLA coords."""
+    tls = world.get_actors().filter("traffic.traffic_light*")
+    locs = [t.get_transform().location for t in tls]
+    if not locs:
+        return None
+    xs = [l.x for l in locs]; ys = [l.y for l in locs]; zs = [l.z for l in locs]
+    return _frame_stats(xs, ys, zs, f"{len(locs)} traffic lights")
+
+
+def _table_junctions(tl_table, no_net_offset):
+    """junction_id -> list of (x, y, z) CARLA-coord points from the TL table.
+    With --no-net-offset (RoadRunner-local maps) SUMO (x, y) -> CARLA (x, -y)."""
+    import csv
+    juncs = {}
+    try:
+        with open(tl_table, newline="", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                x = float(row["x"])
+                y = -float(row["y"]) if no_net_offset else float(row["y"])
+                z = float(row.get("z") or 0.0)
+                juncs.setdefault(row["junction_id"], []).append((x, y, z))
+    except (OSError, KeyError, ValueError):
+        return {}
+    return juncs
+
+
+def _frame_from_table(tl_table, no_net_offset, junction=None, whole=False):
+    """Frame from the TL table. By default zooms to ONE intersection (the busiest
+    by signal-head count) so the signal sync is legible; whole=True frames the
+    entire network; junction=<id> targets a specific intersection."""
+    juncs = _table_junctions(tl_table, no_net_offset)
+    if not juncs:
+        return None
+    if whole:
+        pts = [p for pts in juncs.values() for p in pts]
+        anchor = f"{len(juncs)} junctions (network)"
+    elif junction is not None:
+        if junction not in juncs:
+            print(f"[VIEW] junction '{junction}' not in table; using the busiest one")
+            junction = None
+        pts = juncs.get(junction) or max(juncs.values(), key=len)
+        anchor = f"junction {junction}" if junction else "busiest junction"
+    else:
+        jid = max(juncs, key=lambda j: len(juncs[j]))
+        pts = juncs[jid]
+        anchor = f"junction {jid} ({len(pts)} heads)"
+    xs = [p[0] for p in pts]; ys = [p[1] for p in pts]; zs = [p[2] for p in pts]
+    return _frame_stats(xs, ys, zs, anchor)
+
+
+def _frame_stats(xs, ys, zs, anchor):
+    cx, cy, cz = sum(xs) / len(xs), sum(ys) / len(ys), sum(zs) / len(zs)
+    span = max(max(xs) - min(xs), max(ys) - min(ys), 1.0)
+    return cx, cy, cz, span, anchor
+
+
+def position_spectator(world, frame, pitch=-55.0):
+    """Point the spectator at the anchor from an angled overhead view. Height is
+    scaled to the anchor's span (so a single intersection is seen up close), and
+    the camera is offset back along -X so the anchor sits in the view centre."""
+    import math
+    import carla
+    cx, cy, cz, span, anchor = frame
+    height = min(max(span * 1.2, 35.0), 600.0)
+    back = height / math.tan(math.radians(-pitch))  # so the look ray hits (cx, cy)
+    world.get_spectator().set_transform(carla.Transform(
+        carla.Location(x=cx - back, y=cy, z=cz + height),
+        carla.Rotation(pitch=pitch, yaw=0.0, roll=0.0)))
+    print(f"[VIEW] spectator -> ({cx - back:.0f}, {cy:.0f}, {cz + height:.0f}) "
+          f"looking at ({cx:.0f}, {cy:.0f}), span~{span:.0f}m, anchored on {anchor}")
 
 
 def kill_carla(proc):
@@ -104,23 +214,51 @@ def main():
     ap.add_argument("--map", default="Town01", help="CARLA map to load_world()")
     ap.add_argument("--tl-table", default=None, help="traffic_light_table.csv (for --tls-manager sumo)")
     ap.add_argument("--tls-manager", default="sumo", choices=["sumo", "carla", "none"])
-    ap.add_argument("--step-length", type=float, default=0.05)
+    ap.add_argument("--step-length", type=float, default=0.05,
+                    help="sim timestep in seconds / CARLA fixed_delta_seconds (default 0.05; "
+                         "0.1 halves the ticks-per-second and is fine for traffic)")
+    ap.add_argument("--quality-level", choices=["Low", "Medium", "High", "Epic"], default=None,
+                    help="CARLA render quality; Low is much faster on heavy maps")
+    ap.add_argument("--fast", action="store_true",
+                    help="do not pace the co-sim to real time (run as fast as possible)")
     ap.add_argument("--no-net-offset", action="store_true",
                     help="zero the SUMO net offset (RoadRunner-local maps)")
     ap.add_argument("--carla-host", default="localhost")
     ap.add_argument("--carla-port", type=int, default=2000)
+    ap.add_argument("--carla-timeout", type=float, default=10.0,
+                    help="CARLA client connect timeout in seconds (default: 10; "
+                         "raise for heavy source-build maps)")
     ap.add_argument("--no-launch", action="store_true", help="CARLA is already running")
     ap.add_argument("--reconfigure", action="store_true",
                     help="re-run CARLA env setup before launching (pick a different CARLA)")
     ap.add_argument("--render-offscreen", action="store_true", help="headless CARLA")
+    ap.add_argument("--no-spectator", action="store_true",
+                    help="do not auto-frame the CARLA spectator on the scene")
+    ap.add_argument("--spectator-all", action="store_true",
+                    help="frame the whole network instead of one intersection")
+    ap.add_argument("--spectator-junction", default=None,
+                    help="frame this junction id (default: the busiest intersection)")
     ap.add_argument("--sumo-gui", action="store_true")
     args = ap.parse_args()
+
+    # Resolve the saved CARLA env (running first-time setup if needed) and make
+    # sure we are on its python before importing carla. --no-launch still needs
+    # the env for the python/carla client, but won't force CARLA-path setup.
+    cfg = env.load_config()
+    if not args.no_launch and (cfg is None or args.reconfigure):
+        cfg = resolve_carla_env(reconfigure=args.reconfigure)
+    if cfg is not None:
+        cfg = ensure_runtime(cfg)  # repair stale configs that lack a python env
+        maybe_reexec(cfg)          # may not return (re-execs under the env python)
+    elif args.no_launch:
+        print("[cosim] no CARLA env configured; running under the current python. "
+              "If 'import carla' fails, run setup_carla first.")
 
     carla_proc = None
     try:
         if not args.no_launch:
-            cfg = resolve_carla_env(reconfigure=args.reconfigure)
-            carla_proc = launch_carla(cfg, args.carla_port, args.render_offscreen)
+            carla_proc = launch_carla(cfg, args.carla_port, args.render_offscreen,
+                                      args.quality_level)
             if not wait_for_port(args.carla_host, args.carla_port):
                 sys.exit("CARLA RPC port did not open in time.")
 
@@ -128,16 +266,39 @@ def main():
         client = carla.Client(args.carla_host, args.carla_port)
         client.set_timeout(60.0)
         print(f"[CARLA] loading world: {args.map}")
-        client.load_world(args.map)
+        world = client.load_world(args.map)
+        # A source build keeps streaming/cooking the map after load_world
+        # returns; give it a moment so the sync client's first RPC succeeds.
+        time.sleep(2.0)
+
+        if not args.no_spectator:
+            # Default: zoom to one intersection from the TL table so the signal
+            # sync is legible. --spectator-all frames the whole network (placed TL
+            # actors, else the full table).
+            frame = None
+            if args.tl_table and not args.spectator_all:
+                frame = _frame_from_table(args.tl_table, args.no_net_offset,
+                                          junction=args.spectator_junction)
+            if frame is None:
+                frame = _frame_from_actors(world)
+            if frame is None and args.tl_table:
+                frame = _frame_from_table(args.tl_table, args.no_net_offset, whole=True)
+            if frame is not None:
+                position_spectator(world, frame)
+            else:
+                print("[VIEW] no TL actors/table to anchor on; leaving spectator as is")
 
         cmd = [sys.executable, SYNC, args.sumocfg,
                "--tls-manager", args.tls_manager,
                "--step-length", str(args.step_length),
-               "--carla-host", args.carla_host, "--carla-port", str(args.carla_port)]
+               "--carla-host", args.carla_host, "--carla-port", str(args.carla_port),
+               "--carla-timeout", str(args.carla_timeout)]
         if args.tl_table:
             cmd += ["--tl-table", args.tl_table]
         if args.no_net_offset:
             cmd.append("--no-net-offset")
+        if args.fast:
+            cmd.append("--no-realtime")
         if args.sumo_gui:
             cmd.append("--sumo-gui")
         print(f"[SYNC] {' '.join(cmd)}")

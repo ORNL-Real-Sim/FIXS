@@ -251,7 +251,8 @@ def synchronization_loop(args):
     sumo_simulation = SumoSimulation(args.sumo_cfg_file, args.step_length, args.sumo_host,
                                      args.sumo_port, args.sumo_gui, args.client_order,
                                      use_landmark_tls=use_landmark_tls)
-    carla_simulation = CarlaSimulation(args.carla_host, args.carla_port, args.step_length)
+    carla_simulation = CarlaSimulation(args.carla_host, args.carla_port, args.step_length,
+                                       timeout=args.carla_timeout)
 
     tl_table_manager = None
     if args.tls_manager == 'sumo':
@@ -277,7 +278,9 @@ def synchronization_loop(args):
 
             end = time.time()
             elapsed = end - start
-            if elapsed < args.step_length:
+            # By default pace to real time (sleep out the remainder of the step).
+            # --no-realtime runs as fast as the hardware allows (batch/headless).
+            if not args.no_realtime and elapsed < args.step_length:
                 time.sleep(args.step_length - elapsed)
 
     except KeyboardInterrupt:
@@ -301,6 +304,14 @@ if __name__ == '__main__':
                            default=2000,
                            type=int,
                            help='TCP port to listen to (default: 2000)')
+    argparser.add_argument('--carla-timeout',
+                           metavar='S',
+                           default=10.0,
+                           type=float,
+                           help='CARLA client connect timeout in seconds (default: 10)')
+    argparser.add_argument('--no-realtime',
+                           action='store_true',
+                           help='do not pace to real time; run as fast as possible')
     argparser.add_argument('--sumo-host',
                            metavar='H',
                            default=None,

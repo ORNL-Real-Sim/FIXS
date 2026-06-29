@@ -97,10 +97,29 @@ Setup asks **packaged** vs **source build**, then opens a native folder picker:
 - **Packaged** &mdash; pick the folder holding `CarlaUE4.exe` (Windows) /
   `CarlaUE4.sh` (Linux). Launched directly.
 - **Source build** &mdash; pick the CARLA source folder (with
-  `Unreal/CarlaUE4/CarlaUE4.uproject`) and the Unreal Engine root (`UE4_ROOT`).
+  `Unreal/CarlaUE4/CarlaUE4.uproject`) and the Unreal Engine root. `UE4_ROOT` is
+  used automatically when it points at a real engine; otherwise you're prompted.
   Launched through the editor as `UE4Editor <uproject> -game`.
 
-(No display? The picker falls back to typing the path. Headless CI instead sets
+**Windows note:** importing a *custom* map into a packaged CARLA is unsupported by
+CARLA (map ingestion is Linux + Docker only &mdash; there is no `ImportAssets.bat`),
+so on Windows setup offers **source build only** for custom-map apps. Pass
+`--allow-packaged-windows` if you only need stock maps (Town01, ...) from a package.
+
+Setup also resolves the **python env** that runs the co-sim and stores it in the
+config, so the launcher works on any machine no matter what the env is named:
+
+1. the canonical env from `environment.yml` (`realsim`) if it exists;
+2. else, if conda is found, it offers to create it from `environment.yml`;
+3. else any conda env that already imports `carla + traci + sumolib`, or a manual
+   pick. For a **source build** the matching client wheel is auto-resolved from
+   `PythonAPI/carla/dist` (manual pick as fallback).
+
+`run_cosim.py` then re-executes itself under that interpreter before importing
+`carla`, so the `.bat`/`.sh` stay trivial. A config written by an older setup
+(missing the python env) is repaired automatically on the next run.
+
+(No display? Pickers fall back to typing the path. Headless CI instead sets
 `CARLA_ROOT` and runs `verify_demo.py`, which bypasses the interactive setup.)
 
 ## Running a co-sim
@@ -128,7 +147,21 @@ python run_cosim.py --no-launch --map RP_Ver0529 \
   (which sit in the SUMO-local frame). Stock CARLA towns do **not** need it.
 - `--no-launch` skips both the launch and the env config &mdash; use it when CARLA
   is already running.
+- The spectator auto-frames the **busiest intersection** from the TL table so the
+  signal sync is legible (`--spectator-junction <id>` for a specific one,
+  `--spectator-all` for the whole network, `--no-spectator` to leave it).
 - Traffic lights for a RoadRunner map are placed once with `auto_place_tls.py`
   (run via the UE4 editor `-ExecutePythonScript`); see `sumo/`.
 - Large map assets (FBX / cooked content) are **not** stored here - the tests use
   stock Town01; application maps ship separately.
+
+### Timestep & speed
+`--step-length` is the **shared** timestep: SUMO's `--step-length` *and* CARLA's
+`fixed_delta_seconds` (default 0.05 s, matching CARLA's official
+`run_synchronization`; the hard max with default physics substepping is 0.1 s).
+The loop is paced to **real time** by default. Speed levers, none of which change
+the defaults:
+- `--carla-timeout S` &mdash; client connect timeout (default 10 s; raise for heavy
+  source-build maps that are slow to answer the first RPC).
+- `--quality-level Low` &mdash; cheaper rendering on heavy maps.
+- `--fast` &mdash; drop real-time pacing; run as fast as the hardware allows.
