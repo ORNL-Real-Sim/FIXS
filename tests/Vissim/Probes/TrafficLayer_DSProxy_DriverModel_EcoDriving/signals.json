@@ -1,0 +1,33 @@
+{
+  "_comment": "Eco-driving corridor signal model (#173). TIMING is from signal_plan.json (reliable). POSITIONS are estimates -- CALIBRATE against one readback pass, see README.",
+  "_calibrated": false,
+  "travel_axis": "x",
+  "direction": 1.0,
+  "cav_type": "100",
+  "signals": [
+    {
+      "name": "int_west",
+      "pos": 330.0,
+      "cycle": 90.0,
+      "offset": 0.0,
+      "green_start": 0.0,
+      "green_dur": 42.0
+    },
+    {
+      "name": "int_center",
+      "pos": 670.0,
+      "cycle": 90.0,
+      "offset": 0.0,
+      "green_start": 0.0,
+      "green_dur": 42.0
+    },
+    {
+      "name": "int_east",
+      "pos": 1010.0,
+      "cycle": 90.0,
+      "offset": 0.0,
+      "green_start": 0.0,
+      "green_dur": 38.0
+    }
+  ]
+}
