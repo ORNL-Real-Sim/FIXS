@@ -26,9 +26,12 @@ class CarlaSimulation(object):
     """
     CarlaSimulation is responsible for the management of the carla simulation.
     """
-    def __init__(self, host, port, step_length, tl_table_path=None):
+    def __init__(self, host, port, step_length, tl_table_path=None, timeout=10.0):
         self.client = carla.Client(host, port)
-        self.client.set_timeout(2.0)
+        # A freshly-loaded map - especially on a source build (UE4Editor -game)
+        # still streaming/cooking - can take well over 2s to answer the first
+        # RPC, so the connect timeout is configurable (default 10s).
+        self.client.set_timeout(timeout)
 
         self.world = self.client.get_world()
         self.blueprint_library = self.world.get_blueprint_library()

@@ -42,7 +42,10 @@ def main():
 
     import run_cosim
     headless = platform.system() != "Windows"
-    proc = run_cosim.launch_carla(CARLA_ROOT, 2000, render_offscreen=headless)
+    # CI/gated path uses a packaged CARLA pointed at by CARLA_ROOT (no interactive
+    # setup); build the config inline instead of reading ~/.fixs/carla.json.
+    cfg = {"mode": "packaged", "carla_root": CARLA_ROOT}
+    proc = run_cosim.launch_carla(cfg, 2000, render_offscreen=headless)
     try:
         if not run_cosim.wait_for_port("localhost", 2000):
             print("FAIL: CARLA RPC port did not open.")
