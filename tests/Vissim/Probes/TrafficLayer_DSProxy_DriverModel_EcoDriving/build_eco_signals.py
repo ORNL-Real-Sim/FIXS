@@ -67,7 +67,23 @@ def main() -> int:
     ap.add_argument("--cav-type", default="100")
     ap.add_argument("--axis", default="x", choices=["x", "y"])
     ap.add_argument("--direction", type=float, default=1.0)
+    ap.add_argument("--force", action="store_true",
+                    help="overwrite even a calibrated signals.json (DISCARDS calibration)")
     args = ap.parse_args()
+
+    # Never clobber a calibrated signals.json (the launcher calls us every run).
+    out_path = pathlib.Path(args.out)
+    if out_path.is_file() and not args.force:
+        try:
+            existing = json.loads(out_path.read_text())
+        except (ValueError, OSError):
+            existing = {}
+        if existing.get("_calibrated"):
+            print(f"{out_path.name} is calibrated; keeping it (use --force to regenerate).")
+            return 0
+        if existing.get("signals"):
+            print(f"{out_path.name} exists (uncalibrated); keeping it (use --force to regenerate).")
+            return 0
 
     plan = json.loads(pathlib.Path(args.plan).read_text())
 

@@ -1,0 +1,34 @@
+# DriverModel par-file for the #173 eco-driving CAV demo.
+#
+# Attached to VISSIM Car type 100 (extDriver) by setup_eco.py. With
+# EnableRealSim: true the FIXS DriverModel binds a socket to TrafficLayer on
+# TrafficSimulatorPort and, per tick, receives the per-CAV speedDesired the
+# eco-driving controller produced (relayed by TrafficLayer's DSProxyMode), then
+# returns it to VISSIM via DRIVER_DATA_DESIRED_VELOCITY so Wiedemann integrates
+# the CAV toward it.
+#
+# SubEgoOnly: false is THE knob that enables the per-tick relay path (#158
+# Stage C). With it true (the historical default) the DriverModel does the
+# once-per-tick send/recv only inside the per-vehicle MOVE_DRIVER path and the
+# relay loop deadlocks; false routes the send/recv through DRIVER_DATA_TIME so
+# TrafficLayer's batched per-tick relay lines up.
+#
+# VehicleMessageField MUST be byte-identical to config.yaml's list -- the binary
+# VehFullData_t wire format gates each field on its position, so any mismatch
+# between TL (packer) and the DriverModel (depacker) silently misaligns the
+# reader and blocks both sides on the next recv.
+
+SimulationSetup:
+    EnableRealSim: true
+    EnableVerboseLog: true
+    SubEgoOnly: false
+    SelectedTrafficSimulator: VISSIM
+    TrafficSimulatorIP: "127.0.0.1"
+    TrafficSimulatorPort: 1337
+    VehicleMessageField: [id, type, vehicleClass, speed, speedDesired, positionX, positionY, positionZ, heading, linkId, laneId, grade]
+
+ApplicationSetup:
+    EnableApplicationLayer: false
+
+XilSetup:
+    EnableXil: false

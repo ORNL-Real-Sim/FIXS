@@ -111,6 +111,19 @@ class SignalWorld:
         return best, best_d
 
 
+def _eco_selected(veh_id: str, penetration: float) -> bool:
+    """Stable per-vehicle selection so a given car keeps its eco/plain role for
+    the whole run (deterministic hash, not random)."""
+    if penetration >= 1.0:
+        return True
+    if penetration <= 0.0:
+        return False
+    h = 0
+    for ch in str(veh_id):
+        h = (h * 131 + ord(ch)) & 0xFFFFFFFF
+    return (h % 1000) / 1000.0 < penetration
+
+
 def make_cav_cmd(veh: VehData, target_speed: float) -> VehData:
     """One behavior command for a CAV: echo state, override speedDesired."""
     cmd = VehData()
@@ -139,6 +152,10 @@ def main() -> int:
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=0,
                     help="CAV-controller port; 0 -> read VissimSetup.CavControllerPort from config")
+    ap.add_argument("--penetration", type=float, default=1.0,
+                    help="fraction (0..1) of hooked CAVs that eco-drive; the rest "
+                         "get free-flow desired speed (~plain Wiedemann). Selection is "
+                         "a stable per-vehicle-id hash so a given car keeps its role.")
     args = ap.parse_args()
 
     cfg_path = pathlib.Path(args.config)
@@ -173,6 +190,13 @@ def main() -> int:
     n_active = 0
     n_cmds = 0
     tick = 0
+    dt = 1.0 / 10.0  # 10 Hz co-sim; matches SimulatorFrequency
+    STOP_SPEED = 0.5  # m/s -> "stopped"
+    # Per-CAV metrics, keyed by VISSIM id, for the before/after eco readout.
+    prev_speed: dict[str, float] = {}
+    stop_ticks: dict[str, int] = {}      # ticks spent stopped
+    decel_sum: dict[str, float] = {}     # cumulative |deceleration| (m/s), a harshness/energy proxy
+    seen_ids: set[str] = set()
     try:
         while True:
             if args.ticks and tick >= args.ticks:
@@ -186,8 +210,24 @@ def main() -> int:
             cavs = [v for v in sh.vehicle_data_receive_list
                     if v.type.strip() == world.cav_type]
 
+            # Accumulate per-CAV metrics from this tick's readback.
+            for cav in cavs:
+                seen_ids.add(cav.id)
+                if cav.speed < STOP_SPEED:
+                    stop_ticks[cav.id] = stop_ticks.get(cav.id, 0) + 1
+                if cav.id in prev_speed:
+                    dv = prev_speed[cav.id] - cav.speed
+                    if dv > 0:
+                        decel_sum[cav.id] = decel_sum.get(cav.id, 0.0) + dv
+                prev_speed[cav.id] = cav.speed
+
             active_this_tick = 0
             for cav in cavs:
+                # Penetration: a stable per-id fraction eco-drives; the rest are
+                # released to free-flow (desired = v_max ~ plain Wiedemann).
+                if not _eco_selected(cav.id, args.penetration):
+                    sh.vehicle_data_send_list.append(make_cav_cmd(cav, glosa.v_max))
+                    continue
                 sig, dist = world.next_signal(cav, glosa)
                 if sig is None:
                     advice = Advice(glosa.v_max, False, "no_signal")
@@ -214,8 +254,34 @@ def main() -> int:
         except OSError:
             pass
 
+    # --- before/after eco readout -------------------------------------------
+    n_cavs = len(seen_ids)
+    total_stop_ticks = sum(stop_ticks.values())
+    cavs_that_stopped = sum(1 for v in stop_ticks.values() if v > 0)
+    total_idle_s = total_stop_ticks * dt
+    mean_decel_proxy = (sum(decel_sum.values()) / n_cavs) if n_cavs else 0.0
+
+    summary = {
+        "penetration": args.penetration,
+        "ticks": tick,
+        "cav_cmds_sent": n_cmds,
+        "eco_active_cav_ticks": n_active,
+        "n_cavs_seen": n_cavs,
+        "cavs_that_stopped": cavs_that_stopped,
+        "total_idle_s": round(total_idle_s, 2),
+        "mean_decel_proxy_mps": round(mean_decel_proxy, 3),
+    }
+    out_dir = HERE / "out"
+    out_dir.mkdir(exist_ok=True)
+    tag = "eco" if args.penetration > 0 else "baseline"
+    out_path = out_dir / f"summary_{tag}.json"
+    out_path.write_text(json.dumps(summary, indent=2))
+
     print(f"[cav_controller] done: {tick} ticks, {n_cmds} CAV cmds sent, "
           f"{n_active} eco-active CAV-ticks", flush=True)
+    print(f"[cav_controller] readout: {n_cavs} CAVs, {cavs_that_stopped} stopped, "
+          f"idle={total_idle_s:.1f}s, mean_decel_proxy={mean_decel_proxy:.2f} m/s "
+          f"-> {out_path.name}", flush=True)
     return 0
 
 

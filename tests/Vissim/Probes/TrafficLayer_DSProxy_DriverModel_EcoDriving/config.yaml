@@ -1,0 +1,73 @@
+# =============================================================================
+# FIXS #173 -- Eco-driving CAV demo. CarMaker (office) <-> VISSIM via DSProxy,
+# WITH the FIXS DriverModel co-loaded (Stage C co-load) on the SAME signalized
+# corridor as Demo 2 (simple_traffic_light).
+#
+# This is Demo 2 (TrafficLayer_DSProxy_CMoffice_Signal) PLUS the DriverModel
+# relay: a fraction of VISSIM background Cars are DriverModel-hooked CAVs whose
+# desired speed is set every tick by a GLOSA eco-driving controller (cav_
+# controller.py), while the CarMaker ego stays the XIL vehicle you watch.
+#
+# Data flow (lockstep, CarMaker-triggered) -- FOUR sockets:
+#
+#   CarMaker.win64.exe --[ego VehFullData on 2444]------> TrafficLayer (DSProxy)
+#   TrafficLayer --[VISSIM_SetDriverVehicles]-----------> VISSIM (via DSProxy)
+#   VISSIM --[GetTrafficVehicles + GetSignalStates]-----> TrafficLayer
+#   TrafficLayer --[background VehFullData on 2444]------> CarMaker (renders RS_Cxxx)
+#   TrafficLayer --[per-(ctrl,sg) TlsData on 2445]------> CarMaker (drives TrfLight.Objs)
+#   TrafficLayer --[whole-network readback on 1338]-----> cav_controller (GLOSA brain)
+#   cav_controller --[per-CAV speedDesired on 1338]-----> TrafficLayer
+#   TrafficLayer --[CAV behavior cmds on 1337]----------> DriverModel.dll (in VISSIM)
+#   DriverModel --[DRIVER_DATA_DESIRED_VELOCITY]--------> VISSIM Wiedemann (CAV speed)
+#
+# The DriverModel is hooked on Car type 100 by setup_eco.py (extDriver=true ->
+# DriverModel_RealSim.dll + eco_par.yaml). The ego therefore uses a DIFFERENT
+# type (200) so the hook does not grab the XIL vehicle.
+
+SimulationSetup:
+    EnableRealSim: false             # DSProxy mode uses its own code path; this stays off
+    EnableVerboseLog: false
+    SelectedTrafficSimulator: VISSIM # informational; DSProxy dispatch bypasses it
+    TrafficSimulatorPort: 1337       # DriverModel relay port (DSProxyMode binds it; the
+                                     # DriverModel.dll connects here during VISSIM_Connect)
+    SimulationEndTime: 1000          # 10000 ticks at 10 Hz
+
+    # vehicleClass is mandatory for CarMaker's VirtualEnvironment.lib (RS_C
+    # placement); the rest carry pose + the desired-speed channel the relay
+    # needs. This list MUST be byte-identical to eco_par.yaml's.
+    VehicleMessageField: [id, type, vehicleClass, speed, speedDesired, positionX, positionY, positionZ, heading, linkId, laneId, grade]
+
+ApplicationSetup:
+    EnableApplicationLayer: true
+    VehicleSubscription:
+    -   type: ego
+        attribute: { id: ['egoCm'], radius: [0] }
+        ip: ['127.0.0.1']
+        port: [2444]
+
+XilSetup:
+    EnableXil: false
+
+CarMakerSetup:
+    EnableCosimulation: true
+    TrafficRefreshRate: 0.001        # write t_0 every sim step (1 kHz) -- REQUIRED (#168)
+    EnableEgoSimulink: false
+
+    SynchronizeTrafficSignal: true   # drive CM traffic lights from VISSIM signal state (#172)
+    TrafficSignalPort: 2445
+    EgoId: egoCm
+    EgoType: '200'                   # HGV -- keep the XIL ego OFF the DriverModel-hooked Car type 100
+
+VissimSetup:
+    EnableDSProxy: true
+    EnableDriverModelRelay: true     # >>> #173: co-load the FIXS DriverModel + relay CAV cmds to it
+    CavControllerPort: 1338          # dedicated CAV-controller socket (cav_controller.py connects here)
+
+    NetworkFile: 'stage_network\simple_traffic_light.inpx'
+
+    VissimVersion: 2022
+    SimulatorFrequency: 10           # Hz
+    VisibilityRadius: -1.0           # unlimited
+    MaxSimulatorVeh: 50
+    MaxTotalVeh: 50000
+    MaxVissimSigGrp: 1000
