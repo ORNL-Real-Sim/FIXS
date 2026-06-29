@@ -46,6 +46,14 @@ public:
     // POST-tick (as mainVirCarla does), so the core must not also send.
     bool sendEgoFromCore = true;
 
+    // Policy: CarMaker receives signals on a SEPARATE FIXS port (true -> open a
+    // 2nd connection); Carla receives vehicles AND signals on ONE port (false).
+    bool openSignalPort = true;
+
+    // The host driver (Carla) reads this to map its interested ids -> backend
+    // handles for the POST-tick readback.
+    const std::unordered_map<std::string, VehHandle>& mappedVehicles() const { return id2handle_; }
+
     // Same return codes as the old VirEnvHelper, so callers (User.c) are unchanged.
     enum InitErr { ERROR_INIT_READ_CONFIG = -1, ERROR_INIT_MSG_FIELD = -2,
                    ERROR_INIT_SOCKET = -3, ERROR_INIT_TRAFFIC = -4 };

@@ -53,7 +53,7 @@ int VirEnvCore::initialization(const char** errorMsg, const char* /*configPath*/
         serverAddr_.clear(); serverPort_.clear();
         serverAddr_.push_back(trafficLayerIP_);
         serverPort_.push_back(vehDataPort_);
-        if (SYNCHRONIZE_TRAFFIC_SIGNAL) {
+        if (SYNCHRONIZE_TRAFFIC_SIGNAL && openSignalPort) {
             serverAddr_.push_back(trafficLayerIP_);
             serverPort_.push_back(trafficSignalPort_);
         }
