@@ -46,7 +46,8 @@ public:
     void loadSignalTable(const char* path) override { rec("loadSignalTable", path ? path : ""); }
     void initTrafficPool() override { rec("initTrafficPool", ""); poolInit_ = true; }
 
-    VehHandle spawnVehicle(const std::string& vType, const std::string& vClass) override {
+    VehHandle spawnVehicle(const std::string& vType, const std::string& vClass,
+                           const Pose& /*spawnPose*/) override {
         VehClass cls = classify(vClass);
         std::queue<VehHandle>& pool = poolFor(cls);
         std::string tag = clsName(cls) + "(" + vType + "/" + vClass + ")";

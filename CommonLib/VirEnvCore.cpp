@@ -133,7 +133,10 @@ int VirEnvCore::processStep(double simTime, bool onUpdate, int simStateRecv, flo
             const string& idTs = it.second.id;
             if (idTs == egoId_) continue;                          // never spawn the ego
             if (id2handle_.find(idTs) != id2handle_.end()) continue; // already mapped
-            VehHandle h = backend_ ? backend_->spawnVehicle(it.second.type, it.second.vehicleClass)
+            Pose sp;
+            sp.x = it.second.positionX; sp.y = it.second.positionY; sp.z = it.second.positionZ;
+            sp.headingDeg = it.second.heading; sp.gradeRad = it.second.grade;
+            VehHandle h = backend_ ? backend_->spawnVehicle(it.second.type, it.second.vehicleClass, sp)
                                    : kNoHandle;
             if (h == kNoHandle) continue;                          // backend full -> skip
             id2handle_[idTs] = h;
@@ -187,7 +190,7 @@ int VirEnvCore::processStep(double simTime, bool onUpdate, int simStateRecv, flo
     }
 
     // ---- step 5: send ego back (mode A readback) on the update boundary ---
-    if (onUpdate) {
+    if (onUpdate && sendEgoFromCore) {
         VehFullData_t VehDataSend;
         bool haveEgo = false;
         if ((!ENABLE_SEPARATE_EGO_TRAFFIC || simTime < 1e-5) && backend_) {

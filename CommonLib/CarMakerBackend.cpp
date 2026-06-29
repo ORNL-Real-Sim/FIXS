@@ -66,7 +66,8 @@ void CarMakerBackend::initTrafficPool() {
 //  spawn / despawn -- pop/return a class slot; park on release. From the
 //  map-ids + cleanup-vehicles steps.
 //----------------------------------------------------------------------------
-VehHandle CarMakerBackend::spawnVehicle(const std::string& /*vType*/, const std::string& vClass) {
+VehHandle CarMakerBackend::spawnVehicle(const std::string& /*vType*/, const std::string& vClass,
+                                        const Pose& /*spawnPose*/) {
     if (vClass.find("car") != string::npos || vClass.find("passenger") != string::npos
         || vClass.find("private") != string::npos) {
         if (carQueue_.empty()) return kNoHandle;

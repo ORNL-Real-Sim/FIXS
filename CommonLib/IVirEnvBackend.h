@@ -100,10 +100,13 @@ public:
     // Acquire a backend handle for a newly-seen traffic vehicle. vType is the
     // FIXS vehicle type, vClass the SUMO/VISSIM class string -- the backend does
     // its own classification (CarMaker: vClass -> car/truck slot pool; Carla:
-    // vType or vClass -> blueprint). Returns kNoHandle if it cannot place the
-    // vehicle (e.g. CarMaker pool exhausted), and the core skips it this step
-    // exactly like the full-queue `continue` today.
-    virtual VehHandle spawnVehicle(const std::string& vType, const std::string& vClass) = 0;
+    // vType or vClass -> blueprint). spawnPose is the raw FIXS pose to place the
+    // vehicle at (Carla's TrySpawnActor needs a transform; CarMaker's pre-placed
+    // slots ignore it). Returns kNoHandle if it cannot place the vehicle (e.g.
+    // CarMaker pool exhausted), and the core skips it this step exactly like the
+    // full-queue `continue` today.
+    virtual VehHandle spawnVehicle(const std::string& vType, const std::string& vClass,
+                                   const Pose& spawnPose) = 0;
 
     // Release a handle whose vehicle left the sim (CarMaker parks the slot at
     // z=-5000 and returns it to the pool; Carla destroys the actor).

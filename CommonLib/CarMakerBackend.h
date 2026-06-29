@@ -32,7 +32,8 @@ public:
     void loadSignalTable(const char* path) override;
     void initTrafficPool() override;
 
-    VehHandle spawnVehicle(const std::string& vType, const std::string& vClass) override;
+    VehHandle spawnVehicle(const std::string& vType, const std::string& vClass,
+                           const Pose& spawnPose) override;
     void      despawnVehicle(VehHandle h) override;
 
     void setVehiclePose(VehHandle h, const Pose& p) override;

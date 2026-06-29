@@ -41,6 +41,11 @@ public:
     // the received pose directly each tick (Carla 1:1). Host sets before init.
     bool interpolateTraffic = true;
 
+    // Policy: does the core send the ego back to FIXS (CarMaker mode-A readback,
+    // true)? Carla sets false -- its driver sends interested-vehicle readback
+    // POST-tick (as mainVirCarla does), so the core must not also send.
+    bool sendEgoFromCore = true;
+
     // Same return codes as the old VirEnvHelper, so callers (User.c) are unchanged.
     enum InitErr { ERROR_INIT_READ_CONFIG = -1, ERROR_INIT_MSG_FIELD = -2,
                    ERROR_INIT_SOCKET = -3, ERROR_INIT_TRAFFIC = -4 };
