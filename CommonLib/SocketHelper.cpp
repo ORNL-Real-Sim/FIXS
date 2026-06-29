@@ -206,6 +206,77 @@ void SocketHelper::socketSetup(vector <int> selfServerPortUserInput) {
 	}
 }
 
+// --- Granular server-socket primitives (#173) -------------------------------
+// See SocketHelper.h for the rationale (split bind/accept timing for DSProxyMode).
+// Cross-platform: TrafficLayer builds these on WIN32; the shared lib must still
+// compile for the dSPACE/Linux CarMaker targets, hence the same #ifdef guards
+// the rest of this file uses.
+int SocketHelper::bindServerPort(int port) {
+#ifdef WIN32
+	WSADATA wsaData;
+	WSAStartup(MAKEWORD(2, 2), &wsaData);   // idempotent if already initialized elsewhere
+#endif
+	int s = (int)socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	if (s < 0) return -1;
+
+	int reuse = 1;
+	setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (const char*)&reuse, sizeof(reuse));
+
+	struct sockaddr_in addr;
+	memset(&addr, 0, sizeof(addr));
+	addr.sin_family = AF_INET;
+	addr.sin_addr.s_addr = htonl(INADDR_ANY);
+	addr.sin_port = htons((unsigned short)port);
+
+	if (::bind(s, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+#ifdef WIN32
+		fprintf(stderr, "ERROR: bind(%d) failed: %d\n", port, WSAGetLastError());
+		closesocket(s);
+#else
+		fprintf(stderr, "ERROR: bind(%d) failed\n", port);
+		close(s);
+#endif
+		return -1;
+	}
+	if (listen(s, MAXPENDING) < 0) {
+#ifdef WIN32
+		fprintf(stderr, "ERROR: listen(%d) failed: %d\n", port, WSAGetLastError());
+		closesocket(s);
+#else
+		fprintf(stderr, "ERROR: listen(%d) failed\n", port);
+		close(s);
+#endif
+		return -1;
+	}
+	return s;
+}
+
+int SocketHelper::acceptClient(int serverSock, bool noDelay) {
+	struct sockaddr_in addr;
+	memset(&addr, 0, sizeof(addr));
+#ifdef RS_DSPACE
+	socklen_t addrLen = sizeof(addr);
+#elif WIN32
+	int addrLen = sizeof(addr);
+#else
+	socklen_t addrLen = sizeof(addr);
+#endif
+	int c = (int)accept(serverSock, (struct sockaddr*)&addr, &addrLen);
+	if (c < 0) {
+#ifdef WIN32
+		fprintf(stderr, "ERROR: accept failed: %d\n", WSAGetLastError());
+#else
+		fprintf(stderr, "ERROR: accept failed\n");
+#endif
+		return -1;
+	}
+	if (noDelay) {
+		int nodelay = 1;
+		setsockopt(c, IPPROTO_TCP, TCP_NODELAY, (const char*)&nodelay, sizeof(nodelay));
+	}
+	return c;
+}
+
 void SocketHelper::socketReset() {
 
 	SERVERADDR.clear();

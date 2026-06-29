@@ -93,6 +93,18 @@ public:
 
 	int initConnection(std::string errorLogName="");
 
+	// Granular server-socket primitives (#173). Unlike initConnection -- which
+	// binds + listens + accepts every registered port in one blocking call --
+	// these expose bind and accept as SEPARATE steps, so callers needing split
+	// timing can compose them. DSProxyMode is the motivating case: it must bind
+	// the DriverModel listener BEFORE VISSIM_Connect (the DLL connects during the
+	// DSProxy handshake) but accept the app/signal/CAV clients AFTER. Plain TCP,
+	// no RealSim trigger handshake; per-tick I/O still goes through recvData/
+	// sendData (which key off the raw socket fd). Purely additive -- initConnection
+	// and its existing callers are untouched.
+	int bindServerPort(int port);                          // socket + SO_REUSEADDR + bind + listen; returns listener fd or -1
+	int acceptClient(int serverSock, bool noDelay = true); // plain accept (+ TCP_NODELAY); returns client fd or -1
+
 	// RS_DEBUG master-log target. The host assigns it (TrafficLayer sets it to its
 	// RealSim_tmp/TrafficLayer_<timestamp>.log). When empty -- e.g. the VirtualEnvironment
 	// .lib running inside CarMaker -- RS_DEBUG breadcrumbs fall back to
