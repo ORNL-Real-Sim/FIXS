@@ -21,25 +21,26 @@ int main() {
     MockVirEnvBackend mock(/*cars*/2, /*trucks*/1, /*buses*/0);
     IVirEnvBackend& be = mock;
 
+    be.loadSignalTable("");   // signal-free scenario: no-op
     be.initTrafficPool();
 
     // spawn within capacity
-    VehHandle a = be.spawnVehicle(VehClass::Car);
-    VehHandle b = be.spawnVehicle(VehClass::Car);
+    VehHandle a = be.spawnVehicle("car", "passenger");
+    VehHandle b = be.spawnVehicle("car", "passenger");
     assert(a != kNoHandle && b != kNoHandle && a != b);
     // capacity exhausted -> kNoHandle (mirrors the full-queue `continue` in runStep)
-    VehHandle c = be.spawnVehicle(VehClass::Car);
+    VehHandle c = be.spawnVehicle("car", "passenger");
     assert(c == kNoHandle);
     // despawn returns the slot; next spawn reuses it
     be.despawnVehicle(a);
-    VehHandle d = be.spawnVehicle(VehClass::Car);
+    VehHandle d = be.spawnVehicle("car", "passenger");
     assert(d == a);
 
-    // actuation verbs in the canonical frame
-    Pose p; p.x = 12.5; p.y = -0.4; p.z = 0.1; p.yaw = 1.57; p.pitch = 0.0;
+    // actuation verbs in the raw FIXS frame
+    Pose p; p.x = 12.5; p.y = -0.4; p.z = 0.1; p.headingDeg = 78.0; p.gradeRad = 0.0;
     be.setVehiclePose(b, p);
     be.setVehicleLights(b, /*brake*/true, /*L*/false, /*R*/true);
-    be.setTrafficLight(/*lightIndex*/3, /*sumoState*/'r');
+    be.syncTrafficLight("J1", "rG");
 
     // ego mode A readback (canned)
     EgoState canned; canned.speed = 7.2; canned.x = 12.2; canned.y = -0.42; canned.heading = 12.5;

@@ -48,14 +48,19 @@ enum class VehClass { Car, Truck, Bus };
 using VehHandle = int;
 static constexpr VehHandle kNoHandle = -1;  // backend full / nothing to spawn into
 
-// Pose in the CANONICAL FIXS frame (pre-anchor). x/y/z is the vehicle's FRONT
-// reference point at GROUND height; the backend translates to its own ref point.
-//  yaw   : rad, east=0, north=+pi/2, CCW positive (already converted from the FIXS
-//          wire heading by the core).
-//  pitch : rad, RealSim grade convention negated (matches VehDataAuxiliary.pitch).
+// Pose in the RAW FIXS wire frame (pre-anchor, pre-convention). x/y/z is the
+// vehicle's FRONT reference point at GROUND height; headingDeg/gradeRad are the
+// FIXS wire conventions verbatim. The BACKEND does ALL of: convention conversion
+// (heading->CarMaker yaw / Carla rotation) AND its pose anchor (CarMaker Cfg.l/h
+// /zOff; Carla extent). Keeping the raw values here -- not a pre-converted yaw --
+// is what lets each backend reproduce its ORIGINAL math bit-for-bit (the #174
+// byte-identical goal), since the core never round-trips the angle.
+//  headingDeg : FIXS wire heading, north=0, clockwise (degrees).
+//  gradeRad   : FIXS wire grade, positive = climbing (radians).
 struct Pose {
     double x = 0.0, y = 0.0, z = 0.0;
-    double pitch = 0.0, yaw = 0.0;
+    double headingDeg = 0.0;
+    double gradeRad = 0.0;
 };
 
 // Ego state read back from a backend that owns ego dynamics (mode A). Returned in
@@ -80,31 +85,46 @@ public:
     virtual void log(const char* msg) = 0;
     virtual void logError(const char* msg) = 0;
 
+    // Load whatever the backend needs to dispatch traffic signals -- CarMaker
+    // reads the RSsignalTable.csv (controller -> head id + TrfLight index); Carla
+    // matches its traffic.traffic_light actors to the junction map. Default no-op
+    // (a signal-free scenario like SimpleLoop never calls it). Called once in init.
+    virtual void loadSignalTable(const char* /*path*/) {}
+
     // --- traffic pool lifecycle -------------------------------------------
     // Called once at the first step: prepare the pool (CarMaker enumerates its
     // pre-placed RS_C/RS_T slots and parks them off-road; Carla may no-op and
     // spawn lazily). After this, spawnVehicle must be serviceable.
     virtual void initTrafficPool() = 0;
 
-    // Acquire a backend handle for a newly-seen traffic vehicle of the given
-    // class. Returns kNoHandle if the backend has no capacity (core then skips
-    // the vehicle this step, exactly like the full-queue `continue` today).
-    virtual VehHandle spawnVehicle(VehClass cls) = 0;
+    // Acquire a backend handle for a newly-seen traffic vehicle. vType is the
+    // FIXS vehicle type, vClass the SUMO/VISSIM class string -- the backend does
+    // its own classification (CarMaker: vClass -> car/truck slot pool; Carla:
+    // vType or vClass -> blueprint). Returns kNoHandle if it cannot place the
+    // vehicle (e.g. CarMaker pool exhausted), and the core skips it this step
+    // exactly like the full-queue `continue` today.
+    virtual VehHandle spawnVehicle(const std::string& vType, const std::string& vClass) = 0;
 
     // Release a handle whose vehicle left the sim (CarMaker parks the slot at
     // z=-5000 and returns it to the pool; Carla destroys the actor).
     virtual void despawnVehicle(VehHandle h) = 0;
 
-    // --- per-step actuation (canonical frame in; backend applies anchor) ---
+    // --- per-step actuation (raw FIXS pose in; backend converts + anchors) -
     virtual void setVehiclePose(VehHandle h, const Pose& p) = 0;
     virtual void setVehicleLights(VehHandle h, bool brake, bool indL, bool indR) = 0;
 
-    // Traffic-signal dispatch. lightIndex is the backend light slot (CarMaker
-    // TrfLight.Objs index); sumoState is the raw SUMO TLS char ('r'/'y'/'g'/'G'
-    // /'u'/'O'). The backend owns the char->native-state mapping (CarMaker's
-    // tlsChar2CmState). NOTE: this stays a SUMO char until #156 defines a
-    // FIXS-canonical signal type for the VISSIM signal-routing path.
-    virtual void setTrafficLight(int lightIndex, char sumoState) = 0;
+    // Called once per refresh slot, before the mapped-vehicle pose loop. CarMaker
+    // must re-park its UNMAPPED RS_C/RS_T spare slots at z=-5000 EVERY refresh
+    // (FreeMotion slots drift at low UpdRate -- #168); Carla has no spare pool so
+    // this is a no-op. Lets the core stay ignorant of the backend's spare set.
+    virtual void parkSpares() {}
+
+    // Dispatch one junction's signal state. junctionId is the FIXS/SUMO TLS id,
+    // stateStr its per-link SUMO state string ("rGyu..."). The backend owns the
+    // per-link mapping + char->native-state conversion (CarMaker's signal table +
+    // tlsChar2CmState; Carla's trafficLightMap + SetState). NOTE: stays a SUMO
+    // state string until #156 defines a FIXS-canonical signal type. Default no-op.
+    virtual void syncTrafficLight(const std::string& /*junctionId*/, const std::string& /*stateStr*/) {}
 
     // --- ego coupling ------------------------------------------------------
     // Mode A "backend owns ego": read the ego pose back so the core sends it out.

@@ -43,13 +43,16 @@ public:
     void log(const char* msg) override      { rec("log", msg); }
     void logError(const char* msg) override { rec("logError", msg); }
 
+    void loadSignalTable(const char* path) override { rec("loadSignalTable", path ? path : ""); }
     void initTrafficPool() override { rec("initTrafficPool", ""); poolInit_ = true; }
 
-    VehHandle spawnVehicle(VehClass cls) override {
+    VehHandle spawnVehicle(const std::string& vType, const std::string& vClass) override {
+        VehClass cls = classify(vClass);
         std::queue<VehHandle>& pool = poolFor(cls);
-        if (pool.empty()) { rec("spawnVehicle", clsName(cls) + " -> kNoHandle"); return kNoHandle; }
+        std::string tag = clsName(cls) + "(" + vType + "/" + vClass + ")";
+        if (pool.empty()) { rec("spawnVehicle", tag + " -> kNoHandle"); return kNoHandle; }
         VehHandle h = pool.front(); pool.pop();
-        rec("spawnVehicle", clsName(cls) + " -> " + std::to_string(h));
+        rec("spawnVehicle", tag + " -> " + std::to_string(h));
         return h;
     }
     void despawnVehicle(VehHandle h) override {
@@ -60,16 +63,15 @@ public:
     void setVehiclePose(VehHandle h, const Pose& p) override {
         std::ostringstream os;
         os << h << " (" << fx(p.x) << "," << fx(p.y) << "," << fx(p.z)
-           << ") pitch=" << fx(p.pitch) << " yaw=" << fx(p.yaw);
+           << ") hdg=" << fx(p.headingDeg) << " grade=" << fx(p.gradeRad);
         rec("setVehiclePose", os.str());
     }
     void setVehicleLights(VehHandle h, bool brake, bool indL, bool indR) override {
         std::ostringstream os; os << h << " brake=" << brake << " L=" << indL << " R=" << indR;
         rec("setVehicleLights", os.str());
     }
-    void setTrafficLight(int lightIndex, char sumoState) override {
-        std::ostringstream os; os << "idx=" << lightIndex << " state='" << sumoState << "'";
-        rec("setTrafficLight", os.str());
+    void syncTrafficLight(const std::string& junctionId, const std::string& stateStr) override {
+        rec("syncTrafficLight", junctionId + " '" + stateStr + "'");
     }
 
     bool readEgoState(const std::string& egoId, EgoState& out) override {
@@ -93,6 +95,11 @@ private:
     static std::string clsName(VehClass c) {
         switch (c) { case VehClass::Car: return "Car"; case VehClass::Truck: return "Truck";
                      case VehClass::Bus: return "Bus"; } return "?";
+    }
+    static VehClass classify(const std::string& vClass) {
+        if (vClass.find("truck") != std::string::npos) return VehClass::Truck;
+        if (vClass.find("bus")   != std::string::npos) return VehClass::Bus;
+        return VehClass::Car;  // car/passenger/private/default
     }
     // encode (class,index) into a stable, decodable handle so classOf() works.
     static VehHandle handleOf(VehClass c, int i) { return static_cast<int>(c) * 100000 + i; }
