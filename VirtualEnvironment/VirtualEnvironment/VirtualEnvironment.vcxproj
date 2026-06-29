@@ -22,15 +22,20 @@
     <ClCompile Include="..\..\CommonLib\ConfigHelper.cpp" />
     <ClCompile Include="..\..\CommonLib\MsgHelper.cpp" />
     <ClCompile Include="..\..\CommonLib\SocketHelper.cpp" />
+    <ClCompile Include="..\..\CommonLib\VirEnvCore.cpp" />
+    <ClCompile Include="..\..\CommonLib\CarMakerBackend.cpp" />
     <ClCompile Include="..\..\CommonLib\VirEnvHelper.cpp" />
     <ClCompile Include="..\..\CommonLib\VirEnv_Wrapper.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\CommonLib\ConfigHelper.h" />
+    <ClInclude Include="..\..\CommonLib\IVirEnvBackend.h" />
     <ClInclude Include="..\..\CommonLib\MsgHelper.h" />
     <ClInclude Include="..\..\CommonLib\PerformanceTimer.h" />
     <ClInclude Include="..\..\CommonLib\SocketHelper.h" />
     <ClInclude Include="..\..\CommonLib\VehDataMsgDefs.h" />
+    <ClInclude Include="..\..\CommonLib\VirEnvCore.h" />
+    <ClInclude Include="..\..\CommonLib\CarMakerBackend.h" />
     <ClInclude Include="..\..\CommonLib\VirEnvHelper.h" />
     <ClInclude Include="..\..\CommonLib\VirEnv_Wrapper.h" />
   </ItemGroup>
