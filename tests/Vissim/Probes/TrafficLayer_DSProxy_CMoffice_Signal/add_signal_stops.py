@@ -35,10 +35,10 @@ does NOT re-run osc2cm, which would wipe the hand-made Route) into
      marker per route->movement, never one per head (a green movement-head would otherwise
      cancel a red one -- the Q1 finding).
 
-It also writes the TestRun `SimpleTrafficLight_Scene` = the working SimpleTrafficLight_import run with
+It also writes the TestRun `SimpleTrafficLight_ego` = the working SimpleTrafficLight_import run with
 Road.FName -> the new rd5 and DriverTemplate.FName -> Car_Normal (McLaren + Route kept).
 
-Run:  python add_signal_stops.py        (then run_cm_scene_only.bat to drive it in CarMaker)
+Run:  python add_signal_stops.py        (then run_signal_demo_gui.bat for the full co-sim)
 """
 from __future__ import annotations
 import re, pathlib
@@ -50,7 +50,7 @@ SUMO_NET = REPO / "tests" / "Sumo" / "networks" / "simple_traffic_light"   # sha
 BASE_RD = CMPROJ / "Data" / "Road" / "simple_traffic_light_import.rd5"     # raw osc2cm import (intermediate)
 OUT_RD = CMPROJ / "Data" / "Road" / "simple_traffic_light.rd5"             # demo road (heads + DrvStops)
 BASE_TR = CMPROJ / "Data" / "TestRun" / "SimpleTrafficLight_import"        # raw osc2cm TestRun (intermediate)
-OUT_TR = CMPROJ / "Data" / "TestRun" / "SimpleTrafficLight_Scene"          # scene-only (CM, no VISSIM)
+OUT_TR = CMPROJ / "Data" / "TestRun" / "SimpleTrafficLight_ego"          # ego-only base (build_cosim_testrun extends it)
 
 STOP_BACK = 2.0       # DrvStop this many metres before the approach lane-path's downstream end
                       # (the junction) -> at the stop line, near the end of the approach edge

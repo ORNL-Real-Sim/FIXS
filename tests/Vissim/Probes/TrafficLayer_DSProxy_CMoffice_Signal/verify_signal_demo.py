@@ -16,7 +16,7 @@ Extends the #168 verify_demo.py with the signal half:
 
 Run:  python verify_signal_demo.py
 Prereq: VISSIM 2022 licensed/healthy; binaries built; add_signal_stops.py +
-        build_signal_table.py + build_cosim_testrun.py already run (run_signal_demo.bat
+        build_signal_table.py + build_cosim_testrun.py already run (run_signal_demo_headless.bat
         does this for you).
 """
 from __future__ import annotations

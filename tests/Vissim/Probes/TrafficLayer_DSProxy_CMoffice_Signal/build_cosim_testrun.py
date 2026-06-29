@@ -2,7 +2,7 @@
 Build the co-simulation TestRun for the #172 signal demo: SimpleTrafficLight_Cosim.
 
 This combines the two halves of the demo into one CarMaker TestRun:
-  - the EGO from SimpleTrafficLight_Scene (built by add_signal_stops.py): Car_Normal
+  - the EGO from SimpleTrafficLight_ego (built by add_signal_stops.py): Car_Normal
     driver on the signalized corridor rd5, with the in-road DrvStops that make it
     brake at a red light, following Route 3 (the native corridor loop); and
   - N RS_C traffic slots (CM13 format) so VISSIM's background vehicles have CM
@@ -13,7 +13,7 @@ The ego pose is sent to VISSIM (id 'egoCm'); VISSIM returns background traffic
 socket + RSsignalTable.csv). The DrvStop + the now VISSIM-driven red is what
 stops the ego, so the SAME rd5 serves both the scene-only and the co-sim demos.
 
-Run AFTER add_signal_stops.py (needs SimpleTrafficLight_Scene + the signalstop rd5).
+Run AFTER add_signal_stops.py (needs SimpleTrafficLight_ego + the signalstop rd5).
 The RS_C slots are load-time anchors only: the .lib parks them at z=-5000 and
 lifts only those mapped to a live VISSIM vehicle (identical to #168).
 """
@@ -21,7 +21,7 @@ from __future__ import annotations
 import os, pathlib, re
 
 CMPROJ = pathlib.Path(__file__).resolve().parents[4] / "ProprietaryFiles" / "CM13_proj"
-TR_SRC = CMPROJ / "Data" / "TestRun" / "SimpleTrafficLight_Scene"   # ego-only (scene) TestRun
+TR_SRC = CMPROJ / "Data" / "TestRun" / "SimpleTrafficLight_ego"   # ego-only (scene) TestRun
 TR_OUT = CMPROJ / "Data" / "TestRun" / "SimpleTrafficLight_Cosim"   # co-sim TestRun (this script)
 
 # Route anchored in simple_traffic_light.rd5 (the native corridor loop).

@@ -7,7 +7,7 @@ REM  DOUBLE-CLICK this. It builds the demo assets, then runs the whole pipeline
 REM  and prints PASS/FAIL with evidence -- no GUI, no manual Start.
 REM
 REM  Build steps (idempotent):
-REM    1. add_signal_stops.py     -> simple_traffic_light.rd5 + SimpleTrafficLight_Scene
+REM    1. add_signal_stops.py     -> simple_traffic_light.rd5 + SimpleTrafficLight_ego
 REM    2. build_signal_table.py   -> RSsignalTable.csv + VISSIM-convention names
 REM    3. build_cosim_testrun.py  -> SimpleTrafficLight_Cosim (ego + 50 RS_C traffic slots)
 REM  Then verify_signal_demo.py:

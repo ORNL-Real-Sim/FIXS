@@ -11,14 +11,17 @@ now **physically stops at the red lights**, with the signal heads mounted **far-
 
 ## Build + run (one click)
 
+The VISSIM↔CarMaker co-simulation demo (full architecture in [DEMO.md](DEMO.md)):
+
 ```bat
-run_cm_scene_only.bat            :: build signal-stop road/TestRun, open CarMaker + IPGMovie
-run_cm_scene_only.bat verify     :: build + run headless + print the stop-at-red report
+run_signal_demo_gui.bat        :: build + launch TrafficLayer + CarMaker GUI + IPGMovie
+run_signal_demo_headless.bat   :: build + run headless + assert PASS/FAIL (CI-style)
 ```
 
-Press START in CarMaker: standalone, the 44 controllers cycle on their own (green/red) and
-the looping ego stops at the reds. (Full VISSIM co-sim drives the same controllers live; the
-stopping mechanism is identical.) Needs CarMaker 13.1.3 + any Python 3 on `PATH`.
+Both build the assets (`add_signal_stops.py` → `build_signal_table.py` →
+`build_cosim_testrun.py`), then run the VISSIM↔CM co-sim on `SimpleTrafficLight_Cosim`: the
+ego loops the corridor and stops at the **VISSIM-driven** reds, with VISSIM background traffic
+rendered as `RS_C` cars. Needs CarMaker 13.1.3 + VISSIM 2022 (CodeMeter) + Python 3 on `PATH`.
 
 `import_road.bat` (re)generates the base road via osc2cm — only needed if the committed
 `simple_traffic_light.rd5` is missing (osc2cm wipes the hand-made ego Route, so re-inject it
@@ -45,7 +48,7 @@ which would wipe the Route) into `simple_traffic_light.rd5`:
 2. Spreads each approach mount's overlapping heads laterally so straight/left/right are
    visually distinct (cosmetic; heads stay on the approach edge).
 
-and writes the TestRun `SimpleTrafficLight_Scene` = the working `SimpleTrafficLight_import` run with the new
+and writes the TestRun `SimpleTrafficLight_ego` = the working `SimpleTrafficLight_import` run with the new
 road and `DriverTemplate.FName = Car_Normal` (McLaren + Route unchanged).
 
 ### Head placement & far-side (verified on a minimal junction scene)
@@ -77,11 +80,12 @@ PASS: 110/110 stops occurred at a red referenced controller (ego respects the si
 
 | File | Role |
 |---|---|
-| `add_signal_stops.py` | builds `simple_traffic_light.rd5` (straight DrvStops + far-side heads + head spread) + the `SimpleTrafficLight_Scene` TestRun (`Car_Normal`) |
+| `add_signal_stops.py` | builds `simple_traffic_light.rd5` (straight DrvStops + far-side heads + head spread) + the `SimpleTrafficLight_ego` TestRun (`Car_Normal`) |
 | `build_signal_table.py` | renames the CM controllers to the VISSIM convention + emits `simple_traffic_light_RSsignalTable.csv` (runs after `add_signal_stops.py`) |
 | `verify_signalstop.py` | parses the ERG, reports each stop episode + whether the referenced controller was red |
 | `parse_erg.py` | minimal CarMaker ERG reader |
-| `run_cm_scene_only.bat` | one-click build + GUI + IPGMovie (or headless `verify`) |
+| `run_signal_demo_gui.bat` | one-click co-sim: TrafficLayer + CarMaker GUI + IPGMovie |
+| `run_signal_demo_headless.bat` | one-click co-sim headless + PASS/FAIL assertion |
 
 Base probe files (`gen_*.py`, `build_*.py`, `import_*.py`, SUMO/VISSIM nets, `signal_plan.json`,
 `WORKING_ROUTE_reference.txt`) are unchanged.

@@ -52,5 +52,5 @@ echo.
 echo === Import complete ===
 echo   Road:    %CMPROJ%\Data\Road\simple_traffic_light.rd5
 echo   TestRun: %CMPROJ%\Data\TestRun\SimpleTrafficLight_import  (McLaren ego, corridor loop)
-echo Now run:  run_cm_scene_only.bat   (open the scene in CarMaker, no VISSIM)
+echo Now run:  run_signal_demo_gui.bat   (full VISSIM co-sim GUI)
 endlocal

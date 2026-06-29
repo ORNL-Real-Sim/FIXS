@@ -9,9 +9,9 @@ VISSIM corridor via the DSProxy pipeline, with **both** halves live:
   CM ego **brakes at the VISSIM-driven red** (this issue, #172).
 
 It builds on [../TrafficLayer_DSProxy_CMoffice/](../TrafficLayer_DSProxy_CMoffice/)
-(#168, vehicles only, no signals) and the scene-only signal work in this directory
-(`add_signal_stops.py`, `build_signal_table.py` — the ego stops at red in CarMaker
-alone, no VISSIM).
+(#168, vehicles only, no signals) and the signal-stop layer in this directory
+(`add_signal_stops.py`, `build_signal_table.py` — the in-road DrvStops + per-lane heads
+that make the ego brake at a red).
 
 ```
 CarMaker.win64.exe ──[ego VehFullData @ 2444]───────────▶ TrafficLayer.exe (DSProxy)
@@ -47,7 +47,7 @@ controller whose state is now driven by VISSIM.
 
 **Headless, self-checking (recommended proof / CI):**
 ```cmd
-run_signal_demo.bat
+run_signal_demo_headless.bat
 ```
 Builds the assets (`add_signal_stops.py` → `build_signal_table.py` →
 `build_cosim_testrun.py`), then `verify_signal_demo.py` stages the network,
@@ -57,7 +57,7 @@ client connected (2445)**, per-tick **vehicles>0 AND signals>0**, ego=1, SIM_END
 
 **GUI (3D view), one click:**
 ```cmd
-run_cm_office_signal_demo.bat
+run_signal_demo_gui.bat
 ```
 Builds the assets, stages the network, registers the custom exe + `-f config -s
 RSsignalTable.csv` into the CM GUI config (via `setup_gui.py`), launches
@@ -76,12 +76,13 @@ VISSIM while it holds the `.inpx` — leaks CodeMeter sessions).
 | `config.yaml` | DSProxy + CarMaker config; `SynchronizeTrafficSignal: true`, `TrafficSignalPort: 2445` |
 | `build_cosim_testrun.py` | `SimpleTrafficLight_Cosim` = ego (Car_Normal + DrvStops) + 50 `RS_C` traffic slots on Route 3 |
 | `verify_signal_demo.py` | headless end-to-end check (vehicles + signals), adapted from #168 `verify_demo.py` |
-| `run_signal_demo.bat` | one-click: build assets + headless verify |
+| `run_signal_demo_headless.bat` | one-click: build assets + headless verify |
 | `tests/Vissim/networks/simple_traffic_light/simple_traffic_light.inpx` | DS-enabled signalized network (3 controllers) |
 
-Reuses the scene-only assets (`add_signal_stops.py`, `build_signal_table.py`,
-`simple_traffic_light.rd5`, `..._RSsignalTable.csv`) — the SAME rd5
-serves both the scene-only and the co-sim demos.
+Built from the signal-stop layer (`add_signal_stops.py` → `build_signal_table.py` →
+`build_cosim_testrun.py`): `simple_traffic_light.rd5` (heads + DrvStops) +
+`simple_traffic_light_RSsignalTable.csv` + the `SimpleTrafficLight_ego` base that the
+co-sim TestRun extends with `RS_C` traffic.
 
 ## Prereqs
 
