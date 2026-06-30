@@ -404,7 +404,15 @@ int runDSProxyMode(const ConfigHelper& config) {
         //     PHASE 6 split).
         // SocketHelper / MsgHelper call shape is identical to the app-side
         // PHASE 4/5 below; only the destination socket changes.
-        if (relayDM && dmSock > 0) {
+        //
+        // tick >= 1 guard (#173): the FIXS DriverModel's DRIVER_DATA_TIME takes
+        // the isVeryFirstStep branch on its FIRST step (empty network) and does
+        // NEITHER send nor recv (DriverModel_FIXS_Common.h ~L545). If TL recvs on
+        // tick 0 it blocks forever on bytes the DriverModel never sends -> the
+        // co-load stalls at "0 ticks". The DriverModel does its once-per-tick
+        // send/recv from its SECOND step on, so TL mirrors it from tick 1. (Holds
+        // while the network is empty at t=0, which it is for this demo's demand.)
+        if (relayDM && dmSock > 0 && tick >= 1) {
             msgHelper.VehDataRecv_um.clear();
             msgHelper.TlsDataRecv_um.clear();
             msgHelper.DetDataRecv_um.clear();

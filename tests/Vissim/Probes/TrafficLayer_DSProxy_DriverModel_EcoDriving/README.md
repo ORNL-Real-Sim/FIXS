@@ -112,15 +112,45 @@ positions are wrong.
 | `run_eco_demo_gui.bat`| one-click launcher (optional arg = penetration) |
 | `verify_eco.py`       | before/after comparison of two runs |
 
-## Status / honest caveats
+## Status / honest caveats (empirical — from headless runs against live VISSIM+CarMaker)
 
-- **Relay actuation is the load-bearing unknown.** DSProxy + DriverModel coexist
-  (cav_xil verified the sockets/handshake), and `SubEgoOnly` is now a config knob,
-  but whether `SubEgoOnly:false` + the batched per-tick relay actually *moves* a
-  CAV end-to-end needs the cav_xil smoke test confirmed at HEAD. If that hangs,
-  the relay (a per-Car loop in `DSProxyMode`) is the first fix — before eco code.
+The Stage C co-load was driven end-to-end with `run_eco_demo_headless.bat`. What
+that revealed, in order (each a real blocker the harness caught):
+
+1. **Multithreading abort — FIXED.** VISSIM aborts `VISSIM_Connect` with *"external
+   driver model DLL does not support multithreading"* when the FIXS DriverModel is
+   co-loaded. VISSIM-under-DSProxy runs multi-core regardless of the `.inpx` core
+   count, and the DriverModel returned `DRIVER_DATA_ALLOW_MULTITHREADING = 0`. Fix:
+   `setup_eco.py` forces single-core **and** the DriverModel now returns `1`
+   (`DriverModel_FIXS_Common.h`, a **ProprietaryFiles** change — pending the PF PR).
+   ✅ After this, **`VISSIM_Connect OK`** and **all four sockets connect**: DSProxy
+   ego, signals (2445), DriverModel (1337), CAV controller (1338).
+
+2. **Tick-0 stall — FIXED.** The DriverModel's `DRIVER_DATA_TIME` does no I/O on its
+   first step (`isVeryFirstStep`, empty network), but DSProxyMode recv'd from it every
+   tick → blocked at tick 0. Fix: the `tick >= 1` guard in DSProxyMode. ✅ The loop
+   now advances past tick 0 (`tick 0: vehicles=0 signals=7 egos=1`).
+
+3. **Tick-1 relay deadlock — OPEN.** The loop then stalls at tick 1. Root cause is
+   structural: the FIXS DriverModel does its **send→recv inside `DRIVER_DATA_TIME`**,
+   which VISSIM fires **during** TL's `setDriverVehicles`. So the DriverModel blocks
+   on its recv (waiting for TL) while TL is still inside `setDriverVehicles` (waiting
+   for the callback to return) and hasn't reached its own DM send/recv → circular
+   deadlock. DriverModelLog confirms it: 3 lines (`Real-Sim connected`), no send/recv.
+   **Resolving this is the open Stage C relay-protocol work** (cav_xil README's
+   "~½ day, restructure the inner loop"): co-design the TL↔DriverModel callback
+   interleaving so TL's DM send is available when the in-callback recv runs (e.g.
+   move TL's DM exchange to straddle `setDriverVehicles`, or change the DriverModel's
+   in-callback ordering). Touches both FIXS (DSProxyMode) and PF (DriverModel).
+
+So: **the co-load CONNECTS and the loop starts** — the multithreading + tick-0 fixes
+are real and validated — but **CAVs are not yet actuated** because the per-tick relay
+handshake deadlocks at tick 1. Everything else (GLOSA math, signal extraction, CAV
+channel, signal sync, ego inject) is in place and exercised.
+
+Other caveats:
 - **Signal positions need one calibration pass** (above). Timing is reliable.
-- **Penetration is controller-side** (free-flow for non-selected hooked CAVs), not
-  a VISSIM demand-composition split — a documented approximation.
-- Not yet run end-to-end against live VISSIM+CarMaker; the C++ (CAV channel) builds
-  and the Python (GLOSA math, signal extraction, verify) self-checks pass.
+- **Penetration is controller-side** (free-flow for non-selected hooked CAVs), not a
+  VISSIM demand-composition split — a documented approximation.
+- **VISSIM 2022 COM dispatch is fragile on Win11 24H2** (CLAUDE.md): it wedges between
+  runs and sometimes needs an admin FlexNet bounce / reboot, not just a zombie reap.
