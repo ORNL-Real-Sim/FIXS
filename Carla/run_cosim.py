@@ -217,14 +217,28 @@ def position_spectator(world, frame, pitch=-55.0):
           f"looking at ({cx:.0f}, {cy:.0f}), span~{span:.0f}m, anchored on {anchor}")
 
 
+def _port_in_use(host, port):
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(1)
+        return s.connect_ex((host, port)) == 0
+
+
 def kill_carla(proc):
+    """Terminate the launched CARLA and its WHOLE process tree. UE4Editor / CarlaUE4
+    spawn child processes (shader-compiler workers, CrashReportClient, the game
+    process) that a plain terminate() leaves alive - which is how stale servers
+    keep holding the RPC port across runs."""
     try:
         if platform.system() == "Windows":
-            proc.terminate()
+            subprocess.call(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         else:
             os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
     except Exception:
-        proc.kill()
+        try:
+            proc.kill()
+        except Exception:
+            pass
 
 
 def main():
@@ -330,6 +344,18 @@ def main():
     carla_proc = None
     try:
         if not args.no_launch:
+            # If the RPC port is already taken, a CARLA from a previous run is
+            # likely still alive. Launching anyway gives a split brain: the new
+            # server can't bind the port, so it sits on the default map while we
+            # drive the OLD one. Stop with clear cleanup instructions instead.
+            if _port_in_use(args.carla_host, args.carla_port):
+                sys.exit(
+                    f"[cosim] {args.carla_host}:{args.carla_port} is already in use - a CARLA "
+                    f"from a previous run is probably still alive. Close it and retry:\n"
+                    f"    Windows: taskkill /F /IM UE4Editor.exe   (source build)\n"
+                    f"             taskkill /F /IM CarlaUE4.exe     (packaged build)\n"
+                    f"    Linux:   pkill -f CarlaUE4\n"
+                    f"  (or pass --no-launch to drive the already-running CARLA on purpose).")
             carla_proc = launch_carla(cfg, args.carla_port, args.render_offscreen,
                                       args.quality_level)
             if not wait_for_port(args.carla_host, args.carla_port):
