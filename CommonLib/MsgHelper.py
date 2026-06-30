@@ -393,15 +393,19 @@ class MsgHelper:
         
         return byte_data, msg_size, byte_index
 
-    def depack_traffic_light_data(self, byte_data: bytes)-> TrafficLightData:
-        # Wire format (matches CommonLib/MsgHelper.cpp::packTrafficLightData):
-        #   1 byte uint8  name_len
-        #   N bytes utf-8 name
-        #   2 bytes uint16 id
-        #   1 byte uint8  state_len
-        #   N bytes utf-8 state
-        # (the leading 2-byte msg_size + 1-byte msg_type header have already
-        # been consumed by SocketHelper.recv_data before this is called.)
+    def depack_traffic_light_data(self, byte_data: bytes) -> TrafficLightData:
+        # Wire format must match CommonLib/MsgHelper.cpp::packTrafficLightData
+        # (and depackTrafficLightData):
+        #   1 byte  uint8   length of name
+        #   N bytes string  name
+        #   2 bytes uint16  signal-group id
+        #   1 byte  uint8   length of state
+        #   N bytes string  state (single SUMO-style char today, but the
+        #                          field is variable-length per spec)
+        # The msg-type identifier (1 byte) and total msg size (2 bytes) live
+        # in the *outer* per-message header (SocketHelper.recv_data already
+        # consumed them before passing the body here), so we depack from
+        # byte 0 of the body.
         byte_index = 0
 
         name_len = byte_data[byte_index]
@@ -409,9 +413,7 @@ class MsgHelper:
         name = byte_data[byte_index:byte_index + name_len].decode('utf-8', errors='replace')
         byte_index += name_len
 
-        tl_id = int.from_bytes(
-            byte_data[byte_index:byte_index + 2], byteorder='little', signed=False
-        )
+        tl_id = int.from_bytes(byte_data[byte_index:byte_index + 2], byteorder='little', signed=False)
         byte_index += 2
 
         state_len = byte_data[byte_index]

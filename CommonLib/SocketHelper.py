@@ -130,6 +130,9 @@ class SocketHelper:
                 vehicle_data_received = self.msg_helper.depack_veh_data(received_buffer)
                 self.vehicle_data_receive_list.append(vehicle_data_received)
             elif msg_type == MessageType.traffic_light_data:
+                # Wire format is fixed: name (uint8 len + bytes), id (uint16),
+                # state (uint8 len + bytes). depack_traffic_light_data on
+                # MsgHelper handles it.
                 tls_data = self.msg_helper.depack_traffic_light_data(received_buffer)
                 self.traffic_light_data_receive_list.append(tls_data)
 
