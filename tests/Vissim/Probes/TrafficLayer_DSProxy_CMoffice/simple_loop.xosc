@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<OpenSCENARIO>
+  <FileHeader revMajor="1" revMinor="0" date="2026-06-10T00:00:00" description="FIXS #168 SimpleEcho CM-VISSIM cosim import probe (routed ego loop)" author="FIXS"/>
+  <ParameterDeclarations>
+    <ParameterDeclaration name="owner" parameterType="string" value="Ego" />
+  </ParameterDeclarations>
+  <CatalogLocations>
+    <VehicleCatalog><Directory path="./Catalogs/Vehicles" /></VehicleCatalog>
+    <ControllerCatalog><Directory path="./Catalogs/Controllers" /></ControllerCatalog>
+  </CatalogLocations>
+  <RoadNetwork>
+    <LogicFile filepath="./simple_loop.xodr" />
+  </RoadNetwork>
+  <Entities>
+    <ScenarioObject name="Ego">
+      <CatalogReference catalogName="VehicleCatalog" entryName="car_ego"/>
+      <ObjectController>
+        <CatalogReference catalogName="ControllerCatalog" entryName="DefaultDriver"/>
+      </ObjectController>
+    </ScenarioObject>
+  </Entities>
+  <Storyboard>
+    <Init>
+      <Actions>
+        <Private entityRef="Ego">
+          <PrivateAction>
+            <LongitudinalAction>
+              <SpeedAction>
+                <SpeedActionDynamics dynamicsShape="step" value="0" dynamicsDimension="time"/>
+                <SpeedActionTarget><AbsoluteTargetSpeed value="8.0"/></SpeedActionTarget>
+              </SpeedAction>
+            </LongitudinalAction>
+          </PrivateAction>
+          <PrivateAction>
+            <TeleportAction>
+              <Position>
+                <LanePosition roadId="1" laneId="-1" offset="0" s="10.0"/>
+              </Position>
+            </TeleportAction>
+          </PrivateAction>
+        </Private>
+      </Actions>
+    </Init>
+    <Story name="MyStory">
+      <Act name="MyAct">
+        <ManeuverGroup maximumExecutionCount="1" name="MySequence">
+          <Actors selectTriggeringEntities="false">
+            <EntityRef entityRef="Ego"/>
+          </Actors>
+          <Maneuver name="ManeuverEgoLoop">
+            <Event maximumExecutionCount="1" name="EventEgoLoop" priority="overwrite">
+              <Action name="ActionEgoFollowLoop">
+                <PrivateAction>
+                  <RoutingAction>
+                    <FollowTrajectoryAction>
+                      <Trajectory name="LoopTraj" closed="true">
+                        <Shape>
+                          <Polyline>
+                            <!-- Clockwise loop along lane centers (~1.6 m inside the 200x200 square edges). -->
+                            <Vertex time="0">   <Position><WorldPosition x="10.0"  y="-1.6"  z="0" h="0.0"/></Position></Vertex>
+                            <Vertex time="20">  <Position><WorldPosition x="198.4" y="-1.6"  z="0" h="0.0"/></Position></Vertex>
+                            <Vertex time="25">  <Position><WorldPosition x="201.6" y="10.0"  z="0" h="1.5708"/></Position></Vertex>
+                            <Vertex time="45">  <Position><WorldPosition x="201.6" y="198.4" z="0" h="1.5708"/></Position></Vertex>
+                            <Vertex time="50">  <Position><WorldPosition x="190.0" y="201.6" z="0" h="3.1416"/></Position></Vertex>
+                            <Vertex time="70">  <Position><WorldPosition x="1.6"   y="201.6" z="0" h="3.1416"/></Position></Vertex>
+                            <Vertex time="75">  <Position><WorldPosition x="-1.6"  y="190.0" z="0" h="-1.5708"/></Position></Vertex>
+                            <Vertex time="95">  <Position><WorldPosition x="-1.6"  y="10.0"  z="0" h="-1.5708"/></Position></Vertex>
+                            <Vertex time="100"> <Position><WorldPosition x="10.0"  y="-1.6"  z="0" h="0.0"/></Position></Vertex>
+                          </Polyline>
+                        </Shape>
+                      </Trajectory>
+                      <TimeReference>
+                        <Timing domainAbsoluteRelative="absolute" offset="0.0" scale="1.0" />
+                      </TimeReference>
+                      <TrajectoryFollowingMode followingMode="follow" />
+                    </FollowTrajectoryAction>
+                  </RoutingAction>
+                </PrivateAction>
+              </Action>
+              <StartTrigger>
+                <ConditionGroup>
+                  <Condition conditionEdge="none" delay="0" name="Start">
+                    <ByValueCondition><SimulationTimeCondition rule="greaterThan" value="0"/></ByValueCondition>
+                  </Condition>
+                </ConditionGroup>
+              </StartTrigger>
+            </Event>
+          </Maneuver>
+        </ManeuverGroup>
+        <StartTrigger>
+          <ConditionGroup>
+            <Condition name="ActStart" delay="0" conditionEdge="rising">
+              <ByValueCondition><SimulationTimeCondition value="0" rule="greaterThan"/></ByValueCondition>
+            </Condition>
+          </ConditionGroup>
+        </StartTrigger>
+      </Act>
+    </Story>
+    <StopTrigger>
+      <ConditionGroup>
+        <Condition name="End" delay="0" conditionEdge="rising">
+          <ByValueCondition><SimulationTimeCondition value="120" rule="greaterThan"/></ByValueCondition>
+        </Condition>
+      </ConditionGroup>
+    </StopTrigger>
+  </Storyboard>
+</OpenSCENARIO>

@@ -881,6 +881,7 @@ int main(int argc, char* argv[]) {
 	}
 
 	Traffic_c.MasterLogName = MasterLogName;
+	Sock_c.MasterLogName = MasterLogName;
 
 	Traffic_c.ENABLE_VEH_SIMULATOR = ENABLE_VEH_SIMULATOR;
 	Traffic_c.ENABLE_CARLA = ENABLE_CARLA;

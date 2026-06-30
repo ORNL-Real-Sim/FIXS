@@ -3,8 +3,40 @@
 // Uncomment the line below to enable performance timing
 // #define ENABLE_PERF_TIMING
 #include "PerformanceTimer.h"
+#include <fstream>
+#include <chrono>
 
 using namespace std;
+
+#ifdef RS_DEBUG
+// Times one runStep() entry->exit (the .lib's OWN per-step cost) AND the interval between
+// consecutive runStep() entries (the FULL CarMaker step). Bucketed to 0.1 s so the CSV
+// write does not perturb the loop. Proves whether the .lib time is flat in N_TRAFFIC
+// while the full step scales -> i.e. the O(N_TRAFFIC) cost is CarMaker core, not FIXS.
+struct RsRunStepTimer {
+	double simTime; size_t n;
+	std::chrono::high_resolution_clock::time_point t0;
+	RsRunStepTimer(double st, size_t n_)
+		: simTime(st), n(n_), t0(std::chrono::high_resolution_clock::now()) {}
+	~RsRunStepTimer() {
+		auto now = std::chrono::high_resolution_clock::now();
+		double runstep_us = (double)std::chrono::duration_cast<std::chrono::microseconds>(now - t0).count();
+		static std::chrono::high_resolution_clock::time_point s_prevEntry = t0;
+		double inter_us = (double)std::chrono::duration_cast<std::chrono::microseconds>(t0 - s_prevEntry).count();
+		s_prevEntry = t0;
+		static double accRun = 0.0, accInter = 0.0; static long cnt = 0, lastSlot = -1;
+		accRun += runstep_us; accInter += inter_us; cnt++;
+		long slot = (long)(simTime * 10.0);
+		if (slot != lastSlot) {
+			static std::ofstream f("rs_runstep_cm.csv");
+			static bool h = (f << "simTime,nVeh,lib_runstep_us,full_step_us,lib_frac" << std::endl, true);
+			double r = cnt ? accRun / cnt : 0.0, i = cnt ? accInter / cnt : 0.0;
+			f << simTime << "," << n << "," << r << "," << i << "," << (i > 0.0 ? r / i : 0.0) << std::endl;
+			accRun = 0.0; accInter = 0.0; cnt = 0; lastSlot = slot;
+		}
+	}
+};
+#endif
 
 VirEnvHelper::VirEnvHelper() {
 
@@ -305,6 +337,9 @@ int VirEnvHelper::readSignalTable(const char* signalTablePathInput) {
 }
 
 int VirEnvHelper::runStep(double simTime, const char** errorMsg) {
+#ifdef RS_DEBUG
+	RsRunStepTimer _rsRunStepTimer(simTime, TrafficSimulatorId2CarMakerId.size());
+#endif
 	//FOR veh in RealSimReceived
 	//  IF veh.id NOT in sumo2ipg :
 	//      IF no available space
@@ -585,6 +620,35 @@ int VirEnvHelper::runStep(double simTime, const char** errorMsg) {
 		// ===========================================================================
 		// 			move traffic position
 		// ===========================================================================
+		#ifdef RS_DEBUG
+		{ static std::ofstream s_rsMap("rs_mapping.csv"); static long st=-1; long s=(long)TrafficSimulatorId2CarMakerId.size()*1000000+(long)CmAvailableCarId_queue.size()*1000+(long)CmAvailableTruckId_queue.size(); if(s!=st){ static bool hh=(s_rsMap<<"simTime,mapN,carQfree,truckQfree"<<std::endl,true); s_rsMap<<simTime<<","<<TrafficSimulatorId2CarMakerId.size()<<","<<CmAvailableCarId_queue.size()<<","<<CmAvailableTruckId_queue.size()<<std::endl; st=s; } }
+#endif
+		// --- RS_DEBUG perf: inter-call wall-clock per CarMaker step (real-time factor) ---
+		// Interval between consecutive runStep() calls = the FULL per-step wall time
+		// (CarMaker core + this .lib + any VISSIM-wait). RTF = sim_dt / wall_dt.
+		// Bucketed to 0.1 s so the 10 Hz CSV write does not perturb the ~1 kHz step.
+#ifdef RS_DEBUG
+		{
+			static auto s_prevWall = std::chrono::high_resolution_clock::now();
+			static double s_prevSim = simTime;
+			static double s_accWall = 0.0, s_accSim = 0.0; static long s_cnt = 0, s_lastSlot = -1;
+			auto nowW = std::chrono::high_resolution_clock::now();
+			double wall_us = (double)std::chrono::duration_cast<std::chrono::microseconds>(nowW - s_prevWall).count();
+			double sim_us = (simTime - s_prevSim) * 1e6;
+			s_prevWall = nowW; s_prevSim = simTime;
+			s_accWall += wall_us; s_accSim += sim_us; s_cnt++;
+			long slot = (long)(simTime * 10.0);
+			if (slot != s_lastSlot) {
+				static std::ofstream f("rs_timing_cm.csv");
+				static bool h = (f << "simTime,nVeh,wall_us_per_step,sim_us_per_step,rtf,ticks" << std::endl, true);
+				double rtf = (s_accWall > 0.0) ? (s_accSim / s_accWall) : 0.0;
+				f << simTime << "," << TrafficSimulatorId2CarMakerId.size() << ","
+				  << (s_cnt ? s_accWall / s_cnt : 0.0) << "," << (s_cnt ? s_accSim / s_cnt : 0.0) << ","
+				  << rtf << "," << s_cnt << std::endl;
+				s_accWall = 0.0; s_accSim = 0.0; s_cnt = 0; s_lastSlot = slot;
+			}
+		}
+#endif
 		PERF_TIC("update_traffic_state");
 		try {
 			// update state
@@ -641,6 +705,9 @@ int VirEnvHelper::runStep(double simTime, const char** errorMsg) {
 					vehDataPrevious.pitch = TrfObj->r_zyx[1];
 				}
 				TrafficStatePrevious_um[idTs] = make_pair(simTime, vehDataPrevious);
+#ifdef RS_DEBUG
+					{ static std::ofstream s_rsCmPos("rs_cm_pos.csv"); static bool h=(s_rsCmPos<<"simTime,vissimId,cmId,drawnX,drawnY,targetX,targetY"<<std::endl,true); s_rsCmPos<<simTime<<","<<idTs<<","<<idCm<<","<<TrfObj->t_0[0]<<","<<TrfObj->t_0[1]<<","<<vehDataNext.positionX<<","<<vehDataNext.positionY<<std::endl; }
+#endif
 			}
 		}
 		catch (const std::exception& e) {
@@ -821,7 +888,62 @@ int VirEnvHelper::runStep(double simTime, const char** errorMsg) {
 #else
 		int refreshRate = (int)1 / Config_s.TrafficRefreshRate;
 #endif
-		if (abs(simTime * refreshRate - ceil(simTime * refreshRate - 0.5)) < 1e-5) {
+		// FP-robust refresh gate: the old fabs(simTime*rate - round)<1e-5 test silently
+		// failed once accumulated FP error in simTime exceeded 1e-5 (~715s at rate=1000),
+		// freezing ALL traffic interpolation. Compare integer refresh slots instead.
+		static long s_lastRefreshSlot = -1;
+		long s_refreshSlot = (long)std::llround((double)simTime * refreshRate);
+#ifdef RS_DEBUG
+		// #168 .lib SEQUENCE PROOF: log an unmapped slot's z (t_0[2]) every runStep. The .lib
+		// re-parks it to -5000 each refresh; at refresh=UpdRate the held value is reset back (the
+		// write is discarded -> z drifts up), at refresh>UpdRate it holds. Same reconciliation the
+		// mover showed for a mapped slot's x, now on the .lib's own write path (no ego confound).
+		if (simTime > 1.0 && simTime < 1.2) {
+			tTrafficObj* Tz = Traffic_GetByTrfId(0);
+			static std::ofstream s_libseq("rs_libseq.csv");
+			static bool hLq = (s_libseq << "simTime,z_readback,slot,didRefresh" << std::endl, true);
+			int dR = (s_refreshSlot != s_lastRefreshSlot) ? 1 : 0;
+			if (Tz != NULL) s_libseq << simTime << "," << Tz->t_0[2] << "," << s_refreshSlot << "," << dR << std::endl;
+		}
+#endif
+		if (s_refreshSlot != s_lastRefreshSlot) {
+			s_lastRefreshSlot = s_refreshSlot;
+#ifdef RS_DEBUG
+			// SLOT PROBE (#168): read the first RS_C slots' positions DIRECTLY each refresh-slot,
+			// regardless of whether the .lib has mapped/teleported them, to test whether CarMaker's
+			// OWN per-object UpdRate update advances the AutoDriver-driven slots. If they freeze at
+			// their StartPos at low UpdRate, the first slot blocks the ego -> the freeze is CarMaker's
+			// traffic update, NOT the .lib teleport. ~10 Hz, first 30 s.
+			{
+				int sstep = refreshRate / 10; if (sstep < 1) sstep = 1;
+				if (simTime < 30.0 && (s_refreshSlot % sstep == 0)) {
+					static std::ofstream s_rsSlot("rs_slots.csv");
+					static bool hS = (s_rsSlot << "simTime,nMapped,s0x,s1x,s2x,s5x,s10x" << std::endl, true);
+					tTrafficObj* T0 = Traffic_GetByTrfId(0); tTrafficObj* T1 = Traffic_GetByTrfId(1);
+					tTrafficObj* T2 = Traffic_GetByTrfId(2); tTrafficObj* T5 = Traffic_GetByTrfId(5);
+					tTrafficObj* T10 = Traffic_GetByTrfId(10);
+					s_rsSlot << simTime << "," << TrafficSimulatorId2CarMakerId.size() << ","
+					         << (T0 ? T0->t_0[0] : -999) << "," << (T1 ? T1->t_0[0] : -999) << ","
+					         << (T2 ? T2->t_0[0] : -999) << "," << (T5 ? T5->t_0[0] : -999) << ","
+					         << (T10 ? T10->t_0[0] : -999) << std::endl;
+				}
+			}
+#endif
+
+			// #168: re-park UNMAPPED RS_C slots EVERY refresh so they HOLD at low UpdRate. The
+			// one-time init park (t_0[2]=-5000) drifts when UpdRate < ~600 -- CarMaker needs an
+			// external FreeMotion position written every step, not once (proven: diag_mover_hz.py).
+			// Mapped slots are driven by the loop below; here we keep the spares buried off-road.
+			for (int iReObj = 0; iReObj < Traffic.nObjs; iReObj++) {
+				bool isMapped = false;
+				for (auto &kvm : TrafficSimulatorId2CarMakerId) { if (kvm.second == iReObj) { isMapped = true; break; } }
+				if (isMapped) continue;
+				tTrafficObj* Tpark = Traffic_GetByTrfId(iReObj);
+				if (Tpark == NULL) continue;
+				string nmPark = Tpark->Cfg.Name;
+				if (nmPark.find(RealSimCarNamePattern) == string::npos && nmPark.find(RealSimTruckNamePattern) == string::npos) continue;
+				Tpark->t_0[2] = -5000;
+			}
 
 			for (auto iter : TrafficSimulatorId2CarMakerId) {
 				string idTs = iter.first;
@@ -860,10 +982,31 @@ int VirEnvHelper::runStep(double simTime, const char** errorMsg) {
 
 				tTrafficObj* TrfObj = Traffic_GetByTrfId(idCm);
 
+#ifdef RS_DEBUG
+				// FREEZE DIAGNOSTIC (#168): capture CarMaker's t_0 immediately BEFORE we overwrite
+				// it -- i.e. the value CarMaker left after ITS own traffic update last step -- vs
+				// the position we are about to teleport to (t0_set). If t0_pre stays static while
+				// t0_set advances across refreshes, CarMaker is CLOBBERING our teleport every step
+				// (the freeze). If t0_pre tracks t0_set but the car still doesn't move, the teleport
+				// survives but isn't rendered as motion. Logged for the first 3 s (freeze is instant).
+				{
+					int fstep = refreshRate / 20; if (fstep < 1) fstep = 1;   // ~20 Hz throttle
+					if (simTime < 30.0 && (s_refreshSlot % fstep == 0)) {
+						static std::ofstream s_rsF("rs_freeze.csv");
+						static bool hF = (s_rsF << "simTime,slot,vissimId,t0_pre_x,t0_pre_y,t0_set_x,t0_set_y,tPrev,tNext" << std::endl, true);
+						s_rsF << simTime << "," << s_refreshSlot << "," << idTs << ","
+						      << TrfObj->t_0[0] << "," << TrfObj->t_0[1] << ","
+						      << posX << "," << posY << "," << tPrevious << "," << tNext << std::endl;
+					}
+				}
+#endif
 
 				TrfObj->t_0[0] = posX;
 				TrfObj->t_0[1] = posY;
 				TrfObj->t_0[2] = posZ;
+#ifdef RS_DEBUG
+					{ static std::ofstream s_rsRef("rs_refresh.csv"); static bool h2=(s_rsRef<<"simTime,vissimId,cmId,tPrev,tNext,prevX,nextX,posX,posY"<<std::endl,true); if(std::fabs(simTime*10.0-std::floor(simTime*10.0+0.5))<0.01) s_rsRef<<simTime<<","<<idTs<<","<<idCm<<","<<tPrevious<<","<<tNext<<","<<vehDataPrevious.positionX<<","<<vehDataNext.positionX<<","<<posX<<","<<posY<<std::endl; }
+#endif
 
 				TrfObj->r_zyx[1] = pitch;
 				TrfObj->r_zyx[2] = yaw;

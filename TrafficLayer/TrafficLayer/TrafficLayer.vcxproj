@@ -205,4 +205,9 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
+  <ItemDefinitionGroup Condition="'$(RS_DEBUG)'=='1'">
+    <ClCompile>
+      <PreprocessorDefinitions>RS_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+  </ItemDefinitionGroup>
 </Project>

@@ -35,6 +35,20 @@ struct SimulationSetup_t {
 
 	bool EnableVerboseLog;
 
+	// FIXS DriverModel "ego only" mode (issue #158 Stage B+).
+	//   true  (default, legacy):  DriverModel does per-vehicle send/recv
+	//                             inside the MOVE_DRIVER callback when the
+	//                             vehicle is in the subscription list,
+	//                             and skips per-tick I/O entirely when no
+	//                             subscribed vehicle is present.
+	//   false (CAV controller):   DriverModel does ONE send/recv per tick
+	//                             at DRIVER_DATA_TIME, regardless of
+	//                             subscription state. Required for the
+	//                             TrafficLayer DSProxy + DriverModel relay
+	//                             path where TL sends behavior cmds for
+	//                             arbitrary CAV vehicles per tick.
+	bool SubEgoOnly;
+
 	double SimulationEndTime;
 
 	// NEED to fix later
@@ -170,6 +184,19 @@ struct VissimSetup_t {
 	int    MaxTotalVeh;
 	int    MaxVissimPed;
 	int    MaxVissimSigGrp;
+
+	// Stage B+ (issue #158). When true, TrafficLayer also opens a server
+	// socket on SimulationSetup.TrafficSimulatorPort for a FIXS DriverModel
+	// callback. Per tick the loop:
+	//   - drains DriverModel's per-tick state messages (DSProxy is the
+	//     canonical source for vehicle state, so DriverModel uploads are
+	//     received and discarded — just to keep its socket buffer clear)
+	//   - relays any non-ego VehFullData_t received from app clients down
+	//     to DriverModel as behavior commands (desired speed / acceleration
+	//     / lane change for Wiedemann-integrated CAVs)
+	// Unlocks scenario 3a — Python CAV controller modulating background
+	// vehicles while DSProxy drives the ego.
+	bool EnableDriverModelRelay;
 };
 
 typedef struct SubscriptionVehicleList_t {
