@@ -21,6 +21,8 @@ sys.path.insert(0, CARLA)
 
 import carla_env_setup as env  # noqa: E402
 import run_cosim  # noqa: E402  (imports carla_env_setup; does NOT import the carla wheel)
+import import_map  # noqa: E402  (stdlib + carla_env_setup; no carla wheel)
+import place_tls  # noqa: E402  (stdlib + carla_env_setup; no carla wheel)
 
 WIN = platform.system() == "Windows"
 
@@ -189,6 +191,201 @@ def test_frame_from_table_centroid_and_span(tmp_path):
 
 def test_frame_from_table_missing_file():
     assert run_cosim._frame_from_table("nope.csv", no_net_offset=True) is None
+
+
+# ---------------------------------------------- map import (no real cook)
+
+def test_map_is_imported_detects_umap(tmp_path):
+    """map_is_imported keys off the cooked .umap under the source Content tree."""
+    root = str(tmp_path / "carla")
+    assert not import_map.map_is_imported(root, "RP_Ver0529")
+    umap = import_map.cooked_map_path(root, "RP_Ver0529")
+    os.makedirs(os.path.dirname(umap), exist_ok=True)
+    open(umap, "w").close()
+    assert import_map.map_is_imported(root, "RP_Ver0529")
+
+
+def test_stage_package_from_local_dir(tmp_path):
+    """A local package dir is copied into <carla_root>/Import (descriptor + assets)."""
+    carla_root = tmp_path / "carla"
+    (carla_root / "Import").mkdir(parents=True)
+    pkg = tmp_path / "pkg"
+    (pkg / "Assets").mkdir(parents=True)
+    (pkg / "RP_Ver0529.json").write_text('{"maps":[]}', encoding="utf-8")
+    (pkg / "Assets" / "RP_Ver0529.xodr").write_text("<x/>", encoding="utf-8")
+    import_map.stage_package(str(carla_root), "RP_Ver0529", package_dir=str(pkg))
+    assert (carla_root / "Import" / "RP_Ver0529.json").is_file()
+    assert (carla_root / "Import" / "Assets" / "RP_Ver0529.xodr").is_file()
+
+
+def test_gh_release_ref_parsing():
+    """github release-asset URLs parse to (repo, tag, asset); others -> None."""
+    ref = import_map._gh_release_ref(
+        "https://github.com/ORNL-Real-Sim/FIXS_Applications/releases/download/"
+        "map-RP_Ver0529/RP_Ver0529_carla_import.zip")
+    assert ref == ("ORNL-Real-Sim/FIXS_Applications", "map-RP_Ver0529",
+                   "RP_Ver0529_carla_import.zip")
+    assert import_map._gh_release_ref("https://example.com/foo.zip") is None
+
+
+def test_stage_from_path_accepts_zip(tmp_path):
+    """A hand-downloaded .zip is extracted into Import/ (the manual ORNL path)."""
+    src = tmp_path / "pkg"
+    (src / "Assets").mkdir(parents=True)
+    (src / "RP_Ver0529.json").write_text("{}", encoding="utf-8")
+    (src / "Assets" / "RP_Ver0529.xodr").write_text("<x/>", encoding="utf-8")
+    zpath = tmp_path / "RP_Ver0529_carla_import.zip"
+    with __import__("zipfile").ZipFile(zpath, "w") as z:
+        z.write(src / "RP_Ver0529.json", "RP_Ver0529.json")
+        z.write(src / "Assets" / "RP_Ver0529.xodr", "Assets/RP_Ver0529.xodr")
+    import_dir = tmp_path / "carla" / "Import"
+    import_dir.mkdir(parents=True)
+    import_map._stage_from_path(str(zpath), str(import_dir))
+    assert (import_dir / "RP_Ver0529.json").is_file()
+    assert (import_dir / "Assets" / "RP_Ver0529.xodr").is_file()
+
+
+def test_stage_package_pick_uses_selector_not_gh(monkeypatch, tmp_path):
+    """--package-pick forces the manual file selector and never calls gh."""
+    carla_root = tmp_path / "carla"
+    (carla_root / "Import").mkdir(parents=True)
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "RP_Ver0529.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(import_map, "_select_package", lambda name, url: str(pkg))
+    monkeypatch.setattr(import_map, "_try_gh_download",
+                        lambda url: (_ for _ in ()).throw(AssertionError("gh used!")))
+    import_map.stage_package(str(carla_root), "RP_Ver0529",
+                             package_url="https://x/y.zip", package_pick=True)
+    assert (carla_root / "Import" / "RP_Ver0529.json").is_file()
+
+
+def test_stage_package_noop_when_already_staged(tmp_path, capsys):
+    """If the descriptor is already present and no source is given, it's a no-op."""
+    carla_root = tmp_path / "carla"
+    (carla_root / "Import").mkdir(parents=True)
+    (carla_root / "Import" / "RP_Ver0529.json").write_text("{}", encoding="utf-8")
+    import_map.stage_package(str(carla_root), "RP_Ver0529")
+    assert "already staged" in capsys.readouterr().out
+
+
+def test_ensure_map_rejects_packaged(monkeypatch, tmp_path):
+    """Importing requires a source build - packaged config is refused."""
+    monkeypatch.setattr(import_map.env, "load_config",
+                        lambda: {"mode": "packaged", "carla_root": str(tmp_path)})
+    with pytest.raises(SystemExit):
+        import_map.ensure_map("RP_Ver0529")
+
+
+def test_ensure_map_noop_when_present(monkeypatch, tmp_path, capsys):
+    """Already-imported map short-circuits without cooking."""
+    root = tmp_path / "carla"
+    umap = import_map.cooked_map_path(str(root), "RP_Ver0529")
+    os.makedirs(os.path.dirname(umap), exist_ok=True)
+    open(umap, "w").close()
+    monkeypatch.setattr(import_map.env, "load_config",
+                        lambda: {"mode": "source", "carla_root": str(root),
+                                 "ue4_root": str(tmp_path / "ue4")})
+    # run_import must NOT be called
+    monkeypatch.setattr(import_map, "run_import",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("cooked!")))
+    assert import_map.ensure_map("RP_Ver0529") == 0
+    assert "already imported" in capsys.readouterr().out
+
+
+def test_ensure_map_force_reimports_when_present(monkeypatch, tmp_path):
+    """force=True re-cooks even an already-imported map: it moves the old content
+    aside, imports fresh, and reports success when the .umap is produced."""
+    root = tmp_path / "carla"
+    umap = import_map.cooked_map_path(str(root), "RP_Ver0529")
+    os.makedirs(os.path.dirname(umap), exist_ok=True)
+    open(umap, "w").close()
+    monkeypatch.setattr(import_map.env, "load_config",
+                        lambda: {"mode": "source", "carla_root": str(root),
+                                 "ue4_root": str(tmp_path / "ue4")})
+    monkeypatch.setattr(import_map, "stage_package", lambda *a, **k: None)
+    called = {"import": False}
+
+    def fake_import(cr, ue, nm):  # simulate a successful cook re-creating the umap
+        called["import"] = True
+        os.makedirs(os.path.dirname(umap), exist_ok=True)
+        with open(umap, "w") as f:
+            f.write("fresh")
+        return 0
+
+    monkeypatch.setattr(import_map, "run_import", fake_import)
+    assert import_map.ensure_map("RP_Ver0529", force=True) == 0
+    assert called["import"] is True
+    assert os.path.isfile(umap)
+    assert not os.path.isdir(import_map.cooked_content_dir(str(root), "RP_Ver0529") + ".bak_reimport")
+
+
+def test_ensure_map_restores_backup_on_failed_reimport(monkeypatch, tmp_path):
+    """If the re-cook fails to produce the umap, the previous map is restored."""
+    root = tmp_path / "carla"
+    umap = import_map.cooked_map_path(str(root), "RP_Ver0529")
+    os.makedirs(os.path.dirname(umap), exist_ok=True)
+    open(umap, "w").close()
+    monkeypatch.setattr(import_map.env, "load_config",
+                        lambda: {"mode": "source", "carla_root": str(root),
+                                 "ue4_root": str(tmp_path / "ue4")})
+    monkeypatch.setattr(import_map, "stage_package", lambda *a, **k: None)
+    monkeypatch.setattr(import_map, "run_import", lambda *a, **k: 1)  # cook fails, no umap
+    with pytest.raises(SystemExit):
+        import_map.ensure_map("RP_Ver0529", force=True)
+    assert os.path.isfile(umap)  # restored
+
+
+def test_read_map_config(tmp_path):
+    """A map.txt declares the package + url for the wrappers."""
+    p = tmp_path / "map.txt"
+    p.write_text("# the roosevelt map\npackage=RP_Ver0529\n"
+                 "url=https://x/y.zip\n\n", encoding="utf-8")
+    mc = import_map.read_map_config(str(p))
+    assert mc["package"] == "RP_Ver0529" and mc["url"] == "https://x/y.zip"
+
+
+# ----------------------------------------------- traffic-light placement
+
+def test_tls_content_path_and_marker(tmp_path):
+    """Content path + placement marker resolve under the map's cooked content."""
+    assert place_tls.content_map_path("RP_Ver0529") == "/Game/RP_Ver0529/Maps/RP_Ver0529/RP_Ver0529"
+    root = str(tmp_path / "carla")
+    assert not place_tls.tls_placed(root, "RP_Ver0529")
+    marker = place_tls.tls_marker(root, "RP_Ver0529")
+    os.makedirs(os.path.dirname(marker), exist_ok=True)
+    open(marker, "w").close()
+    assert place_tls.tls_placed(root, "RP_Ver0529")
+
+
+def test_place_tls_noop_when_marker_present(monkeypatch, tmp_path, capsys):
+    """Already-placed (marker) short-circuits without launching the editor."""
+    root = tmp_path / "carla"
+    # map present
+    umap = import_map.cooked_map_path(str(root), "RP_Ver0529")
+    os.makedirs(os.path.dirname(umap), exist_ok=True)
+    open(umap, "w").close()
+    # marker present
+    open(place_tls.tls_marker(str(root), "RP_Ver0529"), "w").close()
+    table = tmp_path / "tl.csv"
+    table.write_text("junction_id,link_id,x,y,z,heading\n", encoding="utf-8")
+    monkeypatch.setattr(place_tls.env, "load_config",
+                        lambda: {"mode": "source", "carla_root": str(root),
+                                 "ue4_root": str(tmp_path / "ue4")})
+    monkeypatch.setattr(place_tls.subprocess, "call",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("editor launched!")))
+    assert place_tls.place_tls("RP_Ver0529", str(table)) == 0
+    assert "already placed" in capsys.readouterr().out
+
+
+def test_place_tls_rejects_packaged(monkeypatch, tmp_path):
+    """Placement needs a source build (it saves the umap via the editor)."""
+    table = tmp_path / "tl.csv"
+    table.write_text("x\n", encoding="utf-8")
+    monkeypatch.setattr(place_tls.env, "load_config",
+                        lambda: {"mode": "packaged", "carla_root": str(tmp_path)})
+    with pytest.raises(SystemExit):
+        place_tls.place_tls("RP_Ver0529", str(table))
 
 
 def test_frame_from_table_picks_busiest_junction(tmp_path):

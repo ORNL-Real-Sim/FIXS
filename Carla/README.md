@@ -24,6 +24,10 @@ Carla/                        <- self-contained co-sim component (shipped in the
     unreal_remove_tl.py            remove placed TL actors
   carla_env_setup.py          one-time/reconfigure CARLA env picker (saves ~/.fixs/carla.json)
   setup_carla.bat / setup_carla.sh  thin per-OS wrappers for the picker
+  import_map.py               import a RoadRunner/OpenDRIVE map into a source build
+  import_map.bat / import_map.sh    thin per-OS wrappers for the importer
+  place_tls.py                place SUMO traffic lights into a cooked map (editor)
+  place_tls.bat / place_tls.sh      thin per-OS wrappers for the placer
   run_cosim.py                cross-platform launcher (Windows/Linux)
   run_cosim.bat / run_cosim.sh  thin per-OS wrappers
   README.md                   (this file)
@@ -121,6 +125,75 @@ config, so the launcher works on any machine no matter what the env is named:
 
 (No display? Pickers fall back to typing the path. Headless CI instead sets
 `CARLA_ROOT` and runs `verify_demo.py`, which bypasses the interactive setup.)
+
+## Importing a custom map (source build only)
+
+A custom RoadRunner/OpenDRIVE map must be **cooked into a source build** before
+CARLA can load it (packaged CARLA cannot import custom maps). `import_map.py`
+generalizes CARLA's `Util/BuildTools/Import.py --package=<name>` primitive: it
+stages the package (the `<name>.json` descriptor + its fbx/xodr/fbm assets) under
+`<carla_root>/Import` and runs the cook, reading `carla_root`/`ue4_root` from the
+saved env config.
+
+Large map packages are hosted as **release assets** (private repo), not in git.
+Because a consumer may not have the GitHub CLI, the import is **download-and-point**:
+`--package-url` is auto-fetched via `gh` when available, otherwise you're prompted
+to point at a copy you downloaded by hand from the release page (browser access is
+all that's needed):
+
+```bash
+# pass the release URL: auto-download via gh if present, else prompt for a local copy
+python Carla/import_map.py --package RP_Ver0529 --package-url https://.../RP_Ver0529_carla_import.zip
+# or point straight at a downloaded copy (the prompt also accepts a .zip or folder)
+python Carla/import_map.py --package RP_Ver0529 --package-dir C:/Downloads/RP_Ver0529_carla_import.zip
+```
+
+(`--package-dir` and the prompt both accept either the downloaded `.zip` or an
+already-extracted folder.)
+
+An app declares its map in a small text file and points the **generic** importer
+at it, so the URL lives in one place (not hard-coded in wrappers):
+
+```
+# roosevelt_map.txt
+package=RP_Ver0529
+url=https://.../RP_Ver0529_carla_import.zip
+```
+```bash
+import_map.bat --package-pick --map-config apps/roosevelt/roosevelt_map.txt
+```
+
+A **re-import** (`--force` / `--reimport`, or answering the prompt) moves the old
+cooked content aside and imports fresh - CARLA's `ImportAssets` cooks cleanly into
+an empty destination but often fails to *replace* existing content; the backup is
+restored if the cook fails, so a working map is never lost.
+
+## Traffic lights (maps without dynamic signals)
+
+If a map's OpenDRIVE has no dynamic signals, CARLA spawns no `traffic.traffic_light`
+actors and the SUMO->CARLA TL sync has nothing to drive. `place_tls.py` places them
+from the table into the map's level (running `sumo/auto_place_tls.py` in the full
+editor) and writes a marker so it isn't repeated:
+
+```bash
+place_tls.bat --map-config apps/roosevelt/roosevelt_map.txt \
+              --tl-table apps/roosevelt/Roosevelt_Sumo_Scenario/traffic_light_table.csv
+```
+
+A re-import wipes the map's content (and the marker), so the lights are re-placed
+automatically on the next run.
+
+## One-click: run_cosim does it all, idempotently
+
+In source mode `run_cosim.py` is a true one-click: it configures the CARLA env if
+needed, then **imports the map if it isn't cooked** (`--auto-import`), then
+**places the traffic lights if they aren't placed** (when a `--tl-table` is given),
+then loads + runs. Each step is **skipped when already done** and re-done after a
+re-import. The first load of a freshly cooked map compiles shaders and can take a
+couple of minutes (`--load-timeout`, default 300 s, covers it; later loads are
+fast). Without `--auto-import` it instead prints a clear "import / place first"
+hint rather than failing opaquely. Apps keep one-click shims (`import_<app>_map`,
+`place_tls_<app>`) for explicit re-import / re-place.
 
 ## Running a co-sim
 
