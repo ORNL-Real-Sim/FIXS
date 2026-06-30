@@ -26,6 +26,8 @@ Carla/                        <- self-contained co-sim component (shipped in the
   setup_carla.bat / setup_carla.sh  thin per-OS wrappers for the picker
   import_map.py               import a RoadRunner/OpenDRIVE map into a source build
   import_map.bat / import_map.sh    thin per-OS wrappers for the importer
+  place_tls.py                place SUMO traffic lights into a cooked map (editor)
+  place_tls.bat / place_tls.sh      thin per-OS wrappers for the placer
   run_cosim.py                cross-platform launcher (Windows/Linux)
   run_cosim.bat / run_cosim.sh  thin per-OS wrappers
   README.md                   (this file)
@@ -161,14 +163,37 @@ url=https://.../RP_Ver0529_carla_import.zip
 import_map.bat --package-pick --map-config apps/roosevelt/roosevelt_map.txt
 ```
 
-`run_cosim.py` does this automatically: in source mode it checks whether the
-map's `.umap` is cooked and, with `--auto-import [--map-config <txt>]`, imports it
-before launching (auto-configuring the CARLA env first if needed); otherwise it
-exits with a clear "import it first" message rather than an opaque `load_world`
-error. A **re-import** (`--force` / `--reimport`, or answering the prompt) moves
-the old cooked content aside and imports fresh - CARLA's `ImportAssets` cooks
-cleanly into an empty destination but often fails to *replace* existing content;
-the backup is restored if the cook fails, so a working map is never lost.
+A **re-import** (`--force` / `--reimport`, or answering the prompt) moves the old
+cooked content aside and imports fresh - CARLA's `ImportAssets` cooks cleanly into
+an empty destination but often fails to *replace* existing content; the backup is
+restored if the cook fails, so a working map is never lost.
+
+## Traffic lights (maps without dynamic signals)
+
+If a map's OpenDRIVE has no dynamic signals, CARLA spawns no `traffic.traffic_light`
+actors and the SUMO->CARLA TL sync has nothing to drive. `place_tls.py` places them
+from the table into the map's level (running `sumo/auto_place_tls.py` in the full
+editor) and writes a marker so it isn't repeated:
+
+```bash
+place_tls.bat --map-config apps/roosevelt/roosevelt_map.txt \
+              --tl-table apps/roosevelt/Roosevelt_Sumo_Scenario/traffic_light_table.csv
+```
+
+A re-import wipes the map's content (and the marker), so the lights are re-placed
+automatically on the next run.
+
+## One-click: run_cosim does it all, idempotently
+
+In source mode `run_cosim.py` is a true one-click: it configures the CARLA env if
+needed, then **imports the map if it isn't cooked** (`--auto-import`), then
+**places the traffic lights if they aren't placed** (when a `--tl-table` is given),
+then loads + runs. Each step is **skipped when already done** and re-done after a
+re-import. The first load of a freshly cooked map compiles shaders and can take a
+couple of minutes (`--load-timeout`, default 300 s, covers it; later loads are
+fast). Without `--auto-import` it instead prints a clear "import / place first"
+hint rather than failing opaquely. Apps keep one-click shims (`import_<app>_map`,
+`place_tls_<app>`) for explicit re-import / re-place.
 
 ## Running a co-sim
 

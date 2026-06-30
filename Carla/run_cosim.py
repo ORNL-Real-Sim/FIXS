@@ -238,6 +238,9 @@ def main():
     ap.add_argument("--carla-timeout", type=float, default=10.0,
                     help="CARLA client connect timeout in seconds (default: 10; "
                          "raise for heavy source-build maps)")
+    ap.add_argument("--load-timeout", type=float, default=300.0,
+                    help="client timeout (s) for load_world; the first load of a freshly "
+                         "imported map compiles shaders and can take minutes (default 300)")
     ap.add_argument("--no-launch", action="store_true", help="CARLA is already running")
     ap.add_argument("--reconfigure", action="store_true",
                     help="re-run CARLA env setup before launching (pick a different CARLA)")
@@ -290,6 +293,20 @@ def main():
                     f"        Import it once (e.g. import_<app>_map.bat), or pass "
                     f"--auto-import [--map-package-url <release zip>].")
 
+        # TL preflight: a map whose OpenDRIVE has no dynamic signals needs the
+        # traffic lights placed from the table (else the TL sync has no actors).
+        # Idempotent via a marker; re-done after a (re-)import that wiped it.
+        if args.tl_table:
+            import place_tls
+            if (not place_tls.tls_placed(cfg["carla_root"], pkg)) or args.reimport:
+                if args.auto_import or args.reimport:
+                    print(f"[cosim] placing traffic lights for '{pkg}' before launch ...")
+                    place_tls.place_tls(pkg, args.tl_table, carla_root=cfg["carla_root"],
+                                        ue4_root=cfg.get("ue4_root"), force=args.reimport)
+                else:
+                    print(f"[cosim] note: traffic lights not placed for '{pkg}'. Run "
+                          f"place_tls (or pass --auto-import) to add them, else no TL sync.")
+
     carla_proc = None
     try:
         if not args.no_launch:
@@ -300,8 +317,10 @@ def main():
 
         import carla
         client = carla.Client(args.carla_host, args.carla_port)
-        client.set_timeout(60.0)
+        client.set_timeout(args.load_timeout)
         print(f"[CARLA] loading world: {args.map}")
+        print("[CARLA] (the first load of a freshly imported map compiles shaders - "
+              "this can take a few minutes; later loads are fast)")
         world = client.load_world(args.map)
         # A source build keeps streaming/cooking the map after load_world
         # returns; give it a moment so the sync client's first RPC succeeds.

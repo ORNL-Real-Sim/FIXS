@@ -22,6 +22,7 @@ sys.path.insert(0, CARLA)
 import carla_env_setup as env  # noqa: E402
 import run_cosim  # noqa: E402  (imports carla_env_setup; does NOT import the carla wheel)
 import import_map  # noqa: E402  (stdlib + carla_env_setup; no carla wheel)
+import place_tls  # noqa: E402  (stdlib + carla_env_setup; no carla wheel)
 
 WIN = platform.system() == "Windows"
 
@@ -342,6 +343,49 @@ def test_read_map_config(tmp_path):
                  "url=https://x/y.zip\n\n", encoding="utf-8")
     mc = import_map.read_map_config(str(p))
     assert mc["package"] == "RP_Ver0529" and mc["url"] == "https://x/y.zip"
+
+
+# ----------------------------------------------- traffic-light placement
+
+def test_tls_content_path_and_marker(tmp_path):
+    """Content path + placement marker resolve under the map's cooked content."""
+    assert place_tls.content_map_path("RP_Ver0529") == "/Game/RP_Ver0529/Maps/RP_Ver0529/RP_Ver0529"
+    root = str(tmp_path / "carla")
+    assert not place_tls.tls_placed(root, "RP_Ver0529")
+    marker = place_tls.tls_marker(root, "RP_Ver0529")
+    os.makedirs(os.path.dirname(marker), exist_ok=True)
+    open(marker, "w").close()
+    assert place_tls.tls_placed(root, "RP_Ver0529")
+
+
+def test_place_tls_noop_when_marker_present(monkeypatch, tmp_path, capsys):
+    """Already-placed (marker) short-circuits without launching the editor."""
+    root = tmp_path / "carla"
+    # map present
+    umap = import_map.cooked_map_path(str(root), "RP_Ver0529")
+    os.makedirs(os.path.dirname(umap), exist_ok=True)
+    open(umap, "w").close()
+    # marker present
+    open(place_tls.tls_marker(str(root), "RP_Ver0529"), "w").close()
+    table = tmp_path / "tl.csv"
+    table.write_text("junction_id,link_id,x,y,z,heading\n", encoding="utf-8")
+    monkeypatch.setattr(place_tls.env, "load_config",
+                        lambda: {"mode": "source", "carla_root": str(root),
+                                 "ue4_root": str(tmp_path / "ue4")})
+    monkeypatch.setattr(place_tls.subprocess, "call",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("editor launched!")))
+    assert place_tls.place_tls("RP_Ver0529", str(table)) == 0
+    assert "already placed" in capsys.readouterr().out
+
+
+def test_place_tls_rejects_packaged(monkeypatch, tmp_path):
+    """Placement needs a source build (it saves the umap via the editor)."""
+    table = tmp_path / "tl.csv"
+    table.write_text("x\n", encoding="utf-8")
+    monkeypatch.setattr(place_tls.env, "load_config",
+                        lambda: {"mode": "packaged", "carla_root": str(tmp_path)})
+    with pytest.raises(SystemExit):
+        place_tls.place_tls("RP_Ver0529", str(table))
 
 
 def test_frame_from_table_picks_busiest_junction(tmp_path):
