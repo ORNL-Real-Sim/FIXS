@@ -25,6 +25,7 @@ Carla/                        <- self-contained co-sim component (shipped in the
   carla_env_setup.py          one-time/reconfigure CARLA env picker (saves ~/.fixs/carla.json)
   setup_carla.bat / setup_carla.sh  thin per-OS wrappers for the picker
   import_map.py               import a RoadRunner/OpenDRIVE map into a source build
+  import_map.bat / import_map.sh    thin per-OS wrappers for the importer
   run_cosim.py                cross-platform launcher (Windows/Linux)
   run_cosim.bat / run_cosim.sh  thin per-OS wrappers
   README.md                   (this file)
@@ -148,11 +149,26 @@ python Carla/import_map.py --package RP_Ver0529 --package-dir C:/Downloads/RP_Ve
 (`--package-dir` and the prompt both accept either the downloaded `.zip` or an
 already-extracted folder.)
 
+An app declares its map in a small text file and points the **generic** importer
+at it, so the URL lives in one place (not hard-coded in wrappers):
+
+```
+# roosevelt_map.txt
+package=RP_Ver0529
+url=https://.../RP_Ver0529_carla_import.zip
+```
+```bash
+import_map.bat --package-pick --map-config apps/roosevelt/roosevelt_map.txt
+```
+
 `run_cosim.py` does this automatically: in source mode it checks whether the
-map's `.umap` is cooked and, with `--auto-import [--map-package-url <zip>]`,
-imports it before launching; otherwise it exits with a clear "import it first"
-message rather than an opaque `load_world` error. Apps ship a one-click
-`import_<app>_map.bat` and pass `--auto-import` from their launcher.
+map's `.umap` is cooked and, with `--auto-import [--map-config <txt>]`, imports it
+before launching (auto-configuring the CARLA env first if needed); otherwise it
+exits with a clear "import it first" message rather than an opaque `load_world`
+error. A **re-import** (`--force` / `--reimport`, or answering the prompt) moves
+the old cooked content aside and imports fresh - CARLA's `ImportAssets` cooks
+cleanly into an empty destination but often fails to *replace* existing content;
+the backup is restored if the cook fails, so a working map is never lost.
 
 ## Running a co-sim
 

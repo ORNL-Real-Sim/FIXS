@@ -36,10 +36,14 @@ import zipfile
 import carla_env_setup as env
 
 
+def cooked_content_dir(carla_root, name):
+    """The Content/<name> folder produced by a successful import."""
+    return os.path.join(carla_root, "Unreal", "CarlaUE4", "Content", name)
+
+
 def cooked_map_path(carla_root, name):
     """Where the cooked .umap lands after a successful import."""
-    return os.path.join(carla_root, "Unreal", "CarlaUE4", "Content",
-                        name, "Maps", name, name + ".umap")
+    return os.path.join(cooked_content_dir(carla_root, name), "Maps", name, name + ".umap")
 
 
 def map_is_imported(carla_root, name):
@@ -186,7 +190,12 @@ def ensure_map(name, carla_root=None, ue4_root=None, package_url=None,
     If the map already exists: `force` re-imports unconditionally; otherwise, when
     `prompt_if_exists` and the session is interactive, the user is asked whether to
     re-import (re-download + re-cook) - handy for updating a map or testing."""
-    cfg = env.load_config() or {}
+    cfg = env.load_config()
+    if cfg is None and not carla_root:
+        # first use on a fresh clone: configure the CARLA env, just like run_cosim
+        print("[import] no CARLA env configured; running first-time setup ...")
+        cfg = env.run_setup()
+    cfg = cfg or {}
     carla_root = carla_root or cfg.get("carla_root")
     ue4_root = ue4_root or cfg.get("ue4_root")
     if not carla_root:
@@ -195,8 +204,10 @@ def ensure_map(name, carla_root=None, ue4_root=None, package_url=None,
         sys.exit("[import] the configured CARLA is PACKAGED; importing a custom map "
                  "needs a SOURCE build (run setup_carla and pick source).")
 
-    if map_is_imported(carla_root, name) and not force:
-        print(f"[import] '{name}' already imported: {cooked_map_path(carla_root, name)}")
+    umap = cooked_map_path(carla_root, name)
+    already = os.path.isfile(umap)
+    if already and not force:
+        print(f"[import] '{name}' already imported: {umap}")
         if not (prompt_if_exists and sys.stdin.isatty()):
             return 0
         ans = input("[import] re-import it now (re-download + re-cook)? [y/N]: ").strip().lower()
@@ -206,20 +217,60 @@ def ensure_map(name, carla_root=None, ue4_root=None, package_url=None,
         print("[import] re-importing ...")
 
     stage_package(carla_root, name, package_url, package_dir, package_pick)
+
+    # CARLA's ImportAssets commandlet imports cleanly into an empty destination
+    # but often fails to *replace* existing cooked content (the .umap is left
+    # untouched). So for a re-import we move the old content aside first and
+    # import fresh; the backup is restored if the cook fails, so a working map is
+    # never lost.
+    content_dir = cooked_content_dir(carla_root, name)
+    backup = content_dir + ".bak_reimport"
+    if already and os.path.isdir(content_dir):
+        shutil.rmtree(backup, ignore_errors=True)
+        os.rename(content_dir, backup)
+        print(f"[import] moved existing content aside for a clean re-import (restored on failure)")
+
     rc = run_import(carla_root, ue4_root, name)
+    ok = os.path.isfile(umap)
+
+    if os.path.isdir(backup):
+        if ok:
+            shutil.rmtree(backup, ignore_errors=True)
+        else:
+            shutil.rmtree(content_dir, ignore_errors=True)
+            os.rename(backup, content_dir)
+            print("[import] import did not produce the map; restored the previous one.")
+
+    if not ok:
+        sys.exit(f"[import] import failed: Import.py exited {rc} and {umap} was not produced.")
     if rc != 0:
-        sys.exit(f"[import] Import.py failed (exit {rc}).")
-    if not map_is_imported(carla_root, name):
-        sys.exit(f"[import] import finished but {cooked_map_path(carla_root, name)} not found.")
-    print(f"[import] done: '{name}' imported.")
+        print(f"[import] note: Import.py exited {rc} (CARLA's cook commonly flags non-fatal "
+              f"warnings as errors), but the map .umap was written.")
+    print(f"[import] done: '{name}' imported -> {umap}")
     return 0
+
+
+def read_map_config(path):
+    """Parse a simple `key=value` map config (keys: package, url). Lets an app
+    declare its map in one text file instead of hard-coding the URL in a wrapper."""
+    cfg = {}
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, val = line.split("=", 1)
+            cfg[key.strip().lower()] = val.strip()
+    return cfg
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--package", required=True,
+    ap.add_argument("--package", default=None,
                     help="map/package name (matches Import/<name>.json)")
+    ap.add_argument("--map-config", default=None,
+                    help="text file declaring the map (package= and url= lines)")
     ap.add_argument("--package-url", default=None,
                     help="URL of the package zip (e.g. a GitHub release asset)")
     ap.add_argument("--package-dir", default=None,
@@ -232,9 +283,18 @@ def main():
     ap.add_argument("--force", action="store_true",
                     help="re-import even if already present (no prompt)")
     args = ap.parse_args()
+
+    package, url = args.package, args.package_url
+    if args.map_config:
+        mc = read_map_config(args.map_config)
+        package = package or mc.get("package")
+        url = url or mc.get("url")
+    if not package:
+        ap.error("a map is required: pass --package, or --map-config with a package= line")
+
     # run standalone -> offer to re-import if the map already exists
-    return ensure_map(args.package, args.carla_root, args.ue4_root,
-                      args.package_url, args.package_dir, args.force,
+    return ensure_map(package, args.carla_root, args.ue4_root,
+                      url, args.package_dir, args.force,
                       prompt_if_exists=True, package_pick=args.package_pick)
 
 
