@@ -15,6 +15,7 @@
 #include <unordered_set>
 #include <cmath>
 #include <chrono>
+#include <cstdlib>
 
 #include <carla/client/Client.h>
 #include <carla/client/World.h>
@@ -103,6 +104,9 @@ int main(int argc, const char* argv[]) {
         if (enableTlsSync) backend.freezeAndMatchTrafficLights();
 
         const int sock0 = 0;
+        // #174 A/B: optional applied-pose log keyed by SUMO id (set RS_POSE_LOG=path)
+        std::ofstream poseLog;
+        if (const char* plp = std::getenv("RS_POSE_LOG")) { poseLog.open(plp); poseLog << "simTime,id,x,y,yaw\n"; }
         double simTime = 0.0;
         while (simTime < simEndTime) {
             // ---- core: recv -> spawn / pose (batch) / despawn / (no send) ---
@@ -112,6 +116,13 @@ int main(int argc, const char* argv[]) {
                 break;
             }
             backend.flushBatch();          // ApplyBatch(transform commands)
+            if (poseLog.is_open()) {       // A/B: log the applied Carla pose per SUMO id
+                for (const auto& kv : core.mappedVehicles()) {
+                    const carla::geom::Transform* tf = backend.lastAppliedPose(kv.second);
+                    if (tf) poseLog << simTime << "," << kv.first << "," << tf->location.x
+                                    << "," << tf->location.y << "," << tf->rotation.yaw << "\n";
+                }
+            }
             world.Tick(1s);                // advance Carla one frame
 
             // ---- POST-tick: interested-id readback + spectator -------------

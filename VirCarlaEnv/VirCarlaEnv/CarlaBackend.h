@@ -59,6 +59,15 @@ public:
     // expose for the driver's TLS / interested handling
     std::unordered_map<std::string, std::unordered_map<int, TrafficLight>>& trafficLightMap() { return trafficLightMap_; }
 
+    // #174 A/B instrumentation: the Carla transform last APPLIED to a handle this
+    // tick (post BridgeHelper transform). The driver logs it keyed by SUMO id so
+    // old-vs-new can be diffed exactly, with no Carla-readback / blueprint / sort
+    // confounds. Returns nullptr if the handle has no applied pose yet.
+    const carla::geom::Transform* lastAppliedPose(VehHandle h) const {
+        auto it = lastApplied_.find(h);
+        return (it != lastApplied_.end()) ? &it->second : nullptr;
+    }
+
 private:
     carla::client::World*  world_  = nullptr;
     carla::client::Client* client_ = nullptr;
@@ -68,6 +77,7 @@ private:
     carla::SharedPtr<carla::client::BlueprintLibrary> bpLib_;
     std::vector<carla::rpc::Command> batch_;                               // ApplyTransform commands this tick
     std::unordered_map<VehHandle, carla::SharedPtr<carla::client::Vehicle>> actors_;
+    std::unordered_map<VehHandle, carla::geom::Transform> lastApplied_;   // A/B instrumentation
     std::unordered_map<std::string, std::unordered_map<int, TrafficLight>> trafficLightMap_;
 
     static carla::geom::Transform sumoTransformOf(const Pose& p);

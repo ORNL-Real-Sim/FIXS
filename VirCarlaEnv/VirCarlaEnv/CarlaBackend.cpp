@@ -80,6 +80,7 @@ void CarlaBackend::despawnVehicle(VehHandle h) {
 
 void CarlaBackend::setVehiclePose(VehHandle h, const Pose& p) {
     carla::geom::Transform carlaTf = BridgeHelper::map_transfrom_Sumo_to_Carla(sumoTransformOf(p), kExtent);
+    lastApplied_[h] = carlaTf;   // A/B instrumentation (driver logs it by SUMO id)
     // batched, applied in flushBatch() before the world Tick -- same as mainVirCarla
     batch_.push_back(carla::rpc::Command::ApplyTransform((carla::rpc::ActorId)h, carlaTf));
 }
