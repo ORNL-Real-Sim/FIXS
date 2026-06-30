@@ -223,22 +223,60 @@ def _port_in_use(host, port):
         return s.connect_ex((host, port)) == 0
 
 
-def kill_carla(proc):
-    """Terminate the launched CARLA and its WHOLE process tree. UE4Editor / CarlaUE4
-    spawn child processes (shader-compiler workers, CrashReportClient, the game
-    process) that a plain terminate() leaves alive - which is how stale servers
-    keep holding the RPC port across runs."""
+def _pid_on_port(port):
+    """PID LISTENING on `port` (any host), or None. Windows netstat / Linux lsof."""
     try:
         if platform.system() == "Windows":
-            subprocess.call(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+            out = subprocess.check_output(["netstat", "-ano", "-p", "tcp"],
+                                          text=True, stderr=subprocess.DEVNULL)
+            for line in out.splitlines():
+                p = line.split()
+                if len(p) >= 5 and p[3].upper() == "LISTENING" and p[1].endswith(f":{port}"):
+                    return int(p[-1])
+        else:
+            out = subprocess.check_output(["lsof", "-ti", f"tcp:{port}", "-sTCP:LISTEN"],
+                                          text=True, stderr=subprocess.DEVNULL)
+            return int(out.split()[0]) if out.strip() else None
+    except Exception:
+        return None
+    return None
+
+
+def _process_name(pid):
+    try:
+        if platform.system() == "Windows":
+            out = subprocess.check_output(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+                                          text=True, stderr=subprocess.DEVNULL).strip()
+            return out.splitlines()[0].split(",")[0].strip('"') if out else ""
+        return subprocess.check_output(["ps", "-p", str(pid), "-o", "comm="],
+                                       text=True, stderr=subprocess.DEVNULL).strip()
+    except Exception:
+        return ""
+
+
+def _is_carla_process(name):
+    n = (name or "").lower()
+    return "ue4editor" in n or "carlaue4" in n
+
+
+def _kill_pid_tree(pid):
+    """Kill a PID and its whole process tree (CARLA spawns shader workers / a game
+    child / CrashReportClient that a plain kill leaves holding the RPC port)."""
+    try:
+        if platform.system() == "Windows":
+            subprocess.call(["taskkill", "/F", "/T", "/PID", str(pid)],
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         else:
-            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            try:
+                os.killpg(os.getpgid(pid), signal.SIGTERM)
+            except Exception:
+                os.kill(pid, signal.SIGTERM)
     except Exception:
-        try:
-            proc.kill()
-        except Exception:
-            pass
+        pass
+
+
+def kill_carla(proc):
+    _kill_pid_tree(proc.pid)
 
 
 def main():
@@ -345,17 +383,29 @@ def main():
     try:
         if not args.no_launch:
             # If the RPC port is already taken, a CARLA from a previous run is
-            # likely still alive. Launching anyway gives a split brain: the new
+            # probably still alive. Launching anyway gives a split brain (the new
             # server can't bind the port, so it sits on the default map while we
-            # drive the OLD one. Stop with clear cleanup instructions instead.
+            # drive the OLD one). Auto-kill a *stale CARLA* holding the port; only
+            # abort if a non-CARLA process owns it (don't kill something unrelated).
             if _port_in_use(args.carla_host, args.carla_port):
-                sys.exit(
-                    f"[cosim] {args.carla_host}:{args.carla_port} is already in use - a CARLA "
-                    f"from a previous run is probably still alive. Close it and retry:\n"
-                    f"    Windows: taskkill /F /IM UE4Editor.exe   (source build)\n"
-                    f"             taskkill /F /IM CarlaUE4.exe     (packaged build)\n"
-                    f"    Linux:   pkill -f CarlaUE4\n"
-                    f"  (or pass --no-launch to drive the already-running CARLA on purpose).")
+                pid = _pid_on_port(args.carla_port)
+                name = _process_name(pid) if pid else ""
+                if pid and _is_carla_process(name):
+                    print(f"[cosim] a stale CARLA is holding port {args.carla_port} "
+                          f"(PID {pid}, {name}); terminating it ...")
+                    _kill_pid_tree(pid)
+                    for _ in range(40):
+                        if not _port_in_use(args.carla_host, args.carla_port):
+                            break
+                        time.sleep(0.5)
+                    if _port_in_use(args.carla_host, args.carla_port):
+                        sys.exit(f"[cosim] could not free port {args.carla_port}; "
+                                 f"kill CARLA manually and retry.")
+                    print(f"[cosim] port {args.carla_port} freed; launching a fresh CARLA.")
+                else:
+                    sys.exit(
+                        f"[cosim] port {args.carla_port} is in use by a non-CARLA process "
+                        f"({name or 'unknown'}); free it or pass --no-launch to use what's running.")
             carla_proc = launch_carla(cfg, args.carla_port, args.render_offscreen,
                                       args.quality_level)
             if not wait_for_port(args.carla_host, args.carla_port):
