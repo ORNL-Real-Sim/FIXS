@@ -250,6 +250,23 @@ def test_ensure_map_noop_when_present(monkeypatch, tmp_path, capsys):
     assert "already imported" in capsys.readouterr().out
 
 
+def test_ensure_map_force_reimports_when_present(monkeypatch, tmp_path):
+    """force=True re-cooks even an already-imported map (runs the import)."""
+    root = tmp_path / "carla"
+    umap = import_map.cooked_map_path(str(root), "RP_Ver0529")
+    os.makedirs(os.path.dirname(umap), exist_ok=True)
+    open(umap, "w").close()
+    monkeypatch.setattr(import_map.env, "load_config",
+                        lambda: {"mode": "source", "carla_root": str(root),
+                                 "ue4_root": str(tmp_path / "ue4")})
+    monkeypatch.setattr(import_map, "stage_package", lambda *a, **k: None)
+    called = {"import": False}
+    monkeypatch.setattr(import_map, "run_import",
+                        lambda *a, **k: called.__setitem__("import", True) or 0)
+    assert import_map.ensure_map("RP_Ver0529", force=True) == 0
+    assert called["import"] is True
+
+
 def test_frame_from_table_picks_busiest_junction(tmp_path):
     """Default framing zooms to the junction with the most signal heads."""
     csv_path = tmp_path / "tl.csv"

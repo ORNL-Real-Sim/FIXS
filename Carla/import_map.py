@@ -103,9 +103,13 @@ def run_import(carla_root, ue4_root, name):
 
 
 def ensure_map(name, carla_root=None, ue4_root=None,
-               package_url=None, package_dir=None, force=False):
+               package_url=None, package_dir=None, force=False, prompt_if_exists=False):
     """Make sure `name` is imported into the (source-build) CARLA, importing it
-    if needed. Returns 0 on success; exits with a clear message otherwise."""
+    if needed. Returns 0 on success; exits with a clear message otherwise.
+
+    If the map already exists: `force` re-imports unconditionally; otherwise, when
+    `prompt_if_exists` and the session is interactive, the user is asked whether to
+    re-import (re-download + re-cook) - handy for updating a map or testing."""
     cfg = env.load_config() or {}
     carla_root = carla_root or cfg.get("carla_root")
     ue4_root = ue4_root or cfg.get("ue4_root")
@@ -117,7 +121,13 @@ def ensure_map(name, carla_root=None, ue4_root=None,
 
     if map_is_imported(carla_root, name) and not force:
         print(f"[import] '{name}' already imported: {cooked_map_path(carla_root, name)}")
-        return 0
+        if not (prompt_if_exists and sys.stdin.isatty()):
+            return 0
+        ans = input("[import] re-import it now (re-download + re-cook)? [y/N]: ").strip().lower()
+        if ans != "y":
+            print("[import] keeping the existing map.")
+            return 0
+        print("[import] re-importing ...")
 
     stage_package(carla_root, name, package_url, package_dir)
     rc = run_import(carla_root, ue4_root, name)
@@ -140,10 +150,12 @@ def main():
                     help="local folder holding the package files")
     ap.add_argument("--carla-root", default=None, help="override the saved carla_root")
     ap.add_argument("--ue4-root", default=None, help="override the saved ue4_root")
-    ap.add_argument("--force", action="store_true", help="re-import even if already present")
+    ap.add_argument("--force", action="store_true",
+                    help="re-import even if already present (no prompt)")
     args = ap.parse_args()
+    # run standalone -> offer to re-import if the map already exists
     return ensure_map(args.package, args.carla_root, args.ue4_root,
-                      args.package_url, args.package_dir, args.force)
+                      args.package_url, args.package_dir, args.force, prompt_if_exists=True)
 
 
 if __name__ == "__main__":

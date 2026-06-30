@@ -218,6 +218,8 @@ def main():
                     help="import package name if it differs from --map")
     ap.add_argument("--map-package-url", default=None,
                     help="URL of the map package zip for --auto-import (e.g. a release asset)")
+    ap.add_argument("--reimport", action="store_true",
+                    help="re-import the map even if already cooked (re-download + re-cook)")
     ap.add_argument("--tl-table", default=None, help="traffic_light_table.csv (for --tls-manager sumo)")
     ap.add_argument("--tls-manager", default="sumo", choices=["sumo", "carla", "none"])
     ap.add_argument("--step-length", type=float, default=0.05,
@@ -267,12 +269,15 @@ def main():
     if not args.no_launch and cfg is not None and cfg.get("mode") == "source":
         import import_map
         pkg = args.map_package or args.map
-        if not import_map.map_is_imported(cfg["carla_root"], pkg):
-            if args.auto_import:
-                print(f"[cosim] map '{pkg}' is not imported; importing it first ...")
+        imported = import_map.map_is_imported(cfg["carla_root"], pkg)
+        if not imported or args.reimport:
+            if args.auto_import or args.reimport:
+                verb = "re-importing" if args.reimport else "importing"
+                print(f"[cosim] {verb} map '{pkg}' before launch ...")
                 import_map.ensure_map(pkg, carla_root=cfg["carla_root"],
                                       ue4_root=cfg.get("ue4_root"),
-                                      package_url=args.map_package_url)
+                                      package_url=args.map_package_url,
+                                      force=args.reimport)
             else:
                 sys.exit(
                     f"[cosim] map '{pkg}' is not imported into {cfg['carla_root']}.\n"
