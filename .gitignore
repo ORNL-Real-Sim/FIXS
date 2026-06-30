@@ -212,5 +212,12 @@ config.runtime.yaml
 config.vanilla.yaml
 stage_network/
 
+# #172 signal demo: VISSIM regen intermediates in the probe dir (import_to_vissim /
+# build_signals / build_demand scratch). The committed network is
+# tests/Vissim/networks/simple_traffic_light/simple_traffic_light.inpx (patch_ds output).
+tests/Vissim/Probes/TrafficLayer_DSProxy_CMoffice_Signal/simple_traffic_light*.inpx
+tests/Vissim/Probes/TrafficLayer_DSProxy_CMoffice_Signal/simple_traffic_light*.inp0
+tests/Vissim/Probes/TrafficLayer_DSProxy_CMoffice_Signal/simple_traffic_light*.layx
+
 # Ignore Claude Code configuration
 .claude/

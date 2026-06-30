@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<edges>
+    <edge id="appr"   from="jW" to="jC" numLanes="1" speed="13.89" priority="3"/>
+    <edge id="dep"    from="jC" to="jE" numLanes="1" speed="13.89" priority="3"/>
+    <edge id="crossN" from="jN" to="jC" numLanes="1" speed="13.89" priority="3"/>
+    <edge id="crossS" from="jC" to="jS" numLanes="1" speed="13.89" priority="3"/>
+</edges>
