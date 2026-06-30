@@ -82,6 +82,26 @@ def maybe_reexec(cfg):
     sys.exit(subprocess.call(cmd, env=osenv))
 
 
+def confirm_world_ready(client, expected_map, timeout):
+    """After load_world, block until the loaded world IS the expected map AND it
+    is producing frames (ticking). On a heavy source build, load_world can return
+    while the map is still switching/streaming - this makes sure we don't start
+    SUMO against the wrong or half-loaded world. Returns the map name, or None."""
+    deadline = time.time() + timeout
+    last = ""
+    while time.time() < deadline:
+        try:
+            world = client.get_world()
+            last = world.get_map().name
+            if expected_map.lower() in last.lower():
+                world.wait_for_tick(10.0)  # the server is actually producing frames
+                return last
+        except RuntimeError:
+            pass  # server busy (e.g. compiling shaders) - retry
+        time.sleep(1.0)
+    return None
+
+
 def wait_for_port(host, port, timeout=180):
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -321,10 +341,21 @@ def main():
         print(f"[CARLA] loading world: {args.map}")
         print("[CARLA] (the first load of a freshly imported map compiles shaders - "
               "this can take a few minutes; later loads are fast)")
-        world = client.load_world(args.map)
-        # A source build keeps streaming/cooking the map after load_world
-        # returns; give it a moment so the sync client's first RPC succeeds.
-        time.sleep(2.0)
+        client.load_world(args.map)
+        # Don't trust load_world's return alone on a heavy source map: confirm the
+        # world IS this map and is ticking before we start SUMO.
+        print(f"[CARLA] confirming '{args.map}' is loaded and ready ...")
+        loaded = confirm_world_ready(client, args.map, args.load_timeout)
+        if loaded is None:
+            current = ""
+            try:
+                current = client.get_world().get_map().name
+            except Exception:
+                pass
+            sys.exit(f"[cosim] map '{args.map}' not confirmed loaded "
+                     f"(current world: '{current}'); aborting before SUMO.")
+        print(f"[CARLA] map ready: {loaded}")
+        world = client.get_world()
 
         if not args.no_spectator:
             # Default: zoom to one intersection from the TL table so the signal
