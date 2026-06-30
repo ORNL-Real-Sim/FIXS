@@ -21,6 +21,7 @@ sys.path.insert(0, CARLA)
 
 import carla_env_setup as env  # noqa: E402
 import run_cosim  # noqa: E402  (imports carla_env_setup; does NOT import the carla wheel)
+import import_map  # noqa: E402  (stdlib + carla_env_setup; no carla wheel)
 
 WIN = platform.system() == "Windows"
 
@@ -189,6 +190,64 @@ def test_frame_from_table_centroid_and_span(tmp_path):
 
 def test_frame_from_table_missing_file():
     assert run_cosim._frame_from_table("nope.csv", no_net_offset=True) is None
+
+
+# ---------------------------------------------- map import (no real cook)
+
+def test_map_is_imported_detects_umap(tmp_path):
+    """map_is_imported keys off the cooked .umap under the source Content tree."""
+    root = str(tmp_path / "carla")
+    assert not import_map.map_is_imported(root, "RP_Ver0529")
+    umap = import_map.cooked_map_path(root, "RP_Ver0529")
+    os.makedirs(os.path.dirname(umap), exist_ok=True)
+    open(umap, "w").close()
+    assert import_map.map_is_imported(root, "RP_Ver0529")
+
+
+def test_stage_package_from_local_dir(tmp_path):
+    """A local package dir is copied into <carla_root>/Import (descriptor + assets)."""
+    carla_root = tmp_path / "carla"
+    (carla_root / "Import").mkdir(parents=True)
+    pkg = tmp_path / "pkg"
+    (pkg / "Assets").mkdir(parents=True)
+    (pkg / "RP_Ver0529.json").write_text('{"maps":[]}', encoding="utf-8")
+    (pkg / "Assets" / "RP_Ver0529.xodr").write_text("<x/>", encoding="utf-8")
+    import_map.stage_package(str(carla_root), "RP_Ver0529", package_dir=str(pkg))
+    assert (carla_root / "Import" / "RP_Ver0529.json").is_file()
+    assert (carla_root / "Import" / "Assets" / "RP_Ver0529.xodr").is_file()
+
+
+def test_stage_package_noop_when_already_staged(tmp_path, capsys):
+    """If the descriptor is already present and no source is given, it's a no-op."""
+    carla_root = tmp_path / "carla"
+    (carla_root / "Import").mkdir(parents=True)
+    (carla_root / "Import" / "RP_Ver0529.json").write_text("{}", encoding="utf-8")
+    import_map.stage_package(str(carla_root), "RP_Ver0529")
+    assert "already staged" in capsys.readouterr().out
+
+
+def test_ensure_map_rejects_packaged(monkeypatch, tmp_path):
+    """Importing requires a source build - packaged config is refused."""
+    monkeypatch.setattr(import_map.env, "load_config",
+                        lambda: {"mode": "packaged", "carla_root": str(tmp_path)})
+    with pytest.raises(SystemExit):
+        import_map.ensure_map("RP_Ver0529")
+
+
+def test_ensure_map_noop_when_present(monkeypatch, tmp_path, capsys):
+    """Already-imported map short-circuits without cooking."""
+    root = tmp_path / "carla"
+    umap = import_map.cooked_map_path(str(root), "RP_Ver0529")
+    os.makedirs(os.path.dirname(umap), exist_ok=True)
+    open(umap, "w").close()
+    monkeypatch.setattr(import_map.env, "load_config",
+                        lambda: {"mode": "source", "carla_root": str(root),
+                                 "ue4_root": str(tmp_path / "ue4")})
+    # run_import must NOT be called
+    monkeypatch.setattr(import_map, "run_import",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("cooked!")))
+    assert import_map.ensure_map("RP_Ver0529") == 0
+    assert "already imported" in capsys.readouterr().out
 
 
 def test_frame_from_table_picks_busiest_junction(tmp_path):

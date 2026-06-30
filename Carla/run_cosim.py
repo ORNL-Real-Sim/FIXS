@@ -212,6 +212,12 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--sumocfg", required=True, help="SUMO .sumocfg")
     ap.add_argument("--map", default="Town01", help="CARLA map to load_world()")
+    ap.add_argument("--auto-import", action="store_true",
+                    help="source build: if the map isn't imported, cook it before launching")
+    ap.add_argument("--map-package", default=None,
+                    help="import package name if it differs from --map")
+    ap.add_argument("--map-package-url", default=None,
+                    help="URL of the map package zip for --auto-import (e.g. a release asset)")
     ap.add_argument("--tl-table", default=None, help="traffic_light_table.csv (for --tls-manager sumo)")
     ap.add_argument("--tls-manager", default="sumo", choices=["sumo", "carla", "none"])
     ap.add_argument("--step-length", type=float, default=0.05,
@@ -253,6 +259,25 @@ def main():
     elif args.no_launch:
         print("[cosim] no CARLA env configured; running under the current python. "
               "If 'import carla' fails, run setup_carla first.")
+
+    # Source-build preflight: a custom map must be cooked into the build before
+    # CARLA can load it. Detect a missing map on disk and either import it
+    # (--auto-import) or fail with a clear instruction - far better than an
+    # opaque load_world() error after launch.
+    if not args.no_launch and cfg is not None and cfg.get("mode") == "source":
+        import import_map
+        pkg = args.map_package or args.map
+        if not import_map.map_is_imported(cfg["carla_root"], pkg):
+            if args.auto_import:
+                print(f"[cosim] map '{pkg}' is not imported; importing it first ...")
+                import_map.ensure_map(pkg, carla_root=cfg["carla_root"],
+                                      ue4_root=cfg.get("ue4_root"),
+                                      package_url=args.map_package_url)
+            else:
+                sys.exit(
+                    f"[cosim] map '{pkg}' is not imported into {cfg['carla_root']}.\n"
+                    f"        Import it once (e.g. import_<app>_map.bat), or pass "
+                    f"--auto-import [--map-package-url <release zip>].")
 
     carla_proc = None
     try:

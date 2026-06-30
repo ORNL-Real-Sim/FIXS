@@ -24,6 +24,7 @@ Carla/                        <- self-contained co-sim component (shipped in the
     unreal_remove_tl.py            remove placed TL actors
   carla_env_setup.py          one-time/reconfigure CARLA env picker (saves ~/.fixs/carla.json)
   setup_carla.bat / setup_carla.sh  thin per-OS wrappers for the picker
+  import_map.py               import a RoadRunner/OpenDRIVE map into a source build
   run_cosim.py                cross-platform launcher (Windows/Linux)
   run_cosim.bat / run_cosim.sh  thin per-OS wrappers
   README.md                   (this file)
@@ -121,6 +122,31 @@ config, so the launcher works on any machine no matter what the env is named:
 
 (No display? Pickers fall back to typing the path. Headless CI instead sets
 `CARLA_ROOT` and runs `verify_demo.py`, which bypasses the interactive setup.)
+
+## Importing a custom map (source build only)
+
+A custom RoadRunner/OpenDRIVE map must be **cooked into a source build** before
+CARLA can load it (packaged CARLA cannot import custom maps). `import_map.py`
+generalizes CARLA's `Util/BuildTools/Import.py --package=<name>` primitive: it
+stages the package (the `<name>.json` descriptor + its fbx/xodr/fbm assets) under
+`<carla_root>/Import` and runs the cook, reading `carla_root`/`ue4_root` from the
+saved env config.
+
+The package is sourced from a local folder or a downloaded zip (e.g. a GitHub
+**release asset** — large maps are hosted as release assets, not in git):
+
+```bash
+# from a release asset (the app wrappers pass the URL)
+python Carla/import_map.py --package RP_Ver0529 --package-url https://.../RP_Ver0529_carla_import.zip
+# from a local package folder
+python Carla/import_map.py --package RP_Ver0529 --package-dir C:/path/to/Import
+```
+
+`run_cosim.py` does this automatically: in source mode it checks whether the
+map's `.umap` is cooked and, with `--auto-import [--map-package-url <zip>]`,
+imports it before launching; otherwise it exits with a clear "import it first"
+message rather than an opaque `load_world` error. Apps ship a one-click
+`import_<app>_map.bat` and pass `--auto-import` from their launcher.
 
 ## Running a co-sim
 
