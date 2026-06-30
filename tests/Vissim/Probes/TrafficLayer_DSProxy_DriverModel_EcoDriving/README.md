@@ -126,27 +126,34 @@ that revealed, in order (each a real blocker the harness caught):
    ✅ After this, **`VISSIM_Connect OK`** and **all four sockets connect**: DSProxy
    ego, signals (2445), DriverModel (1337), CAV controller (1338).
 
-2. **Tick-0 stall — FIXED.** The DriverModel's `DRIVER_DATA_TIME` does no I/O on its
-   first step (`isVeryFirstStep`, empty network), but DSProxyMode recv'd from it every
-   tick → blocked at tick 0. Fix: the `tick >= 1` guard in DSProxyMode. ✅ The loop
-   now advances past tick 0 (`tick 0: vehicles=0 signals=7 egos=1`).
+2. **Per-tick relay does not advance — OPEN.** With the multithreading gate cleared,
+   the loop does not tick over: the co-sim stalls at tick 0/1 and the DriverModel logs
+   only `Real-Sim connected` (no send/recv). This is the **active relay** (`EnableRealSim:
+   true`, DriverModel overriding CAV speed) — the path only PR **#163** claims, on the
+   minimal `cav_xil` probe (single Python client, no CarMaker, no signal sync, no second
+   controller socket). It is **unmerged and contested** (the in-tree `cav_xil` README
+   still says it hangs). Adding CarMaker + signal sync + this demo's dedicated CAV channel
+   exposes that the relay does not "just work" in the richer multi-socket co-sim.
 
-3. **Tick-1 relay deadlock — OPEN.** The loop then stalls at tick 1. Root cause is
-   structural: the FIXS DriverModel does its **send→recv inside `DRIVER_DATA_TIME`**,
-   which VISSIM fires **during** TL's `setDriverVehicles`. So the DriverModel blocks
-   on its recv (waiting for TL) while TL is still inside `setDriverVehicles` (waiting
-   for the callback to return) and hasn't reached its own DM send/recv → circular
-   deadlock. DriverModelLog confirms it: 3 lines (`Real-Sim connected`), no send/recv.
-   **Resolving this is the open Stage C relay-protocol work** (cav_xil README's
-   "~½ day, restructure the inner loop"): co-design the TL↔DriverModel callback
-   interleaving so TL's DM send is available when the in-callback recv runs (e.g.
-   move TL's DM exchange to straddle `setDriverVehicles`, or change the DriverModel's
-   in-callback ordering). Touches both FIXS (DSProxyMode) and PF (DriverModel).
+   What is NOT the fix: a `tick >= 1` guard on the DM I/O. PR #163 shows
+   `DRIVER_DATA_TIME` is called multiple times per VISSIM tick (the 2nd call does I/O
+   even on tick 0), so the guard re-introduces the very deadlock #163 removed — verified
+   here (adding it stalls at tick 1). DSProxyMode therefore does DM I/O every tick (no
+   guard), matching #163.
 
-So: **the co-load CONNECTS and the loop starts** — the multithreading + tick-0 fixes
-are real and validated — but **CAVs are not yet actuated** because the per-tick relay
-handshake deadlocks at tick 1. Everything else (GLOSA math, signal extraction, CAV
-channel, signal sync, ego inject) is in place and exercised.
+   The real open work is getting the **active relay** to advance with the extra sockets
+   in play — building on #163, not inventing a relay thread. Likely suspects: the
+   interleave order of the four per-tick socket exchanges (CarMaker app 2444, signal
+   2445, DriverModel 1337, CAV controller 1338), and whether this demo's PF
+   (`b0ce54b8`) carries the full #163 PF companion (`ProprietaryFiles#7`) vs only the
+   `SubEgoOnly` knob.
+
+So: **the co-load CONNECTS** (multithreading fixed, all four sockets up) — but **CAVs
+are not yet actuated**, because the active per-tick relay (least-proven part of #158,
+only #163, unmerged) does not advance in the full co-sim. Everything else (GLOSA math,
+signal extraction, CAV channel, signal sync, ego inject, the connection) is in place
+and exercised. **What #162/#166 "verified" is the INERT co-load** (DriverModel loaded,
+`EnableRealSim: false`, no socket) — not the active relay this demo needs.
 
 Other caveats:
 - **Signal positions need one calibration pass** (above). Timing is reliable.

@@ -405,14 +405,14 @@ int runDSProxyMode(const ConfigHelper& config) {
         // SocketHelper / MsgHelper call shape is identical to the app-side
         // PHASE 4/5 below; only the destination socket changes.
         //
-        // tick >= 1 guard (#173): the FIXS DriverModel's DRIVER_DATA_TIME takes
-        // the isVeryFirstStep branch on its FIRST step (empty network) and does
-        // NEITHER send nor recv (DriverModel_FIXS_Common.h ~L545). If TL recvs on
-        // tick 0 it blocks forever on bytes the DriverModel never sends -> the
-        // co-load stalls at "0 ticks". The DriverModel does its once-per-tick
-        // send/recv from its SECOND step on, so TL mirrors it from tick 1. (Holds
-        // while the network is empty at t=0, which it is for this demo's demand.)
-        if (relayDM && dmSock > 0 && tick >= 1) {
+        // NO tick>=1 guard (per PR #163): DRIVER_DATA_TIME is called MULTIPLE
+        // times per VISSIM tick and its second call does send+recv even on tick 0,
+        // so TL must do DM I/O every tick -- a tick>=1 guard re-introduces the
+        // Stage B+ deadlock #163 removed. (#173: confirmed adding the guard makes
+        // the full co-sim stall at tick 1; without it the minimal cav_xil relay
+        // works but the CarMaker+signal+CAV-channel co-sim still does not advance
+        // -- the active relay is unproven beyond the single-client probe.)
+        if (relayDM && dmSock > 0) {
             msgHelper.VehDataRecv_um.clear();
             msgHelper.TlsDataRecv_um.clear();
             msgHelper.DetDataRecv_um.clear();
