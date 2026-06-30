@@ -46,7 +46,7 @@ Established empirically (headless ERG: `Vhcl.sRoad`, `Car.v`, `Brake.Hyd.Sys.pMC
 `TrfLight.<name>.State`) and against `road.h` + the IPGRoad InfoFile doc:
 
 1. **A `DrvStop` marker is REQUIRED.** A traffic-light *head* alone does **not** brake
-   IPGDriver — the existing `SimpleTL_VISSIM` demo renders all 44 lights and drives straight
+   IPGDriver — the existing `SimpleTrafficLight_Cosim` demo renders all 44 lights and drives straight
    through a full red. `road.h` flags head-based stop-line detection as *deprecated*; the
    active path is `DrvStop` markers evaluated along the **Route**. osc2cm imports heads but
    **not** stop markers, so they must be added.
