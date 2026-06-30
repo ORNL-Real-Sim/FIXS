@@ -16,8 +16,20 @@
 
 namespace virenv {
 
-// mainVirCarla uses a fixed default bounding box + a small spawn z offset.
-static const carla::geom::Vector3D kExtent(4.8f, 2.0f, 1.8f);
+// #174 coord fix: the SUMO/FIXS wire carries the FRONT-of-vehicle position; the
+// Carla actor transform is the actor PIVOT, which (empirically) sits at the
+// bounding-box CENTER horizontally (bbox.location.x ~= 0). So to land the model's
+// FRONT on the SUMO front we must step back the actor HALF-length == bbox.extent.x.
+// map_transfrom_Sumo_to_Carla(..,extent) does exactly that with extent.x, so the
+// CORRECT extent is the actor's real GetBoundingBox().extent -- which the reverse
+// readback (Carla->Sumo) already uses, so this also makes forward/reverse symmetric.
+//
+// The OLD code passed a hard-coded (4.8,2.0,1.8) -- a placeholder for the
+// commented-out (length/2,width/2,height/2). 4.8 as a half-length implies a 9.6 m
+// vehicle, so every actor was anchored ~2.4 m too far back. kDefaultExtent below is
+// only a sane passenger-car fallback for the TRANSIENT spawn transform (the actor's
+// bbox isn't queryable until it exists; setVehiclePose overwrites it the same tick).
+static const carla::geom::Vector3D kDefaultExtent(2.3f, 1.0f, 0.75f);
 static const float kSpawnOffsetZ = 0.1f;
 
 void CarlaBackend::log(const char* msg)      { std::cout << msg << std::endl; }
@@ -44,7 +56,9 @@ VehHandle CarlaBackend::spawnVehicle(const std::string& vType, const std::string
     if (!world_) return kNoHandle;
     if (!bpLib_) bpLib_ = world_->GetBlueprintLibrary();
 
-    carla::geom::Transform carlaTf = BridgeHelper::map_transfrom_Sumo_to_Carla(sumoTransformOf(spawnPose), kExtent);
+    // spawn transform is transient: setVehiclePose corrects it with the real bbox
+    // the same tick (before world.Tick), so a passenger-car default is sufficient.
+    carla::geom::Transform carlaTf = BridgeHelper::map_transfrom_Sumo_to_Carla(sumoTransformOf(spawnPose), kDefaultExtent);
     carlaTf.location.z += kSpawnOffsetZ;
 
     std::string bpId = useVType_ ? vType : BridgeHelper::map_Sumo_vClass_to_Carla_blueprintId(vClass);
@@ -79,7 +93,16 @@ void CarlaBackend::despawnVehicle(VehHandle h) {
 }
 
 void CarlaBackend::setVehiclePose(VehHandle h, const Pose& p) {
-    carla::geom::Transform carlaTf = BridgeHelper::map_transfrom_Sumo_to_Carla(sumoTransformOf(p), kExtent);
+    // Use the actor's REAL half-size so the model FRONT lands on the SUMO front
+    // (anchor == bbox.extent.x == half-length). Symmetric with the Carla->Sumo
+    // readback, which already uses GetBoundingBox().extent.
+    carla::geom::Vector3D ext = kDefaultExtent;
+    auto it = actors_.find(h);
+    if (it != actors_.end() && it->second) {
+        carla::geom::Vector3D e = it->second->GetBoundingBox().extent;
+        if (e.x > 0.1f) ext = e;   // guard a not-yet-populated bbox on the spawn frame
+    }
+    carla::geom::Transform carlaTf = BridgeHelper::map_transfrom_Sumo_to_Carla(sumoTransformOf(p), ext);
     lastApplied_[h] = carlaTf;   // A/B instrumentation (driver logs it by SUMO id)
     // batched, applied in flushBatch() before the world Tick -- same as mainVirCarla
     batch_.push_back(carla::rpc::Command::ApplyTransform((carla::rpc::ActorId)h, carlaTf));

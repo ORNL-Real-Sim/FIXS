@@ -168,8 +168,14 @@ bool CarMakerBackend::readEgoState(const std::string& /*egoId*/, EgoState& out) 
         heading = (-Vehicle.Yaw + 2.5 * M_PI) * 180 / M_PI;
     out.heading = heading;
 
-    out.x = Vehicle.PoI_Pos[0] + Vehicle.Cfg.Bdy1_CoM[0] * sin(heading * M_PI / 180);
-    out.y = Vehicle.PoI_Pos[1] + Vehicle.Cfg.Bdy1_CoM[0] * cos(heading * M_PI / 180);
+    // The FIXS wire position is the vehicle FRONT. Anchor at the ego's true front
+    // bumper from the loaded model's geometry: PoI -> front axle (PoI2AxleFront)
+    // -> bumper (OverhangFront). This generalizes to ANY ego car. The old code
+    // used Bdy1_CoM[0] (the CoM), which sits ~1.07 m behind the real front on the
+    // default 5 m sedan -- it reported the ego that far back to SUMO/FIXS.
+    const double frontOff = Vehicle.Cfg.PoI2AxleFront + Vehicle.Cfg.OverhangFront;
+    out.x = Vehicle.PoI_Pos[0] + frontOff * sin(heading * M_PI / 180);
+    out.y = Vehicle.PoI_Pos[1] + frontOff * cos(heading * M_PI / 180);
     out.z = Vehicle.PoI_Pos[2] - Vehicle.Cfg.Bdy1_CoM[2];
 
     out.brake = VehicleControl.Lights.Brake;
