@@ -60,11 +60,25 @@ def patch_drivermodel_hook() -> None:
             vt.set("extDriverDLLFile", str(FIXS_DRIVERMODEL))
             vt.set("extDriverParFile", str(PAR_FILE))
             patched += 1
-    tree.write(inpx, encoding="utf-8", xml_declaration=True)
     if patched != 1:
         raise SystemExit(f"ERROR: expected 1 vehicleType no={DM_FLAGGED_TYPE_NO}, patched {patched}")
+
+    # Force SINGLE-CORE: the FIXS DriverModel DLL declares it does not support
+    # multithreading, and VISSIM aborts ("external driver model DLL does not
+    # support multithreading") if the network is set to use all cores. The
+    # simulation element ships with useAllCores="true" (which overrides
+    # numCores), so flip it off and pin numCores=1.
+    cores_fixed = 0
+    for sim in root.iter("simulation"):
+        if sim.get("useAllCores") is not None or sim.get("numCores") is not None:
+            sim.set("useAllCores", "false")
+            sim.set("numCores", "1")
+            cores_fixed += 1
+
+    tree.write(inpx, encoding="utf-8", xml_declaration=True)
     print(f"[setup_eco] hooked FIXS DriverModel on Car type {DM_FLAGGED_TYPE_NO} "
-          f"(EnableRealSim: true via eco_par.yaml)")
+          f"(EnableRealSim: true via eco_par.yaml); single-core forced on "
+          f"{cores_fixed} simulation element(s)")
 
 
 def write_runtime_config() -> None:
