@@ -53,10 +53,29 @@ def main() -> int:
         return 2
 
     print(f"[load_opendrive_world] connecting to {args.host}:{args.port} ...")
-    client = carla.Client(args.host, args.port)
-    client.set_timeout(args.timeout)
-    print(f"[load_opendrive_world] client {client.get_client_version()} / "
-          f"server {client.get_server_version()}")
+    # On a cold start the RPC port can be open (TCP listen backlog) BEFORE Carla's
+    # RPC server actually answers, so a single long-timeout call just hangs. Poll
+    # get_server_version with a FRESH client each attempt until it responds (this
+    # is what reliably catches the server becoming ready); --timeout is the overall
+    # budget for the server to come up.
+    import time
+    deadline = time.time() + args.timeout
+    while True:
+        try:
+            client = carla.Client(args.host, args.port)
+            client.set_timeout(5.0)
+            srv = client.get_server_version()
+            print(f"[load_opendrive_world] client {client.get_client_version()} / "
+                  f"server {srv}")
+            break
+        except RuntimeError:
+            if time.time() >= deadline:
+                print(f"[load_opendrive_world] FAIL: CARLA RPC not responsive within "
+                      f"{args.timeout:.0f}s (server still starting up?)")
+                return 3
+            time.sleep(3)
+    # generous timeout for the heavier generate_opendrive_world mesh build
+    client.set_timeout(max(args.timeout, 60.0))
 
     params = carla.OpendriveGenerationParameters(
         vertex_distance=args.vertex_distance,

@@ -57,13 +57,23 @@ REM --- 1-3. bring up CARLA + load the SimpleLoop world (unless SKIP_CARLA) ----
 if defined SKIP_CARLA (
     echo [1-3/6] SKIP_CARLA set -- assuming CARLA is up with simple_loop.xodr loaded.
 ) else (
-    echo [1/6] Launching CARLA source build...
+    REM Close any stale/wedged CARLA first so we always launch from a clean state.
+    REM (A server left in synchronous mode with no ticker keeps its RPC port open
+    REM but stops serving -- inheriting it makes the world-load below hang. This
+    REM also avoids a second editor that cannot bind port %CARLA_PORT%.)
+    echo [1/6] Closing any running CARLA, then launching fresh...
+    taskkill /F /IM UE4Editor.exe >nul 2>&1
+    taskkill /F /IM CarlaUE4.exe  >nul 2>&1
+    timeout /t 2 /nobreak >nul
     call "%CARLADIR%\launch_carla.bat"
     echo [2/6] Waiting for CARLA RPC on %CARLA_HOST%:%CARLA_PORT% ...
     powershell -NoProfile -ExecutionPolicy Bypass -File "%CARLADIR%\wait_for_rpc.ps1" -Port %CARLA_PORT%
     if errorlevel 1 ( echo ERROR: CARLA never came up on port %CARLA_PORT%. & pause & exit /b 1 )
     echo [3/6] Loading simple_loop.xodr as the CARLA world...
-    "%PY%" "%CARLADIR%\load_opendrive_world.py" "%XODR%" --sync --delta 0.1
+    REM --timeout 120: wait_for_rpc only confirms the PORT is open; a freshly
+    REM launched server needs longer before it serves RPC (get_server_version /
+    REM generate_opendrive_world). 20s (the default) is too short on a cold start.
+    "%PY%" "%CARLADIR%\load_opendrive_world.py" "%XODR%" --sync --delta 0.1 --timeout 300
     if errorlevel 1 ( echo ERROR: load_opendrive_world.py failed ^(is carla 0.9.15 in %%PY%%?^). & pause & exit /b 1 )
 )
 
