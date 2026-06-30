@@ -244,6 +244,21 @@ def test_stage_from_path_accepts_zip(tmp_path):
     assert (import_dir / "Assets" / "RP_Ver0529.xodr").is_file()
 
 
+def test_stage_package_pick_uses_selector_not_gh(monkeypatch, tmp_path):
+    """--package-pick forces the manual file selector and never calls gh."""
+    carla_root = tmp_path / "carla"
+    (carla_root / "Import").mkdir(parents=True)
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "RP_Ver0529.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(import_map, "_select_package", lambda name, url: str(pkg))
+    monkeypatch.setattr(import_map, "_try_gh_download",
+                        lambda url: (_ for _ in ()).throw(AssertionError("gh used!")))
+    import_map.stage_package(str(carla_root), "RP_Ver0529",
+                             package_url="https://x/y.zip", package_pick=True)
+    assert (carla_root / "Import" / "RP_Ver0529.json").is_file()
+
+
 def test_stage_package_noop_when_already_staged(tmp_path, capsys):
     """If the descriptor is already present and no source is given, it's a no-op."""
     carla_root = tmp_path / "carla"

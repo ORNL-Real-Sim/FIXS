@@ -97,33 +97,46 @@ def _try_gh_download(package_url):
     return None, None
 
 
-def _prompt_for_package(name, package_url):
-    """Ask the user to point at a package they downloaded by hand. This is the
-    portable path - no GitHub CLI / auth needed, just browser access to the
-    release."""
-    print(f"\n[import] The '{name}' map package is not staged locally.")
+def _select_package(name, package_url):
+    """Let the user point at a package they downloaded by hand - a native file
+    picker, falling back to a typed path. This is the portable path: no GitHub
+    CLI / auth needed, just browser access to the release."""
+    print(f"\n[import] Select the downloaded '{name}' map package.")
     if package_url:
-        print("[import] Download it from your browser (you need access to the release):")
+        print("[import] If you don't have it yet, download it (browser is fine - "
+              "you need access to the release):")
         print(f"             {package_url}")
-    print("[import] Save it anywhere, then give the path below (the .zip is fine - "
-          "no need to unzip).")
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk()
+        root.withdraw()
+        root.update()
+        path = filedialog.askopenfilename(
+            title=f"Select the downloaded {name} package (.zip)",
+            filetypes=[("Zip archives", "*.zip"), ("All files", "*.*")])
+        root.destroy()
+        if path:
+            return path
+    except Exception as exc:  # no display / no tkinter
+        print(f"[import] file picker unavailable ({exc}); type the path instead.")
     if not sys.stdin.isatty():
-        sys.exit("[import] non-interactive session: pass --package-dir <folder> "
-                 "(or --package-url) with the downloaded package.")
-    path = input("[import] Path to the downloaded package (.zip or folder): ").strip().strip('"')
+        sys.exit("[import] non-interactive session: pass --package-dir "
+                 "<zip-or-folder> with the downloaded package.")
+    path = input("[import] Path to the downloaded .zip (or extracted folder): ").strip().strip('"')
     if not path or not os.path.exists(path):
         sys.exit(f"[import] path not found: {path!r}")
     return path
 
 
-def stage_package(carla_root, name, package_url=None, package_dir=None):
+def stage_package(carla_root, name, package_url=None, package_dir=None, package_pick=False):
     """Ensure <carla_root>/Import has <name>.json (+ its assets). Sources the
     package, in order: an already-staged descriptor, an explicit --package-dir,
-    an opportunistic gh download of --package-url, else an interactive prompt for
-    a hand-downloaded copy."""
+    a hand-picked download (--package-pick, always asks), an opportunistic gh
+    download of --package-url, else a file picker for a hand-downloaded copy."""
     import_dir = os.path.join(carla_root, "Import")
     descriptor = _descriptor(carla_root, name)
-    if os.path.isfile(descriptor) and not package_url and not package_dir:
+    if os.path.isfile(descriptor) and not package_url and not package_dir and not package_pick:
         print(f"[import] package already staged: {descriptor}")
         return import_dir
 
@@ -132,10 +145,12 @@ def stage_package(carla_root, name, package_url=None, package_dir=None):
     try:
         if package_dir:
             src = package_dir
+        elif package_pick:
+            src = _select_package(name, package_url)  # forced manual select
         else:
             src, tmpdir = _try_gh_download(package_url)
             if src is None:
-                src = _prompt_for_package(name, package_url)
+                src = _select_package(name, package_url)
         _stage_from_path(src, import_dir)
     finally:
         if tmpdir:
@@ -163,8 +178,8 @@ def run_import(carla_root, ue4_root, name):
     return subprocess.call(cmd, cwd=carla_root, env=proc_env)
 
 
-def ensure_map(name, carla_root=None, ue4_root=None,
-               package_url=None, package_dir=None, force=False, prompt_if_exists=False):
+def ensure_map(name, carla_root=None, ue4_root=None, package_url=None,
+               package_dir=None, force=False, prompt_if_exists=False, package_pick=False):
     """Make sure `name` is imported into the (source-build) CARLA, importing it
     if needed. Returns 0 on success; exits with a clear message otherwise.
 
@@ -190,7 +205,7 @@ def ensure_map(name, carla_root=None, ue4_root=None,
             return 0
         print("[import] re-importing ...")
 
-    stage_package(carla_root, name, package_url, package_dir)
+    stage_package(carla_root, name, package_url, package_dir, package_pick)
     rc = run_import(carla_root, ue4_root, name)
     if rc != 0:
         sys.exit(f"[import] Import.py failed (exit {rc}).")
@@ -208,7 +223,10 @@ def main():
     ap.add_argument("--package-url", default=None,
                     help="URL of the package zip (e.g. a GitHub release asset)")
     ap.add_argument("--package-dir", default=None,
-                    help="local folder holding the package files")
+                    help="local folder (or .zip) holding the package files")
+    ap.add_argument("--package-pick", action="store_true",
+                    help="always open a file picker to select a hand-downloaded package "
+                         "(skips the gh auto-download)")
     ap.add_argument("--carla-root", default=None, help="override the saved carla_root")
     ap.add_argument("--ue4-root", default=None, help="override the saved ue4_root")
     ap.add_argument("--force", action="store_true",
@@ -216,7 +234,8 @@ def main():
     args = ap.parse_args()
     # run standalone -> offer to re-import if the map already exists
     return ensure_map(args.package, args.carla_root, args.ue4_root,
-                      args.package_url, args.package_dir, args.force, prompt_if_exists=True)
+                      args.package_url, args.package_dir, args.force,
+                      prompt_if_exists=True, package_pick=args.package_pick)
 
 
 if __name__ == "__main__":
