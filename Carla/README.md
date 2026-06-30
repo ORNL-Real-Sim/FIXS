@@ -132,15 +132,21 @@ stages the package (the `<name>.json` descriptor + its fbx/xodr/fbm assets) unde
 `<carla_root>/Import` and runs the cook, reading `carla_root`/`ue4_root` from the
 saved env config.
 
-The package is sourced from a local folder or a downloaded zip (e.g. a GitHub
-**release asset** — large maps are hosted as release assets, not in git):
+Large map packages are hosted as **release assets** (private repo), not in git.
+Because a consumer may not have the GitHub CLI, the import is **download-and-point**:
+`--package-url` is auto-fetched via `gh` when available, otherwise you're prompted
+to point at a copy you downloaded by hand from the release page (browser access is
+all that's needed):
 
 ```bash
-# from a release asset (the app wrappers pass the URL)
+# pass the release URL: auto-download via gh if present, else prompt for a local copy
 python Carla/import_map.py --package RP_Ver0529 --package-url https://.../RP_Ver0529_carla_import.zip
-# from a local package folder
-python Carla/import_map.py --package RP_Ver0529 --package-dir C:/path/to/Import
+# or point straight at a downloaded copy (the prompt also accepts a .zip or folder)
+python Carla/import_map.py --package RP_Ver0529 --package-dir C:/Downloads/RP_Ver0529_carla_import.zip
 ```
+
+(`--package-dir` and the prompt both accept either the downloaded `.zip` or an
+already-extracted folder.)
 
 `run_cosim.py` does this automatically: in source mode it checks whether the
 map's `.umap` is cooked and, with `--auto-import [--map-package-url <zip>]`,

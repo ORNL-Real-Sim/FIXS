@@ -217,6 +217,33 @@ def test_stage_package_from_local_dir(tmp_path):
     assert (carla_root / "Import" / "Assets" / "RP_Ver0529.xodr").is_file()
 
 
+def test_gh_release_ref_parsing():
+    """github release-asset URLs parse to (repo, tag, asset); others -> None."""
+    ref = import_map._gh_release_ref(
+        "https://github.com/ORNL-Real-Sim/FIXS_Applications/releases/download/"
+        "map-RP_Ver0529/RP_Ver0529_carla_import.zip")
+    assert ref == ("ORNL-Real-Sim/FIXS_Applications", "map-RP_Ver0529",
+                   "RP_Ver0529_carla_import.zip")
+    assert import_map._gh_release_ref("https://example.com/foo.zip") is None
+
+
+def test_stage_from_path_accepts_zip(tmp_path):
+    """A hand-downloaded .zip is extracted into Import/ (the manual ORNL path)."""
+    src = tmp_path / "pkg"
+    (src / "Assets").mkdir(parents=True)
+    (src / "RP_Ver0529.json").write_text("{}", encoding="utf-8")
+    (src / "Assets" / "RP_Ver0529.xodr").write_text("<x/>", encoding="utf-8")
+    zpath = tmp_path / "RP_Ver0529_carla_import.zip"
+    with __import__("zipfile").ZipFile(zpath, "w") as z:
+        z.write(src / "RP_Ver0529.json", "RP_Ver0529.json")
+        z.write(src / "Assets" / "RP_Ver0529.xodr", "Assets/RP_Ver0529.xodr")
+    import_dir = tmp_path / "carla" / "Import"
+    import_dir.mkdir(parents=True)
+    import_map._stage_from_path(str(zpath), str(import_dir))
+    assert (import_dir / "RP_Ver0529.json").is_file()
+    assert (import_dir / "Assets" / "RP_Ver0529.xodr").is_file()
+
+
 def test_stage_package_noop_when_already_staged(tmp_path, capsys):
     """If the descriptor is already present and no source is given, it's a no-op."""
     carla_root = tmp_path / "carla"

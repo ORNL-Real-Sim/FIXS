@@ -8,10 +8,13 @@ per-app one-click import_*.bat / .sh wrappers.
 
 A map "package" is the `<name>.json` descriptor plus its fbx/xodr/fbm asset
 folder. This helper makes sure that package is staged under <carla_root>/Import,
-then runs the cook. The package is sourced, in order of preference, from:
+then runs the cook. The package is sourced, in order:
+  already staged        files already present under <carla_root>/Import, or
   --package-dir <dir>   a local folder holding the package files, or
-  --package-url <url>   a zip to download (e.g. a GitHub release asset), or
-  already staged        files already present under <carla_root>/Import.
+  --package-url <url>   tried via the GitHub CLI if installed (handles private
+                        repos), else you are prompted to point at a copy you
+                        downloaded by hand from the release - the portable path,
+                        needing only browser access, no gh / auth.
 
 Importing requires a CARLA **source build** (the cook runs the Unreal editor);
 packaged CARLA cannot import custom maps. carla_root / ue4_root default to the
@@ -23,11 +26,11 @@ Examples:
 """
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
-import urllib.request
 import zipfile
 
 import carla_env_setup as env
@@ -47,9 +50,77 @@ def _descriptor(carla_root, name):
     return os.path.join(carla_root, "Import", name + ".json")
 
 
+def _stage_from_path(path, import_dir):
+    """Copy/extract a downloaded package (a .zip or an extracted folder) into
+    <carla_root>/Import, preserving the descriptor + asset-folder layout."""
+    if os.path.isfile(path) and path.lower().endswith(".zip"):
+        print(f"[import] extracting {path} -> {import_dir}")
+        with zipfile.ZipFile(path) as z:
+            z.extractall(import_dir)
+    elif os.path.isdir(path):
+        print(f"[import] copying {path} -> {import_dir}")
+        for item in os.listdir(path):
+            src = os.path.join(path, item)
+            dst = os.path.join(import_dir, item)
+            if os.path.isdir(src):
+                shutil.copytree(src, dst, dirs_exist_ok=True)
+            else:
+                shutil.copy2(src, dst)
+    else:
+        sys.exit(f"[import] package path is not a .zip or a folder: {path}")
+
+
+def _gh_release_ref(url):
+    """(repo, tag, asset) if url is a github release-asset URL, else None."""
+    m = re.match(r"https?://github\.com/([^/]+/[^/]+)/releases/download/([^/]+)/(.+)$", url)
+    return (m.group(1), m.group(2), m.group(3)) if m else None
+
+
+def _try_gh_download(package_url):
+    """Opportunistic auto-download via the GitHub CLI (handles private repos).
+    Returns (zip_path, tmpdir) on success, else (None, None) so we fall back to a
+    manual prompt - many machines won't have gh installed/authenticated."""
+    ref = _gh_release_ref(package_url or "")
+    gh = shutil.which("gh")
+    if not ref or not gh:
+        return None, None
+    repo, tag, asset = ref
+    tmp = tempfile.mkdtemp(prefix="fixs-map-")
+    print(f"[import] trying gh to download {asset} from {repo}@{tag} ...")
+    rc = subprocess.call([gh, "release", "download", tag, "-R", repo,
+                          "-p", asset, "-D", tmp, "--clobber"])
+    got = os.path.join(tmp, asset)
+    if rc == 0 and os.path.isfile(got):
+        return got, tmp
+    print("[import] gh download unavailable; will ask for a local copy instead.")
+    shutil.rmtree(tmp, ignore_errors=True)
+    return None, None
+
+
+def _prompt_for_package(name, package_url):
+    """Ask the user to point at a package they downloaded by hand. This is the
+    portable path - no GitHub CLI / auth needed, just browser access to the
+    release."""
+    print(f"\n[import] The '{name}' map package is not staged locally.")
+    if package_url:
+        print("[import] Download it from your browser (you need access to the release):")
+        print(f"             {package_url}")
+    print("[import] Save it anywhere, then give the path below (the .zip is fine - "
+          "no need to unzip).")
+    if not sys.stdin.isatty():
+        sys.exit("[import] non-interactive session: pass --package-dir <folder> "
+                 "(or --package-url) with the downloaded package.")
+    path = input("[import] Path to the downloaded package (.zip or folder): ").strip().strip('"')
+    if not path or not os.path.exists(path):
+        sys.exit(f"[import] path not found: {path!r}")
+    return path
+
+
 def stage_package(carla_root, name, package_url=None, package_dir=None):
-    """Ensure <carla_root>/Import has <name>.json (+ its assets). No-op if the
-    descriptor is already present and no explicit source was given."""
+    """Ensure <carla_root>/Import has <name>.json (+ its assets). Sources the
+    package, in order: an already-staged descriptor, an explicit --package-dir,
+    an opportunistic gh download of --package-url, else an interactive prompt for
+    a hand-downloaded copy."""
     import_dir = os.path.join(carla_root, "Import")
     descriptor = _descriptor(carla_root, name)
     if os.path.isfile(descriptor) and not package_url and not package_dir:
@@ -57,28 +128,18 @@ def stage_package(carla_root, name, package_url=None, package_dir=None):
         return import_dir
 
     os.makedirs(import_dir, exist_ok=True)
-    if package_dir:
-        if not os.path.isdir(package_dir):
-            sys.exit(f"[import] --package-dir not found: {package_dir}")
-        print(f"[import] copying package from {package_dir} -> {import_dir}")
-        for item in os.listdir(package_dir):
-            src = os.path.join(package_dir, item)
-            dst = os.path.join(import_dir, item)
-            if os.path.isdir(src):
-                shutil.copytree(src, dst, dirs_exist_ok=True)
-            else:
-                shutil.copy2(src, dst)
-    elif package_url:
-        tmp = tempfile.mkdtemp(prefix="fixs-map-")
-        try:
-            zpath = os.path.join(tmp, "package.zip")
-            print(f"[import] downloading {package_url}")
-            urllib.request.urlretrieve(package_url, zpath)
-            print(f"[import] extracting into {import_dir}")
-            with zipfile.ZipFile(zpath) as z:
-                z.extractall(import_dir)
-        finally:
-            shutil.rmtree(tmp, ignore_errors=True)
+    tmpdir = None
+    try:
+        if package_dir:
+            src = package_dir
+        else:
+            src, tmpdir = _try_gh_download(package_url)
+            if src is None:
+                src = _prompt_for_package(name, package_url)
+        _stage_from_path(src, import_dir)
+    finally:
+        if tmpdir:
+            shutil.rmtree(tmpdir, ignore_errors=True)
 
     if not os.path.isfile(descriptor):
         sys.exit(f"[import] after staging, descriptor still missing: {descriptor}\n"
