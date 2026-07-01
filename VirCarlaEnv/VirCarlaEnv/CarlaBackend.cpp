@@ -9,6 +9,8 @@
 
 #include <iostream>
 #include <cmath>
+#include <cstdio>
+#include <string>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -147,6 +149,20 @@ void CarlaBackend::freezeAndMatchTrafficLights() {
 carla::SharedPtr<carla::client::Vehicle> CarlaBackend::actorOf(VehHandle h) {
     auto it = actors_.find(h);
     return (it != actors_.end()) ? it->second : nullptr;
+}
+
+std::string CarlaBackend::debugHeader() const {
+    return ",carla_x,carla_y,carla_z,carla_yaw,carla_pitch";
+}
+
+std::string CarlaBackend::debugFields(VehHandle h) const {
+    auto it = lastApplied_.find(h);
+    if (it == lastApplied_.end()) return ",,,,,";
+    const carla::geom::Transform& t = it->second;
+    char buf[160];
+    std::snprintf(buf, sizeof(buf), ",%.4f,%.4f,%.4f,%.4f,%.4f",
+                  t.location.x, t.location.y, t.location.z, t.rotation.yaw, t.rotation.pitch);
+    return std::string(buf);
 }
 
 } // namespace virenv

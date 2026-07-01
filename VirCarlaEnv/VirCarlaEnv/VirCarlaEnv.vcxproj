@@ -153,4 +153,11 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
+  <!-- Build with -p:RS_DEBUG=1 to emit the unified VirEnvCore diagnostic CSV
+       (rs_core_pos.csv), same switch as VirtualEnvironment.vcxproj. -->
+  <ItemDefinitionGroup Condition="'$(RS_DEBUG)'=='1'">
+    <ClCompile>
+      <PreprocessorDefinitions>RS_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+  </ItemDefinitionGroup>
 </Project>

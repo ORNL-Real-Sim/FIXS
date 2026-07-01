@@ -23,6 +23,9 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#ifdef RS_DEBUG
+#include <cstdio>
+#endif
 
 #include "SocketHelper.h"
 #include "MsgHelper.h"
@@ -104,6 +107,15 @@ private:
 
     void  logCore(const char* msg);
     static int decodeLightBits(int lightIndicators, bool& brake, bool& indL, bool& indR);
+
+#ifdef RS_DEBUG
+    // Unified per-vehicle diagnostic log (one CSV for every simulator). Writes the
+    // FIXS-canonical pose + the pose handed to the backend, then appends the
+    // backend's own debugFields(). Opened lazily on the first row.
+    std::FILE* rsDbg_ = nullptr;
+    void rsDebugRow_(double simTime, const std::string& id, VehHandle h,
+                     const Pose& fixs, const Pose& applied, int lightBits);
+#endif
 };
 
 } // namespace virenv

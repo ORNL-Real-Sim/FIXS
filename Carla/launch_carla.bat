@@ -32,5 +32,7 @@ if not exist "%UE4EDITOR%" ( echo [ERROR] UE4Editor.exe not found: %UE4EDITOR% &
 
 echo Launching CARLA (-game) on %MAP% ...
 echo   uproject: %CARLA_UPROJECT%
+REM For render-bound viz you can append -quality-level=Low below (cheap render: no
+REM motion blur, simpler shadows/AA -> higher frame rate). Left off by default.
 start "CARLA" "%UE4EDITOR%" "%CARLA_UPROJECT%" "%MAP%" -game -windowed -ResX=1280 -ResY=720
 endlocal

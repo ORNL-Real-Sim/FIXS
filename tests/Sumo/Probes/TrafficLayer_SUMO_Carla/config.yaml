@@ -85,8 +85,27 @@ CarlaSetup:
 
     TrafficRefreshRate: 0.1
 
+    # Carla render sub-step (s). Ticks Carla finer than the 0.1 s FIXS feed and
+    # interpolates between received states -> more rendered frames = smoother
+    # motion (the CarMaker trick). Effective FPS ~= (0.1 / CarlaTimeStep) x feed
+    # rate, so smaller = smoother viz. TUNE for your machine: try 0.0125 (8x),
+    # 0.01 (10x), 0.02 (5x). Must evenly divide 0.1. Omit / 0 -> 1:1 (no interp).
+    CarlaTimeStep: 0.05
+
+    # Spread the sub-ticks evenly in wall-time (pace to real time) so the follow-
+    # cam renders smooth instead of burst-then-freeze at the 0.1 s feed rate.
+    # TRUE for standalone viz (no RT hardware). FALSE for XIL -- the RT component
+    # (CarMaker/dSPACE) already paces the loop and an extra sleep would throttle it.
+    RealtimePacing: false
+
     # Subset of the subscription ids that Carla treats as "interested" (ego).
     InterestedIds: ['ego']
 
-    # Spectator camera follows this id (must be an interested id).
+    # Spectator (main viewport) camera. EnableSpectatorFollow true -> the bridge
+    # rigidly snaps a top-down BEV onto CenteredViewId each tick (no lag / no
+    # oscillation). Set it false -> the bridge never touches the spectator, so you
+    # can free-fly the CARLA camera (WASD + mouse) to inspect.
+    EnableSpectatorFollow: true
     CenteredViewId: ego
+    SpectatorHeight: 50        # BEV camera height above the ego (m)
+    SpectatorAlignYaw: false   # false: fixed north-up; true: rotate view with ego heading

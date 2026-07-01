@@ -51,6 +51,10 @@ public:
 
     bool readEgoState(const std::string&, EgoState&) override { return false; }  // driver reads POST-tick
 
+    // unified RS_DEBUG: append the APPLIED Carla transform to the core's csv row
+    std::string debugHeader() const override;
+    std::string debugFields(VehHandle h) const override;
+
     // ---- driver hooks (not part of IVirEnvBackend) ------------------------
     void flushBatch();                                                     // ApplyBatch(the transform commands)
     void freezeAndMatchTrafficLights();                                    // map traffic.traffic_light actors -> junctions

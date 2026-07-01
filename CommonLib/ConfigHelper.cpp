@@ -541,6 +541,14 @@ int ConfigHelper::getConfig(string configName) {
 		if (!SuppressDefaultMessages) printf("\nCentered View Id not specified! Will use ego as default!\n");
 	}
 
+	// Spectator BEV follow (rigid top-down snap). Default ON, 50 m up, north-up.
+	CarlaSetup.EnableSpectatorFollow = node["EnableSpectatorFollow"] ? parserFlag(node, "EnableSpectatorFollow") : true;
+	CarlaSetup.SpectatorHeight       = node["SpectatorHeight"]       ? parserDouble(node, "SpectatorHeight") : 50.0;
+	CarlaSetup.SpectatorAlignYaw     = node["SpectatorAlignYaw"]     ? parserFlag(node, "SpectatorAlignYaw") : false;
+
+	// Real-time frame pacing (spread sub-ticks evenly). Default OFF (XIL-safe).
+	CarlaSetup.RealtimePacing = node["RealtimePacing"] ? parserFlag(node, "RealtimePacing") : false;
+
 	if (node["CarlaServerIP"]) {
 		CarlaSetup.CarlaServerIP = parserString(node, "CarlaServerIP");
 	}
@@ -602,6 +610,9 @@ int ConfigHelper::getConfig(string configName) {
 		CarlaSetup.TrafficRefreshRate = 0.1;
 		//printf("\nCarMaker Port not specified! Will use 7331 as default!\n");
 	}
+
+	// Carla render sub-step (interpolate the feed for smoother motion). 0 -> 1:1.
+	CarlaSetup.CarlaTimeStep = node["CarlaTimeStep"] ? parserDouble(node, "CarlaTimeStep") : 0.0;
 
 	if (node["InterestedIds"]) {
 		parserStringVector(node, "InterestedIds", CarlaSetup.InterestedIds);

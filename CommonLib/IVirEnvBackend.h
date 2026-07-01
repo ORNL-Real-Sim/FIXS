@@ -142,6 +142,17 @@ public:
     // Optional L2 hook: advise the backend's in-sim driver of a desired speed
     // (e.g. Carla TM set_desired_speed). Default no-op.
     virtual void applyEgoControl(const std::string& /*egoId*/, double /*desiredSpeed*/) {}
+
+    // --- unified RS_DEBUG diagnostics --------------------------------------
+    // When the core is built with RS_DEBUG it writes ONE canonical per-vehicle
+    // CSV (simTime, id, the FIXS-canonical pose, the pose handed to the backend).
+    // A backend may append its OWN columns to that SAME row so every simulator
+    // shares one log instead of N divergent CSVs: debugHeader() returns the extra
+    // column names (comma-led, e.g. ",carla_x,carla_y,carla_yaw") written once;
+    // debugFields(h) returns the matching values for one vehicle each step.
+    // Default empty -> the core log has identical columns regardless of backend.
+    virtual std::string debugHeader() const { return std::string(); }
+    virtual std::string debugFields(VehHandle /*h*/) const { return std::string(); }
 };
 
 } // namespace virenv

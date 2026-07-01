@@ -18,6 +18,36 @@ void VirEnvCore::logCore(const char* msg) {
     else std::cout << msg;
 }
 
+#ifdef RS_DEBUG
+// One unified per-vehicle diagnostic row, identical columns for every backend.
+//   fixs_*  : the FIXS-canonical pose received this step (front-of-vehicle, the
+//             wire conventions -- this is the simulator-neutral ground truth).
+//   set_*   : the pose the core handed to the backend (== fixs_* for Carla 1:1;
+//             interpolated x/y/z for CarMaker sub-steps).
+// Backend-specific readings (e.g. the applied Carla transform, or CarMaker t_0 /
+// Vehicle.v) are appended via debugFields() so it all stays in ONE csv.
+void VirEnvCore::rsDebugRow_(double simTime, const std::string& id, VehHandle h,
+                             const Pose& fixs, const Pose& applied, int lightBits) {
+    if (rsDbg_ == nullptr) {
+        rsDbg_ = std::fopen("RealSim_tmp\\rs_core_pos.csv", "w");
+        if (rsDbg_ == nullptr) rsDbg_ = std::fopen("rs_core_pos.csv", "w");  // CWD fallback
+        if (rsDbg_ != nullptr) {
+            std::fprintf(rsDbg_,
+                "simTime,id,handle,fixs_x,fixs_y,fixs_z,fixs_heading,fixs_grade,"
+                "set_x,set_y,set_z,set_heading,lightBits%s\n",
+                backend_ ? backend_->debugHeader().c_str() : "");
+        }
+    }
+    if (rsDbg_ == nullptr) return;
+    const std::string extra = backend_ ? backend_->debugFields(h) : std::string();
+    std::fprintf(rsDbg_,
+        "%.3f,%s,%d,%.4f,%.4f,%.4f,%.4f,%.5f,%.4f,%.4f,%.4f,%.4f,%d%s\n",
+        simTime, id.c_str(), h, fixs.x, fixs.y, fixs.z, fixs.headingDeg, fixs.gradeRad,
+        applied.x, applied.y, applied.z, applied.headingDeg, lightBits, extra.c_str());
+    std::fflush(rsDbg_);
+}
+#endif
+
 // FIXS lightIndicators bitfield -> brake / left / right (verbatim from the old
 // refresh loop: right=bit0, left=bit1, brake=bit3).
 int VirEnvCore::decodeLightBits(int lightIndicators, bool& brake, bool& indL, bool& indR) {
@@ -154,11 +184,24 @@ int VirEnvCore::processStep(double simTime, bool onUpdate, int simStateRecv, flo
             }
         }
 
-        // ---- step 3: stage the new target pose (raw FIXS) + interp prev ---
+        // ---- step 3: stage the k+1 target (raw FIXS); prev = the k pose --------
+        // Interpolate between CONSECUTIVE RECEIVED samples (k -> k+1) -- the
+        // causally-correct co-sim motion: the received traffic IS the next-step
+        // (k+1) state and the previous received is the current (k) state, so the
+        // interval [simTime, simTimeNext] carries the vehicle exactly along the
+        // k->k+1 segment. Using the previous RECEIVED pose (not the last DRAWN
+        // pose) makes this exact at ANY sub-step rate; the old last-drawn anchor
+        // lagged ~half a step at coarse Carla sub-steps (they never reach f=1
+        // before the boundary re-stages).
         double simTimeNext = ceil(simTime * 10 + 0.001) / 10;
         for (auto& kv : id2handle_) {
             const string& idTs = kv.first;
             const VehFullData_t& v = Msg_c.VehDataRecv_um[idTs];
+
+            // capture the previous target (the k pose) BEFORE overwriting next_
+            auto pit = next_.find(idTs);
+            const bool hasPrev = (pit != next_.end());
+            const Pose kPose = hasPrev ? pit->second.pose : Pose();
 
             Sample nextS;
             nextS.t = simTimeNext;
@@ -168,17 +211,14 @@ int VirEnvCore::processStep(double simTime, bool onUpdate, int simStateRecv, flo
             nextS.pose.headingDeg = v.heading;   // raw wire conventions; backend converts
             nextS.pose.gradeRad   = v.grade;
             nextS.lightBits = v.lightIndicators;
-            next_[idTs] = nextS;
 
             Sample prevS;
             prevS.t = simTime;
-            if (lastSet_.find(idTs) == lastSet_.end()) {
-                prevS.pose = nextS.pose;         // first sight: no interpolation yet
-            } else {
-                prevS.pose = lastSet_[idTs];     // last raw pose we drew (== old t_0)
-            }
+            prevS.pose = hasPrev ? kPose : nextS.pose;   // first sight: no interp yet
             prevS.lightBits = nextS.lightBits;
+
             prev_[idTs] = prevS;
+            next_[idTs] = nextS;
         }
 
         // ---- step 4: traffic-signal sync (per junction; backend maps) -----
@@ -263,6 +303,9 @@ int VirEnvCore::processStep(double simTime, bool onUpdate, int simStateRecv, flo
 
             if (backend_) backend_->setVehiclePose(h, out);
             lastSet_[idTs] = out;
+#ifdef RS_DEBUG
+            rsDebugRow_(simTime, idTs, h, nS.pose, out, nS.lightBits);
+#endif
 
             if (Msg_c.VehicleMessageField_set.find("lightIndicators") != Msg_c.VehicleMessageField_set.end()) {
                 bool brake, indL, indR;

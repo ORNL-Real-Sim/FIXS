@@ -144,7 +144,27 @@ struct CarlaSetup_t {
 
 	std::string CenteredViewId;
 
+	// Spectator (main-viewport) BEV follow of CenteredViewId. Rigid top-down snap
+	// each tick (no low-pass -> no camera oscillation). Off -> the bridge never
+	// touches the spectator, so you can free-fly the CARLA camera to inspect.
+	bool   EnableSpectatorFollow;   // master on/off
+	double SpectatorHeight;         // BEV camera height above the ego (m)
+	bool   SpectatorAlignYaw;       // true: rotate view with ego heading; false: fixed north-up
+
+	// Pace the bridge loop to real time (sleep out the remainder of each tick).
+	// FALSE for XIL -- the RT component (CarMaker/dSPACE) already paces the loop
+	// and an extra sleep would throttle it. TRUE for a STANDALONE viz demo (no RT
+	// hardware) so a follow-cam renders smooth real-time motion instead of a
+	// several-x fast-forward. This is what the native run_synchronization does.
+	bool   RealtimePacing;
+
 	double TrafficRefreshRate;
+
+	// Carla render/tick sub-step. The FIXS feed is 0.1 s; ticking Carla finer
+	// (e.g. 0.05 s) and interpolating the feed gives smoother motion -- the same
+	// trick the CarMaker side uses. Default 0 -> the bridge uses TrafficRefreshRate
+	// (1:1, no interpolation). Must evenly divide the 0.1 s feed (0.05/0.025/0.02).
+	double CarlaTimeStep;
 
 	std::vector<std::string> InterestedIds;
 
