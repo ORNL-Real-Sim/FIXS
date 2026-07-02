@@ -530,7 +530,11 @@ int TrafficHelper::addEgoVehicle(double simTime) {
 int TrafficHelper::addEgoVehicleFromXY(double simTime, std::string vehicleId, std::string vehicleType, double positionX, double positionY) {
 
 	if (SUMO_OR_VISSIM.compare("SUMO") == 0) {
-		if (ENABLE_VEH_SIMULATOR) {
+		// NOTE: no ENABLE_VEH_SIMULATOR gate here. This is called from the Carla
+		// external-control inject path, which runs WITHOUT a CarMaker/XIL coupling
+		// (ENABLE_VEH_SIMULATOR false) -- the old gate silently skipped the add and
+		// returned success, so the Carla ego could never enter SUMO.
+		{
 			// Map the x y positon to an edge for spawing the ego vehicle
 			libsumo::TraCIRoadPosition edgePosition = SUMO_TRACI_NAMESPACE::Simulation::convertRoad(positionX, positionY, false);
 			// Create a dummy route for the ego vehicle
@@ -542,8 +546,15 @@ int TrafficHelper::addEgoVehicleFromXY(double simTime, std::string vehicleId, st
 			dummyRoute.push_back(dummyedgeID);
 			SUMO_TRACI_NAMESPACE::Route::add(dummyRouteId, dummyRoute);
 
-			SUMO_TRACI_NAMESPACE::Vehicle::add(vehicleId, dummyRouteId, vehicleType);
-			SUMO_TRACI_NAMESPACE::Vehicle::setColor(vehicleId, libsumo::TraCIColor(255, 0, 0));
+			// Depart AT the mapped position (not "base"=pos 0): the edge start is
+			// where background flows enter, so "base" insertion can stay blocked
+			// indefinitely -- the ego would never depart.
+			SUMO_TRACI_NAMESPACE::Vehicle::add(vehicleId, dummyRouteId, vehicleType, "now",
+				std::to_string(laneIndex), std::to_string(lanePos), "0");
+			// setColor on a not-yet-departed vehicle can throw "not known" -- the add
+			// above already succeeded, so never let the color abort the injection.
+			try { SUMO_TRACI_NAMESPACE::Vehicle::setColor(vehicleId, libsumo::TraCIColor(255, 0, 0)); }
+			catch (const std::exception&) { /* recolor happens once it departs */ }
 		}
 
 		return 1;
@@ -673,7 +684,6 @@ int TrafficHelper::sendToSUMO(double simTime, MsgHelper Msg_c) {
 		for (int iV = 0; iV < VehIdInSimulator.size(); iV++) {
 			//traci.vehicle.setSpeedMode(VehIdInSimulator[iV], 31); // default speed mode
 		}
-
 		for (int iV = 0; iV < Msg_c.VehDataSend_um[0].size(); iV++) {
 			string idStr = Msg_c.VehDataSend_um[0][iV].id;
 			
@@ -701,8 +711,17 @@ int TrafficHelper::sendToSUMO(double simTime, MsgHelper Msg_c) {
 				}
 			}
 
+			// Does Carla external control own this id? Must be checked FIRST: when
+			// the CarMakerSetup section is absent, CarMakerSetup.EgoId is inferred
+			// from the lone subscription and can equal the Carla ego id -- the CM
+			// branch below would then shadow the Carla injection (and moveToXY a
+			// vehicle that was never added). Carla ownership is the more specific
+			// condition (requires EnableExternalControl + id in InterestedIds).
+			const bool carlaOwnsId = ENABLE_CARLA && ENABLE_CARLA_EXTERNAL_CONTROL &&
+				find(Config_c->CarlaSetup.InterestedIds.begin(), Config_c->CarlaSetup.InterestedIds.end(), idStr) != Config_c->CarlaSetup.InterestedIds.end();
+
 			// if vehicle simulator and is ego
-			if (ENABLE_VEH_SIMULATOR && idStr.compare(Config_c->CarMakerSetup.EgoId) == 0) {
+			if (!carlaOwnsId && ENABLE_VEH_SIMULATOR && idStr.compare(Config_c->CarMakerSetup.EgoId) == 0) {
 				// !!!!check if what received is ego vehicle 
 				// use default type if not specified!!
 				
@@ -751,7 +770,7 @@ int TrafficHelper::sendToSUMO(double simTime, MsgHelper Msg_c) {
 				}
 			}
 			// if carla is enabled and the reveiced id is within the interested ids
-			else if (ENABLE_CARLA&&ENABLE_CARLA_EXTERNAL_CONTROL&&find(Config_c->CarlaSetup.InterestedIds.begin(), Config_c->CarlaSetup.InterestedIds.end(), idStr) != Config_c->CarlaSetup.InterestedIds.end()) {
+			else if (carlaOwnsId) {
 
 				double positionX = (double)Msg_c.VehDataSend_um[0][iV].positionX;
 				double positionY = (double)Msg_c.VehDataSend_um[0][iV].positionY;
@@ -765,11 +784,22 @@ int TrafficHelper::sendToSUMO(double simTime, MsgHelper Msg_c) {
 						vehicleExist = true;
 					}
 				}
-				if (!vehicleExist) {
-					addEgoVehicleFromXY(simTime, idStr, vehicleType, positionX, positionY);
+				try {
+					// Add ONCE (re-adding every step resets the pending vehicle so it
+					// never departs), then moveToXY EVERY step: per SUMO semantics
+					// moveToXY also works on not-yet-departed vehicles -- it INSERTS
+					// them at the given position (default departPos would otherwise
+					// stay blocked behind bg traffic entering the same edge).
+					if (carlaInjectedIds_.find(idStr) == carlaInjectedIds_.end()) {
+						addEgoVehicleFromXY(simTime, idStr, vehicleType, positionX, positionY);
+						carlaInjectedIds_.insert(idStr);
+					}
+					SUMO_TRACI_NAMESPACE::Vehicle::moveToXY(idStr, "", -1, positionX, positionY, heading, 6);
+					if (vehicleExist) SUMO_TRACI_NAMESPACE::Vehicle::setSpeed(idStr, speed);
 				}
-				SUMO_TRACI_NAMESPACE::Vehicle::moveToXY(idStr, "", -1, positionX, positionY, heading, 6);
-				SUMO_TRACI_NAMESPACE::Vehicle::setSpeed(idStr, speed);
+				catch (const std::exception& e) {
+					printf("Carla external-control inject '%s' failed: %s\n", idStr.c_str(), e.what());
+				}
 
 			}
 			else {

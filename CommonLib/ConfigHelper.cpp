@@ -549,6 +549,25 @@ int ConfigHelper::getConfig(string configName) {
 	// Real-time frame pacing (spread sub-ticks evenly). Default OFF (XIL-safe).
 	CarlaSetup.RealtimePacing = node["RealtimePacing"] ? parserFlag(node, "RealtimePacing") : false;
 
+	// #174 ego driving-mode ladder (0=SumoDriver 1=CarlaDriver/L0 2=Advisory/L2 3=Control/L4)
+	CarlaSetup.EgoMode      = node["EgoMode"]      ? parserInteger(node, "EgoMode") : 0;
+	CarlaSetup.EgoId        = node["EgoId"]        ? parserString(node, "EgoId") : "ego";
+	CarlaSetup.EgoSumoType  = node["EgoSumoType"]  ? parserString(node, "EgoSumoType") : "car";
+	CarlaSetup.EgoBlueprint = node["EgoBlueprint"] ? parserString(node, "EgoBlueprint") : "vehicle.tesla.model3";
+	if (node["EgoSpawnPose"]) {
+		for (std::size_t i = 0; i < node["EgoSpawnPose"].size(); i++)
+			CarlaSetup.EgoSpawnPose.push_back(node["EgoSpawnPose"][i].as<double>());
+	}
+	CarlaSetup.TrafficManagerPort = node["TrafficManagerPort"] ? parserInteger(node, "TrafficManagerPort") : 8000;
+	if (node["EgoRoutePoints"]) {
+		for (std::size_t i = 0; i < node["EgoRoutePoints"].size(); i++) {
+			CarlaSetup.EgoRoutePoints.push_back(std::make_pair(
+				node["EgoRoutePoints"][i][0].as<double>(), node["EgoRoutePoints"][i][1].as<double>()));
+		}
+	}
+	CarlaSetup.EgoRouteRepeat = node["EgoRouteRepeat"] ? parserInteger(node, "EgoRouteRepeat") : 50;
+	CarlaSetup.EgoTargetSpeed = node["EgoTargetSpeed"] ? parserDouble(node, "EgoTargetSpeed") : 8.33;
+
 	if (node["CarlaServerIP"]) {
 		CarlaSetup.CarlaServerIP = parserString(node, "CarlaServerIP");
 	}

@@ -22,6 +22,7 @@
 
 #include <string>
 #include <vector>
+#include <utility>
 #include <unordered_map>
 
 namespace virenv {
@@ -49,11 +50,24 @@ public:
 
     void syncTrafficLight(const std::string& junctionId, const std::string& stateStr) override;
 
-    bool readEgoState(const std::string&, EgoState&) override { return false; }  // driver reads POST-tick
+    // mode A (EgoMode >= 1): read the Carla-driven ego actor back in FIXS terms.
+    // Returns false when no ego actor is owned (EgoMode 0 -- driver readback only).
+    bool readEgoState(const std::string&, EgoState& out) override;
 
     // unified RS_DEBUG: append the APPLIED Carla transform to the core's csv row
     std::string debugHeader() const override;
     std::string debugFields(VehHandle h) const override;
+
+    // ---- L0+ ego ownership (EgoMode >= 1) ----------------------------------
+    // Spawn the ego with PHYSICS ON + TM autopilot (Carla drives it). spawnPose
+    // is the raw FIXS pose. Returns kNoHandle on failure.
+    VehHandle spawnEgo(const std::string& blueprintId, const Pose& spawnPose, int tmPort);
+    void enableEgoAutopilot(int tmPort);   // TM autopilot (broken on generated maps; unused by L0)
+    void setEgoRoute(const std::vector<std::pair<double, double>>& fixsPts,
+                     int repeat, int tmPort);  // closed waypoint path (CM-Route analog)
+    void driveEgo(double targetSpeed);     // per-tick built-in driver: pure pursuit + speed hold
+    void destroyEgo();
+    carla::SharedPtr<carla::client::Vehicle> egoActor() { return egoActor_; }
 
     // ---- driver hooks (not part of IVirEnvBackend) ------------------------
     void flushBatch();                                                     // ApplyBatch(the transform commands)
@@ -79,6 +93,9 @@ private:
     bool verbose_   = false;
 
     carla::SharedPtr<carla::client::BlueprintLibrary> bpLib_;
+    carla::SharedPtr<carla::client::Vehicle> egoActor_;                    // EgoMode >= 1: the Carla-driven ego
+    std::vector<carla::geom::Location> egoPath_;                           // densified closed route (Carla frame)
+    size_t egoPathIx_ = 0;                                                 // driver's current path index
     std::vector<carla::rpc::Command> batch_;                               // ApplyTransform commands this tick
     std::unordered_map<VehHandle, carla::SharedPtr<carla::client::Vehicle>> actors_;
     std::unordered_map<VehHandle, carla::geom::Transform> lastApplied_;   // A/B instrumentation

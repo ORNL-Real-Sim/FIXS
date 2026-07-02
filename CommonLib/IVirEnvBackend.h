@@ -71,6 +71,7 @@ struct EgoState {
     double speed = 0.0;                 // m/s
     double x = 0.0, y = 0.0, z = 0.0;   // FIXS front-of-vehicle, ground
     double heading = 0.0;               // deg, north=0, clockwise
+    double grade = 0.0;                 // rad, positive = climbing (0 if unknown)
     bool brake = false, indL = false, indR = false;
 };
 

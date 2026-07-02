@@ -178,6 +178,29 @@ struct CarlaSetup_t {
 	std::string EgoControl;
 	bool        EnableEgoSimulink;
 
+	// #174 ego driving-mode ladder (integer -- modular, GUI-mappable):
+	//   0 = SumoDriver  : SUMO drives the ego; Carla teleports it (default, today)
+	//   1 = CarlaDriver : L0 -- Carla TM drives the ego (physics ON + autopilot);
+	//                     its state is read back and injected into SUMO each feed
+	//   2 = Advisory    : L2 -- as 1, plus external desired-speed advisory
+	//                     through FIXS (TM keeps steering)          [reserved]
+	//   3 = Control     : L4 -- external throttle/brake/steer through FIXS
+	//                     (full PhysX dynamics, external steers)    [reserved]
+	int EgoMode;
+	std::string EgoId;                 // FIXS id of the Carla-driven ego (mode >= 1)
+	std::string EgoSumoType;           // SUMO vType used when TL injects the ego
+	std::string EgoBlueprint;          // Carla blueprint for the ego actor
+	std::vector<double> EgoSpawnPose;  // [x, y, z, headingDeg] FIXS frame (mode >= 1)
+	int TrafficManagerPort;            // Carla TM port (client-side instance)
+
+	// Ego route for the Carla TM (the CarMaker-Route analog): [[x,y], ...] FIXS
+	// frame waypoints injected via TM SetCustomPath. REQUIRED in practice for
+	// generated OpenDRIVE worlds -- TM default lane-following drives straight off
+	// road ends there. EgoRouteRepeat: laps of the list to queue (loop scenarios).
+	std::vector<std::pair<double, double>> EgoRoutePoints;
+	int EgoRouteRepeat;
+	double EgoTargetSpeed;             // built-in driver cruise speed (m/s)
+
 };
 
 struct SumoSetup_t {

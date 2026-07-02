@@ -3,6 +3,7 @@
 
 #include <unordered_map>
 #include <unordered_set>
+#include <set>
 #include <tuple>
 
 #include <math.h>
@@ -139,6 +140,9 @@ public:
 
 	bool ENABLE_CARLA = false;
 	bool ENABLE_CARLA_EXTERNAL_CONTROL = false;
+	// Carla external-control ids already added to the traffic simulator (add ONCE,
+	// then wait for insertion; see the Carla inject branch in sendToSUMO).
+	std::set<std::string> carlaInjectedIds_;
 
 	// #177: skip per-vehicle TraCI getters whose output is never sent. Derived
 	// once from VehicleMessageField_set in connectionSetup -- getNextTLS is only

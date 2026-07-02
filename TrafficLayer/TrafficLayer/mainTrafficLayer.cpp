@@ -1305,6 +1305,17 @@ int main(int argc, char* argv[]) {
 							//string id = it.first;
 							//printf("current id %s\n", id);
 							if (MsgServer_c.VehDataRecv_um.find(it.first) == MsgServer_c.VehDataRecv_um.end()) {
+								// EXEMPT ids owned by Carla external control: those are
+								// INJECTED into the traffic simulator by the send path
+								// (addEgoVehicleFromXY + moveToXY), so they are NOT in
+								// the SUMO feed until after the first injection --
+								// dropping them here would deadlock that injection.
+								if (ENABLE_CARLA && ENABLE_CARLA_EXTERNAL_CONTROL &&
+									find(Config_c.CarlaSetup.InterestedIds.begin(),
+									     Config_c.CarlaSetup.InterestedIds.end(),
+									     it.first) != Config_c.CarlaSetup.InterestedIds.end()) {
+									continue;
+								}
 								idToRemove.push_back(it.first);
 
 							}

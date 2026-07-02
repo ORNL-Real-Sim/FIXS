@@ -21,10 +21,12 @@
 #include <carla/client/Client.h>
 #include <carla/client/World.h>
 #include <carla/client/Actor.h>
+#include <carla/client/ActorList.h>
 #include <carla/client/Vehicle.h>
 #include <carla/client/TimeoutException.h>
 #include <carla/geom/Transform.h>
 #include <carla/Memory.h>
+#include <carla/trafficmanager/TrafficManager.h>
 
 #include "BridgeHelper.h"
 #include "CarlaBackend.h"
@@ -69,6 +71,13 @@ int main(int argc, const char* argv[]) {
     const bool   spectatorAlignYaw = cs.SpectatorAlignYaw;
     const bool   realtimePacing = cs.RealtimePacing;
     const bool   enableTlsSync = true;
+    // #174 ego-mode ladder: 0=SumoDriver(teleport) 1=CarlaDriver(L0) 2=Advisory(L2) 3=Control(L4)
+    const int    egoMode = cs.EgoMode;
+    const std::string egoId = cs.EgoId;
+    if (egoMode >= 1 && cs.EgoSpawnPose.size() < 4) {
+        std::cerr << "EgoMode " << egoMode << " needs EgoSpawnPose: [x, y, z, headingDeg]\n";
+        return -1;
+    }
 
     std::unordered_set<std::string> interestedIds(cs.InterestedIds.begin(), cs.InterestedIds.end());
 
@@ -82,11 +91,32 @@ int main(int argc, const char* argv[]) {
         carla::SharedPtr<carla::client::Actor> spectator = world.GetSpectator();
 
         carla::rpc::EpisodeSettings settings = world.GetSettings();
-        if (!settings.synchronous_mode) {
+        // Force BOTH sync mode and the tick delta: the world-load script may have
+        // set sync with a different delta, and a physics ego (EgoMode >= 1) steps
+        // PhysX/TM by fixed_delta_seconds -- it must equal the bridge's carlaStep.
+        if (!settings.synchronous_mode ||
+            !settings.fixed_delta_seconds.has_value() ||
+            std::fabs(settings.fixed_delta_seconds.value_or(0.0) - carlaStep) > 1e-9) {
             settings.synchronous_mode = true;
             settings.fixed_delta_seconds = carlaStep;
             world.ApplySettings(settings, 1s);
-            if (verbose) std::cout << "Synchronous mode enabled.\n";
+            if (verbose) std::cout << "Synchronous mode enabled (delta " << carlaStep << " s).\n";
+        }
+
+        // Clear stale vehicle actors from prior runs: this bridge owns EVERY
+        // vehicle in the world, so any pre-existing one is a crashed run's zombie
+        // (it would block the ego spawn point / duplicate bg traffic).
+        // NOTE: in synchronous mode the client's episode snapshot is EMPTY until a
+        // tick -- GetActors() would miss the zombies without this first Tick.
+        world.Tick(10s);
+        {
+            carla::SharedPtr<carla::client::ActorList> stale =
+                world.GetActors()->Filter("vehicle.*");
+            int nStale = 0;
+            for (const carla::SharedPtr<carla::client::Actor>& a : *stale) {
+                if (a) { a->Destroy(); nStale++; }
+            }
+            if (nStale > 0) std::cout << "Cleared " << nStale << " stale vehicle actor(s) from a prior run.\n";
         }
 
         // ---- backend + core ------------------------------------------------
@@ -98,7 +128,10 @@ int main(int argc, const char* argv[]) {
         core.openSignalPort            = false;  // Carla: vehicles + signals on ONE port
         core.ENABLE_REALSIM            = cs.EnableCosimulation;
         core.SYNCHRONIZE_TRAFFIC_SIGNAL = enableTlsSync;
-        core.egoId_                    = "";      // Carla renders every vehicle (ego included)
+        // EgoMode 0: Carla renders every vehicle incl. the SUMO-driven ego ("").
+        // EgoMode >=1: Carla OWNS the ego -- the core must never spawn/teleport the
+        // SUMO echo of it (SUMO's copy is the injected shadow of this Carla actor).
+        core.egoId_                    = (egoMode >= 1) ? egoId : "";
         core.egoType_                  = "";
         core.trafficLayerIP_           = cs.CarlaClientIP;
         core.vehDataPort_              = cs.CarlaClientPort;
@@ -114,6 +147,33 @@ int main(int argc, const char* argv[]) {
             return -1;
         }
         if (enableTlsSync) backend.freezeAndMatchTrafficLights();
+
+        // ---- L0+ (EgoMode >= 1): Carla drives the ego ----------------------
+        // Order matters (matches the proven Python sequence): spawn + physics
+        // first, THEN create the TM + sync + autopilot. TM must be synchronous in
+        // a synchronous world; world.Tick() then drives TM's SynchronousTick
+        // automatically (in-process TM instance).
+        if (egoMode >= 1) {
+            virenv::Pose sp;
+            sp.x = cs.EgoSpawnPose[0]; sp.y = cs.EgoSpawnPose[1];
+            sp.z = cs.EgoSpawnPose[2]; sp.headingDeg = cs.EgoSpawnPose[3];
+            if (backend.spawnEgo(cs.EgoBlueprint, sp, cs.TrafficManagerPort) == virenv::kNoHandle) {
+                std::cerr << "EgoMode " << egoMode << ": ego spawn failed\n";
+                return -1;
+            }
+            // NO Traffic Manager: TM was measured unable to follow routes on
+            // generated OpenDRIVE worlds (autopilot AND SetCustomPath drove the
+            // ego straight off the loop corner into the kill-z). EgoMode 1 uses
+            // the bridge's built-in driver (pure pursuit + speed hold on
+            // EgoRoutePoints) through full PhysX dynamics instead.
+            if (cs.EgoRoutePoints.empty()) {
+                std::cerr << "EgoMode " << egoMode << " needs EgoRoutePoints (the ego route)\n";
+                return -1;
+            }
+            backend.setEgoRoute(cs.EgoRoutePoints, cs.EgoRouteRepeat, cs.TrafficManagerPort);
+            // settle the spawned ego onto its tires before the co-sim loop
+            for (int i = 0; i < 10; i++) world.Tick(30s);
+        }
 
         const int sock0 = 0;
         // #174 A/B: optional applied-pose log keyed by SUMO id (set RS_POSE_LOG=path)
@@ -131,6 +191,7 @@ int main(int argc, const char* argv[]) {
                 break;
             }
             backend.flushBatch();          // ApplyBatch(transform commands)
+            if (egoMode >= 1) backend.driveEgo(cs.EgoTargetSpeed);   // built-in driver: control THIS tick
             if (poseLog.is_open()) {       // A/B: log the applied Carla pose per SUMO id
                 for (const auto& kv : core.mappedVehicles()) {
                     const carla::geom::Transform* tf = backend.lastAppliedPose(kv.second);
@@ -138,15 +199,37 @@ int main(int argc, const char* argv[]) {
                                     << "," << tf->location.y << "," << tf->rotation.yaw << "\n";
                 }
             }
-            world.Tick(1s);                // advance Carla one sub-step
+            world.Tick(10s);               // advance Carla one sub-step (10s: TM sync work rides on the tick)
 
             // FIXS feed boundary (0.1 s): a recv happened this step, so send the
             // paired response + clear here. Sub-steps in between only render.
             const bool onFeed = std::fabs(simTime * 10.0 - std::llround(simTime * 10.0)) < 1e-6;
 
+            // ---- POST-tick L0+: the Carla-driven ego -> FIXS (TL injects into SUMO)
+            if (egoMode >= 1) {
+                virenv::EgoState es;
+                if (backend.readEgoState(egoId, es)) {
+            if (onFeed && core.ENABLE_REALSIM) {
+                        VehFullData_t d;
+                        d.id = egoId; d.type = cs.EgoSumoType;
+                        d.speed = (float)es.speed; d.speedDesired = (float)es.speed;
+                        d.positionX = (float)es.x; d.positionY = (float)es.y; d.positionZ = (float)es.z;
+                        d.heading = (float)es.heading; d.grade = (float)es.grade;
+                        core.Msg_c.VehDataSend_um[core.Sock_c.serverSock[sock0]].push_back(d);
+                    }
+                    if (spectatorFollow && egoId == centeredViewId && backend.egoActor()) {
+                        carla::geom::Transform eTf = backend.egoActor()->GetTransform();
+                        carla::geom::Location loc = eTf.location; loc.z += spectatorHeight;
+                        const float yaw = spectatorAlignYaw ? (eTf.rotation.yaw - 90.f) : -90.f;
+                        spectator->SetTransform(carla::geom::Transform(loc, carla::geom::Rotation(-90.f, yaw, 0.f)));
+                    }
+                }
+            }
+
             // ---- POST-tick: interested-id readback (feed) + spectator (every tick)
             const auto& mapped = core.mappedVehicles();
             for (const std::string& iid : interestedIds) {
+                if (egoMode >= 1 && iid == egoId) continue;   // ego handled above (never mapped)
                 auto mit = mapped.find(iid);
                 if (mit == mapped.end()) continue;
                 carla::SharedPtr<carla::client::Vehicle> actor = backend.actorOf(mit->second);
@@ -203,6 +286,7 @@ int main(int argc, const char* argv[]) {
             }
         }
 
+        if (egoMode >= 1) backend.destroyEgo();
         settings = world.GetSettings();
         if (settings.synchronous_mode) {
             settings.synchronous_mode = false;
