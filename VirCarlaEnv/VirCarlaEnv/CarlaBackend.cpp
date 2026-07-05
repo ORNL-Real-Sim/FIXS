@@ -178,87 +178,60 @@ VehHandle CarlaBackend::spawnEgo(const std::string& blueprintId, const Pose& spa
     }
     egoActor_ = boost::static_pointer_cast<carla::client::Vehicle>(actor);
     egoActor_->SetSimulatePhysics(true);                 // full PhysX: tire contact, dynamics
-    (void)tmPort;  // autopilot is enabled separately (enableEgoAutopilot) AFTER TM sync setup
+    (void)tmPort;  // driver (TM autopilot or the EgoDriver module) is wired separately, post-settle
     std::cout << "L0 ego spawned: " << blueprintId << " actor " << egoActor_->GetId()
               << " (physics ON)\n";
     return (VehHandle)egoActor_->GetId();
 }
 
-void CarlaBackend::enableEgoAutopilot(int tmPort) {
-    if (!egoActor_) return;
-    egoActor_->SetAutopilot(true, (uint16_t)tmPort);     // TM drives (registers with the TM)
-    std::cout << "L0 ego autopilot ON (TM port " << tmPort << ")\n";
+void CarlaBackend::enableEgoTM(int tmPort, double targetSpeedMps) {
+    // NATIVE L0: Carla's server-side Traffic Manager drives the ego. Works once
+    // the map's OpenDRIVE junction topology is routable (the simple_loop
+    // junction-id / road-id collision that broke this is fixed in the generator).
+    // Spawn + physics must already be done; TM must be synchronous in a sync
+    // world -- world.Tick() then drives TM's SynchronousTick on the in-process
+    // instance. Sequence mirrors the verified standalone probe.
+    if (!egoActor_ || !client_) return;
+    auto tm = client_->GetInstanceTM((uint16_t)tmPort);
+    tm.SetSynchronousMode(true);
+    std::vector<carla::SharedPtr<carla::client::Actor>> one{ egoActor_ };
+    tm.RegisterVehicles(one);
+    egoActor_->SetAutopilot(true, (uint16_t)tmPort);
+    tm.SetDesiredSpeed(egoActor_, (float)(targetSpeedMps * 3.6));   // TM speed is km/h
+    std::cout << "L0 ego: NATIVE Traffic Manager autopilot (TM port " << tmPort
+              << ", target " << targetSpeedMps << " m/s)\n";
 }
 
 void CarlaBackend::setEgoRoute(const std::vector<std::pair<double, double>>& fixsPts,
                                int /*repeat*/, int /*tmPort*/) {
-    // The CarMaker-Route analog: the closed waypoint path the built-in ego driver
-    // follows (pure pursuit; see driveEgo). NOTE: Carla's Traffic Manager was
-    // measured UNABLE to follow routes on generated OpenDRIVE worlds (both
-    // autopilot and SetCustomPath drove straight off the simple_loop corner and
-    // were kill-z destroyed), so EgoMode 1 uses this bridge-internal driver.
+    // FALLBACK L0: hand the closed route to the SDK-free EgoDriver module. The
+    // only Carla-specific step here is the frame conversion (FIXS -> Carla is a
+    // Y flip); the module then owns densification + the pursuit control law.
     if (fixsPts.empty()) return;
-    egoPath_.clear();
-    // densify the closed polyline to ~3 m spacing (in the Carla frame: Y flip)
-    for (size_t i = 0; i < fixsPts.size(); i++) {
-        const std::pair<double, double>& a = fixsPts[i];
-        const std::pair<double, double>& b = fixsPts[(i + 1) % fixsPts.size()];
-        const double dx = b.first - a.first, dy = b.second - a.second;
-        const int n = std::max(1, (int)(std::sqrt(dx * dx + dy * dy) / 3.0));
-        for (int k = 0; k < n; k++)
-            egoPath_.push_back(carla::geom::Location(
-                (float)(a.first + dx * k / n), (float)(-(a.second + dy * k / n)), 0.0f));
-    }
-    egoPathIx_ = 0;
+    std::vector<std::pair<double, double>> carlaPts;
+    carlaPts.reserve(fixsPts.size());
+    for (const std::pair<double, double>& p : fixsPts)
+        carlaPts.emplace_back(p.first, -p.second);       // FIXS -> Carla planar frame
+    egoDriver_.setRoute(carlaPts, /*closed=*/true);
     std::cout << "L0 ego route: " << fixsPts.size() << " waypoints -> "
-              << egoPath_.size() << " path points (bridge pure-pursuit driver)\n";
+              << egoDriver_.routeSize() << " path points (EgoDriver fallback module)\n";
 }
 
-void CarlaBackend::driveEgo(double targetSpeed) {
-    // Bridge-internal L0 driver: pure-pursuit steering + proportional speed hold,
-    // applied through full PhysX dynamics (ApplyControl -> tires, powertrain).
-    if (!egoActor_ || egoPath_.empty()) return;
+void CarlaBackend::driveEgoFallback(double targetSpeed) {
+    // Per-tick fallback driver: read the ego pose in the Carla frame, ask the
+    // module for a neutral DriveCommand, apply it through full PhysX dynamics.
+    if (!egoActor_ || !egoDriver_.hasRoute()) return;
     carla::geom::Transform tf = egoActor_->GetTransform();
     carla::geom::Vector3D  vel = egoActor_->GetVelocity();
     const double v = std::sqrt(vel.x * vel.x + vel.y * vel.y);
-
-    // advance the path index to the nearest point ahead (closed loop: wrap)
-    const size_t n = egoPath_.size();
-    double best = 1e18; size_t bestIx = egoPathIx_;
-    for (size_t k = 0; k < 40; k++) {                    // local window search
-        size_t ix = (egoPathIx_ + k) % n;
-        double dx = egoPath_[ix].x - tf.location.x, dy = egoPath_[ix].y - tf.location.y;
-        double d = dx * dx + dy * dy;
-        if (d < best) { best = d; bestIx = ix; }
-    }
-    egoPathIx_ = bestIx;
-
-    // lookahead point: ~max(6 m, 1.2 s of travel)
-    const double lookahead = std::max(6.0, 1.2 * v);
-    size_t tgtIx = egoPathIx_;
-    double acc = 0.0;
-    while (acc < lookahead) {
-        size_t nxt = (tgtIx + 1) % n;
-        double dx = egoPath_[nxt].x - egoPath_[tgtIx].x, dy = egoPath_[nxt].y - egoPath_[tgtIx].y;
-        acc += std::sqrt(dx * dx + dy * dy);
-        tgtIx = nxt;
-    }
-    const double tx = egoPath_[tgtIx].x - tf.location.x;
-    const double ty = egoPath_[tgtIx].y - tf.location.y;
     const double yawRad = tf.rotation.yaw * M_PI / 180.0;
-    double alpha = std::atan2(ty, tx) - yawRad;          // heading error to lookahead
-    while (alpha >  M_PI) alpha -= 2.0 * M_PI;
-    while (alpha < -M_PI) alpha += 2.0 * M_PI;
-    const double wheelbase = 2.9;                        // ~tesla model3
-    const double delta = std::atan2(2.0 * wheelbase * std::sin(alpha), lookahead);
+
+    DriveCommand dc = egoDriver_.computeControl(tf.location.x, tf.location.y, yawRad, v, targetSpeed);
 
     carla::rpc::VehicleControl c;
-    c.steer = (float)std::max(-1.0, std::min(1.0, delta / 0.7));  // ~40 deg max wheel angle
-    // curvature-aware speed: slow toward corners so pure pursuit tracks the arc
-    const double curveSlow = std::max(0.4, 1.0 - 1.2 * std::fabs(alpha));
-    const double dv = targetSpeed * curveSlow - v;
-    if (dv >= 0) { c.throttle = (float)std::min(0.75, 0.25 * dv + 0.15); c.brake = 0.f; }
-    else         { c.throttle = 0.f; c.brake = (float)std::min(1.0, -0.3 * dv); }
+    c.throttle = (float)dc.throttle;
+    c.brake    = (float)dc.brake;
+    c.steer    = (float)dc.steer;
     egoActor_->ApplyControl(c);
 }
 

@@ -551,6 +551,8 @@ int ConfigHelper::getConfig(string configName) {
 
 	// #174 ego driving-mode ladder (0=SumoDriver 1=CarlaDriver/L0 2=Advisory/L2 3=Control/L4)
 	CarlaSetup.EgoMode      = node["EgoMode"]      ? parserInteger(node, "EgoMode") : 0;
+	// L0 driver: native Carla TM by default; "Pursuit" selects the fallback module.
+	CarlaSetup.EgoL0Driver  = node["EgoL0Driver"]  ? parserString(node, "EgoL0Driver") : "TM";
 	CarlaSetup.EgoId        = node["EgoId"]        ? parserString(node, "EgoId") : "ego";
 	CarlaSetup.EgoSumoType  = node["EgoSumoType"]  ? parserString(node, "EgoSumoType") : "car";
 	CarlaSetup.EgoBlueprint = node["EgoBlueprint"] ? parserString(node, "EgoBlueprint") : "vehicle.tesla.model3";

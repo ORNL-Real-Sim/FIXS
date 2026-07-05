@@ -45,6 +45,7 @@ static void show_usage(const std::string& name) {
 }
 
 int main(int argc, const char* argv[]) {
+    std::cout << std::unitbuf;   // flush every << so a crash never swallows the last diagnostic line
     std::string configPath, tlsPath;
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
@@ -73,6 +74,10 @@ int main(int argc, const char* argv[]) {
     const bool   enableTlsSync = true;
     // #174 ego-mode ladder: 0=SumoDriver(teleport) 1=CarlaDriver(L0) 2=Advisory(L2) 3=Control(L4)
     const int    egoMode = cs.EgoMode;
+    // L0 driver selection: native Carla TM autopilot vs the SDK-free EgoDriver
+    // fallback module (map-agnostic). Default is TM (see ConfigHelper).
+    const bool   useFallbackDriver = (cs.EgoL0Driver == "Pursuit" || cs.EgoL0Driver == "pursuit"
+                                      || cs.EgoL0Driver == "Fallback" || cs.EgoL0Driver == "EgoDriver");
     const std::string egoId = cs.EgoId;
     if (egoMode >= 1 && cs.EgoSpawnPose.size() < 4) {
         std::cerr << "EgoMode " << egoMode << " needs EgoSpawnPose: [x, y, z, headingDeg]\n";
@@ -161,18 +166,32 @@ int main(int argc, const char* argv[]) {
                 std::cerr << "EgoMode " << egoMode << ": ego spawn failed\n";
                 return -1;
             }
-            // NO Traffic Manager: TM was measured unable to follow routes on
-            // generated OpenDRIVE worlds (autopilot AND SetCustomPath drove the
-            // ego straight off the loop corner into the kill-z). EgoMode 1 uses
-            // the bridge's built-in driver (pure pursuit + speed hold on
-            // EgoRoutePoints) through full PhysX dynamics instead.
-            if (cs.EgoRoutePoints.empty()) {
-                std::cerr << "EgoMode " << egoMode << " needs EgoRoutePoints (the ego route)\n";
-                return -1;
+            // Two L0 drivers (config EgoL0Driver):
+            //  - native Carla TM autopilot (default): server-side, needs a
+            //    routable map (the simple_loop junction-id fix makes it routable);
+            //  - EgoDriver fallback module: map-agnostic pure pursuit on
+            //    EgoRoutePoints, through full PhysX -- needs the route.
+            if (useFallbackDriver) {
+                if (cs.EgoRoutePoints.empty()) {
+                    std::cerr << "EgoMode " << egoMode << " (Pursuit) needs EgoRoutePoints\n";
+                    return -1;
+                }
+                backend.setEgoRoute(cs.EgoRoutePoints, cs.EgoRouteRepeat, cs.TrafficManagerPort);
             }
-            backend.setEgoRoute(cs.EgoRoutePoints, cs.EgoRouteRepeat, cs.TrafficManagerPort);
-            // settle the spawned ego onto its tires before the co-sim loop
+            // settle the spawned ego onto its tires before wiring the driver / loop
             for (int i = 0; i < 10; i++) world.Tick(30s);
+            // native TM must be enabled AFTER spawn + physics settle (proven order)
+            if (!useFallbackDriver) {
+                backend.enableEgoTM(cs.TrafficManagerPort, cs.EgoTargetSpeed);
+                // TM builds its InMemoryMap on the FIRST tick after autopilot -- can
+                // take 15-30 s on a generated map. Absorb that ONE-TIME cost HERE
+                // (generous timeout, before the co-sim loop couples with TL/SUMO), so
+                // the loop's tight world.Tick() never stalls past its timeout and
+                // drops the TrafficLayer/SUMO connection.
+                std::cout << "Pre-building TM InMemoryMap (one-time, may take ~30 s)...\n";
+                for (int i = 0; i < 5; i++) world.Tick(120s);
+                std::cout << "TM InMemoryMap ready; entering co-sim loop.\n";
+            }
         }
 
         const int sock0 = 0;
@@ -191,7 +210,8 @@ int main(int argc, const char* argv[]) {
                 break;
             }
             backend.flushBatch();          // ApplyBatch(transform commands)
-            if (egoMode >= 1) backend.driveEgo(cs.EgoTargetSpeed);   // built-in driver: control THIS tick
+            // fallback module drives per-tick; native TM drives inside world.Tick()
+            if (egoMode >= 1 && useFallbackDriver) backend.driveEgoFallback(cs.EgoTargetSpeed);
             if (poseLog.is_open()) {       // A/B: log the applied Carla pose per SUMO id
                 for (const auto& kv : core.mappedVehicles()) {
                     const carla::geom::Transform* tf = backend.lastAppliedPose(kv.second);

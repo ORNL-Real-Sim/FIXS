@@ -187,6 +187,10 @@ struct CarlaSetup_t {
 	//   3 = Control     : L4 -- external throttle/brake/steer through FIXS
 	//                     (full PhysX dynamics, external steers)    [reserved]
 	int EgoMode;
+	// Which L0 driver actuates the ego when EgoMode >= 1:
+	//   "TM"      -> native Carla Traffic Manager autopilot (needs a routable map)
+	//   "Pursuit" -> the SDK-free EgoDriver module (map-agnostic fallback)
+	std::string EgoL0Driver;
 	std::string EgoId;                 // FIXS id of the Carla-driven ego (mode >= 1)
 	std::string EgoSumoType;           // SUMO vType used when TL injects the ego
 	std::string EgoBlueprint;          // Carla blueprint for the ego actor

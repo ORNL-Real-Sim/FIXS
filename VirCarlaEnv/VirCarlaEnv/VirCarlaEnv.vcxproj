@@ -130,6 +130,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="..\..\CommonLib\ConfigHelper.cpp" />
+    <ClCompile Include="..\..\CommonLib\EgoDriver.cpp" />
     <ClCompile Include="..\..\CommonLib\MsgHelper.cpp" />
     <ClCompile Include="..\..\CommonLib\SocketHelper.cpp" />
     <ClCompile Include="..\..\CommonLib\VirEnvCore.cpp" />
@@ -140,6 +141,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\CommonLib\ConfigHelper.h" />
+    <ClInclude Include="..\..\CommonLib\EgoDriver.h" />
     <ClInclude Include="..\..\CommonLib\IVirEnvBackend.h" />
     <ClInclude Include="..\..\CommonLib\MsgHelper.h" />
     <ClInclude Include="..\..\CommonLib\SocketHelper.h" />

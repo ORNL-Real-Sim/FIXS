@@ -1,13 +1,11 @@
 @echo off
 REM ============================================================================
-REM  FIXS #174 - SUMO ^<-^> Carla demo, EgoMode 1 "CarlaDriver" (L0)
+REM  FIXS #174 - SUMO ^<-^> Carla demo, EgoMode 1 (L0) -- Pursuit fallback
 REM ----------------------------------------------------------------------------
 REM  DOUBLE-CLICK this. Same stack as run_sumo_carla_demo.bat, but the EGO is a
-REM  REAL Carla vehicle with full PhysX dynamics (tire contact), driven by Carla's
-REM  NATIVE Traffic Manager autopilot (config_l0.yaml, EgoL0Driver: TM) -- the
-REM  Carla counterpart of the CM office demo's IPGDriver ego. Background traffic
-REM  stays SUMO-driven. (For the map-agnostic pure-pursuit EgoDriver module
-REM  instead, run run_sumo_carla_l0_pursuit_demo.bat.)
+REM  REAL Carla vehicle: full PhysX dynamics (tire contact), driven by the
+REM  bridge's built-in route-following driver -- the Carla counterpart of the CM
+REM  office demo's IPGDriver ego. Background traffic stays SUMO-driven.
 REM
 REM    1. launch CARLA (Carla\launch_carla.bat) + wait for RPC
 REM    3. load simple_loop.xodr as the world
@@ -15,10 +13,9 @@ REM    4. launch SUMO on the BACKGROUND-ONLY SimpleLoop scenario (no SUMO ego --
 REM       TrafficLayer injects the Carla ego via moveToXY, like the CM demo)
 REM    5. launch TrafficLayer   6. launch VirCarlaEnv (config_l0.yaml)
 REM
-REM  Watch for: after a one-time ~30 s "Pre-building TM InMemoryMap" pause (TM
-REM  builds its route graph once), a red-highlighted ego that ACCELERATES from rest
-REM  on its tires, follows the loop, and appears in the SUMO-gui as vehicle 'ego'
-REM  with the background traffic reacting to it.
+REM  Watch for: a red-highlighted ego that ACCELERATES from rest on its tires,
+REM  follows the loop, and appears in the SUMO-gui as vehicle 'ego' with the
+REM  background traffic reacting to it.
 REM
 REM  If CARLA is ALREADY running with the world loaded:  set SKIP_CARLA=1 first.
 REM ============================================================================
@@ -31,7 +28,7 @@ set ENVFILE=%CARLADIR%\carla.env
 set TL=%RepoRoot%\TrafficLayer\x64\Release\TrafficLayer.exe
 set VCE=%RepoRoot%\VirCarlaEnv\x64\Release\VirCarlaEnv.exe
 if not exist "%VCE%" set VCE=%RepoRoot%\tests\SumoCarla\VirCarlaEnv.exe
-set CONFIG=%HERE%config_l0.yaml
+set CONFIG=%HERE%config_l0_pursuit.yaml
 set TLS=%HERE%traffic_light_table.csv
 REM BACKGROUND-ONLY scenario: the ego is injected by TrafficLayer, not routed by SUMO.
 set SUMOCFG=%RepoRoot%\tests\Sumo\network\simple_loop\simple_loop.sumocfg
@@ -43,7 +40,7 @@ for /f "usebackq eol=# tokens=1,* delims==" %%A in ("%ENVFILE%") do set "%%A=%%B
 if not defined CARLA_PORT set CARLA_PORT=2000
 
 echo ============================================================
-echo  FIXS #174 SUMO-Carla L0 demo: Carla drives the ego (EgoMode 1)
+echo  FIXS #174 SUMO-Carla L0 demo: EgoDriver PURSUIT module drives the ego
 echo ============================================================
 
 REM --- kill stale FIXS-side processes (leave CARLA alone) ----------------------
@@ -85,7 +82,7 @@ echo [5/6] Launching TrafficLayer (SUMO path)...
 start "FIXS TrafficLayer (SUMO)" cmd /k "%TL% -f %CONFIG%"
 
 REM --- 6. Carla bridge (EgoMode 1) ---------------------------------------------
-echo [6/6] Launching VirCarlaEnv (Carla bridge, EgoMode 1 CarlaDriver)...
+echo [6/6] Launching VirCarlaEnv (Carla bridge, EgoMode 1 Pursuit)...
 start "FIXS VirCarlaEnv (L0)" cmd /k "%VCE% -f %CONFIG% -t %TLS%"
 
 echo.

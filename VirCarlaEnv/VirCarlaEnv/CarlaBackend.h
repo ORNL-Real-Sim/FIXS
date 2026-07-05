@@ -11,6 +11,7 @@
 //============================================================================
 
 #include "../../CommonLib/IVirEnvBackend.h"
+#include "../../CommonLib/EgoDriver.h"
 #include "BridgeHelper.h"
 
 #include <carla/client/World.h>
@@ -59,13 +60,23 @@ public:
     std::string debugFields(VehHandle h) const override;
 
     // ---- L0+ ego ownership (EgoMode >= 1) ----------------------------------
-    // Spawn the ego with PHYSICS ON + TM autopilot (Carla drives it). spawnPose
-    // is the raw FIXS pose. Returns kNoHandle on failure.
+    // Spawn the ego with PHYSICS ON. spawnPose is the raw FIXS pose. The driver
+    // (native TM or the EgoDriver module) is wired separately below. Returns
+    // kNoHandle on failure.
     VehHandle spawnEgo(const std::string& blueprintId, const Pose& spawnPose, int tmPort);
-    void enableEgoAutopilot(int tmPort);   // TM autopilot (broken on generated maps; unused by L0)
+
+    // NATIVE L0: hand the ego to Carla's Traffic Manager (server-side autopilot).
+    // Requires a routable map (see the simple_loop junction-id fix). targetSpeed
+    // in m/s (TM's SetDesiredSpeed is km/h -- converted here).
+    void enableEgoTM(int tmPort, double targetSpeedMps);
+
+    // FALLBACK L0: feed the map-agnostic EgoDriver module a closed route (the
+    // CM-Route analog). fixsPts are raw FIXS-frame [x,y]; the Carla Y-flip is
+    // applied here so the module stays frame-neutral.
     void setEgoRoute(const std::vector<std::pair<double, double>>& fixsPts,
-                     int repeat, int tmPort);  // closed waypoint path (CM-Route analog)
-    void driveEgo(double targetSpeed);     // per-tick built-in driver: pure pursuit + speed hold
+                     int repeat, int tmPort);
+    void driveEgoFallback(double targetSpeed);   // per-tick: EgoDriver -> ApplyControl
+
     void destroyEgo();
     carla::SharedPtr<carla::client::Vehicle> egoActor() { return egoActor_; }
 
@@ -94,8 +105,7 @@ private:
 
     carla::SharedPtr<carla::client::BlueprintLibrary> bpLib_;
     carla::SharedPtr<carla::client::Vehicle> egoActor_;                    // EgoMode >= 1: the Carla-driven ego
-    std::vector<carla::geom::Location> egoPath_;                           // densified closed route (Carla frame)
-    size_t egoPathIx_ = 0;                                                 // driver's current path index
+    EgoDriver egoDriver_;                                                  // fallback L0 driver (SDK-free module)
     std::vector<carla::rpc::Command> batch_;                               // ApplyTransform commands this tick
     std::unordered_map<VehHandle, carla::SharedPtr<carla::client::Vehicle>> actors_;
     std::unordered_map<VehHandle, carla::geom::Transform> lastApplied_;   // A/B instrumentation
