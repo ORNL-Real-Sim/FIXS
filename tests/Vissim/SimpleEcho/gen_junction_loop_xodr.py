@@ -47,7 +47,14 @@ LINKS = {
     7: (("road", 3, "end"), ("road", 4, "start")),
     8: (("road", 4, "end"), ("road", 1, "start")),
 }
-JUNC_OF = {5: 1, 6: 2, 7: 3, 8: 4}            # connector road -> its junction
+# CARLA decides "is a road's successor a junction?" purely by !ContainsRoad(id)
+# (LibCarla road/MapBuilder.cpp GetLaneNext). If a junction id collides with a
+# road id, the road's junction-successor is misread as a same-numbered road (a
+# self-reference) -> the lane dead-ends at the corner, so get_topology drops every
+# straight->corner edge and TM/agents drive straight off the loop. Junction ids
+# MUST therefore stay clear of every road id (1..8). Offset them by JID_BASE.
+JID_BASE = 100
+JUNC_OF = {5: 1, 6: 2, 7: 3, 8: 4}            # connector road -> its junction (logical 1..4)
 JUNC_CONN = {1: (1, 5), 2: (2, 6), 3: (3, 7), 4: (4, 8)}  # junction -> (incoming, connecting)
 
 
@@ -78,13 +85,13 @@ def main() -> int:
 
     def el(side, spec):
         if spec[0] == "junction":
-            return f'<{side} elementType="junction" elementId="{spec[1]}"/>'
+            return f'<{side} elementType="junction" elementId="{JID_BASE + spec[1]}"/>'
         return f'<{side} elementType="road" elementId="{spec[1]}" contactPoint="{spec[2]}"/>'
 
     roads = ""
     for rid in range(1, 9):
         x0, y0, h0, length, typ, k = geom[rid]
-        junc = JUNC_OF.get(rid, -1)
+        junc = JID_BASE + JUNC_OF[rid] if rid in JUNC_OF else -1
         pre, suc = LINKS[rid]
         g = "<line/>" if typ == "line" else f'<arc curvature="{k:.12f}"/>'
         # connecting roads carry the lane link; roads touching a junction don't
@@ -108,7 +115,7 @@ def main() -> int:
 
     juncs = ""
     for jid, (inc, conn) in JUNC_CONN.items():
-        juncs += f'''  <junction id="{jid}" name="j{jid}">
+        juncs += f'''  <junction id="{JID_BASE + jid}" name="j{jid}">
     <connection id="0" incomingRoad="{inc}" connectingRoad="{conn}" contactPoint="start">
       <laneLink from="-1" to="-1"/>
     </connection>
