@@ -1,6 +1,6 @@
 # Cross-simulator probes (FIXS #174)
 
-One **shared scenario** (`tests/Sumo/SimpleLoop`) driving the FIXS
+One **shared scenario** (`tests/Sumo/networks/simple_loop`) driving the FIXS
 VirtualEnvironment pipeline through **different backends**, each with a
 **one-click** launcher. This is the test harness #174 PR 1 stands up so the
 later VirEnvCore consolidation has a green baseline to refactor against.

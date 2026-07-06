@@ -101,17 +101,17 @@ Resolved during bring-up (were open scaffold items):
   interface and teleported to CarMaker's pose; the shared route's self-driven
   `ego` simply becomes the one background vehicle CarMaker renders. No route edit
   needed; no duplicate ego.
-- **Geometry — unified.** `tests/Sumo/SimpleLoop/simple_loop.net.xml` is now
+- **Geometry — unified.** `tests/Sumo/networks/simple_loop/simple_loop.net.xml` is now
   **generated from the same `simple_loop.xodr`** that builds the CarMaker road
   (`netconvert --opendrive-files`), so SUMO and CarMaker share one geometry — no
   more square-vs-rounded corner mismatch. Verified headless: the ego traces the
   full R15 loop in the 0–200 frame. (Route edges are `-1 -2 -3 -4` from
-  netconvert; see `tests/Sumo/SimpleLoop/README.md`.)
+  netconvert; see `tests/Sumo/networks/simple_loop/README.md`.)
 - **Ports — OK.** 2444 (CarMaker) confirmed served; SUMO TraCI on 1337.
 
 Traffic mimics the VISSIM counterpart: a 700 veh/h background flow fills to ~40
 vehicles (yellow) that **circulate endlessly** (no exit), plus the red ego —
-matching VISSIM's ~40-persistent-after-240 s. See `tests/Sumo/SimpleLoop/`.
+matching VISSIM's ~40-persistent-after-240 s. See `tests/Sumo/networks/simple_loop/`.
 
 ## Build prerequisites
 

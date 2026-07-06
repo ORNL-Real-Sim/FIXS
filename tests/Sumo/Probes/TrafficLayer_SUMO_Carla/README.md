@@ -82,7 +82,7 @@ Remaining to confirm on a Carla box: the SimpleLoop `car` vType resolves to a
 valid Carla blueprint (`UseVehicleTypeAsBlueprint: false` → mapped via
 `BridgeHelper::map_Sumo_vClass_to_Carla_blueprintId`). Traffic mimics the VISSIM
 counterpart: ~40 background vehicles circulating endlessly (yellow in SUMO) + the
-red ego — see `tests/Sumo/SimpleLoop/`.
+red ego — see `tests/Sumo/networks/simple_loop/`.
 
 ## Build prerequisites
 
