@@ -6,7 +6,7 @@ measures the **SUMO/TraCI side**, which #168 did not, and which is where the
 SUMO-CM slowdown actually lives.
 
 All numbers are from the in-isolation harnesses in this folder — **no CarMaker,
-no TrafficLayer, no socket to CM** — driving the exact `tests/Sumo/network/simple_loop`
+no TrafficLayer, no socket to CM** — driving the exact `tests/Sumo/networks/simple_loop`
 scenario (40-vehicle ego-free loop demand, `--step-length 0.1`). They replicate the
 CarMaker-side SUMO path from `CommonLib/TrafficHelper.cpp` faithfully.
 

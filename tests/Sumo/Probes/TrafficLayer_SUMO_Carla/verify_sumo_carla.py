@@ -42,7 +42,7 @@ if not VCE.is_file():
     VCE = REPO / "tests" / "SumoCarla" / "VirCarlaEnv.exe"   # committed fallback
 CONFIG = HERE / "config.yaml"
 TLS = HERE / "traffic_light_table.csv"
-SUMOCFG = REPO / "tests" / "Sumo" / "network" / "simple_loop" / "simple_loop_ego.sumocfg"
+SUMOCFG = REPO / "tests" / "Sumo" / "networks" / "simple_loop" / "simple_loop_ego.sumocfg"
 XODR = REPO / "tests" / "Vissim" / "SimpleEcho" / "simple_loop.xodr"
 LOGS = HERE / "_logs"
 

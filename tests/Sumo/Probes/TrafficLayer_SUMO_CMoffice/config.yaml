@@ -78,6 +78,6 @@ CarMakerSetup:
                                     # objects don't phase-lock/freeze at high UpdRate (#168).
     EgoId: egoCm
     # SUMO vType for the injected ego. 'car' matches the vType defined in
-    # tests/Sumo/network/simple_loop/simple_loop.rou.xml. If absent, SUMO's
+    # tests/Sumo/networks/simple_loop/simple_loop.rou.xml. If absent, SUMO's
     # default type is used.
     EgoType: car

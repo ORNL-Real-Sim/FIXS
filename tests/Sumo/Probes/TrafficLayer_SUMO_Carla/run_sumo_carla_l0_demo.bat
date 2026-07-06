@@ -34,7 +34,7 @@ if not exist "%VCE%" set VCE=%RepoRoot%\tests\SumoCarla\VirCarlaEnv.exe
 set CONFIG=%HERE%config_l0.yaml
 set TLS=%HERE%traffic_light_table.csv
 REM BACKGROUND-ONLY scenario: the ego is injected by TrafficLayer, not routed by SUMO.
-set SUMOCFG=%RepoRoot%\tests\Sumo\network\simple_loop\simple_loop.sumocfg
+set SUMOCFG=%RepoRoot%\tests\Sumo\networks\simple_loop\simple_loop.sumocfg
 set XODR=%RepoRoot%\tests\Vissim\SimpleEcho\simple_loop.xodr
 
 REM --- load carla.env (for PY + carla host/port) ------------------------------

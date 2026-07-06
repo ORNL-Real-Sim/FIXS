@@ -16,7 +16,7 @@ import libsumo
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", "..", "..", ".."))
-NET = os.path.join(REPO, "tests", "Sumo", "network", "simple_loop", "simple_loop.net.xml")
+NET = os.path.join(REPO, "tests", "Sumo", "networks", "simple_loop", "simple_loop.net.xml")
 LOOP = ["-1", "-2", "-3", "-4"]
 
 

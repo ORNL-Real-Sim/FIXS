@@ -44,7 +44,7 @@ ApplicationSetup:
     VehicleSubscription:
     -   type: ego
         # 'ego' matches the overlay vehicle defined in
-        # tests/Sumo/network/simple_loop/simple_loop.ego.rou.xml (loaded via
+        # tests/Sumo/networks/simple_loop/simple_loop.ego.rou.xml (loaded via
         # simple_loop_ego.sumocfg). radius is the Euclidean
         # context-subscription distance from the ego (the only working SUMO
         # visibility lever; the YAML 'all' flag is dead code, #176). The

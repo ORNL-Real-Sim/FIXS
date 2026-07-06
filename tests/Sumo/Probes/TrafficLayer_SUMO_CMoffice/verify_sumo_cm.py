@@ -43,7 +43,7 @@ TL = REPO / "TrafficLayer" / "x64" / "Release" / "TrafficLayer.exe"
 CMEXE = REPO / "ProprietaryFiles" / "CM13_proj" / "src" / "CarMaker_headless.win64.exe"
 CMPROJ = REPO / "ProprietaryFiles" / "CM13_proj"
 CONFIG = HERE / "config.yaml"
-SUMOCFG = REPO / "tests" / "Sumo" / "network" / "simple_loop" / "simple_loop.sumocfg"
+SUMOCFG = REPO / "tests" / "Sumo" / "networks" / "simple_loop" / "simple_loop.sumocfg"
 # RS_SUMOCFG overrides the scenario (e.g. a W99 car-following variant) without
 # touching the committed network -- for the car-following-model comparison test.
 if os.environ.get("RS_SUMOCFG"):

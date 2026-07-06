@@ -33,7 +33,7 @@ set CMPROJ=%RepoRoot%\ProprietaryFiles\CM13_proj
 set CM_OFFICE=C:\IPG\carmaker\win64-13.1.3\bin\CM_Office.exe
 set TESTRUN=SimpleLoop_rs
 set CONFIG=%HERE%config.yaml
-set SUMOCFG=%RepoRoot%\tests\Sumo\network\simple_loop\simple_loop.sumocfg
+set SUMOCFG=%RepoRoot%\tests\Sumo\networks\simple_loop\simple_loop.sumocfg
 
 REM Python is used ONLY to patch the GUI config (setup_gui.py is pure stdlib) --
 REM ANY Python 3 works, no packages. Honor a preset %PYTHON%; else try 'py', then

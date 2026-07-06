@@ -34,7 +34,7 @@ import libsumo
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", "..", "..", ".."))
-SUMOCFG = os.path.join(REPO, "tests", "Sumo", "network", "simple_loop", "simple_loop.sumocfg")
+SUMOCFG = os.path.join(REPO, "tests", "Sumo", "networks", "simple_loop", "simple_loop.sumocfg")
 OUTDIR = os.path.join(HERE, "_perf")
 
 # ---- the EXACT VehDataSubscribeList from TrafficHelper.cpp L126-192 ----------

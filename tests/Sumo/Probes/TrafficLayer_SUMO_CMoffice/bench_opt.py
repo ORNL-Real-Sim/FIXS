@@ -22,7 +22,7 @@ import os, sys, time, csv, statistics, argparse, importlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", "..", "..", ".."))
-SUMOCFG = os.path.join(REPO, "tests", "Sumo", "network", "simple_loop", "simple_loop.sumocfg")
+SUMOCFG = os.path.join(REPO, "tests", "Sumo", "networks", "simple_loop", "simple_loop.sumocfg")
 OUTDIR = os.path.join(HERE, "_perf")
 SUMO_BIN = os.path.join(os.environ.get("SUMO_HOME", r"C:\Program Files (x86)\Eclipse\Sumo"),
                         "bin", "sumo.exe")
