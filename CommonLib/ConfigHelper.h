@@ -289,6 +289,16 @@ typedef struct SubscriptionAllList_t {
 
 };
 
+// Generic FIXS infrastructure logging (see CommonLib/DataLogger). Config-driven,
+// backend-agnostic: records the FIXS vehicle-data stream in the SUMO/VISSIM wire
+// convention. Analysis/plotting of the output lives per-test, not here.
+struct DataLogSetup_t {
+	bool EnableDataLog = false;
+	std::string DataLogPath = "auto";           // "auto" -> a component default path
+	std::vector<std::string> DataLogWho;         // vehicle ids to log; empty = all seen
+	std::vector<std::string> DataLogFields;      // VehFullData fields; empty = default core set
+};
+
 class ConfigHelper
 {
 public:
@@ -323,6 +333,7 @@ public:
 	SumoSetup_t SumoSetup;
 	CarlaSetup_t CarlaSetup;
 	VissimSetup_t VissimSetup;
+	DataLogSetup_t DataLogSetup;
 
 
 

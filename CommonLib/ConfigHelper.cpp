@@ -679,6 +679,17 @@ int ConfigHelper::getConfig(string configName) {
 		if (node["EnableDriverModelRelay"])  VissimSetup.EnableDriverModelRelay  = parserFlag(node, "EnableDriverModelRelay");
 	}
 
+	// ===========================================================================
+	// 			READ DataLog Setup section (generic FIXS infrastructure logging)
+	// ===========================================================================
+	node = config["DataLogSetup"];
+	if (node) {
+		if (node["EnableDataLog"]) DataLogSetup.EnableDataLog = parserFlag(node, "EnableDataLog");
+		if (node["DataLogPath"])   DataLogSetup.DataLogPath   = parserString(node, "DataLogPath");
+		if (node["DataLogWho"])    parserStringVector(node, "DataLogWho", DataLogSetup.DataLogWho);
+		if (node["DataLogFields"]) parserStringVector(node, "DataLogFields", DataLogSetup.DataLogFields);
+	}
+
 	return 0;
 }
 

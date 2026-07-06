@@ -31,6 +31,7 @@
 #include "BridgeHelper.h"
 #include "CarlaBackend.h"
 #include "../../CommonLib/VirEnvCore.h"
+#include "../../CommonLib/DataLogger.h"
 #include "MsgHelper.h"
 #include "ConfigHelper.h"
 
@@ -201,6 +202,27 @@ int main(int argc, const char* argv[]) {
         long stepCount = 0;
         double simTime = 0.0;
         auto wallStart = std::chrono::steady_clock::now();   // realtime-pacing reference
+
+        // ---- generic FIXS data logging (config: DataLogSetup) --------------
+        // Records the vehicle-data records this bridge reports to FIXS, in the
+        // SUMO/VISSIM wire convention (see CommonLib/DataLogger). Same code path
+        // for every EgoL0Driver, so the CSVs are directly comparable.
+        const auto& dls = config.DataLogSetup;
+        fixs::DataLogger dataLog;
+        auto logWanted = [&](const std::string& id) {
+            if (dls.DataLogWho.empty()) return true;
+            for (const std::string& w : dls.DataLogWho) if (w == id) return true;
+            return false;
+        };
+        if (dls.EnableDataLog) {
+            std::string p = (dls.DataLogPath.empty() || dls.DataLogPath == "auto")
+                            ? std::string("_datalog/vircarla.csv") : dls.DataLogPath;
+            if (dataLog.open(p, dls.DataLogFields))
+                std::cout << "DataLogger -> " << dataLog.path() << " (FIXS/SUMO-VISSIM wire convention)\n";
+            else
+                std::cerr << "DataLogger: could not open " << p << "\n";
+        }
+
         while (simTime < simEndTime) {
             // ---- core: recv (only on the 0.1s feed boundary) -> spawn / pose
             //      (batch) / despawn; the refresh interpolates EVERY sub-step ----
@@ -236,6 +258,7 @@ int main(int argc, const char* argv[]) {
                         d.positionX = (float)es.x; d.positionY = (float)es.y; d.positionZ = (float)es.z;
                         d.heading = (float)es.heading; d.grade = (float)es.grade;
                         core.Msg_c.VehDataSend_um[core.Sock_c.serverSock[sock0]].push_back(d);
+                        if (dataLog.isOpen() && logWanted(d.id)) dataLog.logVehicle(simTime, d);
                     }
                     if (spectatorFollow && egoId == centeredViewId && backend.egoActor()) {
                         carla::geom::Transform eTf = backend.egoActor()->GetTransform();
@@ -266,6 +289,7 @@ int main(int argc, const char* argv[]) {
                     d.positionX = sTf.location.x; d.positionY = sTf.location.y; d.positionZ = sTf.location.z;
                     d.heading = sTf.rotation.yaw; d.grade = (float)(sTf.rotation.pitch * M_PI / 180.0);
                     core.Msg_c.VehDataSend_um[core.Sock_c.serverSock[sock0]].push_back(d);
+                    if (dataLog.isOpen() && logWanted(d.id)) dataLog.logVehicle(simTime, d);
                 }
                 if (spectatorFollow && iid == centeredViewId) {
                     // Rigid top-down BEV snapped to the ego each tick: no low-pass,
@@ -306,6 +330,7 @@ int main(int argc, const char* argv[]) {
             }
         }
 
+        if (dataLog.isOpen()) { std::cout << "DataLogger closed: " << dataLog.path() << "\n"; dataLog.close(); }
         if (egoMode >= 1) backend.destroyEgo();
         settings = world.GetSettings();
         if (settings.synchronous_mode) {

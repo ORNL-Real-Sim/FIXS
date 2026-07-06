@@ -103,3 +103,13 @@ CarlaSetup:
     CenteredViewId: ego
     SpectatorHeight: 50
     SpectatorAlignYaw: false
+
+# Generic FIXS data logging (infrastructure -- CommonLib/DataLogger). Records the
+# ego's reported state in the SUMO/VISSIM wire convention, so the two L0 drivers
+# (EgoDriver here; native TM in config_l0_tm.yaml) compare directly via
+# tests/Sumo/Probes/TrafficLayer_SUMO_Carla/plot_l0_compare.py.
+DataLogSetup:
+    EnableDataLog: true
+    DataLogPath: '_datalog/l0_egodriver.csv'
+    DataLogWho: ['ego']
+    DataLogFields: [positionX, positionY, positionZ, heading, speed, speedDesired]

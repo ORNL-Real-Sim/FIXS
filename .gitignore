@@ -26,6 +26,8 @@
 **/RealSim_tmp/*
 **/RS_tmp/*
 **/tmp/*
+**/_logs/*
+**/_datalog/*
 
 **/.vscode/*
 
