@@ -11,7 +11,7 @@ REM    1. launch CARLA (Carla\launch_carla.bat) + wait for RPC
 REM    3. load simple_loop.xodr as the world
 REM    4. launch SUMO on the BACKGROUND-ONLY SimpleLoop scenario (no SUMO ego --
 REM       TrafficLayer injects the Carla ego via moveToXY, like the CM demo)
-REM    5. launch TrafficLayer   6. launch VirCarlaEnv (config_l0.yaml)
+REM    5. launch TrafficLayer   6. launch VirCarlaEnv (config_l0_egodriver.yaml)
 REM
 REM  Watch for: a red-highlighted ego that ACCELERATES from rest on its tires,
 REM  follows the loop, and appears in the SUMO-gui as vehicle 'ego' with the
@@ -28,7 +28,7 @@ set ENVFILE=%CARLADIR%\carla.env
 set TL=%RepoRoot%\TrafficLayer\x64\Release\TrafficLayer.exe
 set VCE=%RepoRoot%\VirCarlaEnv\x64\Release\VirCarlaEnv.exe
 if not exist "%VCE%" set VCE=%RepoRoot%\tests\SumoCarla\VirCarlaEnv.exe
-set CONFIG=%HERE%config_l0_pursuit.yaml
+set CONFIG=%HERE%config_l0_egodriver.yaml
 set TLS=%HERE%traffic_light_table.csv
 REM BACKGROUND-ONLY scenario: the ego is injected by TrafficLayer, not routed by SUMO.
 set SUMOCFG=%RepoRoot%\tests\Sumo\networks\simple_loop\simple_loop.sumocfg

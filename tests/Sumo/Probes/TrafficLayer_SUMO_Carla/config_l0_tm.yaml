@@ -3,15 +3,16 @@
 #
 # The L0 counterpart of the SUMO-CM office demo: background traffic is
 # SUMO-driven (teleported into Carla), but the EGO is a REAL Carla vehicle --
-# full PhysX dynamics (tire contact, powertrain). This file uses EgoL0Driver: Pursuit
-# -- the SDK-free EgoDriver module (pure pursuit + speed hold) drives the ego
-# through full PhysX. Map-agnostic: it ignores Carla's road graph, so it works
-# even where TM cannot route. For the native TM autopilot, see config_l0.yaml.
+# full PhysX dynamics (tire contact, powertrain). This file uses EgoL0Driver: TM
+# -- Carla's NATIVE Traffic Manager autopilot drives the ego (the Carla
+# counterpart of CarMaker's IPGDriver). TM needs a routable map; the simple_loop
+# junction-id/road-id collision that used to break it is fixed in the generator.
+# For the map-agnostic pure-pursuit fallback instead, see config_l0_egodriver.yaml.
 #
 # Data flow (note the ego direction is REVERSED vs the teleport demo):
 #
 #   SUMO --[bg traffic]--> TrafficLayer --[port 440]--> VirCarlaEnv --> Carla (teleport bg)
-#   Carla ego (EgoDriver)    --[VirCarlaEnv readback]--> TrafficLayer --moveToXY--> SUMO 'ego'
+#   Carla ego (TM autopilot) --[VirCarlaEnv readback]--> TrafficLayer --moveToXY--> SUMO 'ego'
 #
 # EgoMode ladder (CarlaSetup.EgoMode):
 #   0 = SumoDriver  : SUMO drives the ego, Carla teleports it (config.yaml)
@@ -19,7 +20,7 @@
 #   2 = Advisory    : L2 -- + external desired-speed advisory via FIXS   [reserved]
 #   3 = Control     : L4 -- + external throttle/brake/steer via FIXS     [reserved]
 #
-# Run: run_sumo_carla_l0_demo.bat (one click). SUMO side runs the BACKGROUND-ONLY
+# Run: run_sumo_carla_l0_tm.bat (one click). SUMO side runs the BACKGROUND-ONLY
 # scenario (simple_loop.sumocfg) -- the ego is injected by TrafficLayer from the
 # Carla readback (same mechanism as the CM office demo's egoCm).
 # =============================================================================
@@ -65,9 +66,9 @@ CarlaSetup:
 
     # ---- EgoMode 1: Carla drives the ego (L0) -------------------------------
     EgoMode: 1
-    # L0 driver: "Pursuit" = SDK-free EgoDriver fallback module (map-agnostic).
-    # "TM" = native Carla Traffic Manager autopilot (config_l0.yaml).
-    EgoL0Driver: Pursuit
+    # L0 driver: "TM" = native Carla Traffic Manager autopilot (default; needs a
+    # routable map). "Pursuit" = SDK-free EgoDriver fallback (config_l0_egodriver.yaml).
+    EgoL0Driver: TM
     EgoId: ego                          # FIXS/SUMO id of the injected ego
     EgoSumoType: car                    # SUMO vType for injection (exists in simple_loop.rou.xml)
     EgoBlueprint: vehicle.tesla.model3  # the Carla actor (physics ON)

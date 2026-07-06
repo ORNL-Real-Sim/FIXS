@@ -4,16 +4,16 @@ REM  FIXS #174 - SUMO ^<-^> Carla demo, EgoMode 1 "CarlaDriver" (L0)
 REM ----------------------------------------------------------------------------
 REM  DOUBLE-CLICK this. Same stack as run_sumo_carla_demo.bat, but the EGO is a
 REM  REAL Carla vehicle with full PhysX dynamics (tire contact), driven by Carla's
-REM  NATIVE Traffic Manager autopilot (config_l0.yaml, EgoL0Driver: TM) -- the
+REM  NATIVE Traffic Manager autopilot (config_l0_tm.yaml, EgoL0Driver: TM) -- the
 REM  Carla counterpart of the CM office demo's IPGDriver ego. Background traffic
 REM  stays SUMO-driven. (For the map-agnostic pure-pursuit EgoDriver module
-REM  instead, run run_sumo_carla_l0_pursuit_demo.bat.)
+REM  instead, run run_sumo_carla_l0_egodriver.bat.)
 REM
 REM    1. launch CARLA (Carla\launch_carla.bat) + wait for RPC
 REM    3. load simple_loop.xodr as the world
 REM    4. launch SUMO on the BACKGROUND-ONLY SimpleLoop scenario (no SUMO ego --
 REM       TrafficLayer injects the Carla ego via moveToXY, like the CM demo)
-REM    5. launch TrafficLayer   6. launch VirCarlaEnv (config_l0.yaml)
+REM    5. launch TrafficLayer   6. launch VirCarlaEnv (config_l0_tm.yaml)
 REM
 REM  Watch for: after a one-time ~30 s "Pre-building TM InMemoryMap" pause (TM
 REM  builds its route graph once), a red-highlighted ego that ACCELERATES from rest
@@ -31,7 +31,7 @@ set ENVFILE=%CARLADIR%\carla.env
 set TL=%RepoRoot%\TrafficLayer\x64\Release\TrafficLayer.exe
 set VCE=%RepoRoot%\VirCarlaEnv\x64\Release\VirCarlaEnv.exe
 if not exist "%VCE%" set VCE=%RepoRoot%\tests\SumoCarla\VirCarlaEnv.exe
-set CONFIG=%HERE%config_l0.yaml
+set CONFIG=%HERE%config_l0_tm.yaml
 set TLS=%HERE%traffic_light_table.csv
 REM BACKGROUND-ONLY scenario: the ego is injected by TrafficLayer, not routed by SUMO.
 set SUMOCFG=%RepoRoot%\tests\Sumo\networks\simple_loop\simple_loop.sumocfg
