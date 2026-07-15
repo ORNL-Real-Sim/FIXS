@@ -9,6 +9,9 @@ per-app one-click import_*.bat / .sh wrappers.
 A map "package" is the `<name>.json` descriptor plus its fbx/xodr/fbm asset
 folder. This helper makes sure that package is staged under <carla_root>/Import,
 then runs the cook. The package is sourced, in order:
+  --pick-release        list the repo's map releases and prompt which VERSION to
+                        import, then download it via gh (needs gh; no URL/version
+                        to hand-maintain - you pick from what's published), or
   already staged        files already present under <carla_root>/Import, or
   --package-dir <dir>   a local folder holding the package files, or
   --package-url <url>   tried via the GitHub CLI if installed (handles private
@@ -21,6 +24,8 @@ packaged CARLA cannot import custom maps. carla_root / ue4_root default to the
 saved env config (~/.fixs/carla.json) written by carla_env_setup.py.
 
 Examples:
+  # pick which published version to import (lists releases tagged map-*):
+  python import_map.py --pick-release --repo ORNL-Real-Sim/FIXS_Applications --tag-prefix map-
   python import_map.py --package RP_Ver0529 --package-dir C:/src_ext/Carla/Import
   python import_map.py --package RP_Ver0529 --package-url https://.../RP_Ver0529_import.zip
 """
@@ -182,14 +187,11 @@ def run_import(carla_root, ue4_root, name):
     return subprocess.call(cmd, cwd=carla_root, env=proc_env)
 
 
-def ensure_map(name, carla_root=None, ue4_root=None, package_url=None,
-               package_dir=None, force=False, prompt_if_exists=False, package_pick=False):
-    """Make sure `name` is imported into the (source-build) CARLA, importing it
-    if needed. Returns 0 on success; exits with a clear message otherwise.
-
-    If the map already exists: `force` re-imports unconditionally; otherwise, when
-    `prompt_if_exists` and the session is interactive, the user is asked whether to
-    re-import (re-download + re-cook) - handy for updating a map or testing."""
+def _resolve_carla(carla_root=None, ue4_root=None):
+    """Resolve (carla_root, ue4_root) from the saved env config, running first-time
+    setup if nothing is configured yet. Exits with a clear message if no CARLA is
+    configured, or if it is a packaged build (custom-map import needs a source
+    build). Explicit args win over the saved config."""
     cfg = env.load_config()
     if cfg is None and not carla_root:
         # first use on a fresh clone: configure the CARLA env, just like run_cosim
@@ -203,6 +205,18 @@ def ensure_map(name, carla_root=None, ue4_root=None, package_url=None,
     if cfg.get("mode") == "packaged":
         sys.exit("[import] the configured CARLA is PACKAGED; importing a custom map "
                  "needs a SOURCE build (run setup_carla and pick source).")
+    return carla_root, ue4_root
+
+
+def ensure_map(name, carla_root=None, ue4_root=None, package_url=None,
+               package_dir=None, force=False, prompt_if_exists=False, package_pick=False):
+    """Make sure `name` is imported into the (source-build) CARLA, importing it
+    if needed. Returns 0 on success; exits with a clear message otherwise.
+
+    If the map already exists: `force` re-imports unconditionally; otherwise, when
+    `prompt_if_exists` and the session is interactive, the user is asked whether to
+    re-import (re-download + re-cook) - handy for updating a map or testing."""
+    carla_root, ue4_root = _resolve_carla(carla_root, ue4_root)
 
     umap = cooked_map_path(carla_root, name)
     already = os.path.isfile(umap)
@@ -264,6 +278,113 @@ def read_map_config(path):
     return cfg
 
 
+def _require_gh():
+    """Path to the GitHub CLI, or exit telling the user how to proceed without it."""
+    gh = shutil.which("gh")
+    if not gh:
+        sys.exit("[import] --pick-release needs the GitHub CLI (gh) to list the map "
+                 "releases.\n        Install gh (https://cli.github.com) and run "
+                 "`gh auth login`, or import a specific version directly with "
+                 "--package + --package-url / --package-dir.")
+    return gh
+
+
+def _package_from_tag(tag, tag_prefix=""):
+    """Package name = release tag with its prefix stripped. Convention:
+    tag `map-<pkg>` <-> asset `<pkg>_carla_import.zip` <-> descriptor `<pkg>.json`."""
+    return tag[len(tag_prefix):] if tag_prefix and tag.startswith(tag_prefix) else tag
+
+
+def list_map_releases(repo, tag_prefix=""):
+    """Map releases in `repo` (tag starts with `tag_prefix`), newest first, via gh.
+    Each item: {tag, title, date 'YYYY-MM-DD', prerelease}. Drafts are skipped -
+    their assets aren't downloadable."""
+    import json
+    gh = _require_gh()
+    try:
+        out = subprocess.check_output(
+            [gh, "release", "list", "-R", repo, "-L", "100", "--json",
+             "tagName,name,publishedAt,isPrerelease,isDraft"],
+            text=True, stderr=subprocess.PIPE)
+    except subprocess.CalledProcessError as exc:
+        sys.exit(f"[import] `gh release list` failed for {repo}:\n{exc.stderr.strip()}\n"
+                 "        Check `gh auth status` and that your account can see the repo.")
+    rels = []
+    for r in json.loads(out):
+        tag = r.get("tagName", "")
+        if r.get("isDraft") or (tag_prefix and not tag.startswith(tag_prefix)):
+            continue
+        rels.append({"tag": tag, "title": r.get("name") or "",
+                     "date": (r.get("publishedAt") or "")[:10],
+                     "prerelease": bool(r.get("isPrerelease"))})
+    rels.sort(key=lambda r: r["date"], reverse=True)
+    return rels
+
+
+def choose_release(releases, tag_prefix=""):
+    """Print a numbered menu of releases and return the chosen tag. Empty input
+    picks the newest (item 1). Exits if there is nothing to choose or the session
+    is non-interactive (no way to prompt)."""
+    if not releases:
+        sys.exit("[import] no matching map releases found to choose from.")
+    print("\n[import] Available map versions (newest first):")
+    for i, r in enumerate(releases, 1):
+        pkg = _package_from_tag(r["tag"], tag_prefix)
+        flag = "  (pre-release)" if r["prerelease"] else ""
+        print(f"   {i}) {pkg:<26} {r['date']}{flag}")
+    if not sys.stdin.isatty():
+        sys.exit("[import] non-interactive session: cannot prompt for a version. Pass "
+                 "--package (+ --package-url / --package-dir) to import a specific one.")
+    while True:
+        ans = input(f"[import] Which version? [1-{len(releases)}], Enter = 1 (newest): ").strip()
+        if ans == "":
+            return releases[0]["tag"]
+        if ans.isdigit() and 1 <= int(ans) <= len(releases):
+            return releases[int(ans) - 1]["tag"]
+        print("[import] invalid choice; enter a number from the list.")
+
+
+def gh_download_release_zip(repo, tag, dest_dir):
+    """Download the release's .zip asset into `dest_dir` via gh; return its path."""
+    gh = _require_gh()
+    os.makedirs(dest_dir, exist_ok=True)
+    print(f"[import] downloading release '{tag}' from {repo} ...")
+    rc = subprocess.call([gh, "release", "download", tag, "-R", repo,
+                          "-p", "*.zip", "-D", dest_dir, "--clobber"])
+    if rc != 0:
+        sys.exit(f"[import] `gh release download {tag}` failed (rc={rc}).")
+    zips = [f for f in os.listdir(dest_dir) if f.lower().endswith(".zip")]
+    if not zips:
+        sys.exit(f"[import] release '{tag}' has no .zip asset to import.")
+    return os.path.join(dest_dir, zips[0])
+
+
+def pick_and_import(repo, tag_prefix="", carla_root=None, ue4_root=None, force=False):
+    """List `repo`'s map releases, ask which to import, then download + cook it.
+    If the chosen version is already cooked, skip the download (unless the user
+    opts to re-import, or force=True)."""
+    carla_root, ue4_root = _resolve_carla(carla_root, ue4_root)
+    tag = choose_release(list_map_releases(repo, tag_prefix), tag_prefix)
+    name = _package_from_tag(tag, tag_prefix)
+
+    if map_is_imported(carla_root, name) and not force:
+        print(f"[import] '{name}' is already imported: {cooked_map_path(carla_root, name)}")
+        if not sys.stdin.isatty():
+            return 0
+        if input("[import] re-import it (re-download + re-cook)? [y/N]: ").strip().lower() != "y":
+            print("[import] keeping the existing map.")
+            return 0
+        force = True
+
+    tmp = tempfile.mkdtemp(prefix="fixs-map-")
+    try:
+        zip_path = gh_download_release_zip(repo, tag, tmp)
+        return ensure_map(name, carla_root=carla_root, ue4_root=ue4_root,
+                          package_dir=zip_path, force=force)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -278,19 +399,35 @@ def main():
     ap.add_argument("--package-pick", action="store_true",
                     help="always open a file picker to select a hand-downloaded package "
                          "(skips the gh auto-download)")
+    ap.add_argument("--pick-release", action="store_true",
+                    help="list the repo's map releases and prompt which version to import, "
+                         "then download + cook it (needs gh). Repo/prefix come from "
+                         "--repo/--tag-prefix or from repo=/tag_prefix= in --map-config")
+    ap.add_argument("--repo", default=None,
+                    help="owner/repo whose releases to list for --pick-release")
+    ap.add_argument("--tag-prefix", default=None,
+                    help="for --pick-release, only offer releases whose tag starts with "
+                         "this (e.g. 'map-'); the package name is the tag minus this prefix")
     ap.add_argument("--carla-root", default=None, help="override the saved carla_root")
     ap.add_argument("--ue4-root", default=None, help="override the saved ue4_root")
     ap.add_argument("--force", action="store_true",
                     help="re-import even if already present (no prompt)")
     args = ap.parse_args()
 
-    package, url = args.package, args.package_url
-    if args.map_config:
-        mc = read_map_config(args.map_config)
-        package = package or mc.get("package")
-        url = url or mc.get("url")
+    mc = read_map_config(args.map_config) if args.map_config else {}
+
+    if args.pick_release:
+        repo = args.repo or mc.get("repo")
+        if not repo:
+            ap.error("--pick-release needs --repo or a 'repo=' line in --map-config")
+        tag_prefix = args.tag_prefix if args.tag_prefix is not None else mc.get("tag_prefix", "")
+        return pick_and_import(repo, tag_prefix, args.carla_root, args.ue4_root, args.force)
+
+    package = args.package or mc.get("package")
+    url = args.package_url or mc.get("url")
     if not package:
-        ap.error("a map is required: pass --package, or --map-config with a package= line")
+        ap.error("a map is required: pass --package, or --map-config with a package= line "
+                 "(or use --pick-release to choose from the repo's releases)")
 
     # run standalone -> offer to re-import if the map already exists
     return ensure_map(package, args.carla_root, args.ue4_root,
