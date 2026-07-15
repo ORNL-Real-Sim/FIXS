@@ -103,7 +103,12 @@ def main():
     if not name and args.map_config:
         name = import_map.read_map_config(args.map_config).get("package")
     if not name:
-        ap.error("a map is required: pass --map, or --map-config with a package= line")
+        # No map given: let the user pick from the maps already cooked into this
+        # CARLA. place_tls operates on a cooked map, so this needs no repo/network.
+        carla_root = args.carla_root or (env.load_config() or {}).get("carla_root")
+        if not carla_root:
+            ap.error("no CARLA configured (run setup_carla first), or pass --map <name>.")
+        name = import_map.choose_imported_map(carla_root)
 
     return place_tls(name, args.tl_table, args.carla_root, args.ue4_root, args.force)
 

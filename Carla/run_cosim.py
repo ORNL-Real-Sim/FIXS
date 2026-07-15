@@ -283,9 +283,18 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--sumocfg", required=True, help="SUMO .sumocfg")
-    ap.add_argument("--map", default="Town01", help="CARLA map to load_world()")
+    ap.add_argument("--map", default=None,
+                    help="CARLA map to load. If omitted, pick from the published map "
+                         "releases of --repo (lists versions, you choose, it auto-downloads).")
+    ap.add_argument("--repo", default=None,
+                    help="owner/repo whose map-* releases to offer when --map is omitted "
+                         "(or a repo= line in --map-config)")
+    ap.add_argument("--tag-prefix", default=None,
+                    help="release tag prefix for the picker (e.g. 'map-'); the map name is "
+                         "the tag minus this prefix")
     ap.add_argument("--auto-import", action="store_true",
-                    help="source build: if the map isn't imported, cook it before launching")
+                    help="source build: if the map isn't imported, cook it before launching "
+                         "(implied when you pick a version via --repo)")
     ap.add_argument("--map-package", default=None,
                     help="import package name if it differs from --map")
     ap.add_argument("--map-package-url", default=None,
@@ -339,29 +348,48 @@ def main():
         print("[cosim] no CARLA env configured; running under the current python. "
               "If 'import carla' fails, run setup_carla first.")
 
+    # Decide which map to run. An explicit --map wins (seamless / scriptable).
+    # Otherwise list the published map releases of --repo and let the user pick a
+    # version; the chosen version is what we both import AND load, so the imported
+    # map and the loaded map can never drift apart.
+    import import_map
+    repo = args.repo
+    picked_tag = None
+    picked_local = None
+    target_map = args.map
+    if target_map is None:
+        repo, tag_prefix = import_map.resolve_map_source(args.repo, args.tag_prefix)
+        target_map, picked_tag, picked_local = import_map.choose_map(repo, tag_prefix)
+        src = f"release {picked_tag}" if picked_tag else f"local {picked_local}"
+        print(f"[cosim] selected map: {target_map}  ({src})")
+
     # Source-build preflight: a custom map must be cooked into the build before
-    # CARLA can load it. Detect a missing map on disk and either import it
-    # (--auto-import) or fail with a clear instruction - far better than an
-    # opaque load_world() error after launch.
+    # CARLA can load it. Import the target map if missing - from the picked release
+    # (downloaded + cached), a picked local .zip, or the explicit --map + url/config
+    # - else fail clearly.
     if not args.no_launch and cfg is not None and cfg.get("mode") == "source":
-        import import_map
-        pkg, url = args.map_package, args.map_package_url
-        if args.map_config:
-            mc = import_map.read_map_config(args.map_config)
-            pkg = pkg or mc.get("package")
-            url = url or mc.get("url")
-        pkg = pkg or args.map
-        imported = import_map.map_is_imported(cfg["carla_root"], pkg)
-        if not imported or args.reimport:
-            if args.auto_import or args.reimport:
+        need_import = args.reimport or not import_map.map_is_imported(cfg["carla_root"], target_map)
+        if need_import:
+            if picked_tag is not None or picked_local is not None:
                 verb = "re-importing" if args.reimport else "importing"
-                print(f"[cosim] {verb} map '{pkg}' before launch ...")
-                import_map.ensure_map(pkg, carla_root=cfg["carla_root"],
+                print(f"[cosim] {verb} '{target_map}' before launch ...")
+                zip_path = picked_local or import_map.download_release_zip(
+                    repo, picked_tag, force_redownload=args.reimport)
+                import_map.ensure_map(target_map, carla_root=cfg["carla_root"],
+                                      ue4_root=cfg.get("ue4_root"),
+                                      package_dir=zip_path, force=args.reimport)
+            elif args.auto_import or args.reimport:
+                url = args.map_package_url
+                if args.map_config:
+                    url = url or import_map.read_map_config(args.map_config).get("url")
+                verb = "re-importing" if args.reimport else "importing"
+                print(f"[cosim] {verb} map '{target_map}' before launch ...")
+                import_map.ensure_map(target_map, carla_root=cfg["carla_root"],
                                       ue4_root=cfg.get("ue4_root"),
                                       package_url=url, force=args.reimport)
             else:
                 sys.exit(
-                    f"[cosim] map '{pkg}' is not imported into {cfg['carla_root']}.\n"
+                    f"[cosim] map '{target_map}' is not imported into {cfg['carla_root']}.\n"
                     f"        Import it once (e.g. import_<app>_map.bat), or pass "
                     f"--auto-import [--map-package-url <release zip>].")
 
@@ -370,13 +398,13 @@ def main():
         # Idempotent via a marker; re-done after a (re-)import that wiped it.
         if args.tl_table:
             import place_tls
-            if (not place_tls.tls_placed(cfg["carla_root"], pkg)) or args.reimport:
-                if args.auto_import or args.reimport:
-                    print(f"[cosim] placing traffic lights for '{pkg}' before launch ...")
-                    place_tls.place_tls(pkg, args.tl_table, carla_root=cfg["carla_root"],
+            if (not place_tls.tls_placed(cfg["carla_root"], target_map)) or args.reimport:
+                if picked_tag is not None or picked_local is not None or args.auto_import or args.reimport:
+                    print(f"[cosim] placing traffic lights for '{target_map}' before launch ...")
+                    place_tls.place_tls(target_map, args.tl_table, carla_root=cfg["carla_root"],
                                         ue4_root=cfg.get("ue4_root"), force=args.reimport)
                 else:
-                    print(f"[cosim] note: traffic lights not placed for '{pkg}'. Run "
+                    print(f"[cosim] note: traffic lights not placed for '{target_map}'. Run "
                           f"place_tls (or pass --auto-import) to add them, else no TL sync.")
 
     carla_proc = None
@@ -414,21 +442,21 @@ def main():
         import carla
         client = carla.Client(args.carla_host, args.carla_port)
         client.set_timeout(args.load_timeout)
-        print(f"[CARLA] loading world: {args.map}")
+        print(f"[CARLA] loading world: {target_map}")
         print("[CARLA] (the first load of a freshly imported map compiles shaders - "
               "this can take a few minutes; later loads are fast)")
-        client.load_world(args.map)
+        client.load_world(target_map)
         # Don't trust load_world's return alone on a heavy source map: confirm the
         # world IS this map and is ticking before we start SUMO.
-        print(f"[CARLA] confirming '{args.map}' is loaded and ready ...")
-        loaded = confirm_world_ready(client, args.map, args.load_timeout)
+        print(f"[CARLA] confirming '{target_map}' is loaded and ready ...")
+        loaded = confirm_world_ready(client, target_map, args.load_timeout)
         if loaded is None:
             current = ""
             try:
                 current = client.get_world().get_map().name
             except Exception:
                 pass
-            sys.exit(f"[cosim] map '{args.map}' not confirmed loaded "
+            sys.exit(f"[cosim] map '{target_map}' not confirmed loaded "
                      f"(current world: '{current}'); aborting before SUMO.")
         print(f"[CARLA] map ready: {loaded}")
         world = client.get_world()

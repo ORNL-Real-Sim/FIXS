@@ -321,51 +321,155 @@ def list_map_releases(repo, tag_prefix=""):
     return rels
 
 
-def choose_release(releases, tag_prefix=""):
-    """Print a numbered menu of releases and return the chosen tag. Empty input
-    picks the newest (item 1). Exits if there is nothing to choose or the session
-    is non-interactive (no way to prompt)."""
-    if not releases:
-        sys.exit("[import] no matching map releases found to choose from.")
+def _infer_package_name(path):
+    """Best-effort map/package name from a downloaded zip or folder: the stem of the
+    <name>.json descriptor it contains (handles Windows-built zips with backslash
+    entries). Returns None if no descriptor is found."""
+    entries = []
+    if os.path.isfile(path) and path.lower().endswith(".zip"):
+        with zipfile.ZipFile(path) as z:
+            entries = z.namelist()
+    elif os.path.isdir(path):
+        entries = os.listdir(path)
+    for e in entries:
+        base = os.path.basename(e.replace("\\", "/").rstrip("/"))
+        if base.lower().endswith(".json"):
+            return base[:-5]
+    return None
+
+
+def _prompt(msg):
+    """input() that converts a non-interactive / closed stdin (EOF) into a clean
+    exit instead of an EOFError traceback. isatty() is unreliable through some
+    Windows shells, so we guard the call itself rather than trust isatty alone."""
+    try:
+        return input(msg)
+    except EOFError:
+        sys.exit("[import] non-interactive session (no input); pass an explicit "
+                 "--map / --package to run without prompting.")
+
+
+def choose_map(repo, tag_prefix=""):
+    """Interactive chooser covering both cases: pick one of `repo`'s published
+    map-* releases (auto-downloaded + cached), or select a local .zip / folder by
+    hand. Returns (name, tag, local_path): for a release (name, tag, None); for a
+    local pick (name, None, path). Exits if the session is non-interactive."""
+    releases = list_map_releases(repo, tag_prefix)
     print("\n[import] Available map versions (newest first):")
     for i, r in enumerate(releases, 1):
         pkg = _package_from_tag(r["tag"], tag_prefix)
         flag = "  (pre-release)" if r["prerelease"] else ""
         print(f"   {i}) {pkg:<26} {r['date']}{flag}")
+    if not releases:
+        print("   (no published releases found)")
+    print("   L) select a local .zip / folder instead")
     if not sys.stdin.isatty():
-        sys.exit("[import] non-interactive session: cannot prompt for a version. Pass "
-                 "--package (+ --package-url / --package-dir) to import a specific one.")
+        sys.exit("[import] non-interactive session: cannot prompt. Pass --package "
+                 "(+ --package-url/--package-dir), or --map, to choose non-interactively.")
     while True:
-        ans = input(f"[import] Which version? [1-{len(releases)}], Enter = 1 (newest): ").strip()
-        if ans == "":
-            return releases[0]["tag"]
+        hint = f"[1-{len(releases)} / L]" if releases else "[L]"
+        default = ", Enter = 1 (newest)" if releases else ""
+        ans = _prompt(f"[import] Which version? {hint}{default}: ").strip().lower()
+        if ans == "" and releases:
+            r = releases[0]
+            return _package_from_tag(r["tag"], tag_prefix), r["tag"], None
+        if ans == "l":
+            path = _select_package("map", None)  # native file picker / typed path
+            name = _infer_package_name(path)
+            if not name:
+                name = _prompt("[import] map name (matches <name>.json inside the package): ").strip()
+            if not name:
+                sys.exit("[import] no package name given; cannot import.")
+            return name, None, path
         if ans.isdigit() and 1 <= int(ans) <= len(releases):
-            return releases[int(ans) - 1]["tag"]
+            r = releases[int(ans) - 1]
+            return _package_from_tag(r["tag"], tag_prefix), r["tag"], None
+        print("[import] invalid choice; enter a number, or L for a local file.")
+
+
+def list_imported_maps(carla_root):
+    """Names of maps already cooked under this CARLA (i.e. that have a <name>.umap).
+    Used to let tools that operate on an existing map (e.g. place_tls) offer a
+    local choice without needing gh / the network."""
+    content = os.path.join(carla_root, "Unreal", "CarlaUE4", "Content")
+    if not os.path.isdir(content):
+        return []
+    return [name for name in sorted(os.listdir(content))
+            if os.path.isfile(cooked_map_path(carla_root, name))]
+
+
+def choose_imported_map(carla_root):
+    """Numbered menu of the maps already cooked into this CARLA; returns the chosen
+    name. Auto-selects when there is exactly one; exits if there are none, or if a
+    choice is needed but the session is non-interactive."""
+    maps = list_imported_maps(carla_root)
+    if not maps:
+        sys.exit(f"[import] no cooked maps found under {carla_root}. Import one first "
+                 "(e.g. import_<app>_map).")
+    if len(maps) == 1:
+        return maps[0]
+    print("\n[import] Imported maps:")
+    for i, m in enumerate(maps, 1):
+        print(f"   {i}) {m}")
+    if not sys.stdin.isatty():
+        sys.exit("[import] non-interactive session: pass --map <name> to choose one.")
+    while True:
+        ans = _prompt(f"[import] Which map? [1-{len(maps)}]: ").strip()
+        if ans.isdigit() and 1 <= int(ans) <= len(maps):
+            return maps[int(ans) - 1]
         print("[import] invalid choice; enter a number from the list.")
 
 
-def gh_download_release_zip(repo, tag, dest_dir):
-    """Download the release's .zip asset into `dest_dir` via gh; return its path."""
+def _map_cache_dir():
+    """Local cache for downloaded map zips: ~/.fixs/maps (next to carla.json), or
+    $FIXS_MAP_CACHE if set. Kept outside FIXS/ so `initialize` (which wipes FIXS/)
+    never deletes it, and shared across app clones so a map is downloaded once."""
+    d = os.environ.get("FIXS_MAP_CACHE") or os.path.join(os.path.dirname(env.CONFIG_PATH), "maps")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def download_release_zip(repo, tag, force_redownload=False):
+    """Return a local path to the release's .zip asset, downloading it via gh into
+    the ~/.fixs/maps/<tag>/ cache. If a cached copy already exists, ask whether to
+    reuse or re-download (default reuse); force_redownload skips the prompt and
+    re-fetches. The zip stays in the cache (not deleted) so re-imports are free."""
     gh = _require_gh()
-    os.makedirs(dest_dir, exist_ok=True)
-    print(f"[import] downloading release '{tag}' from {repo} ...")
+    tag_dir = os.path.join(_map_cache_dir(), tag)
+    cached = [f for f in os.listdir(tag_dir) if f.lower().endswith(".zip")] \
+        if os.path.isdir(tag_dir) else []
+
+    if cached and not force_redownload:
+        zip_path = os.path.join(tag_dir, cached[0])
+        if sys.stdin.isatty():
+            ans = input(f"[import] cached '{cached[0]}' found for '{tag}'. "
+                        "[U]se it / [R]e-download / [C]ancel? [U]: ").strip().lower()
+            if ans.startswith("c"):
+                sys.exit("[import] cancelled by user.")
+            force_redownload = ans.startswith("r")
+        if not force_redownload:
+            print(f"[import] using cached {zip_path}")
+            return zip_path
+
+    os.makedirs(tag_dir, exist_ok=True)
+    print(f"[import] downloading release '{tag}' from {repo}\n"
+          f"[import]   into cache {tag_dir} (~720MB; set FIXS_MAP_CACHE to relocate) ...")
     rc = subprocess.call([gh, "release", "download", tag, "-R", repo,
-                          "-p", "*.zip", "-D", dest_dir, "--clobber"])
+                          "-p", "*.zip", "-D", tag_dir, "--clobber"])
     if rc != 0:
         sys.exit(f"[import] `gh release download {tag}` failed (rc={rc}).")
-    zips = [f for f in os.listdir(dest_dir) if f.lower().endswith(".zip")]
+    zips = [f for f in os.listdir(tag_dir) if f.lower().endswith(".zip")]
     if not zips:
         sys.exit(f"[import] release '{tag}' has no .zip asset to import.")
-    return os.path.join(dest_dir, zips[0])
+    return os.path.join(tag_dir, zips[0])
 
 
 def pick_and_import(repo, tag_prefix="", carla_root=None, ue4_root=None, force=False):
-    """List `repo`'s map releases, ask which to import, then download + cook it.
-    If the chosen version is already cooked, skip the download (unless the user
-    opts to re-import, or force=True)."""
+    """List `repo`'s map releases (or accept a local .zip), ask which to import,
+    then download + cook it. If the chosen version is already cooked, skip the
+    download (unless the user opts to re-import, or force=True)."""
     carla_root, ue4_root = _resolve_carla(carla_root, ue4_root)
-    tag = choose_release(list_map_releases(repo, tag_prefix), tag_prefix)
-    name = _package_from_tag(tag, tag_prefix)
+    name, tag, local = choose_map(repo, tag_prefix)
 
     if map_is_imported(carla_root, name) and not force:
         print(f"[import] '{name}' is already imported: {cooked_map_path(carla_root, name)}")
@@ -376,13 +480,35 @@ def pick_and_import(repo, tag_prefix="", carla_root=None, ue4_root=None, force=F
             return 0
         force = True
 
-    tmp = tempfile.mkdtemp(prefix="fixs-map-")
-    try:
-        zip_path = gh_download_release_zip(repo, tag, tmp)
-        return ensure_map(name, carla_root=carla_root, ue4_root=ue4_root,
-                          package_dir=zip_path, force=force)
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
+    zip_path = local if local else download_release_zip(repo, tag, force_redownload=force)
+    return ensure_map(name, carla_root=carla_root, ue4_root=ue4_root,
+                      package_dir=zip_path, force=force)
+
+
+DEFAULT_MAP_REPO = "ORNL-Real-Sim/FIXS_Applications"
+DEFAULT_MAP_TAG_PREFIX = "map-"
+
+
+def _app_root():
+    """The application repo root that holds fixs_sources.txt: two levels up from
+    this file (<repo>/FIXS/Carla/import_map.py -> <repo>)."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    return os.path.dirname(os.path.dirname(here))
+
+
+def resolve_map_source(repo=None, tag_prefix=None):
+    """Resolve (repo, tag_prefix) for the map picker. Precedence: an explicit value
+    (CLI) wins, else the root fixs_sources.txt (map_repo / map_tag_prefix), else the
+    built-in default. Lets the hosting repo change in one config line, no wrappers
+    to edit."""
+    cfg = {}
+    src = os.path.join(_app_root(), "fixs_sources.txt")
+    if os.path.isfile(src):
+        cfg = read_map_config(src)
+    repo = repo or cfg.get("map_repo") or DEFAULT_MAP_REPO
+    if tag_prefix is None:
+        tag_prefix = cfg.get("map_tag_prefix", DEFAULT_MAP_TAG_PREFIX)
+    return repo, tag_prefix
 
 
 def main():
@@ -416,18 +542,16 @@ def main():
 
     mc = read_map_config(args.map_config) if args.map_config else {}
 
-    if args.pick_release:
-        repo = args.repo or mc.get("repo")
-        if not repo:
-            ap.error("--pick-release needs --repo or a 'repo=' line in --map-config")
-        tag_prefix = args.tag_prefix if args.tag_prefix is not None else mc.get("tag_prefix", "")
+    # Default action is the release/local picker; naming a specific --package (or a
+    # package= in --map-config) opts into the direct, non-interactive import path.
+    if args.pick_release or not (args.package or args.package_dir or args.package_url or mc.get("package")):
+        repo, tag_prefix = resolve_map_source(
+            args.repo or mc.get("repo"),
+            args.tag_prefix if args.tag_prefix is not None else mc.get("tag_prefix"))
         return pick_and_import(repo, tag_prefix, args.carla_root, args.ue4_root, args.force)
 
     package = args.package or mc.get("package")
     url = args.package_url or mc.get("url")
-    if not package:
-        ap.error("a map is required: pass --package, or --map-config with a package= line "
-                 "(or use --pick-release to choose from the repo's releases)")
 
     # run standalone -> offer to re-import if the map already exists
     return ensure_map(package, args.carla_root, args.ue4_root,
