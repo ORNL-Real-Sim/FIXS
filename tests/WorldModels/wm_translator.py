@@ -80,6 +80,11 @@ def load_world_model_setup(config_file: str) -> dict:
         "ModelDir": _resolve(wm.get("ModelDir", "")),
         "TokenDir": _resolve(wm.get("TokenDir", "")),
         "Device": wm.get("Device", "cuda"),
+        # Hand vehicles back to SUMO (don't WM-drive them) when they are
+        # signal-constrained, so SUMO's signal + car-following own the stop-and-go
+        # (the WMs are not signal-aware, and moveToXY would otherwise pin a stopped
+        # vehicle so it can never launch at green). The WM keeps free-flow traffic.
+        "MinControlSpeed": float(wm.get("MinControlSpeed", 2.0)),   # m/s
     }
 
 
@@ -131,6 +136,7 @@ def main() -> int:
     half = wm["BevHalfExtent"]
     dt = wm["StepLength"]
     horizon = wm["EgoFutureHorizon"]
+    min_control_speed = wm["MinControlSpeed"]
 
     history = RollingHistory(depth=wm["HistoryFrames"])
 
@@ -175,19 +181,40 @@ def main() -> int:
 
             poses = backend.step(bev)  # {id: AgentPose} for non-ego only
             for aid, pose in poses.items():
-                if aid in recv_map:
-                    socket_helper.vehicle_data_send_list.append(
-                        build_send_veh(recv_map, aid, pose)
-                    )
+                if aid not in recv_map:
+                    continue
+                i = bev.ids.index(aid)
+                spd = float(bev.speed[i])
+                v = recv_map[aid]
+                sig = int(getattr(v, "signalLightColor", 0))       # 1=red 2=yellow 3=green
+                sig_dist = float(getattr(v, "signalLightDistance", -1.0))
+                # comfortable stopping distance (+margin) at the current speed
+                stop_dist = spd * spd / (2.0 * 3.0) + 5.0
+                # Hand back to SUMO if signal-constrained: stopped/slow (would
+                # deadlock at 0), or approaching a red/yellow within stopping range.
+                if spd < min_control_speed:
+                    continue
+                if sig in (1, 2) and 0.0 <= sig_dist <= stop_dist:
+                    continue
+                socket_helper.vehicle_data_send_list.append(
+                    build_send_veh(recv_map, aid, pose)
+                )
 
             if os.environ.get("RS_WM_DEBUG") and poses:
-                aid = next(iter(poses))
-                i = bev.ids.index(aid)
-                rx = float(bev.xy[i, 0])          # received (SUMO) x this step
-                p = poses[aid]
-                print(f"[dbg] t={sim_time:.1f} id={aid} recvX={rx:.3f} "
-                      f"spd={float(bev.speed[i]):.3f} -> outX={p.x:.3f} outSpd={p.speed:.3f}",
-                      file=sys.stderr)
+                dbg = os.environ.get("RS_WM_DEBUG_CSV", "wm_debug.csv")
+                newf = not os.path.exists(dbg)
+                with open(dbg, "a", encoding="utf-8") as f:
+                    if newf:
+                        f.write("t,id,recvX,recvY,recvSpeed,outSpeed,sigColor,sigDist\n")
+                    for aid, p in poses.items():
+                        if aid not in recv_map:
+                            continue
+                        i = bev.ids.index(aid)
+                        v = recv_map[aid]
+                        f.write(f"{sim_time:.2f},{aid},{bev.xy[i,0]:.3f},{bev.xy[i,1]:.3f},"
+                                f"{float(bev.speed[i]):.3f},{p.speed:.3f},"
+                                f"{int(getattr(v,'signalLightColor',0))},"
+                                f"{float(getattr(v,'signalLightDistance',0.0)):.1f}\n")
 
             socket_helper.sendData(sim_state, sim_time, client)
 
