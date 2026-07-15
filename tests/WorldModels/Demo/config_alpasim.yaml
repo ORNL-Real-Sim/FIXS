@@ -37,6 +37,10 @@ WorldModelSetup:
     StepLength: 0.1
     HistoryFrames: 16              # CATK needs >= 16 frames of history
     EgoFutureHorizon: 5            # ego plan pinned as the CATK conditioning
+    # CATK is signal-aware (light_type): let it do its own braking for reds, and
+    # only hand back once STOPPED so SUMO gives a clean launch at green.
+    RedApproachHandback: false
+    MinControlSpeed: 2.0
     NetFile: './simple_traffic_light.net.xml'
     # CATK checkpoint + tokens (absolute; live outside the repo)
     ModelDir: 'C:/src_git/WM_AlpaSim/data/trafficsim-models/catk_v120'

@@ -82,9 +82,16 @@ def load_world_model_setup(config_file: str) -> dict:
         "Device": wm.get("Device", "cuda"),
         # Hand vehicles back to SUMO (don't WM-drive them) when they are
         # signal-constrained, so SUMO's signal + car-following own the stop-and-go
-        # (the WMs are not signal-aware, and moveToXY would otherwise pin a stopped
-        # vehicle so it can never launch at green). The WM keeps free-flow traffic.
+        # (moveToXY would otherwise pin a stopped vehicle so it can never launch at
+        # green). The WM keeps free-flow traffic.
+        #   MinControlSpeed        : always hand back when stopped/slow (fixes the
+        #                            deadlock-at-0; SUMO relaunches at green).
+        #   RedApproachHandback    : also hand back when approaching a red/yellow.
+        #                            Set FALSE for a signal-aware backend (CATK with
+        #                            light_type) so the WM does its own braking; the
+        #                            stopped handback still gives it a clean relaunch.
         "MinControlSpeed": float(wm.get("MinControlSpeed", 2.0)),   # m/s
+        "RedApproachHandback": bool(wm.get("RedApproachHandback", True)),
     }
 
 
@@ -137,6 +144,7 @@ def main() -> int:
     dt = wm["StepLength"]
     horizon = wm["EgoFutureHorizon"]
     min_control_speed = wm["MinControlSpeed"]
+    red_approach_handback = wm["RedApproachHandback"]
 
     history = RollingHistory(depth=wm["HistoryFrames"])
 
@@ -197,7 +205,7 @@ def main() -> int:
                 if not os.environ.get("RS_WM_NO_HANDBACK"):
                     if spd < min_control_speed:
                         continue
-                    if sig in (1, 2) and 0.0 <= sig_dist <= stop_dist:
+                    if red_approach_handback and sig in (1, 2) and 0.0 <= sig_dist <= stop_dist:
                         continue
                 socket_helper.vehicle_data_send_list.append(
                     build_send_veh(recv_map, aid, pose)
