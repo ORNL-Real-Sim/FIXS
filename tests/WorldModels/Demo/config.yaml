@@ -1,0 +1,60 @@
+# WorldModels endless-loop co-simulation (#189) -- WITH World Model.
+#
+# SUMO -> TrafficLayer -> WM (constant_velocity). The ego loops (SUMO route);
+# the WM owns the surrounding vehicles in the ego bubble and drives their poses
+# via moveToXY. Compare against run_without_wm.bat (pure SUMO) to see whether
+# WM-driven traffic still respects the signals.
+
+SimulationSetup:
+    EnableRealSim: true
+    EnableVerboseLog: false
+    SelectedTrafficSimulator: 'SUMO'
+    TrafficSimulatorIP: "127.0.0.1"
+    TrafficSimulatorPort: 1337
+
+    # Pose + extents + speedDesired (write-back reads speedDesired), plus each
+    # vehicle's upcoming-signal fields so a signal-aware WM can learn to stop at
+    # reds (the constant_velocity baseline ignores them -- that's the point of
+    # the comparison).
+    VehicleMessageField: [id, type, vehicleClass, speed, positionX, positionY, positionZ, heading, speedDesired, laneId, length, width, height, signalLightId, signalLightColor, signalLightDistance]
+
+    # Pose control (moveToXY), not speed integration.
+    EnableExternalDynamics: false
+
+SumoSetup:
+    # TrafficLayer auto-launches sumo-gui so you can watch the co-sim.
+    EnableAutoLaunch: true
+    SumoConfigFile: "./simple_traffic_light.sumocfg"
+    # 32 (bit5 only): safety checks off, so externally commanded poses take effect.
+    SpeedMode: 32
+
+ApplicationSetup:
+    EnableApplicationLayer: true
+    # Ego bubble: ego + every vehicle within 400 m. The translator crops this to
+    # the square BEV box (BevHalfExtent). radius >= BevHalfExtent * sqrt(2).
+    VehicleSubscription:
+    -   type: ego
+        attribute: {id: ['egoCm123'], radius: [400]}
+        ip: ['127.0.0.1']
+        port: [2444]
+
+XilSetup:
+    EnableXil: false
+
+# --- World Model (#189) ---------------------------------------------------
+# TrafficLayer (C++) reads Enable + EgoId: when enabled, every non-ego id the
+# WM client returns is written back with moveToXY. The remaining fields are read
+# by the Python translator (wm_translator.py).
+WorldModelSetup:
+    Enable: true
+    Backend: constant_velocity   # constant_velocity | alpasim | waymax
+    EgoId: 'egoCm123'
+    BevHalfExtent: 200.0         # square window half-side (m)
+    StepLength: 0.1
+    HistoryFrames: 16
+    EgoFutureHorizon: 5
+    NetFile: './simple_traffic_light.net.xml'
+    ModelDir: ''
+    Device: cuda
+    ip: ['127.0.0.1']
+    port: [2444]

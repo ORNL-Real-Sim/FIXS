@@ -1,0 +1,34 @@
+# Heavy world-model dependencies (#189) -- installed ON DEMAND into the existing
+# `realsim` env, ONLY when a real backend (alpasim/waymax) is actually used.
+#
+# The root environment.yml stays lightweight and MUST NOT require torch/jax.
+# The stub backend and the CI smoke test need NONE of this.
+#
+# Install (into the already-active realsim env):
+#   conda env update -n realsim -f tests/WorldModels/environment-worldmodel.yml
+#
+# Single file for both backends. torch (cu121, self-contained CUDA) and
+# jax[cuda12] (bundled CUDA) coexist because each ships its own CUDA/cuDNN and
+# does not share system libs. If a specific machine hits a CUDA/cuDNN clash,
+# fall back to the per-backend split noted at the bottom.
+
+name: realsim
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - pip
+  - pip:
+      # --- AlpaSim (CATK/SMART, PyTorch) ---
+      - torch --index-url https://download.pytorch.org/whl/cu121
+      - torch_cluster        # must match torch version+CUDA (common install snag)
+      # AlpaSim CATK adapter package (path/git install -- fill in when wired):
+      # - -e C:/src_git/WM_AlpaSim/src/trafficsim
+
+      # --- Waymax (JAX) ---
+      - "jax[cuda12]"
+      - "waymax @ git+https://github.com/waymo-research/waymax.git"
+
+# --- Per-backend fallback (use ONLY if the combined install conflicts) -------
+# environment-worldmodel-alpasim.yml : torch + torch_cluster + alpasim
+# environment-worldmodel-waymax.yml  : jax[cuda12] + waymax
