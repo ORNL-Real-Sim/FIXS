@@ -68,6 +68,7 @@ class AlpaSimBackend:
         self.num_history = int(cfg.get("HistoryFrames", 16))
         self.predict = int(cfg.get("EgoFutureHorizon", 5))
         self.half = float(cfg.get("BevHalfExtent", 200.0))
+        self._light_radius = float(cfg.get("SignalLightRadius", 10.0))
         self.vector_map = vector_map
 
         model_dir = cfg["ModelDir"]
@@ -121,6 +122,38 @@ class AlpaSimBackend:
             arr[i, :, 0:2] = resample(p, k)
         return {"lane_centers": {"polylines": self._torch.tensor(arr, dtype=self._torch.float32),
                                  "label": [5] * len(polys)}}
+
+    def _inject_light_type(self, result, bev) -> None:
+        """Tag CATK map triplets near a red/yellow stop-line with light_type=STOP.
+
+        SMART's map encoder has a 5-state traffic-light embedding but the env_data
+        adapter zeros it, so the model never sees signals. We derive stop-lines
+        from each bubble vehicle's next-signal (pos + dist along heading) and set
+        the STOP index (1, per SMART's ['NONE','STOP','GO','CAUTION','GO_TO_STOP'])
+        on map triplets within light_radius of one. Experiment: does CATK then
+        slow/stop for the red on its own?
+        """
+        import numpy as np
+        torch = self._torch
+        stops = []
+        for i in range(len(bev.ids)):
+            c = int(bev.sig_color[i])
+            d = float(bev.sig_dist[i])
+            if c in (1, 2) and d >= 0.0:                 # red or yellow ahead
+                yaw = float(bev.yaw[i])
+                stops.append((bev.xy[i, 0] + d * np.cos(yaw),
+                              bev.xy[i, 1] + d * np.sin(yaw)))
+        if not stops:
+            return
+        pe = result["input_data"]["map"]["polyline_extras"]
+        tri = result["input_data"]["map"]["triplets"]     # (M, 3, 2)
+        centers = tri.float().mean(dim=1)                 # (M, 2)
+        stops_t = torch.tensor(stops, dtype=centers.dtype, device=centers.device)
+        d2 = ((centers[:, None, :] - stops_t[None, :, :]) ** 2).sum(-1)  # (M, S)
+        near = d2.min(dim=1).values < (self._light_radius ** 2)
+        lt = pe["light_type"].clone()
+        lt[near] = 1                                      # STOP
+        pe["light_type"] = lt
 
     def step(self, bev: BevAgentSet) -> dict[str, AgentPose]:
         # Warm-up: not enough history for CATK -> constant velocity.
@@ -186,6 +219,7 @@ class AlpaSimBackend:
         if result is None:
             # e.g. no map triplets near the ego this step -> keep moving, no freeze
             return self._fallback.step(bev)
+        self._inject_light_type(result, bev)   # feed SUMO signals into the map
         actions = self.model.inference(result["input_data"])
 
         fx = actions["agent_future_xyz"].detach().cpu().numpy()        # (A, S, 3)

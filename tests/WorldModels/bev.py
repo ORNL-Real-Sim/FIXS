@@ -114,6 +114,8 @@ class BevAgentSet:
     lwh: np.ndarray                      # (N, 3)  length, width, height (m)
     veh_class: list[str]                 # per-agent SUMO vClass string
     history: RollingHistory              # rolling window (translator-owned)
+    sig_color: np.ndarray                # (N,) next-signal state: 1=red 2=yellow 3=green, 0/-1=none
+    sig_dist: np.ndarray                 # (N,) distance to that signal (m); <0 = none
     ego_future: np.ndarray | None = None  # (S, 3) [x, y, yaw] -- CATK only
 
     @property
@@ -147,7 +149,7 @@ def crop_square_bev(
     ex, ey = float(ego.positionX), float(ego.positionY)
 
     ids: list[str] = []
-    xy, yaw, speed, lwh, vclass = [], [], [], [], []
+    xy, yaw, speed, lwh, vclass, sigc, sigd = [], [], [], [], [], [], []
     for v in vehicles:
         vx, vy = float(v.positionX), float(v.positionY)
         if abs(vx - ex) > half_extent or abs(vy - ey) > half_extent:
@@ -159,6 +161,8 @@ def crop_square_bev(
         speed.append(float(v.speed))
         lwh.append((float(v.length), float(v.width), float(v.height)))
         vclass.append(v.vehicleClass.strip() if hasattr(v, "vehicleClass") else "")
+        sigc.append(int(getattr(v, "signalLightColor", 0)))
+        sigd.append(float(getattr(v, "signalLightDistance", -1.0)))
 
     ego_idx = ids.index(ego_id) if ego_id in ids else -1
 
@@ -172,6 +176,8 @@ def crop_square_bev(
         lwh=np.asarray(lwh, dtype=np.float64).reshape(-1, 3),
         veh_class=vclass,
         history=history,
+        sig_color=np.asarray(sigc, dtype=np.int64),
+        sig_dist=np.asarray(sigd, dtype=np.float64),
     )
 
 

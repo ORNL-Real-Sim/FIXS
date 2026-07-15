@@ -192,10 +192,13 @@ def main() -> int:
                 stop_dist = spd * spd / (2.0 * 3.0) + 5.0
                 # Hand back to SUMO if signal-constrained: stopped/slow (would
                 # deadlock at 0), or approaching a red/yellow within stopping range.
-                if spd < min_control_speed:
-                    continue
-                if sig in (1, 2) and 0.0 <= sig_dist <= stop_dist:
-                    continue
+                # RS_WM_NO_HANDBACK disables this (to observe the WM's OWN signal
+                # response, e.g. the CATK light_type experiment).
+                if not os.environ.get("RS_WM_NO_HANDBACK"):
+                    if spd < min_control_speed:
+                        continue
+                    if sig in (1, 2) and 0.0 <= sig_dist <= stop_dist:
+                        continue
                 socket_helper.vehicle_data_send_list.append(
                     build_send_veh(recv_map, aid, pose)
                 )
