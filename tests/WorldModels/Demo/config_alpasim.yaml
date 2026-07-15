@@ -1,0 +1,46 @@
+# WorldModels endless-loop co-sim (#189) -- WITH the AlpaSim / CATK world model.
+#
+# SUMO -> TrafficLayer -> WM (alpasim). Ego loops (SUMO route); the CATK/SMART
+# tokenized reactive model drives the surrounding bubble vehicles via moveToXY.
+# CATK needs a torch env -- launch via run_with_wm_alpasim.bat.
+
+SimulationSetup:
+    EnableRealSim: true
+    EnableVerboseLog: false
+    SelectedTrafficSimulator: 'SUMO'
+    TrafficSimulatorIP: "127.0.0.1"
+    TrafficSimulatorPort: 1337
+    VehicleMessageField: [id, type, vehicleClass, speed, positionX, positionY, positionZ, heading, speedDesired, laneId, length, width, height, signalLightId, signalLightColor, signalLightDistance]
+    EnableExternalDynamics: false
+
+SumoSetup:
+    EnableAutoLaunch: true
+    SumoConfigFile: "./simple_traffic_light.sumocfg"
+    SpeedMode: 32
+
+ApplicationSetup:
+    EnableApplicationLayer: true
+    VehicleSubscription:
+    -   type: ego
+        attribute: {id: ['egoCm123'], radius: [400]}
+        ip: ['127.0.0.1']
+        port: [2444]
+
+XilSetup:
+    EnableXil: false
+
+WorldModelSetup:
+    Enable: true
+    Backend: alpasim
+    EgoId: 'egoCm123'
+    BevHalfExtent: 200.0
+    StepLength: 0.1
+    HistoryFrames: 16              # CATK needs >= 16 frames of history
+    EgoFutureHorizon: 5            # ego plan pinned as the CATK conditioning
+    NetFile: './simple_traffic_light.net.xml'
+    # CATK checkpoint + tokens (absolute; live outside the repo)
+    ModelDir: 'C:/src_git/WM_AlpaSim/data/trafficsim-models/catk_v120'
+    TokenDir: 'C:/src_git/WM_AlpaSim/data/trafficsim-models/tokens'
+    Device: cuda
+    ip: ['127.0.0.1']
+    port: [2444]

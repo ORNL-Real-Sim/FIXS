@@ -20,9 +20,9 @@ def make_backend(name: str):
         from .constant_velocity import ConstantVelocityBackend
         return ConstantVelocityBackend()
     if key == "alpasim":
-        from .alpasim_backend import AlpaSimBackend  # not scaffolded yet
+        from .alpasim import AlpaSimBackend
         return AlpaSimBackend()
     if key == "waymax":
-        from .waymax_backend import WaymaxBackend  # not scaffolded yet
+        from .waymax import WaymaxBackend
         return WaymaxBackend()
     raise ValueError(f"Unknown world-model backend: {name!r} (have: stub|alpasim|waymax)")

@@ -26,17 +26,20 @@ controller that plans the ego's action and feeds it to the WM as conditioning
 ```
 tests/WorldModels/
   bev.py                 square BEV crop, heading conversion, rolling history, ego-future
+  vector_map.py          SUMO .net.xml -> lane-centre polylines (parsed once)
   wm_translator.py       the loop: recv -> crop -> history -> backend.step -> send back
   backends/
     base.py              WorldModelBackend Protocol (no ABC)
-    stub.py              constant-velocity, NO torch/jax  (default CI path)
+    constant_velocity.py speed+heading advance, NO torch/jax  (default CI path)
     __init__.py          registry (lazy import for heavy backends)
-    alpasim_backend.py   NVIDIA AlpaSim CATK/SMART (PyTorch)   [to scaffold]
-    waymax_backend.py    Waymo Waymax (JAX)                    [to scaffold]
+    alpasim.py           NVIDIA AlpaSim CATK/SMART (PyTorch+CUDA)
+    waymax.py            Waymo Waymax IDMRoutePolicy (JAX)
   environment-worldmodel.yml   heavy deps, installed ON DEMAND (never in root env)
   test_wm_translator.py  CI-safe unit tests (no sockets/SUMO/torch/jax)
-  Stub/                  runnable end-to-end smoke test (stub backend)
-    config.yaml, wm_loop.rou.xml, wm_loop.sumocfg, simple_loop.net.xml, run_wm_stub_demo.bat
+  Demo/                  runnable endless-loop demo (SimpleTrafficLight loop)
+    config.yaml, config_alpasim.yaml, config_waymax.yaml,
+    simple_traffic_light.{net,rou,sumocfg},
+    run_without_wm.bat, run_with_wm.bat, run_with_wm_alpasim.bat, run_with_wm_waymax.bat
 ```
 
 ## Run the CI-safe unit tests (no simulator, no heavy deps)
@@ -45,29 +48,49 @@ tests/WorldModels/
 python -m pytest tests/WorldModels/test_wm_translator.py -v
 ```
 
-Validates the FIXS-side plumbing (BEV crop, rolling history, stub
-constant-velocity, heading conversion) with fabricated `VehData`.
+Validates the FIXS-side plumbing (BEV crop, rolling history, constant-velocity,
+heading conversion) with fabricated `VehData`.
 
-## Run the end-to-end stub smoke test (needs TrafficLayer.exe + SUMO)
+## Run the endless-loop demo (`Demo/`, needs TrafficLayer.exe + SUMO)
 
-```
-cd tests/WorldModels/Stub
-run_wm_stub_demo.bat
-```
+The scene: the ego (`egoCm123`, red) circulates an endless teardrop loop through
+3 traffic signals; background traffic transits the corridor and exits at the
+ends (so on the loop the ego is alone -- the WM must handle zero neighbours).
+One click each, to compare visually:
 
-Launches TrafficLayer (auto-launches SUMO with a 6-vehicle loop), then the
-translator with the `stub` backend for 300 steps. Exit code 0 = the full loop
-ran end to end: bubble crop -> stub -> `moveToXY` write-back, ego untouched.
+| launcher | what drives the surrounding bubble traffic |
+|---|---|
+| `run_without_wm.bat` | **nothing** -- pure SUMO (baseline; traffic obeys the signals) |
+| `run_with_wm.bat` | **constant_velocity** baseline WM (no heavy deps) |
+| `run_with_wm_alpasim.bat` | **AlpaSim / CATK** tokenized reactive model (PyTorch, GPU) |
+| `run_with_wm_waymax.bat` | **Waymax** IDM route-following policy (JAX, CPU on Windows) |
 
-## Backends
+The ego always loops via its SUMO route; only the surrounding vehicles differ.
 
-- **stub** — constant velocity by finite-difference of the last two frames; no
-  heavy deps. What CI runs.
-- **alpasim** — CATK/SMART tokenized reactive model (PyTorch). Needs a rolling
-  >=16-frame history and a const-velocity ego future (usage 1). *To be wired.*
-- **waymax** — Waymo Waymax (JAX), `StateDynamics` / sim-agent policies. Global
-  frame, needs no ego future. *To be wired.*
+## Backends (`WorldModelSetup.Backend`)
 
-Selected via `WorldModelSetup.Backend` in `config.yaml`. Heavy backends install
-from `environment-worldmodel.yml` on demand; the root `environment.yml` stays
-lightweight.
+- **constant_velocity** — advance by reported speed+heading; no torch/jax. CI +
+  baseline. (Not signal-aware, by design -- the comparison point.)
+- **alpasim** — CATK/SMART tokenized reactive model (PyTorch+CUDA). Builds
+  `env_data` directly (bubble history >=16 frames + pinned ego plan + a
+  SUMO-derived vector map), runs one inference, takes sub-step 0.
+- **waymax** — Waymo Waymax `IDMRoutePolicy` (JAX). Per step builds a
+  `SimulatorState` where each agent follows a const-velocity route; IDM does
+  car-following. Global frame, no history needed.
+
+## Real-backend environments (installed on demand, outside the repo)
+
+Heavy deps must NOT go in the root `environment.yml`. Dedicated venvs:
+
+- **AlpaSim/CATK** — `C:\src_git\WM_AlpaSim\.venv-catk` (torch 2.8+cu128, PyG
+  `torch_cluster/scatter`, omegaconf, hydra, loguru, einops). Deliberately WITHOUT
+  `trajdata`/`deltalake` (no Windows wheels) -- CATK *inference* doesn't need them;
+  we bypass its map_adapter by building `env_data` ourselves. Weights + tokens at
+  `WM_AlpaSim/data/trafficsim-models/{catk_v120,tokens}`.
+- **Waymax** — `C:\src_git\WM_Waymax\.venv-waymax` (`git+waymax`, jax). JAX has no
+  CUDA build on native Windows, so it runs CPU-only (fine for a small bubble).
+
+The `run_with_wm_{alpasim,waymax}.bat` launchers point the translator at the
+matching venv; the plain `realsim` env runs everything else (TrafficLayer client
+plumbing + the constant_velocity backend). See `environment-worldmodel.yml` for
+the intended single-file layering.

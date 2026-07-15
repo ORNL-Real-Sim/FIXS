@@ -61,16 +61,24 @@ def load_world_model_setup(config_file: str) -> dict:
     with open(config_file, "r", encoding="utf-8") as f:
         raw = yaml.safe_load(f)
     wm = raw.get("WorldModelSetup", {}) or {}
+    cfg_dir = os.path.dirname(os.path.abspath(config_file))
+
+    def _resolve(p):
+        if p and not os.path.isabs(p):
+            return os.path.normpath(os.path.join(cfg_dir, p))
+        return p
+
     return {
         "Enable": wm.get("Enable", True),
-        "Backend": wm.get("Backend", "stub"),
+        "Backend": wm.get("Backend", "constant_velocity"),
         "EgoId": wm.get("EgoId", "ego"),
         "BevHalfExtent": float(wm.get("BevHalfExtent", 50.0)),
         "StepLength": float(wm.get("StepLength", 0.1)),
         "HistoryFrames": int(wm.get("HistoryFrames", 16)),
         "EgoFutureHorizon": int(wm.get("EgoFutureHorizon", 5)),
-        "NetFile": wm.get("NetFile", ""),
-        "ModelDir": wm.get("ModelDir", ""),
+        "NetFile": _resolve(wm.get("NetFile", "")),
+        "ModelDir": _resolve(wm.get("ModelDir", "")),
+        "TokenDir": _resolve(wm.get("TokenDir", "")),
         "Device": wm.get("Device", "cuda"),
     }
 
@@ -125,8 +133,17 @@ def main() -> int:
     horizon = wm["EgoFutureHorizon"]
 
     history = RollingHistory(depth=wm["HistoryFrames"])
+
+    # Local vector map (parsed once) for map-consuming backends.
+    vmap = None
+    if wm["NetFile"] and os.path.exists(wm["NetFile"]):
+        from vector_map import VectorMap
+        vmap = VectorMap.from_sumo_net(wm["NetFile"])
+        print(f"[wm] vector map: {len(vmap.lanes)} lane polylines from {os.path.basename(wm['NetFile'])}",
+              file=sys.stderr)
+
     backend = make_backend(wm["Backend"])
-    backend.reset(wm, vector_map=None)  # vector_map wired in with real backends
+    backend.reset(wm, vector_map=vmap)
     print(f"[wm] backend={wm['Backend']} ego={ego_id} bubble=+/-{half}m dt={dt}s", file=sys.stderr)
 
     client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

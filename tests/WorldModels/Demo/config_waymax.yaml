@@ -1,0 +1,44 @@
+# WorldModels endless-loop co-sim (#189) -- WITH the Waymo Waymax world model.
+#
+# SUMO -> TrafficLayer -> WM (waymax). Ego loops (SUMO route); Waymax's IDM
+# route-following policy drives the surrounding bubble vehicles (car-following +
+# collision avoidance) via moveToXY. JAX is CPU-only on Windows -- launch via
+# run_with_wm_waymax.bat.
+
+SimulationSetup:
+    EnableRealSim: true
+    EnableVerboseLog: false
+    SelectedTrafficSimulator: 'SUMO'
+    TrafficSimulatorIP: "127.0.0.1"
+    TrafficSimulatorPort: 1337
+    VehicleMessageField: [id, type, vehicleClass, speed, positionX, positionY, positionZ, heading, speedDesired, laneId, length, width, height, signalLightId, signalLightColor, signalLightDistance]
+    EnableExternalDynamics: false
+
+SumoSetup:
+    EnableAutoLaunch: true
+    SumoConfigFile: "./simple_traffic_light.sumocfg"
+    SpeedMode: 32
+
+ApplicationSetup:
+    EnableApplicationLayer: true
+    VehicleSubscription:
+    -   type: ego
+        attribute: {id: ['egoCm123'], radius: [400]}
+        ip: ['127.0.0.1']
+        port: [2444]
+
+XilSetup:
+    EnableXil: false
+
+WorldModelSetup:
+    Enable: true
+    Backend: waymax
+    EgoId: 'egoCm123'
+    BevHalfExtent: 200.0
+    StepLength: 0.1
+    HistoryFrames: 4              # Waymax needs no long history (route encodes intent)
+    EgoFutureHorizon: 5
+    NetFile: './simple_traffic_light.net.xml'
+    Device: cpu                   # JAX CUDA is unavailable on native Windows
+    ip: ['127.0.0.1']
+    port: [2444]
