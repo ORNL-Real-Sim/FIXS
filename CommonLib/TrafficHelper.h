@@ -140,6 +140,10 @@ public:
 	bool ENABLE_CARLA = false;
 	bool ENABLE_CARLA_EXTERNAL_CONTROL = false;
 
+	// #189: external World Model owns non-ego bubble poses (moveToXY write-back)
+	bool ENABLE_WORLDMODEL = false;
+	std::string WorldModelEgoId = "";
+
 	double tSimuEnd = 90000;
 
 

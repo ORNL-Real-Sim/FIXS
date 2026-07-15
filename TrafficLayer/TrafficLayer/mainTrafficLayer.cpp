@@ -886,6 +886,9 @@ int main(int argc, char* argv[]) {
 	Traffic_c.ENABLE_VEH_SIMULATOR = ENABLE_VEH_SIMULATOR;
 	Traffic_c.ENABLE_CARLA = ENABLE_CARLA;
 	Traffic_c.ENABLE_CARLA_EXTERNAL_CONTROL = ENABLE_CARLA_EXTERNAL_CONTROL;
+	// #189: external World Model owns non-ego bubble poses (moveToXY write-back)
+	Traffic_c.ENABLE_WORLDMODEL = Config_c.WorldModelSetup.Enable;
+	Traffic_c.WorldModelEgoId = Config_c.WorldModelSetup.EgoId;
 	/********************************************
 	* Message Setups
 	*********************************************/

@@ -150,6 +150,14 @@ struct CarlaSetup_t {
 
 };
 
+// #189: external World Model owns the poses of the non-ego bubble vehicles.
+// Kept intentionally minimal (mirrors how CarlaSetup drives the write-back);
+// the WM's neural work lives in the Python translator, not here.
+struct WorldModelSetup_t {
+	bool Enable = false;
+	std::string EgoId = "ego";
+};
+
 struct SumoSetup_t {
 
 	int SpeedMode;
@@ -266,6 +274,7 @@ public:
 	SumoSetup_t SumoSetup;
 	CarlaSetup_t CarlaSetup;
 	VissimSetup_t VissimSetup;
+	WorldModelSetup_t WorldModelSetup;
 
 
 

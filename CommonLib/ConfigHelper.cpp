@@ -636,6 +636,21 @@ int ConfigHelper::getConfig(string configName) {
 		if (node["EnableDriverModelRelay"])  VissimSetup.EnableDriverModelRelay  = parserFlag(node, "EnableDriverModelRelay");
 	}
 
+	// ===========================================================================
+	// 			READ WorldModelSetup section (issue #189)
+	// ===========================================================================
+	// External World Model owns the poses of the non-ego bubble vehicles. When
+	// enabled, TrafficHelper::sendToSUMO writes any non-ego client-returned id
+	// with moveToXY (see the model-agnostic external-pose branch), so a Python
+	// WM translator can drive the surrounding traffic.
+	WorldModelSetup.Enable = false;
+	WorldModelSetup.EgoId = "ego";
+	node = config["WorldModelSetup"];
+	if (node) {
+		if (node["Enable"]) WorldModelSetup.Enable = parserFlag(node, "Enable");
+		if (node["EgoId"])  WorldModelSetup.EgoId  = parserString(node, "EgoId");
+	}
+
 	return 0;
 }
 

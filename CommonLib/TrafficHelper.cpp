@@ -703,8 +703,13 @@ int TrafficHelper::sendToSUMO(double simTime, MsgHelper Msg_c) {
 
 				}
 			}
-			// if carla is enabled and the reveiced id is within the interested ids
-			else if (ENABLE_CARLA&&ENABLE_CARLA_EXTERNAL_CONTROL&&find(Config_c->CarlaSetup.InterestedIds.begin(), Config_c->CarlaSetup.InterestedIds.end(), idStr) != Config_c->CarlaSetup.InterestedIds.end()) {
+			// Model-agnostic "external region owns these ids' poses" branch: the
+			// vehicle's X/Y/heading are driven by an external client via moveToXY
+			// (not SUMO car-following). Two owners share this branch today:
+			//   - CARLA external control  (static InterestedIds list), and
+			//   - #189 World Model        (every non-ego bubble id the WM returns).
+			else if ((ENABLE_CARLA&&ENABLE_CARLA_EXTERNAL_CONTROL&&find(Config_c->CarlaSetup.InterestedIds.begin(), Config_c->CarlaSetup.InterestedIds.end(), idStr) != Config_c->CarlaSetup.InterestedIds.end())
+			         || (ENABLE_WORLDMODEL && idStr.compare(WorldModelEgoId) != 0)) {
 
 				double positionX = (double)Msg_c.VehDataSend_um[0][iV].positionX;
 				double positionY = (double)Msg_c.VehDataSend_um[0][iV].positionY;
