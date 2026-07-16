@@ -221,3 +221,10 @@ tests/Vissim/Probes/TrafficLayer_DSProxy_CMoffice_Signal/simple_traffic_light*.l
 
 # Ignore Claude Code configuration
 .claude/
+
+# WorldModels demo generated artifacts (#189)
+tests/WorldModels/Demo/*.html
+tests/WorldModels/Demo/*.xml.gz
+tests/WorldModels/Demo/fcd_*.xml
+tests/WorldModels/Demo/bev_dump.jsonl
+tests/WorldModels/Demo/wm_*.csv

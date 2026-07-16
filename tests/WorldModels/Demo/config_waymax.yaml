@@ -23,7 +23,7 @@ ApplicationSetup:
     EnableApplicationLayer: true
     VehicleSubscription:
     -   type: ego
-        attribute: {id: ['egoCm123'], radius: [400]}
+        attribute: {id: ['ego'], radius: [400]}
         ip: ['127.0.0.1']
         port: [2444]
 
@@ -33,7 +33,7 @@ XilSetup:
 WorldModelSetup:
     Enable: true
     Backend: waymax
-    EgoId: 'egoCm123'
+    EgoId: 'ego'
     BevHalfExtent: 200.0
     StepLength: 0.1
     HistoryFrames: 4              # Waymax needs no long history (route encodes intent)

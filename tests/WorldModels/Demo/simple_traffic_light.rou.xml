@@ -27,7 +27,7 @@
            repeat="1000"/>
 
     <!-- Ego: circulates the loop endlessly -->
-    <vehicle id="egoCm123" type="ego_vehicle" route="ego_endless_loop" depart="0.0" departSpeed="max" departPos="0" departLane="0" color="1,0,0"/>
+    <vehicle id="ego" type="ego_vehicle" route="ego_endless_loop" depart="0.0" departSpeed="max" departPos="0" departLane="0" color="1,0,0"/>
 
     <!-- Background Traffic - Main Corridor (exits at the far end) -->
     <flow id="flow_WE" type="passenger_car" route="route_full_WE" begin="15.0" end="1200.0" vehsPerHour="400" departLane="best" departSpeed="max"/>

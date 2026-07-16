@@ -34,7 +34,7 @@ ApplicationSetup:
     # the square BEV box (BevHalfExtent). radius >= BevHalfExtent * sqrt(2).
     VehicleSubscription:
     -   type: ego
-        attribute: {id: ['egoCm123'], radius: [400]}
+        attribute: {id: ['ego'], radius: [400]}
         ip: ['127.0.0.1']
         port: [2444]
 
@@ -48,7 +48,7 @@ XilSetup:
 WorldModelSetup:
     Enable: true
     Backend: constant_velocity   # constant_velocity | alpasim | waymax
-    EgoId: 'egoCm123'
+    EgoId: 'ego'
     BevHalfExtent: 200.0         # square window half-side (m)
     StepLength: 0.1
     HistoryFrames: 16

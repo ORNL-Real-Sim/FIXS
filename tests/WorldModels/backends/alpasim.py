@@ -69,6 +69,10 @@ class AlpaSimBackend:
         self.predict = int(cfg.get("EgoFutureHorizon", 5))
         self.half = float(cfg.get("BevHalfExtent", 200.0))
         self._light_radius = float(cfg.get("SignalLightRadius", 10.0))
+        # Feed CATK an EGO-CENTERED scene (subtract the ego position). WOMD/SMART
+        # is trained SDC-centered; absolute SUMO coords (~600-1300 m) are far
+        # out-of-distribution and hurt stability. Outputs are shifted back.
+        self.ego_center = bool(cfg.get("EgoCenter", True))
         self.vector_map = vector_map
 
         model_dir = cfg["ModelDir"]
@@ -94,7 +98,7 @@ class AlpaSimBackend:
         self._fallback.reset(cfg)
 
     # ------------------------------------------------------------------ #
-    def _full_map_layers(self, cx: float, cy: float, k: int = 20) -> dict:
+    def _full_map_layers(self, ox: float, oy: float, k: int = 20) -> dict:
         """All lane polylines as a single CATK 'lane_centers' layer.
 
         CATK's filter_map + triplet extraction need FIXED-LENGTH, NaN-free
@@ -119,11 +123,14 @@ class AlpaSimBackend:
         polys = self.vector_map.lanes
         arr = np.zeros((len(polys), k, 3), dtype=np.float64)
         for i, p in enumerate(polys):
-            arr[i, :, 0:2] = resample(p, k)
+            rp = resample(p, k)
+            rp[:, 0] -= ox                  # ego-center the map too
+            rp[:, 1] -= oy
+            arr[i, :, 0:2] = rp
         return {"lane_centers": {"polylines": self._torch.tensor(arr, dtype=self._torch.float32),
                                  "label": [5] * len(polys)}}
 
-    def _inject_light_type(self, result, bev) -> None:
+    def _inject_light_type(self, result, bev, ox: float = 0.0, oy: float = 0.0) -> None:
         """Tag CATK map triplets near a red/yellow stop-line with light_type=STOP.
 
         SMART's map encoder has a 5-state traffic-light embedding but the env_data
@@ -141,8 +148,8 @@ class AlpaSimBackend:
             d = float(bev.sig_dist[i])
             if c in (1, 2) and d >= 0.0:                 # red or yellow ahead
                 yaw = float(bev.yaw[i])
-                stops.append((bev.xy[i, 0] + d * np.cos(yaw),
-                              bev.xy[i, 1] + d * np.sin(yaw)))
+                stops.append((bev.xy[i, 0] + d * np.cos(yaw) - ox,   # ego-centered frame
+                              bev.xy[i, 1] + d * np.sin(yaw) - oy))
         if not stops:
             return
         pe = result["input_data"]["map"]["polyline_extras"]
@@ -154,6 +161,25 @@ class AlpaSimBackend:
         lt = pe["light_type"].clone()
         lt[near] = 1                                      # STOP
         pe["light_type"] = lt
+
+    def _dump_bev(self, win, idx, ego_i, result) -> None:
+        """Append one ego-centered BEV snapshot (agents + local map) as JSON.
+
+        Verification aid: dump exactly what CATK sees (post ego-centering) so it
+        can be plotted. Writes to $RS_WM_BEV_DUMP (default bev_dump.jsonl).
+        """
+        import json
+        tri = result["input_data"]["map"]["triplets"].detach().cpu().numpy()  # (M,3,2)
+        mc = tri.mean(axis=1)                                                  # (M,2)
+        frame = {
+            "ego": [0.0, 0.0, round(float(win[ego_i, -1, 2]), 3)],            # x,y,yaw
+            "agents": [[round(float(win[i, -1, 0]), 2), round(float(win[i, -1, 1]), 2),
+                        round(float(win[i, -1, 2]), 3), round(float(win[i, -1, 3]), 2)]
+                       for i in idx],                                          # x,y,yaw,speed
+            "map": [[round(float(x), 1), round(float(y), 1)] for x, y in mc],
+        }
+        with open(os.environ.get("RS_WM_BEV_DUMP", "bev_dump.jsonl"), "a", encoding="utf-8") as f:
+            f.write(json.dumps(frame) + "\n")
 
     def step(self, bev: BevAgentSet) -> dict[str, AgentPose]:
         # Warm-up: not enough history for CATK -> constant velocity.
@@ -172,6 +198,12 @@ class AlpaSimBackend:
         N = len(bev.ids)
         ego_i = bev.ego_idx
 
+        # ego-center: translate the whole scene so the ego sits at the origin
+        ox, oy = ((float(bev.xy[ego_i, 0]), float(bev.xy[ego_i, 1]))
+                  if self.ego_center else (0.0, 0.0))
+        win[:, :, 0] -= ox
+        win[:, :, 1] -= oy
+
         # --- ego: history + pinned future (the plan) ---
         ego_xyz = torch.zeros(L, 3)
         ego_head = torch.zeros(L)
@@ -179,8 +211,8 @@ class AlpaSimBackend:
         ego_xyz[:T, 1] = torch.tensor(win[ego_i, :, 1], dtype=torch.float32)
         ego_head[:T] = torch.tensor(win[ego_i, :, 2], dtype=torch.float32)
         if bev.ego_future is not None and len(bev.ego_future) >= P:
-            ego_xyz[T:, 0] = torch.tensor(bev.ego_future[:P, 0], dtype=torch.float32)
-            ego_xyz[T:, 1] = torch.tensor(bev.ego_future[:P, 1], dtype=torch.float32)
+            ego_xyz[T:, 0] = torch.tensor(bev.ego_future[:P, 0] - ox, dtype=torch.float32)
+            ego_xyz[T:, 1] = torch.tensor(bev.ego_future[:P, 1] - oy, dtype=torch.float32)
             ego_head[T:] = torch.tensor(bev.ego_future[:P, 2], dtype=torch.float32)
         else:
             ego_xyz[T:] = ego_xyz[T - 1]
@@ -202,14 +234,13 @@ class AlpaSimBackend:
             ag_head[k, T:] = ag_head[k, T - 1]
             ag_lwh[k] = torch.tensor(bev.lwh[i], dtype=torch.float32)
 
-        cx, cy = float(bev.xy[ego_i, 0]), float(bev.xy[ego_i, 1])
         env_data = {
             "ego": {"xyz": ego_xyz, "heading": ego_head,
                     "lwh": torch.tensor(bev.lwh[ego_i], dtype=torch.float32)},
             "agents": {"xyz": ag_xyz, "heading": ag_head, "valid_mask": ag_valid,
                        "lwh": ag_lwh, "track_ids": torch.arange(A),
                        "class_ids": torch.zeros(A, dtype=torch.long), "num_obstacles": A},
-            "map": self._full_map_layers(cx, cy),
+            "map": self._full_map_layers(ox, oy),
             "env": {"curr_t": T - 1},
             "metadata": {"frame_rate": 10, **self._meta},
         }
@@ -219,7 +250,11 @@ class AlpaSimBackend:
         if result is None:
             # e.g. no map triplets near the ego this step -> keep moving, no freeze
             return self._fallback.step(bev)
-        self._inject_light_type(result, bev)   # feed SUMO signals into the map
+        self._inject_light_type(result, bev, ox, oy)   # feed SUMO signals into the map
+
+        if os.environ.get("RS_WM_BEV_DUMP"):
+            self._dump_bev(win, idx, ego_i, result)
+
         actions = self.model.inference(result["input_data"])
 
         fx = actions["agent_future_xyz"].detach().cpu().numpy()        # (A, S, 3)
@@ -231,8 +266,8 @@ class AlpaSimBackend:
             aid = bev.ids[i]
             yaw = float(fh[k, 0])
             out[aid] = AgentPose(
-                x=float(fx[k, 0, 0]),
-                y=float(fx[k, 0, 1]),
+                x=float(fx[k, 0, 0]) + ox,          # shift back to global SUMO frame
+                y=float(fx[k, 0, 1]) + oy,
                 heading_deg=math_rad_to_sumo_deg(yaw),
                 speed=float(np.hypot(fv[k, 0, 0], fv[k, 0, 1])),
             )
