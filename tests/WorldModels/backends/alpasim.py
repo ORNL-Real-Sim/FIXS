@@ -162,19 +162,29 @@ class AlpaSimBackend:
         lt[near] = 1                                      # STOP
         pe["light_type"] = lt
 
-    def _dump_bev(self, bev, win, idx, ego_i, ox, oy) -> None:
+    def _dump_bev(self, bev) -> None:
         """Append one ego-centered BEV snapshot of EXACTLY the converted CATK
-        input, for manual verification. Everything is in the ego-centered frame
-        (ego at origin) that the model receives. Writes JSONL to $RS_WM_BEV_DUMP.
+        input, for manual verification. Self-contained (built from bev + its
+        history + the vector map), so it fires EVERY step -- including warm-up and
+        fallback -- giving a CONTIGUOUS 10 Hz sequence (no skipped frames).
 
         Per frame: sim time, ego (heading + pinned future plan), each agent's
-        full history tail (x,y) + heading + speed, the local road lane polylines,
-        and the red/yellow stop-line points that get light_type=STOP.
+        history tail (x,y) + heading + speed, the local road lane polylines, and
+        the red/yellow stop-line points that get light_type=STOP.
         """
         import json
         import numpy as np
 
-        # local road geometry as CATK sees it (ego-centered lane polylines near ego)
+        ego_i = bev.ego_idx
+        if ego_i < 0 or len(bev.history) == 0:
+            return
+        ox, oy = ((float(bev.xy[ego_i, 0]), float(bev.xy[ego_i, 1]))
+                  if self.ego_center else (0.0, 0.0))
+        win = _backfill(bev.history.window(bev.ids), self.dt)   # (N, Thist, 4), ego-centered below
+        win[:, :, 0] -= ox
+        win[:, :, 1] -= oy
+        idx = [i for i in range(len(bev.ids)) if i != ego_i]
+
         lanes = []
         if self.vector_map is not None:
             for p in self.vector_map.crop(ox, oy, self.half * 1.3):
@@ -183,12 +193,11 @@ class AlpaSimBackend:
                 q[:, 1] -= oy
                 lanes.append([[round(float(x), 1), round(float(y), 1)] for x, y in q])
 
-        # red/yellow stop-lines (ego-centered) -> lanes tagged STOP
         stops = []
         for i in range(len(bev.ids)):
             c = int(bev.sig_color[i])
             d = float(bev.sig_dist[i])
-            if c in (1, 2) and d >= 0.0:
+            if c in (1, 2) and d >= 0.0:                          # red/yellow ahead
                 yaw = float(bev.yaw[i])
                 stops.append([round(float(bev.xy[i, 0] + d * np.cos(yaw) - ox), 1),
                               round(float(bev.xy[i, 1] + d * np.sin(yaw) - oy), 1)])
@@ -214,6 +223,9 @@ class AlpaSimBackend:
             f.write(json.dumps(frame) + "\n")
 
     def step(self, bev: BevAgentSet) -> dict[str, AgentPose]:
+        if os.environ.get("RS_WM_BEV_DUMP"):
+            self._dump_bev(bev)        # contiguous every step (before any early return)
+
         # Warm-up: not enough history for CATK -> constant velocity.
         if len(bev.history) < self.num_history or bev.non_ego_mask.sum() == 0:
             return self._fallback.step(bev)
@@ -283,10 +295,6 @@ class AlpaSimBackend:
             # e.g. no map triplets near the ego this step -> keep moving, no freeze
             return self._fallback.step(bev)
         self._inject_light_type(result, bev, ox, oy)   # feed SUMO signals into the map
-
-        if os.environ.get("RS_WM_BEV_DUMP"):
-            self._dump_bev(bev, win, idx, ego_i, ox, oy)
-
         actions = self.model.inference(result["input_data"])
 
         fx = actions["agent_future_xyz"].detach().cpu().numpy()        # (A, S, 3)
