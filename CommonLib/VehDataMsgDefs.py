@@ -44,7 +44,9 @@ class VehData:
     length: float = 0.0
     width: float = 0.0
     height: float = 0.0
-    
+
+    speedAdvisory: float = 0.0  # #189: SUMO's own advisory speed (getSpeedWithoutTraCI)
+
     activeLaneChange: int = 0  # Boolean-like integer (-1, 0, or 1)
 
     def get(self, field_name, default=None):

@@ -73,6 +73,15 @@ class AlpaSimBackend:
         # is trained SDC-centered; absolute SUMO coords (~600-1300 m) are far
         # out-of-distribution and hurt stability. Outputs are shifted back.
         self.ego_center = bool(cfg.get("EgoCenter", True))
+        # Greedy/top-K token sampling: >0 overrides the model default (=5). num_k=1
+        # is greedy (argmax) -> deterministic, removes per-step sampling jitter.
+        self.topk = int(cfg.get("SamplingTopK", 0))
+        # Inference stride: run CATK every N steps and REPLAY the token's own
+        # sub-steps (0..N-1) in between (N<=EgoFutureHorizon). Cuts re-sampling
+        # jitter + cost; N=1 = infer every step (fully reactive).
+        self.stride = max(1, int(cfg.get("InferenceStride", 1)))
+        self._istep = 0
+        self._cache = {}
         self.vector_map = vector_map
 
         model_dir = cfg["ModelDir"]
@@ -91,6 +100,13 @@ class AlpaSimBackend:
             device=self.device,
         )
         self.model.model_predict_step_num = self.predict
+        if self.topk > 0:
+            try:
+                self.model.validation_rollout_sampling.num_k = self.topk
+                print(f"[alpasim] SamplingTopK={self.topk} ({'greedy' if self.topk == 1 else 'top-K'})",
+                      file=sys.stderr)
+            except Exception as e:
+                print(f"[alpasim] could not set SamplingTopK: {e}", file=sys.stderr)
         self._meta = obstacle_class_metadata()
 
         # warm-up / degenerate fallback
@@ -230,6 +246,18 @@ class AlpaSimBackend:
         if len(bev.history) < self.num_history or bev.non_ego_mask.sum() == 0:
             return self._fallback.step(bev)
 
+        # Inference stride: on in-between phases, replay the last token's sub-steps
+        # (const-velocity for any agent that entered since the last inference).
+        phase = self._istep % self.stride
+        self._istep += 1
+        if self.stride > 1 and phase != 0 and self._cache:
+            out = self._fallback.step(bev)
+            for aid in list(out.keys()):
+                subs = self._cache.get(aid)
+                if subs and phase < len(subs):
+                    out[aid] = subs[phase]
+            return out
+
         torch = self._torch
         import numpy as np
 
@@ -301,14 +329,23 @@ class AlpaSimBackend:
         fh = actions["agent_future_heading"].detach().cpu().numpy()    # (A, S)
         fv = actions["agent_future_velocity"].detach().cpu().numpy()   # (A, S, 2)
 
+        # cache the token's sub-steps (0..stride-1) per agent for stride replay,
+        # and return sub-step 0 this step
+        S = fx.shape[1]
+        nsub = max(1, min(S, self.stride))
+        self._cache = {}
         out: dict[str, AgentPose] = {}
         for k, i in enumerate(idx):
             aid = bev.ids[i]
-            yaw = float(fh[k, 0])
-            out[aid] = AgentPose(
-                x=float(fx[k, 0, 0]) + ox,          # shift back to global SUMO frame
-                y=float(fx[k, 0, 1]) + oy,
-                heading_deg=math_rad_to_sumo_deg(yaw),
-                speed=float(np.hypot(fv[k, 0, 0], fv[k, 0, 1])),
-            )
+            subs = []
+            for s in range(nsub):
+                yaw = float(fh[k, s])
+                subs.append(AgentPose(
+                    x=float(fx[k, s, 0]) + ox,       # shift back to global SUMO frame
+                    y=float(fx[k, s, 1]) + oy,
+                    heading_deg=math_rad_to_sumo_deg(yaw),
+                    speed=float(np.hypot(fv[k, s, 0], fv[k, s, 1])),
+                ))
+            self._cache[aid] = subs
+            out[aid] = subs[0]
         return out

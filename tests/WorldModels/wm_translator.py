@@ -217,7 +217,7 @@ def main() -> int:
                 newf = not os.path.exists(dbg)
                 with open(dbg, "a", encoding="utf-8") as f:
                     if newf:
-                        f.write("t,id,recvX,recvY,recvSpeed,outSpeed,sigColor,sigDist\n")
+                        f.write("t,id,recvX,recvY,recvSpeed,outSpeed,sumoAdvisory,sigColor,sigDist\n")
                     for aid, p in poses.items():
                         if aid not in recv_map:
                             continue
@@ -225,6 +225,7 @@ def main() -> int:
                         v = recv_map[aid]
                         f.write(f"{sim_time:.2f},{aid},{bev.xy[i,0]:.3f},{bev.xy[i,1]:.3f},"
                                 f"{float(bev.speed[i]):.3f},{p.speed:.3f},"
+                                f"{float(getattr(v,'speedAdvisory',0.0)):.3f},"
                                 f"{int(getattr(v,'signalLightColor',0))},"
                                 f"{float(getattr(v,'signalLightDistance',0.0)):.1f}\n")
 

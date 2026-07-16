@@ -50,6 +50,11 @@ typedef struct  {
 	float length;
 	float width;
 	float height;
+
+	// #189: SUMO's own advisory speed (car-following + signal decision, i.e. the
+	// speed the vehicle WOULD take without TraCI override). Lets a WM client
+	// compare its command to SUMO's, or clamp to it as a safety cap.
+	float speedAdvisory;
 	// variables not retrievable yet
 	float weight;
 

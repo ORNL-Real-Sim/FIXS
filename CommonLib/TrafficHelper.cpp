@@ -1477,6 +1477,7 @@ void TrafficHelper::parserSumoSubscription(libsumo::TraCIResults VehDataSubscrib
 
 	tempDoublePtr = static_pointer_cast<libsumo::TraCIDouble> (VehDataSubscribeTraciResults[libsumo::VAR_SPEED_WITHOUT_TRACI]);
 	float speedWithoutTraci = tempDoublePtr->value;
+	CurVehData.speedAdvisory = speedWithoutTraci;   // #189: SUMO's own advisory speed
 
 
 	tempPositionPtr = static_pointer_cast<libsumo::TraCIPosition> (VehDataSubscribeTraciResults[libsumo::VAR_POSITION3D]);

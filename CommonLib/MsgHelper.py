@@ -49,6 +49,7 @@ class MsgHelper:
             'length': False,
             'width': False,
             'height': False,
+            'speedAdvisory': False,
             'activeLaneChange': False
         }
         self.traffic_light_msg_field_valid = {
@@ -217,7 +218,10 @@ class MsgHelper:
             
         if self.vehicle_msg_field_valid.get('height'):
             veh_data.height, byte_index = MsgHelper.unpack_float(byte_data, byte_index)
-            
+
+        if self.vehicle_msg_field_valid.get('speedAdvisory'):
+            veh_data.speedAdvisory, byte_index = MsgHelper.unpack_float(byte_data, byte_index)
+
         return  veh_data
 
     def pack_veh_data(self, byte_data: bytearray, byte_index, veh_data: VehData):
@@ -257,6 +261,7 @@ class MsgHelper:
                   + self.vehicle_msg_field_valid.get('length', 0) * 4  # length
                   + self.vehicle_msg_field_valid.get('width', 0) * 4  # width
                   + self.vehicle_msg_field_valid.get('height', 0) * 4  # height
+                  + self.vehicle_msg_field_valid.get('speedAdvisory', 0) * 4  # speedAdvisory
             )
         )
         veh_msg_size = round(msg_size) + self.msg_each_header_size
@@ -390,7 +395,11 @@ class MsgHelper:
         if self.vehicle_msg_field_valid.get('height'):
             byte_data[byte_index:byte_index+4] = struct.pack('f', veh_data.height)
             byte_index += 4
-        
+
+        if self.vehicle_msg_field_valid.get('speedAdvisory'):
+            byte_data[byte_index:byte_index+4] = struct.pack('f', veh_data.speedAdvisory)
+            byte_index += 4
+
         return byte_data, msg_size, byte_index
 
     def depack_traffic_light_data(self, byte_data: bytes) -> TrafficLightData:

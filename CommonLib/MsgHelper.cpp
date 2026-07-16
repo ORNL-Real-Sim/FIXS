@@ -384,7 +384,8 @@ void MsgHelper::packVehData(VehFullData_t VehData, char* buffer, int* iByte) {
 	numericVehDataToBuffer<float>(VehData.width, "width", buffer, iByte);
 	numericVehDataToBuffer<float>(VehData.height, "height", buffer, iByte);
 	numericVehDataToBuffer<uint16_t>(VehData.lightIndicators, "lightIndicators", buffer, iByte);
-	
+	numericVehDataToBuffer<float>(VehData.speedAdvisory, "speedAdvisory", buffer, iByte);
+
 	// packVehData: add new vehicle message field here
 	
 	// go back to the first byte location and parser message size 
@@ -439,6 +440,7 @@ void MsgHelper::depackVehData(char* buffer, VehFullData_t& VehData) {
 	bufferToNumericVehData<float>(buffer, &iByte, "width", tempFloat); VehData.width = tempFloat;
 	bufferToNumericVehData<float>(buffer, &iByte, "height", tempFloat); VehData.height = tempFloat;
 	bufferToNumericVehData<uint16_t>(buffer, &iByte, "lightIndicators", tempUint16); VehData.lightIndicators = tempUint16;
+	bufferToNumericVehData<float>(buffer, &iByte, "speedAdvisory", tempFloat); VehData.speedAdvisory = tempFloat;
 
 	// depackVehData: add new vehicle message field here
 

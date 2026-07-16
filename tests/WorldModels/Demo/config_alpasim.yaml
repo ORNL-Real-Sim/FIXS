@@ -10,7 +10,7 @@ SimulationSetup:
     SelectedTrafficSimulator: 'SUMO'
     TrafficSimulatorIP: "127.0.0.1"
     TrafficSimulatorPort: 1337
-    VehicleMessageField: [id, type, vehicleClass, speed, positionX, positionY, positionZ, heading, speedDesired, laneId, length, width, height, signalLightId, signalLightColor, signalLightDistance]
+    VehicleMessageField: [id, type, vehicleClass, speed, positionX, positionY, positionZ, heading, speedDesired, laneId, length, width, height, signalLightId, signalLightColor, signalLightDistance, speedAdvisory]
     EnableExternalDynamics: false
 
 SumoSetup:
@@ -41,6 +41,8 @@ WorldModelSetup:
     # only hand back once STOPPED so SUMO gives a clean launch at green.
     RedApproachHandback: false
     MinControlSpeed: 2.0
+    SamplingTopK: 1        # 1 = greedy (deterministic)
+    InferenceStride: 3     # infer every 3 steps, replay the token sub-steps
     NetFile: './simple_traffic_light.net.xml'
     # CATK checkpoint + tokens (absolute; live outside the repo)
     ModelDir: 'C:/src_git/WM_AlpaSim/data/trafficsim-models/catk_v120'
