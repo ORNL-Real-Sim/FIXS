@@ -184,6 +184,7 @@ def main() -> int:
                 socket_helper.sendData(sim_state, sim_time, client)
                 continue
 
+            bev.sim_time = sim_time
             push_frame(bev)
             bev.ego_future = make_ego_future(bev, horizon, dt)
 

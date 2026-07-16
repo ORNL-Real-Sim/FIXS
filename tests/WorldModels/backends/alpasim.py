@@ -162,21 +162,53 @@ class AlpaSimBackend:
         lt[near] = 1                                      # STOP
         pe["light_type"] = lt
 
-    def _dump_bev(self, win, idx, ego_i, result) -> None:
-        """Append one ego-centered BEV snapshot (agents + local map) as JSON.
+    def _dump_bev(self, bev, win, idx, ego_i, ox, oy) -> None:
+        """Append one ego-centered BEV snapshot of EXACTLY the converted CATK
+        input, for manual verification. Everything is in the ego-centered frame
+        (ego at origin) that the model receives. Writes JSONL to $RS_WM_BEV_DUMP.
 
-        Verification aid: dump exactly what CATK sees (post ego-centering) so it
-        can be plotted. Writes to $RS_WM_BEV_DUMP (default bev_dump.jsonl).
+        Per frame: sim time, ego (heading + pinned future plan), each agent's
+        full history tail (x,y) + heading + speed, the local road lane polylines,
+        and the red/yellow stop-line points that get light_type=STOP.
         """
         import json
-        tri = result["input_data"]["map"]["triplets"].detach().cpu().numpy()  # (M,3,2)
-        mc = tri.mean(axis=1)                                                  # (M,2)
+        import numpy as np
+
+        # local road geometry as CATK sees it (ego-centered lane polylines near ego)
+        lanes = []
+        if self.vector_map is not None:
+            for p in self.vector_map.crop(ox, oy, self.half * 1.3):
+                q = np.asarray(p, float).copy()
+                q[:, 0] -= ox
+                q[:, 1] -= oy
+                lanes.append([[round(float(x), 1), round(float(y), 1)] for x, y in q])
+
+        # red/yellow stop-lines (ego-centered) -> lanes tagged STOP
+        stops = []
+        for i in range(len(bev.ids)):
+            c = int(bev.sig_color[i])
+            d = float(bev.sig_dist[i])
+            if c in (1, 2) and d >= 0.0:
+                yaw = float(bev.yaw[i])
+                stops.append([round(float(bev.xy[i, 0] + d * np.cos(yaw) - ox), 1),
+                              round(float(bev.xy[i, 1] + d * np.sin(yaw) - oy), 1)])
+
+        ego_future = []
+        if bev.ego_future is not None:
+            for x, y, yw in bev.ego_future:
+                ego_future.append([round(float(x) - ox, 2), round(float(y) - oy, 2)])
+
         frame = {
-            "ego": [0.0, 0.0, round(float(win[ego_i, -1, 2]), 3)],            # x,y,yaw
-            "agents": [[round(float(win[i, -1, 0]), 2), round(float(win[i, -1, 1]), 2),
-                        round(float(win[i, -1, 2]), 3), round(float(win[i, -1, 3]), 2)]
-                       for i in idx],                                          # x,y,yaw,speed
-            "map": [[round(float(x), 1), round(float(y), 1)] for x, y in mc],
+            "t": round(float(bev.sim_time), 1),
+            "ego": {"yaw": round(float(win[ego_i, -1, 2]), 3), "future": ego_future},
+            "agents": [{
+                "id": bev.ids[i],
+                "traj": [[round(float(x), 1), round(float(y), 1)] for x, y in win[i, :, 0:2]],
+                "yaw": round(float(win[i, -1, 2]), 3),
+                "speed": round(float(win[i, -1, 3]), 2),
+            } for i in idx],
+            "lanes": lanes,
+            "stops": stops,
         }
         with open(os.environ.get("RS_WM_BEV_DUMP", "bev_dump.jsonl"), "a", encoding="utf-8") as f:
             f.write(json.dumps(frame) + "\n")
@@ -253,7 +285,7 @@ class AlpaSimBackend:
         self._inject_light_type(result, bev, ox, oy)   # feed SUMO signals into the map
 
         if os.environ.get("RS_WM_BEV_DUMP"):
-            self._dump_bev(win, idx, ego_i, result)
+            self._dump_bev(bev, win, idx, ego_i, ox, oy)
 
         actions = self.model.inference(result["input_data"])
 

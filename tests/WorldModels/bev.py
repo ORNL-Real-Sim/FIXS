@@ -117,6 +117,7 @@ class BevAgentSet:
     sig_color: np.ndarray                # (N,) next-signal state: 1=red 2=yellow 3=green, 0/-1=none
     sig_dist: np.ndarray                 # (N,) distance to that signal (m); <0 = none
     ego_future: np.ndarray | None = None  # (S, 3) [x, y, yaw] -- CATK only
+    sim_time: float = 0.0                # SUMO sim time (s), set by the translator
 
     @property
     def non_ego_mask(self) -> np.ndarray:
