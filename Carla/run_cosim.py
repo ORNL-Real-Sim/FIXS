@@ -279,6 +279,49 @@ def kill_carla(proc):
     _kill_pid_tree(proc.pid)
 
 
+def _net_from_sumocfg(sumocfg):
+    """Absolute path to the <net-file> referenced by a .sumocfg, or None."""
+    import xml.etree.ElementTree as ET
+    try:
+        nf = ET.parse(sumocfg).getroot().find(".//net-file")
+        if nf is not None and nf.get("value"):
+            return os.path.join(os.path.dirname(os.path.abspath(sumocfg)), nf.get("value"))
+    except Exception:
+        pass
+    return None
+
+
+def resolve_tl_table(sumocfg):
+    """Find this scenario's traffic-light table: a traffic_light_table.csv committed
+    next to the sumocfg, else one generated from the SUMO net (cached under
+    ~/.fixs/tables). Returns a path, or None if neither is possible. Generation
+    needs pandas/shapely but not SUMO installed."""
+    scen = os.path.dirname(os.path.abspath(sumocfg))
+    committed = os.path.join(scen, "traffic_light_table.csv")
+    if os.path.isfile(committed):
+        print(f"[cosim] TL table: committed {committed}")
+        return committed
+    net = _net_from_sumocfg(sumocfg)
+    if not net or not os.path.isfile(net):
+        print("[cosim] no TL table and no net to generate one from; TL sync off.")
+        return None
+    cache = os.path.join(os.path.dirname(env.CONFIG_PATH), "tables")
+    out = os.path.join(cache, os.path.splitext(os.path.basename(net))[0] + "_tls.csv")
+    if os.path.isfile(out):
+        print(f"[cosim] TL table: cached generated {out}")
+        return out
+    try:
+        sys.path.insert(0, os.path.join(HERE, "utils"))
+        import extract_sumo_tls_as_table as gen
+        os.makedirs(cache, exist_ok=True)
+        gen.generate_table(net, out)
+        print(f"[cosim] TL table: generated from {os.path.basename(net)} -> {out}")
+        return out
+    except Exception as exc:
+        print(f"[cosim] could not generate TL table ({exc}); TL sync off.")
+        return None
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -323,6 +366,9 @@ def main():
                     help="client timeout (s) for load_world; the first load of a freshly "
                          "imported map compiles shaders and can take minutes (default 300)")
     ap.add_argument("--no-launch", action="store_true", help="CARLA is already running")
+    ap.add_argument("--prep-only", action="store_true",
+                    help="import the map + place traffic lights and signs, then stop "
+                         "(do not launch CARLA or run the co-sim)")
     ap.add_argument("--reconfigure", action="store_true",
                     help="re-run CARLA env setup before launching (pick a different CARLA)")
     ap.add_argument("--render-offscreen", action="store_true", help="headless CARLA")
@@ -363,6 +409,13 @@ def main():
         src = f"release {picked_tag}" if picked_tag else f"local {picked_local}"
         print(f"[cosim] selected map: {target_map}  ({src})")
 
+    # Resolve the TL table for signal sync + placement: an explicit --tl-table
+    # wins, else a traffic_light_table.csv committed next to the sumocfg, else one
+    # generated from the SUMO net (cached under ~/.fixs/tables).
+    tl_table = args.tl_table
+    if args.tls_manager == "sumo" and not tl_table:
+        tl_table = resolve_tl_table(args.sumocfg)
+
     # Source-build preflight: a custom map must be cooked into the build before
     # CARLA can load it. Import the target map if missing - from the picked release
     # (downloaded + cached), a picked local .zip, or the explicit --map + url/config
@@ -396,16 +449,30 @@ def main():
         # TL preflight: a map whose OpenDRIVE has no dynamic signals needs the
         # traffic lights placed from the table (else the TL sync has no actors).
         # Idempotent via a marker; re-done after a (re-)import that wiped it.
-        if args.tl_table:
+        if tl_table:
             import place_tls
             if (not place_tls.tls_placed(cfg["carla_root"], target_map)) or args.reimport:
                 if picked_tag is not None or picked_local is not None or args.auto_import or args.reimport:
                     print(f"[cosim] placing traffic lights for '{target_map}' before launch ...")
-                    place_tls.place_tls(target_map, args.tl_table, carla_root=cfg["carla_root"],
+                    place_tls.place_tls(target_map, tl_table, carla_root=cfg["carla_root"],
                                         ue4_root=cfg.get("ue4_root"), force=args.reimport)
                 else:
                     print(f"[cosim] note: traffic lights not placed for '{target_map}'. Run "
                           f"place_tls (or pass --auto-import) to add them, else no TL sync.")
+
+        # Sign preflight: place the RoadRunner sign meshes CARLA's import culled (+
+        # fix their see-through materials). Needs no table/data; cosmetic, so it
+        # never aborts the run. Idempotent via a marker; re-done after a re-import.
+        import place_signs
+        if (not place_signs.signs_placed(cfg["carla_root"], target_map)) or args.reimport:
+            if picked_tag is not None or picked_local is not None or args.auto_import or args.reimport:
+                print(f"[cosim] placing road signs for '{target_map}' before launch ...")
+                place_signs.place_signs(target_map, carla_root=cfg["carla_root"],
+                                        ue4_root=cfg.get("ue4_root"), force=args.reimport)
+
+    if args.prep_only:
+        print(f"[cosim] --prep-only: '{target_map}' imported + prepped (TLs/signs); not launching.")
+        return 0
 
     carla_proc = None
     try:
@@ -466,13 +533,13 @@ def main():
             # sync is legible. --spectator-all frames the whole network (placed TL
             # actors, else the full table).
             frame = None
-            if args.tl_table and not args.spectator_all:
-                frame = _frame_from_table(args.tl_table, args.no_net_offset,
+            if tl_table and not args.spectator_all:
+                frame = _frame_from_table(tl_table, args.no_net_offset,
                                           junction=args.spectator_junction)
             if frame is None:
                 frame = _frame_from_actors(world)
-            if frame is None and args.tl_table:
-                frame = _frame_from_table(args.tl_table, args.no_net_offset, whole=True)
+            if frame is None and tl_table:
+                frame = _frame_from_table(tl_table, args.no_net_offset, whole=True)
             if frame is not None:
                 position_spectator(world, frame)
             else:
@@ -483,8 +550,8 @@ def main():
                "--step-length", str(args.step_length),
                "--carla-host", args.carla_host, "--carla-port", str(args.carla_port),
                "--carla-timeout", str(args.carla_timeout)]
-        if args.tl_table:
-            cmd += ["--tl-table", args.tl_table]
+        if tl_table:
+            cmd += ["--tl-table", tl_table]
         if args.no_net_offset:
             cmd.append("--no-net-offset")
         if args.fast:

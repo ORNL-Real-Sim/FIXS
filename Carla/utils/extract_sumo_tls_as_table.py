@@ -279,19 +279,41 @@ def tls_groups_to_df(traffic_light_groups):
     return pd.DataFrame(data, columns=['junction_id', 'link_id', 'x', 'y', 'z', 'heading'])
 
 
-if __name__ == "__main__":
-    sumo_net_file = '../Roosevelt_Sumo_Scenario/roosevelt.net.xml'
-    output_path = '../Roosevelt_Sumo_Scenario/'
+def generate_table(net_file, out_csv, offset_forward=0.0, apply_linkwise_offset=True,
+                   extend_back=50.0, default_lane_width=3.2):
+    """Parse the SUMO net and write a traffic_light_table.csv to `out_csv`; returns
+    out_csv. Pure-XML parse (ElementTree) - needs pandas/shapely but NOT SUMO
+    installed. This is what run_cosim calls to derive the table from the net when
+    no CSV is committed."""
+    groups, _ = parse_sumo_tls_from_netxml(
+        net_file, offset_forward=offset_forward,
+        apply_linkwise_offset=apply_linkwise_offset,
+        extend_back=extend_back, default_lane_width=default_lane_width)
+    out_dir = os.path.dirname(os.path.abspath(out_csv))
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+    tls_groups_to_df(groups).to_csv(out_csv, index=False)
+    return out_csv
 
-    traffic_light_groups, _ = parse_sumo_tls_from_netxml(
-        sumo_net_file,
-        offset_forward=0.0,
-        apply_linkwise_offset=True,
-        extend_back=50.0,
-        default_lane_width=3.2
-    )
-    traffic_light_groups_df = tls_groups_to_df(traffic_light_groups)
-    traffic_light_groups_df.to_csv(
-        os.path.join(output_path, 'traffic_light_table.csv'),
-        index=False
-    )
+
+def main():
+    import argparse
+    ap = argparse.ArgumentParser(
+        description="Generate traffic_light_table.csv from a SUMO .net.xml.")
+    ap.add_argument("--net-file", required=True, help="SUMO .net.xml")
+    ap.add_argument("--out", required=True, help="output traffic_light_table.csv path")
+    ap.add_argument("--offset-forward", type=float, default=0.0)
+    ap.add_argument("--extend-back", type=float, default=50.0)
+    ap.add_argument("--default-lane-width", type=float, default=3.2)
+    ap.add_argument("--no-linkwise-offset", action="store_true")
+    args = ap.parse_args()
+    out = generate_table(args.net_file, args.out,
+                         offset_forward=args.offset_forward,
+                         apply_linkwise_offset=not args.no_linkwise_offset,
+                         extend_back=args.extend_back,
+                         default_lane_width=args.default_lane_width)
+    print(f"[gen-tls] wrote {out}")
+
+
+if __name__ == "__main__":
+    main()
