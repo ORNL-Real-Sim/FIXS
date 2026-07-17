@@ -4,9 +4,6 @@
 #include <unordered_map>
 #include <vector>
 #include <string>
-#ifdef RS_DSPACE
-#include <cstdint>
-#endif
 // MESSAGE IDENTIFIER 1
 // Full vehicle data structure that will be shared between SUMO and other simulators
 // !!! This does not necessary mean all data directly communicated between simulators
@@ -57,6 +54,8 @@ typedef struct  {
 	//double positionOnLink;
 
 	uint16_t lightIndicators;
+
+	std::vector<std::string> routeEdges;
 
 
 }VehFullData_t;

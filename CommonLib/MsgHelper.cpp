@@ -129,6 +129,9 @@ void MsgHelper::printVehData(VehFullData_t VehData) {
 	if (VehicleMessageField_set.find("lightIndicators") != VehicleMessageField_set.end()) {
 		printf("\t lightIndicators: %d\n", VehData.lightIndicators);
 	}
+	if (VehicleMessageField_set.find("routeEdges") != VehicleMessageField_set.end()) {
+		printf("\t routeEdges: %d\n", VehData.routeEdges);
+	}
 
 	// printVehData: add new vehicle message field here
 }
@@ -238,6 +241,9 @@ void MsgHelper::printVehDataToFile(const std::string fileName, VehFullData_t Veh
 	}
 	if (VehicleMessageField_set.find("lightIndicators") != VehicleMessageField_set.end()) {
 		fprintf(f, "\t lightIndicators: %d\n", VehData.lightIndicators);
+	}
+	if (VehicleMessageField_set.find("routeEdges") != VehicleMessageField_set.end()) {
+		fprintf(f, "\t routeEdges: %d\n", VehData.routeEdges);
 	}
 	fclose(f);
 
@@ -386,7 +392,21 @@ void MsgHelper::packVehData(VehFullData_t VehData, char* buffer, int* iByte) {
 	numericVehDataToBuffer<uint16_t>(VehData.lightIndicators, "lightIndicators", buffer, iByte);
 	
 	// packVehData: add new vehicle message field here
-	
+	uint16_t routeSize = (uint16_t)VehData.routeEdges.size();
+	memcpy(buffer + *iByte, &routeSize, sizeof(uint16_t));
+	*iByte += sizeof(uint16_t);
+
+	for (uint16_t j = 0; j < routeSize; j++) {
+
+		uint16_t strLen = (uint16_t)VehData.routeEdges[j].length();
+		memcpy(buffer + *iByte, &strLen, sizeof(uint16_t));
+		*iByte += sizeof(uint16_t);
+
+
+		memcpy(buffer + *iByte, VehData.routeEdges[j].c_str(), strLen);
+		*iByte += strLen;
+	}
+
 	// go back to the first byte location and parser message size 
 	tempUint16 = (*iByte - initByte);
 	memcpy(buffer + initByte, (char*)&tempUint16, sizeof(tempUint16));
@@ -441,6 +461,25 @@ void MsgHelper::depackVehData(char* buffer, VehFullData_t& VehData) {
 	bufferToNumericVehData<uint16_t>(buffer, &iByte, "lightIndicators", tempUint16); VehData.lightIndicators = tempUint16;
 
 	// depackVehData: add new vehicle message field here
+	VehData.routeEdges.clear();
+
+
+	uint16_t routeSize = 0;
+	memcpy(&routeSize, buffer + iByte, sizeof(uint16_t));
+	iByte += sizeof(uint16_t);
+
+
+	for (uint16_t j = 0; j < routeSize; j++) {
+
+		uint16_t strLen = 0;
+		memcpy(&strLen, buffer + iByte, sizeof(uint16_t));
+		iByte += sizeof(uint16_t);
+
+		string edgeStr;
+		edgeStr.assign(buffer + iByte, buffer + iByte + strLen);
+		VehData.routeEdges.push_back(edgeStr);
+		iByte += strLen;
+	}
 
 }
 

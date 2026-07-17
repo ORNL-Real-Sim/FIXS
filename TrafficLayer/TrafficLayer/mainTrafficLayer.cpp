@@ -1,137 +1,27 @@
-#include <string>
+#include <iostream>
+#include <fstream>
+#include <unordered_map>
+#include <unordered_set>
+#include <conio.h>
+
+
+//#include "TraCIAPI.h"
+
+
+//#include <event2/bufferevent.h>
+//#include <event2/util.h>
+//#include <event2/event.h>
+
+//#define TRACI_ENABLED 1
 #include <ctime>
 #include <chrono>
-#include <filesystem>
-#include <system_error>
-#include <cstdlib>
-#include <cstring>
+
 
 #include "TrafficHelper.h"
 
 #include "RealSimVersion.h"
 
-// Uncomment the line below to enable performance timing
-// #define ENABLE_PERF_TIMING
-#include "PerformanceTimer.h"
-
 using namespace std;
-
-// Global shutdown state - single point of access for cleanup coordination
-struct ShutdownState {
-    volatile bool shutdownRequested = false;
-    bool initialized = false;
-
-    // Pointers to resources that need cleanup (set after initialization)
-    TrafficHelper* traffic = nullptr;
-    SocketHelper* socket = nullptr;
-    MsgHelper* msgClient = nullptr;
-    vector<int>* clientSockets = nullptr;
-    double* simTime = nullptr;
-
-    // Configuration flags (set during initialization)
-    bool enableVissim = false;
-    bool enableClient = false;
-    bool enableRealSim = false;
-
-    // Track if traffic simulator connection was already closed
-    bool trafficSimulatorClosed = false;
-
-    // Reset all state
-    void reset() {
-        shutdownRequested = false;
-        initialized = false;
-        traffic = nullptr;
-        socket = nullptr;
-        msgClient = nullptr;
-        clientSockets = nullptr;
-        simTime = nullptr;
-        enableVissim = false;
-        enableClient = false;
-        enableRealSim = false;
-        trafficSimulatorClosed = false;
-    }
-};
-
-// Single global instance
-static ShutdownState g_shutdown;
-
-namespace {
-std::string GetExecutableDirectory() {
-#ifdef WIN32
-    std::vector<char> buffer(MAX_PATH);
-    DWORD length = 0;
-    while (true) {
-        length = GetModuleFileNameA(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
-        if (length == 0) {
-            return std::string();
-        }
-        if (length < buffer.size() - 1) {
-            return std::filesystem::path(std::string(buffer.data(), length)).parent_path().string();
-        }
-        buffer.resize(buffer.size() * 2);
-    }
-#else
-    std::vector<char> buffer(PATH_MAX);
-    ssize_t length = readlink("/proc/self/exe", buffer.data(), buffer.size() - 1);
-    if (length == -1) {
-        return std::string();
-    }
-    buffer[length] = '\0';
-    return std::filesystem::path(std::string(buffer.data())).parent_path().string();
-#endif
-}
-
-void ConfigureSumoLibraryPath(const ConfigHelper& config) {
-    static bool configured = false;
-    if (configured) return;
-    configured = true;
-
-    std::filesystem::path exeDir(GetExecutableDirectory());
-    std::vector<std::filesystem::path> candidates;
-
-    // Override path first
-    if (!config.SumoSetup.RuntimeLibraryPath.empty()) {
-        std::filesystem::path override(config.SumoSetup.RuntimeLibraryPath);
-        candidates.push_back(override.is_absolute() ? override : exeDir / override);
-    }
-
-    // Standard locations
-    if (!exeDir.empty()) {
-        candidates.push_back(exeDir / "CommonLib" / "libsumo" / "bin");
-        std::filesystem::path parent = exeDir.parent_path();
-        for (int i = 0; i < 5 && !parent.empty(); ++i, parent = parent.parent_path()) {
-            candidates.push_back(parent / "CommonLib" / "libsumo" / "bin");
-        }
-    }
-    candidates.push_back(std::filesystem::current_path() / "CommonLib" / "libsumo" / "bin");
-
-    // Try each candidate
-    for (const auto& path : candidates) {
-        std::error_code ec;
-        if (!std::filesystem::is_directory(path, ec)) continue;
-
-        std::string pathStr = path.string();
-#ifdef WIN32
-        if (!SetDllDirectoryA(pathStr.c_str())) continue;
-#else
-        std::string newPath = pathStr;
-        if (const char* current = std::getenv("LD_LIBRARY_PATH")) {
-            newPath += ':' + std::string(current);
-        }
-        setenv("LD_LIBRARY_PATH", newPath.c_str(), 1);
-#endif
-        printf("Using SUMO library directory: %s\n", pathStr.c_str());
-        return;
-    }
-
-    // Only error if SUMO is selected as traffic simulator
-    if (config.SimulationSetup.SelectedTrafficSimulator != "VISSIM") {
-        printf("ERROR: Unable to locate SUMO library directory.\n");
-        printf("Please check SumoSetup.RuntimeLibraryPath in your configuration file.\n");
-        exit(-1);
-    }
-}
-}
 
 //!!!!! NEED TO
 // -multithread
@@ -158,86 +48,6 @@ SocketHelper Sock_c;
 
 
 
-// Perform graceful cleanup with proper shutdown sequence
-void performCleanup(bool emergencyShutdown) {
-	if (emergencyShutdown) {
-		printf("\nEmergency shutdown initiated...\n");
-	}
-	else {
-		printf("\nGraceful shutdown initiated...\n");
-	}
-
-	// Step 1: Notify all connected clients about shutdown (state=0)
-	if (g_shutdown.initialized && g_shutdown.enableClient &&
-		g_shutdown.socket && g_shutdown.msgClient &&
-		g_shutdown.clientSockets && g_shutdown.simTime) {
-
-		try {
-			printf("Notifying clients of shutdown...\n");
-			MsgHelper* msgClient = g_shutdown.msgClient;
-			msgClient->clearSendStorage();
-
-			float simTimeSend = *g_shutdown.simTime;
-			uint8_t simStateSend = 0; // 0 = shutdown signal
-
-			for (unsigned int iC = 0; iC < g_shutdown.clientSockets->size(); iC++) {
-				try {
-					g_shutdown.socket->sendData((*g_shutdown.clientSockets)[iC], iC,
-						simTimeSend, simStateSend, *msgClient);
-				}
-				catch (...) {
-					// Continue notifying other clients even if one fails
-				}
-			}
-			printf("Client notification complete.\n");
-
-			// Give clients time to receive and process shutdown notification
-			Sleep(100);
-		}
-		catch (const std::exception& e) {
-			printf("Warning: Error notifying clients: %s\n", e.what());
-		}
-		catch (...) {
-			printf("Warning: Unknown error notifying clients.\n");
-		}
-	}
-
-	// Step 2: Close SUMO/VISSIM connection gracefully
-	if (g_shutdown.initialized && g_shutdown.traffic && g_shutdown.enableRealSim && !g_shutdown.trafficSimulatorClosed) {
-		try {
-			printf("Closing traffic simulator connection...\n");
-			g_shutdown.traffic->close();
-			printf("Traffic simulator connection closed.\n");
-		}
-		catch (const std::exception& e) {
-			printf("Warning: Error closing traffic simulator: %s\n", e.what());
-		}
-		catch (...) {
-			printf("Warning: Unknown error closing traffic simulator.\n");
-		}
-	}
-	else if (g_shutdown.trafficSimulatorClosed) {
-		printf("Traffic simulator already closed by user.\n");
-	}
-
-	// Step 3: Close all sockets
-	if (g_shutdown.socket) {
-		try {
-			printf("Closing sockets...\n");
-			g_shutdown.socket->socketShutdown();
-			printf("Sockets closed.\n");
-		}
-		catch (const std::exception& e) {
-			printf("Warning: Error closing sockets: %s\n", e.what());
-		}
-		catch (...) {
-			printf("Warning: Unknown error closing sockets.\n");
-		}
-	}
-
-	printf("Shutdown complete.\n");
-}
-
 BOOL WINAPI CtrlHandler(DWORD fdwCtrlType)
 {
 	switch (fdwCtrlType)
@@ -245,31 +55,10 @@ BOOL WINAPI CtrlHandler(DWORD fdwCtrlType)
 		// Handle the CTRL-C signal.
 	case CTRL_C_EVENT:
 		printf("Ctrl-C event caught\n\n");
-		g_shutdown.shutdownRequested = true;
-		return TRUE;
+		printf("RealSim Exits, Please stop VISSIM/SUMO manually\n\n");
+		Sock_c.socketShutdown();
+		exit(-1);
 
-	// Handle Ctrl-Break signal
-	case CTRL_BREAK_EVENT:
-		printf("Ctrl-Break event caught\n\n");
-		g_shutdown.shutdownRequested = true;
-		return TRUE;
-
-	// Handle console window close (X button)
-	case CTRL_CLOSE_EVENT:
-		printf("Console close event caught\n\n");
-		performCleanup(true); // Emergency cleanup (Windows gives ~5 seconds)
-		return TRUE;
-
-	// Handle user logoff
-	case CTRL_LOGOFF_EVENT:
-		printf("User logoff event caught\n\n");
-		performCleanup(true); // Emergency cleanup
-		return TRUE;
-
-	// Handle system shutdown
-	case CTRL_SHUTDOWN_EVENT:
-		printf("System shutdown event caught\n\n");
-		performCleanup(true); // Emergency cleanup
 		return TRUE;
 
 	default:
@@ -286,94 +75,11 @@ static void show_usage(std::string name)
 		<< std::endl;
 }
 
-#ifdef WIN32
-// Find all YAML files in a directory recursively (Windows implementation)
-void findYamlFilesRecursive(const std::string& directory, std::vector<std::string>& yamlFiles) {
-	WIN32_FIND_DATAA findData;
-	std::string searchPath = directory + "\\*";
-	HANDLE hFind = FindFirstFileA(searchPath.c_str(), &findData);
-
-	if (hFind == INVALID_HANDLE_VALUE) {
-		return;
-	}
-
-	do {
-		std::string fileName = findData.cFileName;
-		if (fileName == "." || fileName == "..") continue;
-
-		std::string fullPath = directory + "\\" + fileName;
-
-		if (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-			// Recursively search subdirectories
-			findYamlFilesRecursive(fullPath, yamlFiles);
-		}
-		else {
-			// Check if file has .yaml or .yml extension
-			size_t dotPos = fileName.find_last_of('.');
-			if (dotPos != std::string::npos) {
-				std::string ext = fileName.substr(dotPos);
-				if (ext == ".yaml" || ext == ".yml") {
-					yamlFiles.push_back(fullPath);
-				}
-			}
-		}
-	} while (FindNextFileA(hFind, &findData));
-
-	FindClose(hFind);
-}
-#else
-// Find all YAML files in a directory recursively (POSIX implementation)
-#include <dirent.h>
-#include <sys/stat.h>
-void findYamlFilesRecursive(const std::string& directory, std::vector<std::string>& yamlFiles) {
-	DIR* dir = opendir(directory.c_str());
-	if (!dir) return;
-
-	struct dirent* entry;
-	while ((entry = readdir(dir)) != nullptr) {
-		std::string fileName = entry->d_name;
-		if (fileName == "." || fileName == "..") continue;
-
-		std::string fullPath = directory + "/" + fileName;
-
-		struct stat statbuf;
-		if (stat(fullPath.c_str(), &statbuf) == 0) {
-			if (S_ISDIR(statbuf.st_mode)) {
-				// Recursively search subdirectories
-				findYamlFilesRecursive(fullPath, yamlFiles);
-			}
-			else if (S_ISREG(statbuf.st_mode)) {
-				// Check if file has .yaml or .yml extension
-				size_t dotPos = fileName.find_last_of('.');
-				if (dotPos != std::string::npos) {
-					std::string ext = fileName.substr(dotPos);
-					if (ext == ".yaml" || ext == ".yml") {
-						yamlFiles.push_back(fullPath);
-					}
-				}
-			}
-		}
-	}
-	closedir(dir);
-}
-#endif
-
-std::vector<std::string> findYamlFiles(const std::string& directory) {
-	std::vector<std::string> yamlFiles;
-	findYamlFilesRecursive(directory, yamlFiles);
-	return yamlFiles;
-}
-
 int main(int argc, char* argv[]) {
 
 	printf("==================================================\n");
 	printf("\t\tRealSim Interface\n");
 	printf("\t\t    v%s\n",REALSIM_VERSION_STRING);
-#ifdef _DEBUG
-	printf("\t\t    (DEBUG build)\n");
-#else
-	printf("\t\t    (RELEASE build)\n");
-#endif
 	printf("==================================================\n");
 
 	// control-c handles
@@ -447,10 +153,7 @@ int main(int argc, char* argv[]) {
 		}
 	}
 
-	string configPath;
-	bool configSpecified = false;
-
-	// Parse command-line arguments
+	string configPath = ".\\ecodrivingConfig.yaml";
 	for (int i = 1; i < argc; i++) {
 		string arg = argv[i];
 		if (arg == "-h" || arg == "--help") {
@@ -460,7 +163,6 @@ int main(int argc, char* argv[]) {
 		else if (arg == "-f" || arg == "--file") {
 			if (i + 1 < argc) {
 				configPath = argv[++i];
-				configSpecified = true;
 			}
 			else {
 				std::cerr << "--path option requires one argument." << std::endl;
@@ -471,43 +173,6 @@ int main(int argc, char* argv[]) {
 			printf("Check options\n");
 			show_usage(argv[0]);
 			return 0;
-		}
-	}
-
-	// Auto-discover config if not specified
-	if (!configSpecified) {
-		// First, check for TrafficLayer/.active_config file
-		std::ifstream activeConfigFile("TrafficLayer/.active_config");
-		if (activeConfigFile.good()) {
-			std::getline(activeConfigFile, configPath);
-			activeConfigFile.close();
-			printf("Using config from TrafficLayer/.active_config: %s\n", configPath.c_str());
-		}
-		else {
-			// Auto-discover in tests/UserScenarios/
-			std::vector<std::string> yamlFiles = findYamlFiles("tests/UserScenarios");
-
-			if (yamlFiles.empty()) {
-				printf("ERROR: No configuration specified and no YAML found in tests/UserScenarios/\n");
-				printf("Options:\n");
-				printf("  - Use: -f path/to/config.yaml\n");
-				printf("  - Add scenario to tests/UserScenarios/\n");
-				printf("  - Create TrafficLayer/.active_config with path to your config\n");
-				return -1;
-			}
-			else if (yamlFiles.size() == 1) {
-				configPath = yamlFiles[0];
-				printf("Auto-discovered config: %s\n", configPath.c_str());
-			}
-			else {
-				printf("ERROR: Multiple YAML files found in tests/UserScenarios/\n");
-				printf("Please create TrafficLayer/.active_config file with one of these paths:\n");
-				for (const auto& yaml : yamlFiles) {
-					printf("  - %s\n", yaml.c_str());
-				}
-				printf("\nExample: echo tests/UserScenarios/issue_85/config.yaml > TrafficLayer/.active_config\n");
-				return -1;
-			}
 		}
 	}
 
@@ -541,7 +206,7 @@ int main(int argc, char* argv[]) {
 	// ENABLE_CARLA: CARLA simulator
 	bool ENABLE_VEH_SIMULATOR = false;
 	bool ENABLE_CARLA = false;
-	bool ENABLE_CARLA_EXTERNAL_CONTROL = false;
+
 	vector <int> selfServerPortAll = {};
 	vector <string> serverAddr = {};
 	vector <int> serverPort = {};
@@ -563,20 +228,19 @@ int main(int argc, char* argv[]) {
 	}
 	if (Config_c.SimulationSetup.SelectedTrafficSimulator.compare("VISSIM") == 0) {
 		ENABLE_VISSIM = true;
-		printf("Traffic Simulator: VISSIM\n");
+		printf("Selected Traffic Simulator VISSIM\n\n");
 	}
 	else {
 		ENABLE_VISSIM = false;
-		printf("Traffic Simulator: SUMO\n");
-		// Configure SUMO library path for runtime DLL loading
-		ConfigureSumoLibraryPath(Config_c);
+		printf("Selected Traffic Simulator SUMO\n\n");
 	}
 	if (Config_c.SimulationSetup.EnableVerboseLog) {
 		ENABLE_VERBOSE = true;
-		printf("Verbose logging: Enabled\n");
+		printf("Enable verbose logging\n\n");
 	}
 	else {
 		ENABLE_VERBOSE = false;
+		printf("No verbose logging\n\n");
 	}
 	if (Config_c.ApplicationSetup.EnableApplicationLayer) {
 		ENABLE_CLIENT = true;
@@ -599,7 +263,7 @@ int main(int argc, char* argv[]) {
 
 	ENABLE_VEH_SIMULATOR = Config_c.CarMakerSetup.EnableCosimulation;
 	ENABLE_CARLA = Config_c.CarlaSetup.EnableCosimulation;
-	ENABLE_CARLA_EXTERNAL_CONTROL = Config_c.CarlaSetup.EnableExternalControl;
+
 	if (ENABLE_VERBOSE) {
 		//FILE* f = fopen(MasterLogName.c_str(), "a");
 		//fprintf(f, "\n============================================");
@@ -613,6 +277,7 @@ int main(int argc, char* argv[]) {
 			serverPort.push_back(Config_c.SimulationSetup.TrafficSimulatorPort);
 			if (ENABLE_VISSIM) {
 				serverNames.push_back("vissimDriver");
+				printf("VISSIM driver model dll selected as server \n");
 			}
 		}
 		if (Config_c.XilSetup.DetectorSubscription.size() > 0) {
@@ -620,6 +285,7 @@ int main(int argc, char* argv[]) {
 			serverPort.push_back(Config_c.SimulationSetup.TrafficSimulatorPort+1);
 			if (ENABLE_VISSIM) {
 				serverNames.push_back("vissimSignal");
+				printf("VISSIM signal dll selected as server \n");
 			}
 		}
 	}
@@ -629,6 +295,7 @@ int main(int argc, char* argv[]) {
 			serverPort.push_back(Config_c.SimulationSetup.TrafficSimulatorPort);
 			if (ENABLE_VISSIM) {
 				serverNames.push_back("vissimDriver");
+				printf("VISSIM driver model dll selected as server \n");
 			}
 		}
 		if (Config_c.ApplicationSetup.DetectorSubscription.size() > 0) {
@@ -636,6 +303,7 @@ int main(int argc, char* argv[]) {
 			serverPort.push_back(Config_c.SimulationSetup.TrafficSimulatorPort+1);
 			if (ENABLE_VISSIM) {
 				serverNames.push_back("vissimSignal");
+				printf("VISSIM signal dll selected as server \n");
 			}
 		}
 	}
@@ -657,6 +325,7 @@ int main(int argc, char* argv[]) {
 				port_v = get<3>(Config_c.XilSetup.VehicleSubscription[i]);
 				for (int iP = 0; iP < port_v.size(); iP++) {
 					selfServerPortAll.push_back(port_v[iP]);
+					printf("\nTrafficLayer broadcast to client at port %d \n", port_v[iP]);
 				}
 			}
 			for (int i = 0; i < Config_c.XilSetup.SignalSubscription.size(); i++) {
@@ -680,6 +349,7 @@ int main(int argc, char* argv[]) {
 				port_v = get<3>(Config_c.ApplicationSetup.VehicleSubscription[i]);
 				for (int iP = 0; iP < port_v.size(); iP++) {
 					selfServerPortAll.push_back(port_v[iP]);
+					printf("\nTrafficLayer broadcast to client at port %d \n", port_v[iP]);
 				}
 			}
 			for (int i = 0; i < Config_c.ApplicationSetup.SignalSubscription.size(); i++) {
@@ -703,7 +373,6 @@ int main(int argc, char* argv[]) {
 	// number of ports equal to size of Sock_c.clientSock
 	// map each port to an element of Sock_c.clientSock
 	selfServerPortUserInput = selfServerPortAll;
-	sort(selfServerPortUserInput.begin(), selfServerPortUserInput.end());
 	auto it = unique(selfServerPortUserInput.begin(), selfServerPortUserInput.end());
 	selfServerPortUserInput.resize(distance(selfServerPortUserInput.begin(), it));
 	for (int i = 0; i < selfServerPortUserInput.size(); i++) {
@@ -717,19 +386,9 @@ int main(int argc, char* argv[]) {
 
 	for (int i = 0; i < selfServerPortUserInput.size(); i++) {
 		if (selfServerPortUserInput[i] == Config_c.SimulationSetup.TrafficSimulatorPort || selfServerPortUserInput[i] == Config_c.SimulationSetup.TrafficSimulatorPort+1) {
-			printf("ERROR: %d and %d are reserved ports, please select other ports for Application Layer!\n", Config_c.SimulationSetup.TrafficSimulatorPort, Config_c.SimulationSetup.TrafficSimulatorPort+1);
+			printf("ERROR: %d and %d are reserved port, please select other ports for Application Layer!!\n\n", Config_c.SimulationSetup.TrafficSimulatorPort, Config_c.SimulationSetup.TrafficSimulatorPort+1);
 			exit(-1);
 		}
-	}
-
-	// Print client ports summary
-	if (selfServerPortUserInput.size() > 0) {
-		printf("Client ports: ");
-		for (int i = 0; i < selfServerPortUserInput.size(); i++) {
-			if (i > 0) printf(", ");
-			printf("%d", selfServerPortUserInput[i]);
-		}
-		printf("\n");
 	}
 
 	double simTime = 0;
@@ -836,10 +495,6 @@ int main(int argc, char* argv[]) {
 	}
 
 
-	// pass configuration to Traffic_c
-	Traffic_c.Config_c = &Config_c;
-	Traffic_c.getConfig();
-
 	/********************************************
 	* Traffic Simulator send and recv setups
 	*********************************************/
@@ -851,8 +506,6 @@ int main(int argc, char* argv[]) {
 		else {
 			string trafficIp = Config_c.SimulationSetup.TrafficSimulatorIP;
 			int trafficPort = Config_c.SimulationSetup.TrafficSimulatorPort;
-
-
 			Traffic_c.connectionSetup(trafficIp, trafficPort, Sock_c.NCLIENT, Config_c.SumoSetup.ExecutionOrder);
 			Traffic_c.selectSUMO();
 		}
@@ -867,11 +520,15 @@ int main(int argc, char* argv[]) {
 		exit(-1);
 	}
 
+
+	// pass configuration to Traffic_c
+	Traffic_c.Config_c = &Config_c;
+	Traffic_c.getConfig();
+
 	Traffic_c.MasterLogName = MasterLogName;
 
 	Traffic_c.ENABLE_VEH_SIMULATOR = ENABLE_VEH_SIMULATOR;
 	Traffic_c.ENABLE_CARLA = ENABLE_CARLA;
-	Traffic_c.ENABLE_CARLA_EXTERNAL_CONTROL = ENABLE_CARLA_EXTERNAL_CONTROL;
 	/********************************************
 	* Message Setups
 	*********************************************/
@@ -889,64 +546,34 @@ int main(int argc, char* argv[]) {
 	//*********************************************/
 	//Sock_c.initConnection();
 
-	// Initialize shutdown state for graceful cleanup
-	g_shutdown.traffic = &Traffic_c;
-	g_shutdown.socket = &Sock_c;
-	g_shutdown.msgClient = &MsgClient_c;
-	g_shutdown.clientSockets = &actualClientSock;
-	g_shutdown.simTime = &simTime;
-	g_shutdown.enableVissim = ENABLE_VISSIM;
-	g_shutdown.enableClient = ENABLE_CLIENT;
-	g_shutdown.enableRealSim = ENABLE_REALSIM;
-	g_shutdown.initialized = true;
-
-	PERF_INIT("TrafficLayerPerf.log");
-
-	bool isVeryFirstStep = true; 
-
-	bool isEgoExist = false;
+	bool isVeryFirstStep = true;
 	bool isInitialTimeFinished = false;
-
+	bool egoSettingsApplied = false;
 	//while (simTime <= tSimuEnd && ii < nT) {
-	while (!g_shutdown.shutdownRequested) {
-
-		PERF_TIC("main_loop");
+	while (1) {
 
 		///****************************************************
 		// RUN one-step simulation
 		///****************************************************
+		
 
-		PERF_TIC("traffic_step");
-		if (ENABLE_REALSIM && !g_shutdown.trafficSimulatorClosed) {
-			try {
-				Traffic_c.runOneStepSimulation();
+		Traffic_c.runOneStepSimulation();
+
+		// Ego is defined in the SUMO route file before the simulation starts.
+		// Detect it after SUMO advances, apply its runtime speed mode once, and
+		// continue the normal client synchronization path even before ego exists.
+		if (!egoSettingsApplied && Traffic_c.checkIfEgoExist(&simTime)) {
+			const int egoSettingsResult = Traffic_c.setEgoSpeedMode();
+			if (egoSettingsResult < 0) {
+				printf("ERROR: failed to configure ego speed mode\n");
+				Sock_c.socketShutdown();
+				exit(-1);
 			}
-			catch (const std::exception& e) {
-				printf("ERROR: Traffic simulator step failed: %s\n", e.what());
-				printf("\tTraffic simulator may have been closed\n");
-				printf("\tInitiating graceful shutdown...\n");
-				g_shutdown.trafficSimulatorClosed = true;
-				g_shutdown.shutdownRequested = true;
-				PERF_TOC("traffic_step");
-				PERF_TOC("main_loop");
-				break;
-			}
-			catch (...) {
-				printf("ERROR: Traffic simulator step failed (unknown error)\n");
-				printf("\tTraffic simulator may have been closed\n");
-				printf("\tInitiating graceful shutdown...\n");
-				g_shutdown.trafficSimulatorClosed = true;
-				g_shutdown.shutdownRequested = true;
-				PERF_TOC("traffic_step");
-				PERF_TOC("main_loop");
-				break;
+			if (egoSettingsResult > 0) {
+				egoSettingsApplied = true;
 			}
 		}
-		PERF_TOC("traffic_step");
-#ifdef ENABLE_PERF_TIMING
-		// Log number of vehicles received from traffic simulator
-		PERF_LOG("t=%.2f vehicles_in_network=%d\n", simTime, (int)MsgServer_c.VehDataRecv_um.size());
-#endif
+
 
 		if (ENABLE_VEH_SIMULATOR && isVeryFirstStep) {
 			if (Sock_c.initConnection(TrafficLayerErrorFile) > 0) {
@@ -973,26 +600,8 @@ int main(int argc, char* argv[]) {
 			printf("===========SimTime %f==============\n", simTime);
 		}
 
-		// run sumo unitial initial time finished
-		if ((Config_c.SimulationSetup.SimulationMode == 4 || Config_c.SimulationSetup.SimulationMode == 5) && !isInitialTimeFinished) {
-			Traffic_c.runSimulation(Config_c.SimulationSetup.SimulationModeParameter);
-			isInitialTimeFinished = true;
-		}
 
-		if ((Config_c.SimulationSetup.SimulationMode == 1 || Config_c.SimulationSetup.SimulationMode == 2) && !isEgoExist) {
-			if (Traffic_c.checkIfEgoExist(&simTime)) {
-				// continue the code to sync VISSIM/SUMO with clients
-				isEgoExist = true;
-			}else{
-				// otherwise just continue running the simulation
-				continue;
-			}
-		}
-
-		// if veryFirstStep and vehicle simulator, add the ego vehicle
-		if (isVeryFirstStep && ENABLE_VEH_SIMULATOR) {
-			Traffic_c.addEgoVehicle(simTime);
-		}
+		// SUMO route files own ego insertion. TrafficLayer does not add ego here.
 
 		///****************************************************
 		// VISSIM/SUMO =====>>>>> Traffic Layer
@@ -1001,27 +610,26 @@ int main(int argc, char* argv[]) {
 		try {
 			MsgServer_c.clearRecvStorage();
 
-			if (ENABLE_REALSIM && !g_shutdown.trafficSimulatorClosed) {
+			if (ENABLE_REALSIM) {
 				if (Traffic_c.recvFromTrafficSimulator(&simTime, MsgServer_c) < 0) {
 					if (WSAGetLastError() != WSAEINTR) {
 
 						printf("WARNING: receive from traffic simulator fails\n");
 
 						printf("\tVISSIM or SUMO may already be closed\n");
-						printf("\tInitiating graceful shutdown...\n");
+						printf("\texit......\n");
 					}
-					g_shutdown.trafficSimulatorClosed = true; // Mark that simulator is already closed
-					g_shutdown.shutdownRequested = true;
-					break;
+					Sock_c.socketShutdown();
+					exit(-1);
 				};
 
 				// end simulation if simulation time is greater than simulation end time setup
 				if (simTime > Config_c.SimulationSetup.SimulationEndTime) {
-					printf("Simulation end time reached.\n");
-					g_shutdown.shutdownRequested = true;
-					break;
+					exit(1);
 				}
 			}
+
+			Traffic_c.fillTrafficLightStates(MsgServer_c);
 
 			if (ENABLE_VERBOSE) {
 				for (auto& it : MsgServer_c.VehDataRecv_um) {
@@ -1032,14 +640,14 @@ int main(int argc, char* argv[]) {
 			}
 		}
 		catch (const std::exception& e) {
-			printf("ERROR: Exception in traffic simulator receive: %s\n", e.what());
-			g_shutdown.shutdownRequested = true;
-			break;
+			Sock_c.socketShutdown();
+			std::cout << e.what();
+			exit(-1);
 		}
 		catch (...) {
+			Sock_c.socketShutdown();
 			printf("UNKNOWN ERROR: receive from traffic simulator fails\n");
-			g_shutdown.shutdownRequested = true;
-			break;
+			exit(-1);
 		}
 
 		///****************************************************
@@ -1064,7 +672,6 @@ int main(int argc, char* argv[]) {
 		}
 
 		if (ENABLE_CLIENT) {
-			PERF_TIC("prepare_send");
 			try {
 				MsgClient_c.clearSendStorage();
 
@@ -1092,6 +699,10 @@ int main(int argc, char* argv[]) {
 							}
 						}
 						else {
+							// TrafficHelper applies the configured vehicle subscription
+							// while receiving data from SUMO.  Distribute that resulting
+							// dataset to each configured client; do not infer a client
+							// role from a hardcoded port number here.
 							MsgClient_c.VehDataSend_um[actualClientSock[iC]].push_back(it.second);
 						}
 					}
@@ -1139,35 +750,19 @@ int main(int argc, char* argv[]) {
 					float simTimeSend = simTime;
 					uint8_t simStateSend = 1;
 
-					PERF_TOC("prepare_send");
-					PERF_TIC("send_data");
-#ifdef ENABLE_PERF_TIMING
-					// Check send buffer status before send
-					int sndBufSize = 0;
-					int optLen = sizeof(sndBufSize);
-					getsockopt(actualClientSock[iC], SOL_SOCKET, SO_SNDBUF, (char*)&sndBufSize, &optLen);
-
-					// Calculate message size
-					int msgSize = MsgClient_c.VehDataSend_um[actualClientSock[iC]].size();
-					PERF_LOG("t=%.2f client=%d/%d sndBufSize=%d nVeh=%d nTls=%d nDet=%d\n",
-						simTime, iC, (int)actualClientSock.size(), sndBufSize, msgSize,
-						(int)MsgClient_c.TlsDataSend_um[actualClientSock[iC]].size(),
-						(int)MsgClient_c.DetDataSend_um[actualClientSock[iC]].size());
-#endif
-
 					if (ENABLE_EXT_DYN) {
 						if (isVeryFirstStep) {
 							if (Sock_c.sendData(actualClientSock[iC], iC, simTimeSend, simStateSend, MsgClient_c) < 0) {
 								printf("ERROR: send to client fails\n");
-								g_shutdown.shutdownRequested = true;
-								break;
+								Sock_c.socketShutdown();
+								exit(-1);
 							};
 						}
 						else {
 							if (Sock_c.sendData(actualClientSock[iC], iC, simTimeSend, simStateSend, MsgClient_c) < 0) {
 								printf("ERROR: send to client fails\n");
-								g_shutdown.shutdownRequested = true;
-								break;
+								Sock_c.socketShutdown();
+								exit(-1);
 							};
 						}
 					}
@@ -1178,20 +773,18 @@ int main(int argc, char* argv[]) {
 						//else {
 							if (Sock_c.sendData(actualClientSock[iC], iC, simTimeSend, simStateSend, MsgClient_c) < 0) {
 								printf("ERROR: send to client fails\n");
-								g_shutdown.shutdownRequested = true;
-								break;
+								Sock_c.socketShutdown();
+								exit(-1);
 							};
 						//}
 					}
 					else {
 						if (Sock_c.sendData(actualClientSock[iC], iC, simTimeSend, simStateSend, MsgClient_c) < 0) {
 							printf("ERROR: send to client fails\n");
-							g_shutdown.shutdownRequested = true;
-							break;
+							Sock_c.socketShutdown();
+							exit(-1);
 						};
 					}
-
-					PERF_TOC("send_data");
 
 					if (ENABLE_VERBOSE) {
 						printf("send complete\n");
@@ -1204,20 +797,15 @@ int main(int argc, char* argv[]) {
 				}
 			}
 			catch (const std::exception& e) {
-				printf("ERROR: Exception in send to client: %s\n", e.what());
-				g_shutdown.shutdownRequested = true;
-				break;
+				Sock_c.socketShutdown();
+				std::cout << e.what();
+				exit(-1);
 			}
 			catch (...) {
+				Sock_c.socketShutdown();
 				printf("UNKNOWN ERROR: send to client fails\n");
-				g_shutdown.shutdownRequested = true;
-				break;
+				exit(-1);
 			}
-		}
-
-		// Check if shutdown was requested during client send
-		if (g_shutdown.shutdownRequested) {
-			break;
 		}
 
 		///****************************************************
@@ -1245,10 +833,16 @@ int main(int argc, char* argv[]) {
 					// save received message into Msg_c recv storages
 					if (Sock_c.recvData(actualClientSock[iC], &simStateRecv, &simTimeRecv, MsgClient_c) < 0) {
 						if (WSAGetLastError() != WSAEINTR && WSAGetLastError() != WSAEFAULT) {
-							printf("ERROR: receive from client fails\n");
+							//printf("ERROR: receive from client fails\n");
+							int err = WSAGetLastError();
+							printf("ERROR: receive from client fails, WSA=%d\n", err);
+
 						}
-						g_shutdown.shutdownRequested = true;
-						break;
+						printf("Paused. Press any key...\n");
+						fflush(stdout);
+						_getch();
+						Sock_c.socketShutdown();
+						exit(-1);
 					};
 
 					if (ENABLE_VERBOSE) {
@@ -1305,23 +899,18 @@ int main(int argc, char* argv[]) {
 				}
 			}
 			catch (const std::exception& e) {
-				printf("ERROR: Exception in receive from client: %s\n", e.what());
-				g_shutdown.shutdownRequested = true;
-				break;
+				Sock_c.socketShutdown();
+				std::cout << e.what();
+				exit(-1);
 			}
 			catch (...) {
+				Sock_c.socketShutdown();
 				printf("UNKNOWN ERROR: receive from client fails\n");
-				g_shutdown.shutdownRequested = true;
-				break;
+				exit(-1);
 			}
 		}
 		else {
 			//Sleep(100);
-		}
-
-		// Check if shutdown was requested during client recv
-		if (g_shutdown.shutdownRequested) {
-			break;
 		}
 
 		if (ENABLE_TIMING) {
@@ -1342,12 +931,11 @@ int main(int argc, char* argv[]) {
 				Traffic_c.parseSendMsg(MsgServer_c, MsgServer_c);
 			}
 
-			if (ENABLE_REALSIM && !g_shutdown.trafficSimulatorClosed) {
+			if (ENABLE_REALSIM) {
 				if (Traffic_c.sendToTrafficSimulator(simTime, MsgServer_c) < 0) {
 					printf("ERROR: send to traffic simulator fails\n");
-					g_shutdown.trafficSimulatorClosed = true;
-					g_shutdown.shutdownRequested = true;
-					break;
+					Sock_c.socketShutdown();
+					exit(-1);
 				};
 			}
 
@@ -1364,14 +952,14 @@ int main(int argc, char* argv[]) {
 			}
 		}
 		catch (const std::exception& e) {
-			printf("ERROR: Exception in send to traffic simulator: %s\n", e.what());
-			g_shutdown.shutdownRequested = true;
-			break;
+			Sock_c.socketShutdown();
+			std::cout << e.what();
+			exit(-1);
 		}
 		catch (...) {
+			Sock_c.socketShutdown();
 			printf("UNKNOWN ERROR: send to traffic simulator fails\n");
-			g_shutdown.shutdownRequested = true;
-			break;
+			exit(-1);
 		}
 
 		///****************************************************
@@ -1383,14 +971,8 @@ int main(int argc, char* argv[]) {
 
 		ii = ii + 1;
 
-		PERF_TOC("main_loop");
-
 	}
 
-	PERF_SHUTDOWN();
+	Traffic_c.close();
 
-	// Perform graceful cleanup after main loop exits
-	performCleanup(false);
-
-	return 0;
 }

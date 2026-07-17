@@ -253,7 +253,7 @@ void SocketHelper::socketShutdown() {
 #else
 		shutdown(selfServerSock[iS], SHUT_RDWR);
 		shutdown(clientSock[iS], SHUT_RDWR);
-	#ifdef RS_DSPACE
+	#ifdef DSRTLX
 		close(selfServerSock[iS]);
 		close(clientSock[iS]);
 	#endif
@@ -265,7 +265,7 @@ void SocketHelper::socketShutdown() {
 		closesocket(serverSock[iS]);
 #else
 		shutdown(serverSock[iS], SHUT_RDWR);
-	#ifdef RS_DSPACE
+	#ifdef DSRTLX
 		close(serverSock[iS]);
 	#endif
 #endif	
@@ -278,6 +278,36 @@ void SocketHelper::socketShutdown() {
 #endif
 
 }
+
+
+static int sendAll(int sock, const char* buf, int len) {
+	int totalSent = 0;
+	while (totalSent < len) {
+		int n = send(sock, buf + totalSent, len - totalSent, 0);
+		if (n == SOCKET_ERROR) {
+#ifdef _WIN32
+			int err = WSAGetLastError();
+			if (err == WSAEWOULDBLOCK) {
+				Sleep(1);
+				continue;
+			}
+			fprintf(stderr, "sendAll failed, WSA=%d\n", err);
+#else
+			perror("sendAll failed");
+#endif
+			return -1;
+		}
+		if (n == 0) {
+#ifdef _WIN32
+			fprintf(stderr, "sendAll failed: peer closed (send returned 0)\n");
+#endif
+			return -1;
+		}
+		totalSent += n;
+	}
+	return 0;
+}
+
 
 
 void SocketHelper::enableWaitClientTrigger() {
@@ -401,7 +431,7 @@ int SocketHelper::initConnection(std::string errorLogName) {
 				printSocketErrorMessage(WSAGetLastError());
 #else
 				printf("Unable to connect to server! error\n");
-			#ifdef RS_DSPACE
+			#ifdef DSRTLX
 				close(serverSock[iS]);
 			#endif
 #endif
@@ -439,7 +469,7 @@ int SocketHelper::initConnection(std::string errorLogName) {
 				WSACleanup();
 #else
 				fprintf(stderr, "%s: \n", "socket() failed");
-			#ifdef RS_DSPACE
+			#ifdef DSRTLX
 				close(selfServerSock[iS]);
 			#endif
 #endif
@@ -470,7 +500,7 @@ int SocketHelper::initConnection(std::string errorLogName) {
 					f << "bind() failed! error: " << endl;
 					f.close();
 			}
-			#ifdef RS_DSPACE
+			#ifdef DSRTLX
 				close(selfServerSock[iS]);
 			#endif
 #endif
@@ -495,7 +525,7 @@ int SocketHelper::initConnection(std::string errorLogName) {
 					f.close();
 				}
 				fprintf(stderr, "%s:\n", "listen() failed");
-			#ifdef RS_DSPACE
+			#ifdef DSRTLX
 				close(selfServerSock[iS]);
 			#endif
 #endif
@@ -581,7 +611,7 @@ int SocketHelper::initConnection(std::string errorLogName) {
 							f.close();
 					}
 						fprintf(stderr, "%s: \n", "accept() failed");
-					#ifdef RS_DSPACE
+					#ifdef DSRTLX
 						close(clientSock[iS]);
 					#endif
 #endif
@@ -684,7 +714,7 @@ int SocketHelper::initConnection(std::string errorLogName) {
 							}
 							fprintf(stderr, "%s: \n", "accept() failed");
 							//exit(1);
-						#ifdef RS_DSPACE
+						#ifdef DSRTLX
 							close(clientSock[iS]);
 						#endif
 #endif
@@ -747,7 +777,7 @@ int SocketHelper::initConnection(std::string errorLogName) {
 					}
 					printf("recv() failed with error code ");
 					//exit(EXIT_FAILURE);
-					#ifdef RS_DSPACE
+					#ifdef DSRTLX
 						close(clientSock[iS]);
 					#endif
 #endif
@@ -779,7 +809,7 @@ int SocketHelper::initConnection(std::string errorLogName) {
 			char sendClientBuffer[SENDCLIENTBUFSIZE];
 			memcpy(sendClientBuffer, (char*)&StartServiceMsg, sizeof(StartServiceMsg));
 			int sendMsgSize = sizeof(StartServiceMsg);
-			if (send(serverSock[iS], sendClientBuffer, sendMsgSize, 0) < 0)
+			if (sendAll(serverSock[iS], sendClientBuffer, sendMsgSize) < 0)  //if (send(serverSock[iS], sendClientBuffer, sendMsgSize, 0) < 0)
 			{
 #ifdef WIN32
 				if (!errorLogName.empty()) {
@@ -797,7 +827,7 @@ int SocketHelper::initConnection(std::string errorLogName) {
 					f.close();
 				}
 				printf("send failed with error:\n");
-				#ifdef RS_DSPACE
+				#ifdef DSRTLX
 					close(serverSock[iS]);
 				#endif
 #endif
@@ -814,6 +844,25 @@ int SocketHelper::initConnection(std::string errorLogName) {
 	return 0;
 }
 
+static int recvAll(int sock, char* buf, int len) {
+	int total = 0;
+	while (total < len) {
+		int n = recv(sock, buf + total, len - total, 0);
+		if (n == 0) return -1;            
+		if (n < 0) {
+#ifdef WIN32
+			int err = WSAGetLastError();
+			if (err == WSAEINTR) continue;     
+#endif
+			return -1;
+		}
+		total += n;
+	}
+	return total;
+}
+
+
+
 int SocketHelper::recvData(int sock, int* simState, float* simTime, MsgHelper& Msg_c) {
 	// this function will receive all possible data
 
@@ -823,6 +872,15 @@ int SocketHelper::recvData(int sock, int* simState, float* simTime, MsgHelper& M
 
 	int recvSize;
 
+	if (recvAll(sock, recvBuffer, Msg_c.msgHeaderSize) < 0) {
+#ifdef WIN32
+		printf("recvAll(msgHeader) failed, WSA=%d\n", WSAGetLastError());
+#endif
+		return -1;
+	}
+
+
+/*
 	if ((recvSize = recv(sock, recvBuffer, Msg_c.msgHeaderSize, 0)) == SOCKET_ERROR) {
 #ifdef WIN32
 		if (WSAGetLastError() == WSAEINTR) {
@@ -838,6 +896,8 @@ int SocketHelper::recvData(int sock, int* simState, float* simTime, MsgHelper& M
 #endif
 		return -1;
 	}
+*/
+
 	//+++++++++
 	// Parser received message
 	//+++++++++
@@ -861,6 +921,15 @@ int SocketHelper::recvData(int sock, int* simState, float* simTime, MsgHelper& M
 		uint8_t iMsgTypeRecv = 0;
 
 		char recvVehDataHeaderBuf[256];
+
+		if (recvAll(sock, recvVehDataHeaderBuf, Msg_c.msgEachHeaderSize) < 0) {
+#ifdef WIN32
+			printf("recvAll(eachHeader) failed, WSA=%d\n", WSAGetLastError());
+#endif
+			return -1;
+		}
+
+/*
 		if ((recvSize = recv(sock, recvVehDataHeaderBuf, Msg_c.msgEachHeaderSize, 0)) == SOCKET_ERROR) {
 #ifdef WIN32
 			if (WSAGetLastError() == WSAEFAULT) {
@@ -873,8 +942,19 @@ int SocketHelper::recvData(int sock, int* simState, float* simTime, MsgHelper& M
 #endif
 			return -1;
 		}
-		Msg_c.depackMsgType(recvVehDataHeaderBuf, &iMsgSizeRecv, &iMsgTypeRecv);
+*/
 
+		Msg_c.depackMsgType(recvVehDataHeaderBuf, &iMsgSizeRecv, &iMsgTypeRecv);
+		if (iMsgTypeRecv < 1 || iMsgTypeRecv > 3 || iMsgSizeRecv < Msg_c.msgEachHeaderSize || iMsgSizeRecv > 65535) {
+			printf("DESYNC? bad eachHeader: type=%u size=%u raw=%02X %02X %02X\n",
+				(unsigned)iMsgTypeRecv, (unsigned)iMsgSizeRecv,
+				(unsigned char)recvVehDataHeaderBuf[0],
+				(unsigned char)recvVehDataHeaderBuf[1],
+				(unsigned char)recvVehDataHeaderBuf[2]);
+			return -1;
+		}
+
+/*
 		char recvEachDataBuf[1024];
 		// this recvSize is purely the message body, without the Msg_c.msgEachHeaderSize
 		if ((recvSize = recv(sock, recvEachDataBuf, iMsgSizeRecv - Msg_c.msgEachHeaderSize, 0)) == SOCKET_ERROR) {
@@ -889,21 +969,40 @@ int SocketHelper::recvData(int sock, int* simState, float* simTime, MsgHelper& M
 #endif
 			return -1;
 		}
+*/
+
+
+		int bodySize = iMsgSizeRecv - Msg_c.msgEachHeaderSize;
+		if (bodySize <= 0) {
+			printf("ERROR: invalid bodySize=%d\n", bodySize);
+			return -1;
+		}
+		std::vector<char> recvEachDataBuf(bodySize);
+
+
+		if (recvAll(sock, recvEachDataBuf.data(), bodySize) < 0) {
+#ifdef WIN32
+			printf("recvAll(body) failed, WSA=%d\n", WSAGetLastError());
+#endif
+			return -1;
+		}
+
+		recvSize = bodySize;  
 
 
 		string id;
 		switch (iMsgTypeRecv) {
 		case 1:
-			Msg_c.depackVehData(recvEachDataBuf, iVehData);
+			Msg_c.depackVehData(recvEachDataBuf.data(), iVehData);
 			id = iVehData.id;
 			Msg_c.VehDataRecv_um[id] = iVehData;
 			break;
 		case 2:
-			Msg_c.depackTrafficLightData(recvEachDataBuf, &iTlsData);
+			Msg_c.depackTrafficLightData(recvEachDataBuf.data(), &iTlsData);
 			Msg_c.TlsDataRecv_um[iTlsData.name] = iTlsData;
 			break;
 		case 3:
-			Msg_c.depackDetectorData(recvEachDataBuf, recvSize, &iDetData);
+			Msg_c.depackDetectorData(recvEachDataBuf.data(), recvSize, &iDetData);
 			Msg_c.DetDataRecv_um[get<1>(iDetData)] = iDetData;
 			break;
 		}
@@ -915,7 +1014,93 @@ int SocketHelper::recvData(int sock, int* simState, float* simTime, MsgHelper& M
 }
 
 
+int SocketHelper::sendData(int sock, int iClient, float simTimeSend, uint8_t simStateSend, MsgHelper Msg_c)
+{
 
+	std::vector<char> tempVeh;
+	std::vector<char> tempTls;
+	std::vector<char> tempDet;
+
+	tempVeh.reserve(64 * 1024);   
+	tempTls.reserve(8 * 1024);
+	tempDet.reserve(8 * 1024);
+
+	int tempVehDataByte = 0;
+	int tempTlsDataByte = 0;
+	int tempDetDataByte = 0;
+
+	// Vehicle
+	if (Msg_c.VehDataSend_um.size() > 0) {
+		for (size_t iV = 0; iV < Msg_c.VehDataSend_um[sock].size(); iV++) {
+
+			const int kPerVehReserve = 1024;
+
+			if ((int)tempVeh.size() < tempVehDataByte + kPerVehReserve) {
+				tempVeh.resize(tempVehDataByte + kPerVehReserve);
+			}
+			Msg_c.packVehData(Msg_c.VehDataSend_um[sock][iV], tempVeh.data(), &tempVehDataByte);
+		}
+	}
+
+	// Tls
+	if (Msg_c.TlsDataSend_um.size() > 0) {
+		for (size_t iT = 0; iT < Msg_c.TlsDataSend_um[sock].size(); iT++) {
+			const int kPerTlsReserve = 256;
+			if ((int)tempTls.size() < tempTlsDataByte + kPerTlsReserve) {
+				tempTls.resize(tempTlsDataByte + kPerTlsReserve);
+			}
+			Msg_c.packTrafficLightData(Msg_c.TlsDataSend_um[sock][iT], tempTls.data(), &tempTlsDataByte);
+		}
+	}
+
+	// Detector
+	if (Msg_c.DetDataSend_um.size() > 0) {
+		for (size_t iD = 0; iD < Msg_c.DetDataSend_um[sock].size(); iD++) {
+			const int kPerDetReserve = 256;
+			if ((int)tempDet.size() < tempDetDataByte + kPerDetReserve) {
+				tempDet.resize(tempDetDataByte + kPerDetReserve);
+			}
+			Msg_c.packDetectorData(Msg_c.DetDataSend_um[sock][iD], tempDet.data(), &tempDetDataByte);
+		}
+	}
+
+	// Total
+	const int totalSize = MSG_HEADER_SIZE + tempVehDataByte + tempTlsDataByte + tempDetDataByte;
+
+	std::vector<char> sendBuffer(totalSize);
+	int iByte = 0;
+	Msg_c.packHeader(simStateSend, simTimeSend, totalSize, sendBuffer.data(), &iByte);
+
+	int offset = MSG_HEADER_SIZE;
+	if (tempVehDataByte > 0) {
+		memcpy(sendBuffer.data() + offset, tempVeh.data(), tempVehDataByte);
+		offset += tempVehDataByte;
+	}
+	if (tempTlsDataByte > 0) {
+		memcpy(sendBuffer.data() + offset, tempTls.data(), tempTlsDataByte);
+		offset += tempTlsDataByte;
+	}
+	if (tempDetDataByte > 0) {
+		memcpy(sendBuffer.data() + offset, tempDet.data(), tempDetDataByte);
+		offset += tempDetDataByte;
+	}
+
+	// sendAll
+	if (sendAll(sock, sendBuffer.data(), totalSize) < 0) {
+#ifdef WIN32
+		fprintf(stderr, "%s: %d\n", "send() failed", WSAGetLastError());
+#else
+		fprintf(stderr, "%s:\n", "send() failed");
+#endif
+		return -1;
+	}
+
+	return 0;
+}
+
+
+
+/*
 int SocketHelper::sendData(int sock, int iClient, float simTimeSend, uint8_t simStateSend, MsgHelper Msg_c) {
 	// for each socket, send only the message relevant to that socket
 
@@ -923,7 +1108,7 @@ int SocketHelper::sendData(int sock, int iClient, float simTimeSend, uint8_t sim
 
 	// initialize send data buffer
 	//char tempVehDataBuffer[8096];
-	char* tempVehDataBuffer = new char[65536];
+	char* tempVehDataBuffer = new char[524288];
 	int tempVehDataByte = 0;
 
 	char* tempTlsDataBuffer = new char[8096];
@@ -933,7 +1118,7 @@ int SocketHelper::sendData(int sock, int iClient, float simTimeSend, uint8_t sim
 	int tempDetDataByte = 0;
 
 	int sendMsgSize = 0;
-	char* sendBuffer = new char[81728];
+	char* sendBuffer = new char[540480];
 
 	// Pack vehicle and detector data
 	if (Msg_c.VehDataSend_um.size() > 0) {
@@ -971,7 +1156,7 @@ int SocketHelper::sendData(int sock, int iClient, float simTimeSend, uint8_t sim
 	sendMsgSize += tempDetDataByte;
 
 	// send all vehicle and detector data
-	if (send(sock, sendBuffer, sendMsgSize, 0) != sendMsgSize) {
+	if (sendAll(sock, sendBuffer, sendMsgSize) < 0 ) {   //if (send(sock, sendBuffer, sendMsgSize, 0) != sendMsgSize) 
 #ifdef WIN32
 		fprintf(stderr, "%s: %d\n", "send() failed", WSAGetLastError());
 #else
@@ -993,3 +1178,4 @@ int SocketHelper::sendData(int sock, int iClient, float simTimeSend, uint8_t sim
 	return 0;
 
 }
+*/

@@ -7,15 +7,11 @@
 
 #include <math.h>
 
-//#define ENABLE_LIBSUMO
+//#include "TraCIAPI.h"
+//#define NOMINMAX
 
-#ifdef ENABLE_LIBSUMO
-#include <libsumo/libsumo.h>
-#define SUMO_TRACI_NAMESPACE libsumo
-#else
-#include <libsumo/libtraci.h>
-#define SUMO_TRACI_NAMESPACE libtraci
-#endif
+//#include <libsumo/libtraci.h>
+#include "traci/TraCIAPI.h"
 #include "SocketHelper.h"
 
 
@@ -43,9 +39,11 @@ public:
 	int runSimulation(double endTime);
 	int recvFromTrafficSimulator(double* simTime, MsgHelper& Msg_c);
 
-	int addEgoVehicle(double simTime);
 	int addEgoVehicleFromXY(double simTime, std::string vehicleId, std::string vehicleType, double positionX, double positionY);
 	int checkIfEgoExist(double* simTime);
+	int setEgoSpeedMode();
+	void fillTrafficLightStates(MsgHelper& msg);
+
 
 	int getSimulationTime(double* simTime);
 
@@ -75,7 +73,13 @@ public:
 	//======================
 	// This is for SUMO
 	//======================
-	// Using libtraci - no custom client class needed
+	class Client : public TraCIAPI {
+	public:
+		Client() {};
+		~Client() {};
+	};
+
+	Client traci;
 
 	
 	/********************************************
@@ -138,7 +142,6 @@ public:
 	bool ENABLE_VEH_SIMULATOR = false;
 
 	bool ENABLE_CARLA = false;
-	bool ENABLE_CARLA_EXTERNAL_CONTROL = false;
 
 	double tSimuEnd = 90000;
 
@@ -211,8 +214,4 @@ private:
 
 	const int N_MAX_VEH = 100;
 };
-
-
-
-
 
