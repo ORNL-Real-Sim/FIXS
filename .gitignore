@@ -209,6 +209,3 @@ TODO.md
 
 # Ignore large SUMO output files
 fcd.xml
-
-# Ignore large assets managed via download script
-tests/Applications/SUMO_CARLA_EcoDriving/MLK_Carla_Scenario/CARLAFiles/MLK_noped1002_final_debug.fbx

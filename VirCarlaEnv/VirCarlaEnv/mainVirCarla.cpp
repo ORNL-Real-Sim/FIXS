@@ -68,10 +68,6 @@ double periodicCosineSpeed(double t, double T_period, double v_max) {
     return 0.5 * v_max * (1 - std::cos(2 * M_PI * t_in_period / T_period));
 }
 
-float lowPassFilter(float currentValue, float lastValue, float alpha) {
-    return alpha * currentValue + (1 - alpha) * lastValue;
-}
-
 int main(int argc, const char* argv[]) {
     std::string CarlaClientLogFile = "CarlaClient.log";
 
@@ -295,20 +291,7 @@ int main(int argc, const char* argv[]) {
                     std::cout << "Vehicle Class: " << tmpVehData.vehicleClass << std::endl;
                 }
                 else {
-                    //// Update the existing actor's transform and extent
-                    //carla::geom::Location prvLocation = mapSumoActor[tmpVehData.id].sumoTransform.location;
-                    //carla::geom::Rotation prvRotation = mapSumoActor[tmpVehData.id].sumoTransform.rotation;
-                    //carla::geom::Transform updatedTransform(
-                    //    carla::geom::Location(
-                    //        lowPassFilter(tmpTransform.location.x, prvLocation.x, 0.5f),
-                    //        lowPassFilter(tmpTransform.location.y, prvLocation.y, 0.5f),
-                    //        lowPassFilter(tmpTransform.location.z, prvLocation.z, 0.5f)
-                    //    ), carla::geom::Rotation(
-                    //        lowPassFilter(tmpTransform.rotation.pitch, prvRotation.pitch, 0.5f),
-                    //        lowPassFilter(tmpTransform.rotation.yaw, prvRotation.yaw, 0.5f),
-                    //        lowPassFilter(tmpTransform.rotation.roll, prvRotation.roll, 0.5f)
-                    //    )
-                    //);
+                    // Update the existing actor's transform and extent
                     mapSumoActor[tmpVehData.id].sumoTransform = tmpTransform;
                     mapSumoActor[tmpVehData.id].extent = tmpExtent;
 				}
