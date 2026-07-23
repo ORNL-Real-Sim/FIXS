@@ -12,8 +12,19 @@ dependencies:
   - pygame
   - protobuf
   - pyyaml
+  - lxml
+  - shapely   # used by utils/extract_sumo_tls_as_table.py
+  - pytest    # tests/Sumo/Carla logic tests
   - vs2015_runtime
   - vc14_runtime
   - pip
   - pip:
-      - ./Carla/carla-0.9.15-cp310-cp310-win_amd64.whl
+      # Official CARLA 0.9.15 client from PyPI. pip auto-selects the correct
+      # wheel for the platform + python (cp310 exists for both win_amd64 and
+      # manylinux_2_27_x86_64), so this works on Windows now and Linux later
+      # with no per-OS changes and no bundled wheel.
+      - carla==0.9.15
+      # SUMO Python bindings (also shipped with a SUMO system install, but
+      # pinned here so the `realsim` env can run SUMO<->CARLA co-sim standalone)
+      - traci
+      - sumolib

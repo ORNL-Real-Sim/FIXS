@@ -1,0 +1,32 @@
+# NOTE: YAML files do not allow tabs. use 2 or 4 spaces for indentation
+#
+# Vissim/SimpleEcho — minimal "is the FIXS↔VISSIM interface alive?" test.
+# Python client connects to TrafficLayer and echoes received vehicle data.
+# No Simulink, no XIL, no golden reference — just verifies the data path.
+
+SimulationSetup:
+    EnableRealSim: true
+    EnableVerboseLog: false
+
+    SelectedTrafficSimulator: 'VISSIM'
+
+    TrafficSimulatorIP: "127.0.0.1"
+    TrafficSimulatorPort: 1337
+
+    VehicleMessageField: [id, speed, speedDesired, positionX, positionY, heading, linkId, laneId]
+
+ApplicationSetup:
+    EnableApplicationLayer: true
+
+    # Treat the first Car that enters the loop (VISSIM no=1) as ego.
+    # radius=0 sends only that vehicle. Vehicles enter via the demand
+    # input on link 1 added by archive/setup_network.py.
+    VehicleSubscription:
+    -   type: ego
+        attribute: {id: ['1'], radius: [0]}
+        ip: ["127.0.0.1"]
+        port: [2444]
+
+XilSetup:
+    EnableXil: false
+    VehicleSubscription:

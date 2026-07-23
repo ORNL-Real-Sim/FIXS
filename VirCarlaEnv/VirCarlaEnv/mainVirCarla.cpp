@@ -285,8 +285,7 @@ int main(int argc, const char* argv[]) {
                 const VehFullData_t& tmpVehData = pair.second;
 				carla::geom::Location tmpLocation(tmpVehData.positionX, tmpVehData.positionY, tmpVehData.positionZ);
 				// The grade received from FIXS is in radians, convert to degrees
-                //carla::geom::Rotation tmpRotation(tmpVehData.grade * 180/M_PI, tmpVehData.heading, 0.0f);
-                carla::geom::Rotation tmpRotation(0.0f, std::round(tmpVehData.heading / 5.0f) * 5.0f, 0.0f);
+                carla::geom::Rotation tmpRotation(tmpVehData.grade * 180/M_PI, tmpVehData.heading, 0.0f);
                 //carla::geom::Vector3D tmpExtent(tmpVehData.length / 2, tmpVehData.width / 2, tmpVehData.height / 2);
                 carla::geom::Vector3D tmpExtent(4.8f, 2.0f, 1.8f); // Default extent, can be modified later
                 carla::geom::Transform tmpTransform(tmpLocation, tmpRotation);
@@ -338,7 +337,9 @@ int main(int argc, const char* argv[]) {
                             trafficLight.carlaTrafficLightActorPtr->SetState(carlaTrafficLightState);
                         }
                         else {
-                            if (enableVerboseLog) std::cerr << "Carla actor for traffic light " << tmpTrafficLightData.id << "Junction Id:" << junctionID << "Link Id: " << linkId << " not found." << std::endl;
+#ifdef RS_DEBUG
+                            std::cerr << "Carla actor for traffic light " << tmpTrafficLightData.id << "Junction Id:" << junctionID << "Link Id: " << linkId << " not found." << std::endl;
+#endif
                         }
                     }
                 }
