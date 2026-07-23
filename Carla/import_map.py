@@ -410,6 +410,92 @@ def stage_package(carla_root, name, package_url=None, package_dir=None, package_
     return import_dir
 
 
+def _looks_like_bundle(names):
+    """True if a package's entries are rooted under a top-level `carla/` - the
+    Digital-Twin-Library combined layout (`carla/` + `sumo/`) - rather than a
+    flat/legacy CARLA-only package."""
+    tops = {n.replace("\\", "/").split("/", 1)[0] for n in names if n.strip()}
+    return "carla" in tops
+
+
+def open_bundle(src):
+    """Split a map source into its CARLA package and its SUMO scenario.
+
+    A Digital-Twin-Library map ships as one bundle - a zip (or folder) with a
+    top-level `carla/` (the CARLA import package) and `sumo/` (the scenario).
+    Returns `(carla_src, sumo_dir)`:
+      - bundle  -> (`<unpacked>/carla`, `<unpacked>/sumo`); a zip is extracted
+                   once into a sibling `<stem>_unpacked/` cache (re-extracted only
+                   when the zip is newer), a folder is used in place.
+      - legacy CARLA-only zip/folder -> `(src, None)`, unchanged behavior.
+    `carla_src` is what to hand `ensure_map`/`stage_package`; `sumo_dir` (or None)
+    is where run_cosim finds the `.sumocfg`."""
+    if os.path.isdir(src):
+        carla = os.path.join(src, "carla")
+        sumo = os.path.join(src, "sumo")
+        if os.path.isdir(carla):
+            return carla, (sumo if os.path.isdir(sumo) else None)
+        return src, None
+    if os.path.isfile(src) and src.lower().endswith(".zip"):
+        with zipfile.ZipFile(src) as z:
+            if not _looks_like_bundle(z.namelist()):
+                return src, None
+            unpacked = os.path.join(
+                os.path.dirname(os.path.abspath(src)),
+                os.path.splitext(os.path.basename(src))[0] + "_unpacked")
+            if not os.path.isdir(unpacked) or os.path.getmtime(src) > os.path.getmtime(unpacked):
+                shutil.rmtree(unpacked, ignore_errors=True)
+                os.makedirs(unpacked, exist_ok=True)
+                z.extractall(unpacked)
+                print(f"[import] unpacked bundle -> {unpacked}")
+        carla = os.path.join(unpacked, "carla")
+        sumo = os.path.join(unpacked, "sumo")
+        return (carla if os.path.isdir(carla) else unpacked), \
+               (sumo if os.path.isdir(sumo) else None)
+    return src, None
+
+
+def bundle_sumocfg(sumo_dir):
+    """The single `.sumocfg` inside a bundle's `sumo/` dir, or None if there is no
+    `sumo/`. Exits if the dir holds more than one (ambiguous - caller should pass
+    an explicit --sumocfg)."""
+    if not sumo_dir or not os.path.isdir(sumo_dir):
+        return None
+    cfgs = sorted(f for f in os.listdir(sumo_dir) if f.lower().endswith(".sumocfg"))
+    if not cfgs:
+        return None
+    if len(cfgs) > 1:
+        sys.exit(f"[import] {sumo_dir} has {len(cfgs)} .sumocfg files {cfgs}; "
+                 f"pass --sumocfg to choose one.")
+    return os.path.join(sumo_dir, cfgs[0])
+
+
+def map_name_in(carla_src):
+    """The real map/package name a staged CARLA source describes - the stem of its
+    lone `<name>.json` descriptor, else its lone `<name>.xodr`. This is the name
+    CARLA actually cooks/loads, which need NOT equal a release/location tag (e.g.
+    the `roosevelt` bundle's carla/ describes `Roosevelt_07142026`). None if it
+    cannot be told unambiguously (0 or >1 candidates)."""
+    if not carla_src or not os.path.isdir(carla_src):
+        return None
+
+    def stems(ext):
+        found = []
+        for root, _dirs, files in os.walk(carla_src):
+            for f in files:
+                if f.lower().endswith(ext):
+                    found.append(f[:-len(ext)])
+        return found
+
+    jsons = [j for j in stems(".json") if j.lower() != "roadpainter_decals"]
+    if len(jsons) == 1:
+        return jsons[0]
+    xodrs = list(set(stems(".xodr")))
+    if len(xodrs) == 1:
+        return xodrs[0]
+    return None
+
+
 def run_import(carla_root, ue4_root, name):
     """Run CARLA's Import.py to cook the staged package. Returns its exit code."""
     import_py = os.path.join(carla_root, "Util", "BuildTools", "Import.py")
