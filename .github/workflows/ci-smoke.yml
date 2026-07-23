@@ -23,7 +23,13 @@ on:
 
 jobs:
   build-core:
-    runs-on: windows-latest
+    # Pin to windows-2022 on purpose: it ships Visual Studio 2022 (v17), which
+    # matches the generator dispatch derives from dependencies.yaml
+    # ("Visual Studio 17 2022"). As of 2026 `windows-latest` ships VS 2026 (v18),
+    # so CMake's v17 generator finds no VS instance and the build fails - and even
+    # if it were bumped, CI would silently build with an unsupported compiler.
+    # Keep CI on the same VS the release is validated against.
+    runs-on: windows-2022
     steps:
       - name: Checkout (full history for git describe, no submodules)
         uses: actions/checkout@v4
