@@ -16,6 +16,17 @@ set "YAML_HELPER=%SCRIPT_DIR%yaml_helper.ps1"
 REM Set build configuration for dispatch (component scripts will use this)
 set "RS_BUILD_CONFIG=Release"
 
+REM Automation mode: when RS_FIXS_AUTOMATION is set (e.g. by the release CI on a
+REM hosted runner), skip the steps that require a licensed/proprietary toolchain
+REM installed on a workstation - VISSIM DriverModel (3), CarMaker (5a), dSPACE
+REM (5b), MATLAB MEX (6). Those binaries are built separately on a licensed box
+REM and pulled in as a pinned prebuilt bundle (see issue #191). The public parts
+REM (yaml-cpp, TrafficLayer/CoordMerge, VirtualEnvironment, Python) still build.
+if defined RS_FIXS_AUTOMATION (
+    echo [automation] RS_FIXS_AUTOMATION set - skipping proprietary steps 3/5a/5b/6.
+    echo.
+)
+
 REM Set up shared log files
 set "RS_BUILD_LOG=%SCRIPT_DIR%build.log"
 set "RS_BUILD_SUMMARY=%SCRIPT_DIR%build_summary.log"
@@ -97,9 +108,13 @@ REM ====================================
 REM Step 3: Compile VISSIM Components
 REM ====================================
 echo [3/9] Compiling VISSIM components...
-call "%~dp0\3_vissim_components.bat" inline
-if %ERRORLEVEL% neq 0 (
-    echo WARNING: VISSIM components build failed or skipped
+if defined RS_FIXS_AUTOMATION (
+    echo   Skipped: proprietary step - built on a licensed workstation.
+) else (
+    call "%~dp0\3_vissim_components.bat" inline
+    if !ERRORLEVEL! neq 0 (
+        echo WARNING: VISSIM components build failed or skipped
+    )
 )
 echo.
 
@@ -117,9 +132,13 @@ REM ====================================
 REM Step 5a: Compile CarMaker Components
 REM ====================================
 echo [5a/9] Compiling CarMaker components...
-call powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0\5a_carmaker_components.ps1" -RunMode inline
-if %ERRORLEVEL% neq 0 (
-    echo WARNING: CarMaker components build failed or skipped
+if defined RS_FIXS_AUTOMATION (
+    echo   Skipped: proprietary step - built on a licensed workstation.
+) else (
+    call powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0\5a_carmaker_components.ps1" -RunMode inline
+    if !ERRORLEVEL! neq 0 (
+        echo WARNING: CarMaker components build failed or skipped
+    )
 )
 echo.
 
@@ -127,9 +146,13 @@ REM ====================================
 REM Step 5b: Compile dSPACE Libraries for CarMaker
 REM ====================================
 echo [5b/9] Compiling dSPACE libraries for CarMaker...
-call powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0\5b_carmaker_dspace.ps1" -RunMode inline
-if %ERRORLEVEL% neq 0 (
-    echo WARNING: dSPACE library build failed or skipped
+if defined RS_FIXS_AUTOMATION (
+    echo   Skipped: proprietary step - built on a licensed workstation.
+) else (
+    call powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0\5b_carmaker_dspace.ps1" -RunMode inline
+    if !ERRORLEVEL! neq 0 (
+        echo WARNING: dSPACE library build failed or skipped
+    )
 )
 echo.
 
@@ -137,9 +160,13 @@ REM ====================================
 REM Step 6: Build RealSimSocket MEX
 REM ====================================
 echo [6/9] Building RealSimSocket MEX...
-call powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0\6_mex_realsim_socket.ps1" -RunMode inline
-if %ERRORLEVEL% neq 0 (
-    echo WARNING: RealSimSocket MEX build failed or skipped
+if defined RS_FIXS_AUTOMATION (
+    echo   Skipped: proprietary step - built on a licensed workstation.
+) else (
+    call powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0\6_mex_realsim_socket.ps1" -RunMode inline
+    if !ERRORLEVEL! neq 0 (
+        echo WARNING: RealSimSocket MEX build failed or skipped
+    )
 )
 echo.
 
