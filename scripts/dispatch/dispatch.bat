@@ -17,13 +17,15 @@ REM Set build configuration for dispatch (component scripts will use this)
 set "RS_BUILD_CONFIG=Release"
 
 REM Automation mode: when RS_FIXS_AUTOMATION is set (e.g. by the release CI on a
-REM hosted runner), skip the steps that require a licensed/proprietary toolchain
-REM installed on a workstation - VISSIM DriverModel (3), CarMaker (5a), dSPACE
-REM (5b), MATLAB MEX (6). Those binaries are built separately on a licensed box
-REM and pulled in as a pinned prebuilt bundle (see issue #191). The public parts
-REM (yaml-cpp, TrafficLayer/CoordMerge, VirtualEnvironment, Python) still build.
+REM hosted runner), skip the steps that need a licensed/proprietary toolchain -
+REM VISSIM DriverModel (3), VirtualEnvironment (4, needs the CarMaker SDK on the
+REM current release line), CarMaker (5a), dSPACE (5b), MATLAB MEX (6). Those are
+REM built separately on a licensed box; VirtualEnvironment.lib graduates to a
+REM CI-built artifact once #174 lands on v0.9.0, the rest return via the pinned
+REM ProprietaryBinaries bundle (see #191). The hosted build still produces
+REM yaml-cpp, TrafficLayer/CoordMerge, and the Python/Carla parts.
 if defined RS_FIXS_AUTOMATION (
-    echo [automation] RS_FIXS_AUTOMATION set - skipping proprietary steps 3/5a/5b/6.
+    echo [automation] RS_FIXS_AUTOMATION set - skipping proprietary steps 3/4/5a/5b/6.
     echo.
 )
 
