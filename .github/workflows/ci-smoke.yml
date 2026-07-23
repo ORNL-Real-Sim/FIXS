@@ -1,0 +1,78 @@
+name: CI Smoke (public core PoC)
+
+# Cheapest proof-of-concept for #191: prove that a hosted GitHub-hosted
+# Windows runner can compile the PUBLIC core of FIXS with no proprietary
+# toolchains and no private submodule.
+#
+# Scope on purpose kept minimal:
+#   - dispatch step 1: build yaml-cpp from tracked source (CMake)
+#   - dispatch step 2: build TrafficLayer.exe / CoordMerge (MSBuild)
+# Deliberately NOT built here (need external/licensed deps):
+#   - VirCarlaEnv      -> needs libcarla (gitignored, provisioned separately)
+#   - VirtualEnvironment -> needs CarMaker SDK headers (licensed)
+#   - VISSIM / CarMaker / dSPACE / MEX (dispatch steps 3, 5a, 5b, 6)
+#
+# Trigger is manual (workflow_dispatch) plus a push that touches this file,
+# so it never runs on ordinary commits and never publishes a release.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [maintenance/191_release_ci]
+    paths: ['.github/workflows/ci-smoke.yml']
+
+jobs:
+  build-core:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout (full history for git describe, no submodules)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # tags + history so generate_version.ps1 works
+          submodules: false     # public build never needs ProprietaryFiles
+
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Show toolchain versions (VS/CMake are preinstalled on the image)
+        shell: pwsh
+        run: |
+          cmake --version
+          msbuild -version
+          # Demonstrates the #191 version fix: semver-only match, full describe
+          git describe --tags --match "v[0-9]*" --always
+
+      - name: Build external libs (yaml-cpp) - dispatch step 1
+        shell: cmd
+        run: |
+          set RS_BUILD_CONFIG=Release
+          set RS_FIXS_AUTOMATION=1
+          call scripts\dispatch\1_external_libraries.bat
+
+      - name: Build core (TrafficLayer, CoordMerge) - dispatch step 2
+        shell: cmd
+        run: |
+          set RS_BUILD_CONFIG=Release
+          set RS_FIXS_AUTOMATION=1
+          call scripts\dispatch\2_core_components.bat inline
+
+      - name: Assert TrafficLayer.exe was produced
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Recurse -Filter TrafficLayer.exe -ErrorAction SilentlyContinue |
+                 Select-Object -First 1
+          if (-not $exe) {
+            Write-Error "TrafficLayer.exe was not produced - see build logs artifact."
+            exit 1
+          }
+          Write-Host "OK - built $($exe.FullName)"
+
+      - name: Upload build logs (always, for debugging failures)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            scripts/dispatch/build.log
+            scripts/dispatch/build_summary.log
+          if-no-files-found: ignore
