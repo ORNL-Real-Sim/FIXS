@@ -220,6 +220,8 @@ void CarlaBackend::enableEgoTM(int tmPort, double targetSpeedMps) {
     tm.RegisterVehicles(one);
     egoActor_->SetAutopilot(true, (uint16_t)tmPort);
     tm.SetDesiredSpeed(egoActor_, (float)(targetSpeedMps * 3.6));   // TM speed is km/h
+    tmPort_ = tmPort;          // remembered so applyEgoControl (L2) can re-fetch the TM instance
+    egoUsesTM_ = true;         // native TM path -> applyEgoControl uses SetDesiredSpeed
     std::cout << "L0 ego: NATIVE Traffic Manager autopilot (TM port " << tmPort
               << ", target " << targetSpeedMps << " m/s)\n";
 }
@@ -248,13 +250,29 @@ void CarlaBackend::driveEgoFallback(double targetSpeed) {
     const double v = std::sqrt(vel.x * vel.x + vel.y * vel.y);
     const double yawRad = tf.rotation.yaw * M_PI / 180.0;
 
-    DriveCommand dc = egoDriver_.computeControl(tf.location.x, tf.location.y, yawRad, v, targetSpeed);
+    // L2: an external advisory (egoDesiredOverride_ >= 0) supersedes the static
+    // cruise target passed in; otherwise use the configured EgoTargetSpeed.
+    const double tgt = (egoDesiredOverride_ >= 0.0) ? egoDesiredOverride_ : targetSpeed;
+    DriveCommand dc = egoDriver_.computeControl(tf.location.x, tf.location.y, yawRad, v, tgt);
 
     carla::rpc::VehicleControl c;
     c.throttle = (float)dc.throttle;
     c.brake    = (float)dc.brake;
     c.steer    = (float)dc.steer;
     egoActor_->ApplyControl(c);
+}
+
+void CarlaBackend::applyEgoControl(const std::string& /*egoId*/, double desiredSpeed) {
+    // L2 actuation seam: route an EXTERNAL desired-speed advisory to whichever L0
+    // driver owns the ego. Native TM -> SetDesiredSpeed (km/h) on the ego's TM
+    // instance; EgoDriver fallback -> stash the target for the next driveEgoFallback
+    // tick. No ego -> nothing to advise.
+    if (!egoActor_) return;
+    egoDesiredOverride_ = desiredSpeed;
+    if (egoUsesTM_ && client_) {
+        auto tm = client_->GetInstanceTM((uint16_t)tmPort_);
+        tm.SetDesiredSpeed(egoActor_, (float)(desiredSpeed * 3.6));   // TM speed is km/h
+    }
 }
 
 void CarlaBackend::destroyEgo() {

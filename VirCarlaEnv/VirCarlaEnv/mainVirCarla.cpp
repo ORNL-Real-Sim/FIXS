@@ -32,6 +32,7 @@
 #include "CarlaBackend.h"
 #include "../../CommonLib/VirEnvCore.h"
 #include "../../CommonLib/DataLogger.h"
+#include "../../CommonLib/EgoSpeedAdvisor.h"
 #include "MsgHelper.h"
 #include "ConfigHelper.h"
 
@@ -195,6 +196,21 @@ int main(int argc, const char* argv[]) {
             }
         }
 
+        // ---- L2 (EgoMode >= 2): artificial external speed-advisory controller ----
+        // Feeds the ego's L0 driver a time-varying desired speed (the advisory a
+        // real external CAV controller would stream over FIXS). SDK-free module;
+        // swap-in point for a separate advisory client later. Empty profile -> the
+        // advisor returns EgoTargetSpeed, so EgoMode 2 degenerates to constant L0.
+        virenv::EgoSpeedAdvisor speedAdvisor;
+        if (egoMode >= 2) {
+            speedAdvisor.setProfile(cs.EgoSpeedProfile);
+            std::cout << "L2 advisory: artificial speed controller, "
+                      << speedAdvisor.knotCount() << " knots, period "
+                      << speedAdvisor.period() << " s (driver: "
+                      << (useFallbackDriver ? "EgoDriver" : "TM") << ")\n";
+        }
+        double lastAdvisory = cs.EgoTargetSpeed;   // most-recent commanded desired speed (for the wire/log)
+
         const int sock0 = 0;
         // #174 A/B: optional applied-pose log keyed by SUMO id (set RS_POSE_LOG=path)
         std::ofstream poseLog;
@@ -232,6 +248,17 @@ int main(int argc, const char* argv[]) {
                 break;
             }
             backend.flushBatch();          // ApplyBatch(transform commands)
+            // ---- L2: apply the external speed advisory at each 0.1s FIXS feed ----
+            // Set the driver target BEFORE it runs this tick. applyEgoControl routes
+            // it to native TM (SetDesiredSpeed) or the EgoDriver fallback (override);
+            // it persists across sub-steps until the next feed refreshes it.
+            if (egoMode >= 2) {
+                const bool onFeedNow = std::fabs(simTime * 10.0 - std::llround(simTime * 10.0)) < 1e-6;
+                if (onFeedNow) {
+                    lastAdvisory = speedAdvisor.desiredSpeed(simTime, cs.EgoTargetSpeed);
+                    backend.applyEgoControl(egoId, lastAdvisory);
+                }
+            }
             // fallback module drives per-tick; native TM drives inside world.Tick()
             if (egoMode >= 1 && useFallbackDriver) backend.driveEgoFallback(cs.EgoTargetSpeed);
             if (poseLog.is_open()) {       // A/B: log the applied Carla pose per SUMO id
@@ -254,7 +281,11 @@ int main(int argc, const char* argv[]) {
             if (onFeed && core.ENABLE_REALSIM) {
                         VehFullData_t d;
                         d.id = egoId; d.type = cs.EgoSumoType;
-                        d.speed = (float)es.speed; d.speedDesired = (float)es.speed;
+                        // L2: report the COMMANDED advisory as speedDesired (measured
+                        // speed stays in `speed`) so the DataLogger captures both and
+                        // the ego's tracking of the external target is verifiable.
+                        d.speed = (float)es.speed;
+                        d.speedDesired = (egoMode >= 2) ? (float)lastAdvisory : (float)es.speed;
                         d.positionX = (float)es.x; d.positionY = (float)es.y; d.positionZ = (float)es.z;
                         d.heading = (float)es.heading; d.grade = (float)es.grade;
                         core.Msg_c.VehDataSend_um[core.Sock_c.serverSock[sock0]].push_back(d);

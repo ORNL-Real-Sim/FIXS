@@ -205,6 +205,10 @@ struct CarlaSetup_t {
 	int EgoRouteRepeat;
 	double EgoTargetSpeed;             // built-in driver cruise speed (m/s)
 
+	// L2 (EgoMode 2) artificial speed-advisory profile: [[time_s, speed_mps], ...]
+	// knots, looped by EgoSpeedAdvisor. Empty -> L2 degenerates to constant target.
+	std::vector<std::pair<double, double>> EgoSpeedProfile;
+
 };
 
 struct SumoSetup_t {
