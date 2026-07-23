@@ -62,16 +62,20 @@ jobs:
           set RS_FIXS_AUTOMATION=1
           call scripts\dispatch\2_core_components.bat inline
 
-      - name: Assert TrafficLayer.exe was produced
+      - name: Assert TrafficLayer.exe was freshly built
         shell: pwsh
         run: |
-          $exe = Get-ChildItem -Recurse -Filter TrafficLayer.exe -ErrorAction SilentlyContinue |
-                 Select-Object -First 1
-          if (-not $exe) {
-            Write-Error "TrafficLayer.exe was not produced - see build logs artifact."
+          # Check the EXACT msbuild output path (gitignored build dir), NOT a
+          # recursive search - the repo ships a committed tests/SumoCarla/
+          # TrafficLayer.exe that a recursive find would match, masking a
+          # no-op build. This path can only exist if this run produced it.
+          $expected = "TrafficLayer\x64\Release\TrafficLayer.exe"
+          if (-not (Test-Path $expected)) {
+            Write-Error "Fresh build output not found: $expected (see build-logs artifact)."
             exit 1
           }
-          Write-Host "OK - built $($exe.FullName)"
+          $exe = Get-Item $expected
+          Write-Host "OK - fresh build produced $($exe.FullName) ($([math]::Round($exe.Length/1KB)) KB, $($exe.LastWriteTime))"
 
       - name: Upload build logs (always, for debugging failures)
         if: always()
