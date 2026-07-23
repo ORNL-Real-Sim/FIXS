@@ -55,6 +55,104 @@ def map_is_imported(carla_root, name):
     return os.path.isfile(cooked_map_path(carla_root, name))
 
 
+def package_descriptor(carla_root, name):
+    """The <name>.Package.json the cook writes beside the imported content. It is
+    the authoritative record of what the package actually holds - the map's real
+    name and its /Game/... path - neither of which is *guaranteed* to equal the
+    package name (see _package_from_tag: that is a release convention, not a rule)."""
+    return os.path.join(cooked_content_dir(carla_root, name),
+                        "Config", name + ".Package.json")
+
+
+def declared_maps(carla_root, name):
+    """[(map_name, /Game/... level path)] declared by the package descriptor.
+    Entries whose .umap is missing are dropped: a descriptor outlives the content
+    it describes (a half-wiped re-import leaves one behind), and a name we hand to
+    load_world must point at a level that is really on disk."""
+    import json
+    try:
+        with open(package_descriptor(carla_root, name), encoding="utf-8") as f:
+            declared = json.load(f).get("maps") or []
+    except (OSError, ValueError):
+        return []
+    found = []
+    for m in declared:
+        mname, mpath = m.get("name"), m.get("path")
+        if not mname or not str(mpath).startswith("/Game/"):
+            continue
+        umap = os.path.join(carla_root, "Unreal", "CarlaUE4", "Content",
+                            *mpath[len("/Game/"):].split("/"), mname + ".umap")
+        if os.path.isfile(umap):
+            found.append((mname, f"{mpath}/{mname}"))
+    return found
+
+
+def find_level_paths(carla_root, name):
+    """Every cooked level called <name>.umap, as /Game/... object paths.
+
+    More than one means load_world(<name>) is a coin flip: CARLA resolves a bare
+    name by recursive file search and silently takes the first hit (see
+    UCarlaEpisode::LoadNewEpisode -> PathList[0]), so which copy you get is
+    directory-traversal order, not a choice. A full /Game/... path is exact."""
+    content = os.path.join(carla_root, "Unreal", "CarlaUE4", "Content")
+    umap = name + ".umap"
+    found = []
+    for root, _dirs, files in os.walk(content):
+        if umap in files:
+            rel = os.path.relpath(root, content).replace(os.sep, "/")
+            found.append((f"/Game/{rel}/{name}", os.path.getsize(os.path.join(root, umap))))
+    return sorted(found)
+
+
+def choose_level_path(carla_root, name):
+    """Full /Game/... path to load for `name`. Only reached when the path could NOT
+    be worked out from the package itself, so there is nothing to default to: if
+    several cooked levels share the name, only the user can say which was meant."""
+    found = find_level_paths(carla_root, name)
+    if len(found) <= 1:
+        return found[0][0] if found else None
+
+    print(f"\n[cosim] {len(found)} cooked maps are named '{name}' and nothing "
+          f"identifies which is wanted - pick one:")
+    for i, (path, size) in enumerate(found, 1):
+        print(f"   {i}) {path}  ({size / 1048576:.1f} MB)")
+    if not sys.stdin.isatty():
+        sys.exit("[cosim] non-interactive and the name is ambiguous; pass --map "
+                 "<package> so the path resolves, or delete the stale copies.")
+    while True:
+        ans = _prompt(f"[cosim] Which one? [1-{len(found)}]: ").strip()
+        if ans.isdigit() and 1 <= int(ans) <= len(found):
+            return found[int(ans) - 1][0]
+        print("[cosim] invalid choice; enter a number from the list.")
+
+
+def duplicate_level_note(carla_root, name, using):
+    """Heads-up text when other cooked levels share `name`, else "". Informational
+    only - we load by exact /Game/... path, so the copies cannot be picked up by
+    mistake; they are just leftovers from repeat imports, worth deleting."""
+    others = [p for p, _ in find_level_paths(carla_root, name) if p != using]
+    if not others:
+        return ""
+    return (f"[cosim] note: {len(others)} other cooked map(s) also named '{name}'; "
+            f"ignored (loading by full path):\n"
+            + "\n".join(f"           {p}" for p in others))
+
+
+def resolve_cooked_map(carla_root, name):
+    """(map_name, /Game/... level path) for an imported package, or None when it
+    cannot be resolved *unambiguously*.
+
+    Resolve, never assume. The picked release gives a PACKAGE name; what CARLA
+    loads is a MAP name, and the two agree only by naming convention. So: accept
+    the conventional layout when it is genuinely on disk, else believe the
+    package's own descriptor, else give up - so the caller can ask the user
+    rather than invent a name that load_world will fail to open."""
+    if map_is_imported(carla_root, name):
+        return name, f"/Game/{name}/Maps/{name}/{name}"
+    found = declared_maps(carla_root, name)
+    return found[0] if len(found) == 1 else None
+
+
 def _descriptor(carla_root, name):
     return os.path.join(carla_root, "Import", name + ".json")
 

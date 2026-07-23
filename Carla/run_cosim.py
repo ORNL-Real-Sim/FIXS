@@ -113,7 +113,7 @@ def wait_for_port(host, port, timeout=180):
     return False
 
 
-def _carla_command(cfg, port, render_offscreen, quality_level=None):
+def _carla_command(cfg, port, render_offscreen, quality_level=None, level=None):
     """Build the server launch command for a packaged build or source editor."""
     if cfg["mode"] == "packaged":
         exe = env.packaged_exe(cfg["carla_root"])
@@ -128,7 +128,14 @@ def _carla_command(cfg, port, render_offscreen, quality_level=None):
             raise FileNotFoundError(
                 f"Source CARLA not found (editor={editor}, uproject={uproject}). "
                 "Re-run carla_env_setup.py (or --reconfigure) to fix the paths.")
-        cmd = [editor, uproject, "-game", f"-carla-rpc-port={port}"]
+        cmd = [editor, uproject]
+        # Boot straight into the map we are about to drive. Without this the engine
+        # browses to the project's GameDefaultMap, which is a per-build setting we
+        # do not own - if it names a map that has since been removed, startup dies
+        # with "Failed to enter <map>: Can't find file" before the RPC port opens.
+        if level:
+            cmd.append(level)
+        cmd += ["-game", f"-carla-rpc-port={port}"]
     if quality_level:
         cmd.append(f"-quality-level={quality_level}")  # Low is much cheaper to render
     if render_offscreen:
@@ -136,8 +143,8 @@ def _carla_command(cfg, port, render_offscreen, quality_level=None):
     return cmd
 
 
-def launch_carla(cfg, port=2000, render_offscreen=False, quality_level=None):
-    cmd = _carla_command(cfg, port, render_offscreen, quality_level)
+def launch_carla(cfg, port=2000, render_offscreen=False, quality_level=None, level=None):
+    cmd = _carla_command(cfg, port, render_offscreen, quality_level, level)
     print(f"[CARLA] launching ({cfg['mode']}): {' '.join(cmd)}")
     if platform.system() == "Windows":
         return subprocess.Popen(cmd)
@@ -416,13 +423,21 @@ def main():
     if args.tls_manager == "sumo" and not tl_table:
         tl_table = resolve_tl_table(args.sumocfg)
 
+    # /Game/... path of the level to boot CARLA into; set by the source-build
+    # preflight below. None (packaged build, or --no-launch) = let the engine pick.
+    target_level = None
+
     # Source-build preflight: a custom map must be cooked into the build before
     # CARLA can load it. Import the target map if missing - from the picked release
     # (downloaded + cached), a picked local .zip, or the explicit --map + url/config
     # - else fail clearly.
     if not args.no_launch and cfg is not None and cfg.get("mode") == "source":
-        need_import = args.reimport or not import_map.map_is_imported(cfg["carla_root"], target_map)
-        if need_import:
+        # `target_map` is so far a PACKAGE name (a release tag with its prefix
+        # stripped). The map CARLA loads only shares that name by convention, so
+        # resolve it against what is actually cooked instead of trusting it.
+        resolved = None if args.reimport else \
+            import_map.resolve_cooked_map(cfg["carla_root"], target_map)
+        if resolved is None:
             if picked_tag is not None or picked_local is not None:
                 verb = "re-importing" if args.reimport else "importing"
                 print(f"[cosim] {verb} '{target_map}' before launch ...")
@@ -445,6 +460,29 @@ def main():
                     f"[cosim] map '{target_map}' is not imported into {cfg['carla_root']}.\n"
                     f"        Import it once (e.g. import_<app>_map.bat), or pass "
                     f"--auto-import [--map-package-url <release zip>].")
+            resolved = import_map.resolve_cooked_map(cfg["carla_root"], target_map)
+
+        # Resolution failed even after the import: the package names its map
+        # something we cannot infer, or ships several. Don't guess a name for
+        # load_world - ask which cooked map to run.
+        if resolved is None:
+            print(f"[cosim] could not tell which cooked map package '{target_map}' "
+                  f"provides; pick the one to load:")
+            target_map = import_map.choose_imported_map(cfg["carla_root"])
+            # We have a name but no package to derive the path from, so this is the
+            # one case where duplicates are genuinely undecidable - it may prompt.
+            target_level = import_map.choose_level_path(cfg["carla_root"], target_map)
+        else:
+            if resolved[0] != target_map:
+                print(f"[cosim] package '{target_map}' provides map '{resolved[0]}'")
+            target_map, target_level = resolved
+
+        # Repeat imports under different package names leave old copies of the same
+        # map behind. Loading by full path makes them harmless, so just say they are
+        # there - no question to ask, we already know which one we want.
+        note = import_map.duplicate_level_note(cfg["carla_root"], target_map, target_level)
+        if note:
+            print(note)
 
         # TL preflight: a map whose OpenDRIVE has no dynamic signals needs the
         # traffic lights placed from the table (else the TL sync has no actors).
@@ -502,17 +540,21 @@ def main():
                         f"[cosim] port {args.carla_port} is in use by a non-CARLA process "
                         f"({name or 'unknown'}); free it or pass --no-launch to use what's running.")
             carla_proc = launch_carla(cfg, args.carla_port, args.render_offscreen,
-                                      args.quality_level)
+                                      args.quality_level, target_level)
             if not wait_for_port(args.carla_host, args.carla_port):
                 sys.exit("CARLA RPC port did not open in time.")
 
         import carla
         client = carla.Client(args.carla_host, args.carla_port)
         client.set_timeout(args.load_timeout)
-        print(f"[CARLA] loading world: {target_map}")
+        # Load by full /Game/... path when we have one: a bare name makes CARLA
+        # pick the first .umap of that name it happens to find, which is the wrong
+        # copy as soon as two packages ship the same map name.
+        load_arg = target_level or target_map
+        print(f"[CARLA] loading world: {load_arg}")
         print("[CARLA] (the first load of a freshly imported map compiles shaders - "
               "this can take a few minutes; later loads are fast)")
-        client.load_world(target_map)
+        client.load_world(load_arg)
         # Don't trust load_world's return alone on a heavy source map: confirm the
         # world IS this map and is ticking before we start SUMO.
         print(f"[CARLA] confirming '{target_map}' is loaded and ready ...")
