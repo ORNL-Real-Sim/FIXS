@@ -236,6 +236,133 @@ def _select_package(name, package_url):
     return path
 
 
+def _has_descriptor(src):
+    """True if the package at `src` (a .zip or a folder) already carries a CARLA
+    map descriptor - any *.json other than the road-painter decals file. A raw
+    RoadRunner export carries none (only .fbx/.xodr/.geojson/.rrdata.xml), which
+    is how stage_package tells a hand-authored package from one whose descriptor
+    must be generated.
+
+    `.geojson` deliberately does not count: like CARLA's own `fnmatch("*.json")`,
+    the check needs the literal '.json', so `<map>.geojson` is ignored."""
+    def is_desc(fname):
+        base = os.path.basename(fname).lower()
+        return base.endswith(".json") and base != "roadpainter_decals.json"
+    if os.path.isfile(src) and src.lower().endswith(".zip"):
+        with zipfile.ZipFile(src) as z:
+            return any(is_desc(n) for n in z.namelist())
+    if os.path.isdir(src):
+        for _root, _dirs, files in os.walk(src):
+            if any(is_desc(f) for f in files):
+                return True
+    return False
+
+
+def _tile_xy(fbx_name, map_name):
+    """(x, y) parsed from a strict `<map_name>_Tile_<x>_<y>.fbx`, else None.
+
+    Strict on purpose: CARLA reads the streaming-grid index off the last two
+    underscore tokens of the tile name (LoadAssetMaterialsCommandlet.cpp), so a
+    loose `<map>_Tile_0_0_final.fbx` would silently cook as tile (0,0) and
+    collide. Anything not exactly `<map>_Tile_<int>_<int>.fbx` is not a tile we
+    own - the caller warns about it rather than guessing."""
+    stem = fbx_name[:-4] if fbx_name.lower().endswith(".fbx") else fbx_name
+    m = re.fullmatch(re.escape(map_name) + r"_Tile_(\d+)_(\d+)", stem)
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+def _tile_size(asset_dir):
+    """RoadRunner tile edge length, in metres, for a tiled export in `asset_dir`.
+
+    Prefer the export's own TilesInfo.txt (`firstTileCenterX,firstTileCenterY,
+    tileSize`); fall back to 2000 when it is absent - the common case. 2000 is
+    both the cook commandlet's own default (PrepareAssetsForCookingCommandlet)
+    and the maximum Unreal honours (FbxStaticMeshImport clamps TileSize > 2000),
+    so the descriptor and the cook agree with nothing to infer."""
+    info = os.path.join(asset_dir, "TilesInfo.txt")
+    if os.path.isfile(info):
+        try:
+            with open(info, encoding="utf-8") as f:
+                for line in f:
+                    nums = re.findall(r"-?\d+(?:\.\d+)?", line)
+                    if len(nums) >= 3:
+                        return int(round(float(nums[2])))
+        except (OSError, ValueError):
+            pass
+        print(f"[import] warning: {info} present but unparseable; using tile_size=2000")
+    return 2000
+
+
+def generate_descriptor(import_dir, map_name):
+    """Synthesise Import/<map_name>.json for a raw RoadRunner export that shipped
+    no CARLA descriptor, deriving everything from the staged filenames (see
+    FIXS_Applications #4). stage_package isolates a raw export under
+    Import/<map_name>/, so that subtree is scanned - never the shared Import/
+    root. Returns the descriptor path.
+
+    Resolve, never guess: exit loudly when the export cannot be described - no
+    <map_name>.xodr staged, the same map staged in two places, or an .xodr with
+    neither a <map_name>.fbx nor <map_name>_Tile_<x>_<y>.fbx beside it."""
+    import json
+
+    subtree = os.path.join(import_dir, map_name)
+    scan_root = subtree if os.path.isdir(subtree) else import_dir
+    # Exactly one <map_name>.xodr is expected in the staged subtree; walk it to
+    # also cover an export that carried its own inner folder.
+    xodr_dirs = [root for root, _dirs, files in os.walk(scan_root)
+                 if map_name + ".xodr" in files]
+    if not xodr_dirs:
+        sys.exit(f"[import] cannot describe '{map_name}': no {map_name}.xodr under "
+                 f"{scan_root}. A raw RoadRunner export must be named after the map "
+                 f"({map_name}.xodr + {map_name}.fbx or {map_name}_Tile_<x>_<y>.fbx).")
+    if len(xodr_dirs) > 1:
+        where = "\n".join(f"             {os.path.relpath(d, import_dir)}"
+                          for d in sorted(xodr_dirs))
+        sys.exit(f"[import] cannot describe '{map_name}': {map_name}.xodr is staged "
+                 f"in {len(xodr_dirs)} places (staged more than once?). Keep one so a "
+                 f"single descriptor maps to a single destination:\n{where}")
+
+    asset_dir = xodr_dirs[0]
+    rel = lambda p: os.path.relpath(p, import_dir).replace(os.sep, "/")
+    single = os.path.join(asset_dir, map_name + ".fbx")
+    tiles = sorted(os.path.join(asset_dir, f) for f in os.listdir(asset_dir)
+                   if _tile_xy(f, map_name) is not None)
+    if os.path.isfile(single) and tiles:
+        sys.exit(f"[import] cannot describe '{map_name}': both {map_name}.fbx and "
+                 f"{map_name}_Tile_*.fbx present - a map is single-source or tiled, "
+                 f"not both.")
+
+    entry = {"name": map_name,
+             "xodr": rel(os.path.join(asset_dir, map_name + ".xodr")),
+             "use_carla_materials": False}  # RoadRunner ships its own materials
+    if os.path.isfile(single):
+        entry["source"] = rel(single)
+        kind = "single-source"
+    elif tiles:
+        entry["tile_size"] = _tile_size(asset_dir)
+        entry["tiles"] = [rel(t) for t in tiles]
+        kind = f"tiled, {len(tiles)} tiles, tile_size={entry['tile_size']}"
+    else:
+        sys.exit(f"[import] cannot describe '{map_name}': found {map_name}.xodr but "
+                 f"no {map_name}.fbx or {map_name}_Tile_<x>_<y>.fbx beside it.")
+
+    # Surface, don't silently drop, RoadRunner layer-split exports: extra .fbx
+    # that are neither the source nor a strict tile. CARLA's own generator
+    # ignores them; a dropped layer should at least be visible.
+    for f in sorted(os.listdir(asset_dir)):
+        if f.lower().endswith(".fbx") and f != map_name + ".fbx" \
+                and _tile_xy(f, map_name) is None:
+            print(f"[import] warning: ignoring unexpected fbx {f!r} (not {map_name}.fbx "
+                  f"or {map_name}_Tile_<x>_<y>.fbx); not part of the descriptor.")
+
+    descriptor = os.path.join(import_dir, map_name + ".json")
+    with open(descriptor, "w", encoding="utf-8") as f:
+        json.dump({"maps": [entry], "props": []}, f, indent=2)
+        f.write("\n")
+    print(f"[import] generated {descriptor} ({kind})")
+    return descriptor
+
+
 def stage_package(carla_root, name, package_url=None, package_dir=None, package_pick=False):
     """Ensure <carla_root>/Import has <name>.json (+ its assets). Sources the
     package, in order: an already-staged descriptor, an explicit --package-dir,
@@ -258,14 +385,28 @@ def stage_package(carla_root, name, package_url=None, package_dir=None, package_
             src, tmpdir = _try_gh_download(package_url)
             if src is None:
                 src = _select_package(name, package_url)
-        _stage_from_path(src, import_dir)
+        if _has_descriptor(src):
+            # Hand-authored package: <name>.json + its <name>/ asset folder land
+            # directly under Import/.
+            _stage_from_path(src, import_dir)
+        else:
+            # Raw RoadRunner export (no CARLA .json): isolate it under
+            # Import/<name>/ so repeat imports of different maps cannot collide,
+            # then synthesise Import/<name>.json from the fbx/xodr (see #4).
+            print(f"[import] '{name}' ships no CARLA descriptor; treating it as a "
+                  f"raw RoadRunner export and generating one.")
+            raw_dest = os.path.join(import_dir, name)
+            os.makedirs(raw_dest, exist_ok=True)
+            _stage_from_path(src, raw_dest)
+            generate_descriptor(import_dir, name)
     finally:
         if tmpdir:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
     if not os.path.isfile(descriptor):
         sys.exit(f"[import] after staging, descriptor still missing: {descriptor}\n"
-                 f"         (the package must contain {name}.json + its asset folder)")
+                 f"         (a packaged map must contain {name}.json; a raw export "
+                 f"must be named after the map so one can be generated)")
     return import_dir
 
 
