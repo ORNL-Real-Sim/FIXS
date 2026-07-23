@@ -1,3 +1,0 @@
-<add>
-    <timedEvent type="SaveTLSSwitchStates" dest="signal_result.xml"/>
-</add>
