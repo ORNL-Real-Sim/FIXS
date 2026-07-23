@@ -1,0 +1,101 @@
+name: Release (public core)
+
+# Automated release pipeline for #191 / #57.
+#
+# Builds the PUBLIC FIXS core on a hosted Windows runner and packages the rolling
+# release zip via the existing dispatch flow. On push to `main` it publishes that
+# zip to the `latest` prerelease (the rolling dev build consumers pull with
+# fetch_fixs.ps1). On pull requests it builds + packages only (NO publish) as a
+# build gate - this is #57's "auto build when a PR is created".
+#
+# TEMPORARY SCOPE (tracked in #191): a hosted runner has no licensed toolchain, so
+# the auto-published zip currently OMITS the components that need one -
+# VirtualEnvironment.lib (CarMaker SDK), the CarMaker exes, dSPACE, MATLAB MEX, and
+# the VISSIM DriverModel DLLs. It covers TrafficLayer/CoordMerge + Python + Carla +
+# libsumo headers + MATLAB .m sources. VirtualEnvironment.lib graduates to a
+# CI-built artifact once the #174 SDK-free refactor lands on the v0.9.0 train; the
+# other proprietary binaries return via the pinned ProprietaryBinaries bundle
+# (also #191). Until then, `latest` is a public-core rolling build.
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish the built zip to the latest prerelease'
+        type: boolean
+        default: false
+  pull_request:
+    branches: [dev, main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: write   # create/update the 'latest' release + tag on publish
+
+jobs:
+  build-publish:
+    # Pin to windows-2022 (VS 2022 / v17) to match the generator dispatch derives
+    # from dependencies.yaml. windows-latest ships VS 2026 (v18), which the pinned
+    # "Visual Studio 17 2022" generator cannot use.
+    runs-on: windows-2022
+    steps:
+      - name: Checkout (full history for git describe; no private submodule)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: false
+
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build + package public release (proprietary steps skipped)
+        shell: cmd
+        run: |
+          set RS_BUILD_CONFIG=Release
+          set RS_FIXS_AUTOMATION=1
+          REM <nul so the trailing `pause` in dispatch.bat returns immediately.
+          call scripts\dispatch\dispatch.bat <nul
+
+      - name: Sanity-check the packaged zip
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem build -Filter 'fixs-build-*.zip' -ErrorAction SilentlyContinue |
+                 Select-Object -First 1
+          if (-not $zip) { Write-Error "No fixs-build-*.zip produced (see build-logs)."; exit 1 }
+          Write-Host "Packaged: $($zip.Name) ($([math]::Round($zip.Length/1MB,1)) MB)"
+          $names = Get-ChildItem build -Recurse -File | ForEach-Object { $_.Name }
+          if ($names -notcontains 'TrafficLayer.exe') {
+            Write-Error "TrafficLayer.exe missing from build/ - public core did not build."
+            exit 1
+          }
+          if ($names -contains 'VirtualEnvironment.lib') {
+            Write-Warning "VirtualEnvironment.lib present - expected it to be skipped on the hosted runner."
+          } else {
+            Write-Host "OK - VirtualEnvironment.lib intentionally omitted (deferred to #174 / v0.9.0)."
+          }
+
+      - name: Upload packaged zip as a workflow artifact (inspect on PRs)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fixs-build-zip
+          path: build/fixs-build-*.zip
+          if-no-files-found: warn
+
+      - name: Publish to 'latest' prerelease (push to main, or manual publish)
+        if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.publish)
+        shell: cmd
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dispatch\publish_release.ps1
+
+      - name: Upload build logs (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            scripts/dispatch/build.log
+            scripts/dispatch/build_summary.log
+          if-no-files-found: ignore

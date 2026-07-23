@@ -122,9 +122,18 @@ REM ====================================
 REM Step 4: Compile VirtualEnvironment
 REM ====================================
 echo [4/9] Compiling VirtualEnvironment...
-call "%~dp0\4_virtual_environment.bat" inline
-if %ERRORLEVEL% neq 0 (
-    echo WARNING: VirtualEnvironment build failed or skipped
+if defined RS_FIXS_AUTOMATION (
+    REM Skipped on the hosted release CI: on the current release line
+    REM VirtualEnvironment still compiles against the CarMaker SDK, so it cannot
+    REM build on a CarMaker-free runner. VirtualEnvironment.lib is therefore
+    REM omitted from the auto-published zip for now; it graduates to a CI-built
+    REM artifact once the #174 SDK-free refactor lands on the 0.9.0 release train.
+    echo   Skipped: needs the CarMaker SDK - omitted from the CI zip until #174 / v0.9.0.
+) else (
+    call "%~dp0\4_virtual_environment.bat" inline
+    if !ERRORLEVEL! neq 0 (
+        echo WARNING: VirtualEnvironment build failed or skipped
+    )
 )
 echo.
 
