@@ -135,6 +135,7 @@
     <ClCompile Include="..\..\CommonLib\MsgHelper.cpp" />
     <ClCompile Include="..\..\CommonLib\SocketHelper.cpp" />
     <ClCompile Include="..\..\CommonLib\VirEnvCore.cpp" />
+    <ClCompile Include="..\..\CommonLib\XilGuard.cpp" />
     <ClCompile Include="CarlaBackend.cpp" />
     <ClCompile Include="BridgeHelper.cpp" />
     <ClCompile Include="DebugHelper.cpp" />
@@ -149,6 +150,7 @@
     <ClInclude Include="..\..\CommonLib\SocketHelper.h" />
     <ClInclude Include="..\..\CommonLib\VehDataMsgDefs.h" />
     <ClInclude Include="..\..\CommonLib\VirEnvCore.h" />
+    <ClInclude Include="..\..\CommonLib\XilGuard.h" />
     <ClInclude Include="CarlaBackend.h" />
     <ClInclude Include="BridgeHelper.h" />
     <ClInclude Include="DebugHelper.h" />

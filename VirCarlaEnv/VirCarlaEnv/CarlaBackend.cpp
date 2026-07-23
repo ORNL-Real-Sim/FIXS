@@ -1,4 +1,5 @@
 #include "CarlaBackend.h"
+#include "../../CommonLib/XilGuard.h"
 
 #include <carla/client/ActorList.h>
 #include <carla/client/ActorBlueprint.h>
@@ -18,6 +19,12 @@
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
+
+// Tolerance for the SUMO<->CARLA per-vehicle z-alignment guard (#193 placeholder).
+// Above this, a teleported car is off the CARLA road surface enough to warn. With
+// the densified elevation net the residual is ~mesh discretization (a few cm), so
+// 0.5 m warns only on a genuine map/elevation mismatch. Policy/threshold config: #193.
+static constexpr double kZMismatchTolM = 0.5;
 
 namespace virenv {
 
@@ -109,6 +116,21 @@ void CarlaBackend::setVehiclePose(VehHandle h, const Pose& p) {
     }
     carla::geom::Transform carlaTf = BridgeHelper::map_transfrom_Sumo_to_Carla(sumoTransformOf(p), ext);
     lastApplied_[h] = carlaTf;   // A/B instrumentation (driver logs it by SUMO id)
+
+    // ---- online XIL health guard (#193 placeholder): SUMO<->CARLA z alignment ---
+    // The teleport places this (physics-off) car at SUMO's z. If SUMO's road
+    // elevation diverges from the CARLA road surface under the car -- e.g. a
+    // coarsely-sampled net vs the xodr, or an inconsistent map pair -- the car
+    // floats/sinks. Compare against the CARLA road and warn past tolerance. #174
+    // only warns; the abort / snap-to-road / dyno-invalid policy is #193.
+    if (!map_) map_ = world_->GetMap();
+    if (map_) {
+        carla::SharedPtr<carla::client::Waypoint> wp = map_->GetWaypoint(carlaTf.location);
+        if (wp)
+            fixs::RS_XIL_GUARD("sumo_carla_z_mismatch",
+                               carlaTf.location.z - wp->GetTransform().location.z, kZMismatchTolM);
+    }
+
     // batched, applied in flushBatch() before the world Tick -- same as mainVirCarla
     batch_.push_back(carla::rpc::Command::ApplyTransform((carla::rpc::ActorId)h, carlaTf));
 }

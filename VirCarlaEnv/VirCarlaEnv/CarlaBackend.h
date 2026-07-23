@@ -18,6 +18,8 @@
 #include <carla/client/Client.h>
 #include <carla/client/BlueprintLibrary.h>
 #include <carla/client/Vehicle.h>
+#include <carla/client/Map.h>
+#include <carla/client/Waypoint.h>
 #include <carla/rpc/Command.h>
 #include <carla/Memory.h>
 
@@ -104,6 +106,7 @@ private:
     bool verbose_   = false;
 
     carla::SharedPtr<carla::client::BlueprintLibrary> bpLib_;
+    carla::SharedPtr<carla::client::Map> map_;                             // cached for the z-alignment guard
     carla::SharedPtr<carla::client::Vehicle> egoActor_;                    // EgoMode >= 1: the Carla-driven ego
     EgoDriver egoDriver_;                                                  // fallback L0 driver (SDK-free module)
     std::vector<carla::rpc::Command> batch_;                               // ApplyTransform commands this tick
