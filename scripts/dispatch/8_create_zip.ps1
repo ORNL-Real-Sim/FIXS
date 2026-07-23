@@ -67,6 +67,19 @@ try {
                 New-Item -ItemType Directory -Path $libsumoDest -Force | Out-Null
                 Get-ChildItem -Path $libsumoSrc -File | Copy-Item -Destination $libsumoDest -Force
             }
+
+            # Drop the vendored YAMLMatlab unit-test fixtures from the release.
+            # They are dead weight at runtime (nothing references
+            # CommonLib/YAMLMatlab/Tests), and their directories extract without
+            # the execute bit on Linux, which breaks a downstream `rm -rf FIXS/`
+            # on re-init (see FIXS #190). Excluded here at pack time rather than
+            # deleted from source, so the vendored lib stays complete for future
+            # YAMLMatlab drop-in updates.
+            $yamlTests = Join-Path $destCommonLib 'YAMLMatlab\Tests'
+            if (Test-Path $yamlTests) {
+                Remove-Item -Path $yamlTests -Recurse -Force
+                Write-Host "  - CommonLib/YAMLMatlab/Tests (test fixtures excluded)"
+            }
         } else {
             Copy-Item -Path $_.FullName -Destination $StagingDir -Recurse -Force
         }
