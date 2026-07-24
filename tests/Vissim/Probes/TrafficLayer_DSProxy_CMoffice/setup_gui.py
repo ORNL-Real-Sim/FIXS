@@ -13,7 +13,9 @@ After this runs:
 so when CarMaker Office launches the app it passes the FIXS config to User.c.
 """
 from __future__ import annotations
+import os
 import pathlib
+import re
 import shutil
 import sys
 
@@ -34,6 +36,17 @@ def stage_network() -> None:
                          f"  regenerate: python patch_ds_inpx.py "
                          f"..\\..\\SimpleEcho\\simple_loop.inpx simple_loop_ds.inpx 200")
     shutil.copy2(SRC_INPX, STAGE / "simple_loop.inpx")
+    # RS_VISSIM_SEED varies the random realization WITHOUT changing the network
+    # (rewrites the SimRun randSeed in the STAGED inpx only; the committed source
+    # is untouched). Lets the GUI demo reproduce a specific seed -- e.g. a seed
+    # known to drive the ego into the junction off-road for a live demo.
+    _vseed = os.environ.get("RS_VISSIM_SEED")
+    if _vseed:
+        _p = STAGE / "simple_loop.inpx"
+        _txt = _p.read_text(encoding="utf-8", errors="ignore")
+        _txt = re.sub(r'randSeed="\d+"', f'randSeed="{_vseed}"', _txt, count=1)
+        _p.write_text(_txt, encoding="utf-8")
+        print(f"[setup_gui] VISSIM randSeed -> {_vseed}")
     if SRC_LAYX.is_file():
         shutil.copy2(SRC_LAYX, STAGE / "simple_loop.layx")
     print(f"[setup_gui] staged DS network -> {STAGE}")

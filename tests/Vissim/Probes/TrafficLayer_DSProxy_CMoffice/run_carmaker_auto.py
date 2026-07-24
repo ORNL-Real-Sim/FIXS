@@ -5,7 +5,7 @@ This drives the actual office executable -- the one compiled from
 ProprietaryFiles/CM13_proj/src/User.c linking VirtualEnvironment.lib -- via the
 CarMaker Python API (cmapi). It is the GUI-equivalent of: open CarMaker Office,
 select this exe + "-f config.runtime.yaml" as the application, load the
-SimpleLoop_VISSIM_rs TestRun, and press Start. The simulation output is identical
+SimpleLoop_rs TestRun, and press Start. The simulation output is identical
 to the GUI path (the GUI is just a front-end to this same exe).
 
 Use it to verify the real VirtualEnvironment.lib round-trip against TrafficLayer
@@ -27,7 +27,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parents[3]
 CM_PROJECT = REPO / "ProprietaryFiles" / "CM13_proj"
 CUSTOM_EXE = CM_PROJECT / "src" / "CarMaker.win64.exe"
-TESTRUN = "SimpleLoop_VISSIM_rs"
+TESTRUN = "SimpleLoop_rs"
 
 
 async def main() -> int:

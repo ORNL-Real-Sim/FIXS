@@ -46,7 +46,7 @@ captures both sides, and prints **PASS/FAIL** with evidence. No GUI, no clicking
 **B) GUI, for the 3D view / sponsor video:**
 Double-click **`run_cm_office_demo.bat`**. It registers the custom exe into the
 CM project + launches TrafficLayer (waits) + opens CarMaker Office. Then in the
-GUI: load TestRun **`SimpleLoop_VISSIM_rs`** and press the green **Start**. The
+GUI: load TestRun **`SimpleLoop_rs`** and press the green **Start**. The
 GUI runs the *same exe and produces the same exchange* as (A) — it just adds the
 live 3D scene. Stop order: **Stop in CarMaker → close VISSIM → Ctrl+C
 TrafficLayer.** (Never `taskkill` VISSIM while it holds an open `.inpx` — that
@@ -56,7 +56,39 @@ The co-simulation is **lockstep and CarMaker-triggered**: TrafficLayer spawns
 VISSIM, then *blocks* until CarMaker connects; that connect (mode A automatically,
 mode B on Start) begins the run.
 
-### Known limitation — ego loop
+### Current state (2026-06, SimpleLoop) — supersedes the SimpleEcho-era notes below
+
+This probe now runs the **rounded R15 SimpleLoop** (shared net generated from
+`simple_loop.xodr`), not the old square SimpleEcho loop, and the ego **laps the
+full loop for the configured 1000 s**. The "ego ends at 30 s" / "loop corners too
+sharp" notes below are **historical** — they describe the retired SimpleEcho
+geometry, not the current scenario.
+
+**Stochastic IPGDriver junction off-road (demo is seed-pinned).** On some traffic
+realizations the ego leaves the road at a junction curve and the run aborts
+(`Vehicle leaves road…` / `Embedded FARoadSensor … not found on Road`). It's a
+CarMaker-side junction-navigation defect — IPGDriver fails to re-acquire the
+course after being halted *on* the curve by traffic, then drives nearly straight
+off the inner edge (#168 "drives straight off the link end"). It is **stochastic
+and backend-agnostic**: reproduced on both VISSIM (5/51 seeds) and SUMO (Krauss
+2/13, W99 4/13) at comparable rates, driven only by the traffic realization — not
+the backend or car-following model (full evidence in the SUMO probe README).
+- The committed default **`randSeed=42` is a verified-clean realization** — the
+  GUI/headless demo runs the full 1000 s. Same seed ⇒ same outcome (deterministic).
+- **Reproduce a failure:** `set RS_VISSIM_SEED=32` (also 25/31/21/40) before
+  `run_cm_office_demo.bat` or `verify_demo.py`. `setup_gui.py`/`verify_demo.py`
+  rewrite the *staged* inpx's `randSeed` (committed source untouched); seed 32 goes
+  off-road ~212 s near (12.8, 0.24).
+
+**VISSIM COM self-heal (Win11 24H2).** `run_cm_office_demo.bat` now runs a
+`vissim_dispatch_probe.py` preflight before launching TrafficLayer: it tests the
+`VISSIM.Vissim.2200` dispatch and, **only if** it's the 24H2 zombie state
+(`Server execution failed`, `0x80080005`), reaps the zombie `VISSIM220.exe` +
+stale `%TEMP%\VISSIM` locks and retries (×3). This stops one bad dispatch from
+wedging every subsequent run. The probe skips harmlessly if `%PYTHON%` lacks
+pywin32 — point `%PYTHON%` at the `realsim_dev` env to make it active.
+
+### Known limitation — ego loop (historical: SimpleEcho geometry)
 
 The ego drives one 200 m straight (link 0) at 18 km/h; the run ends **gracefully
 at 30 s** before it reaches the link end. IPGDriver does not navigate the
@@ -87,7 +119,7 @@ git submodule update --init --recursive
 tests\Vissim\Probes\TrafficLayer_DSProxy_CMoffice\run_cm_office_demo.bat
 ```
 Then in the CarMaker GUI: wait for the TrafficLayer window to print
-`VISSIM_Connect OK`, load TestRun `SimpleLoop_VISSIM_rs`, press the green **Start**.
+`VISSIM_Connect OK`, load TestRun `SimpleLoop_rs`, press the green **Start**.
 
 > The committed binaries are **temporary** for this cross-site test and are stripped
 > before the ProprietaryFiles PR merges (no multi-MB blob on `PF/main`). If CarMaker
@@ -104,7 +136,7 @@ python build_testrun.py
 ```
 
 - **`import_road.bat`** runs `osc2cm.exe` (OpenDRIVE → `simple_loop.rd5` +
-  `SimpleLoop_VISSIM` TestRun + ego) then `RealSimCarMakerSetup.py` (seeds 20
+  `SimpleLoop` TestRun + ego) then `RealSimCarMakerSetup.py` (seeds 20
   `RS_Cxxx` traffic objects).
 - **`build_testrun.py`** then makes it actually load + run in CarMaker 13:
   osc2cm produces a **route-less** road and an old-format traffic set the CM13

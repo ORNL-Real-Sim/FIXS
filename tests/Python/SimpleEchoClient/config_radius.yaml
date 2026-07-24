@@ -1,0 +1,32 @@
+# Subscription repro (issue #176) - variant B: ego with radius 120 m
+# Expected: client sees ego plus vehicles within 120 m of ego (~13 of the ~34), a strict
+# subset of the whole network. (Probed on the ~34-vehicle loop: r=60->5, r=120->13,
+# r=200->24, r=300->34.)
+# NOTE: EnableExternalDynamics MUST be true (see config_ego_only.yaml for why).
+
+SimulationSetup:
+    EnableRealSim: true
+    EnableVerboseLog: false
+    SelectedTrafficSimulator: 'SUMO'
+    TrafficSimulatorIP: "127.0.0.1"
+    TrafficSimulatorPort: 1337
+    VehicleMessageField: [id, type, vehicleClass, speed, acceleration, speedDesired]
+    EnableExternalDynamics: true
+
+SumoSetup:
+    # false: the comparison runner launches headless `sumo` itself (no GUI popup,
+    # deterministic teardown). TrafficLayer connects to that existing instance on 1337.
+    EnableAutoLaunch: false
+    SumoConfigFile: "./simple_loop_traffic.sumocfg"
+
+ApplicationSetup:
+    EnableApplicationLayer: true
+    VehicleSubscription:
+    -   type: ego
+        attribute: {id: ['ego'], radius: [120]}
+        ip: ['127.0.0.1']
+        port: [2444]
+
+XilSetup:
+    EnableXil: false
+    VehicleSubscription:

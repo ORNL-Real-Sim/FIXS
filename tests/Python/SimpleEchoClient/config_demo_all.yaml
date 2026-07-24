@@ -1,0 +1,34 @@
+# Live GUI demo config for issue #176 -- the `all` subscription, with verbose logging ON
+# so you can watch TrafficLayer print every vehicle it pulls from SUMO and sends to the
+# client. Used by demo_vehicle_subscription_gui.bat (which launches sumo-gui so you also
+# see the cars driving). Same as config_all.yaml but EnableVerboseLog: true.
+
+SimulationSetup:
+    EnableRealSim: true
+    EnableVerboseLog: true          # <-- print received/sent vehicle data live
+    SelectedTrafficSimulator: 'SUMO'
+    TrafficSimulatorIP: "127.0.0.1"
+    TrafficSimulatorPort: 1337
+    VehicleMessageField: [id, type, vehicleClass, speed, acceleration, speedDesired]
+    EnableExternalDynamics: true
+
+SumoSetup:
+    # false: the demo .bat launches sumo-gui itself so you can watch the cars.
+    EnableAutoLaunch: false
+    SumoConfigFile: "./simple_loop_traffic.sumocfg"
+
+ApplicationSetup:
+    EnableApplicationLayer: true
+    VehicleSubscription:
+    -   type: ego
+        attribute: {all: ['true']}
+        ip: ['127.0.0.1']
+        port: [2444]
+
+XilSetup:
+    EnableXil: false
+    VehicleSubscription:
+
+# The `all` subscription carries no ego id, so (since #174) EgoId must be stated explicitly.
+CarMakerSetup:
+    EgoId: ego

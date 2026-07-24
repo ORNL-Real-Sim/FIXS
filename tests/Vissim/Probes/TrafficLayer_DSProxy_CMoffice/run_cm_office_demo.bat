@@ -11,7 +11,7 @@ REM       (blocking accept) for CarMaker to connect on port 2444.
 REM    3. Opens the CarMaker Office GUI on the CM project.
 REM
 REM  THEN, in the CarMaker GUI (after TrafficLayer prints "VISSIM_Connect OK"):
-REM    - Load TestRun "SimpleLoop_VISSIM_rs"
+REM    - Load TestRun "SimpleLoop_rs"
 REM    - Press the green START button.
 REM  That Start is what begins the lockstep co-simulation.
 REM
@@ -26,7 +26,7 @@ set TL=%RepoRoot%\TrafficLayer\x64\Release\TrafficLayer.exe
 set CMEXE=%RepoRoot%\ProprietaryFiles\CM13_proj\src\CarMaker.win64.exe
 set CMPROJ=%RepoRoot%\ProprietaryFiles\CM13_proj
 set CM_OFFICE=C:\IPG\carmaker\win64-13.1.3\bin\CM_Office.exe
-set TESTRUN=SimpleLoop_VISSIM_rs
+set TESTRUN=SimpleLoop_rs
 set RUNCFG=%HERE%config.runtime.yaml
 REM Python is used ONLY to stage files (setup_gui.py is pure stdlib) -- ANY Python 3
 REM works, no packages needed. Honor a preset %PYTHON%; else try the 'py' launcher,
@@ -63,6 +63,36 @@ REM --- 1. stage network + write config.runtime.yaml + patch GUI config ------
 echo [1/3] Preparing demo (stage network, write config, register exe)...
 "%PYTHON%" "%HERE%setup_gui.py"
 if errorlevel 1 ( echo ERROR: setup_gui.py failed. & pause & exit /b 1 )
+
+REM --- 1b. VISSIM COM self-heal preflight (Win11 24H2) ----------------------
+REM  On 24H2, VISSIM crashes a fraction of COM dispatches at startup and leaves
+REM  a zombie VISSIM220.exe + stale FlexNet token + lock files; the NEXT launch
+REM  then fails with "Server execution failed" (0x80080005) and STAYS broken.
+REM  The blanket VISSIM220 kill above clears a corpse but not the leaked token /
+REM  locks, so also: probe the dispatch; if it is still broken, clean the locks
+REM  and retry. (The probe is skipped harmlessly if %PYTHON% lacks pywin32.)
+echo [preflight] Checking VISSIM COM dispatch health...
+set _VTRY=0
+:vchk
+"%PYTHON%" "%HERE%vissim_dispatch_probe.py" >nul 2>&1
+if not errorlevel 1 goto vok
+set /a _VTRY+=1
+if %_VTRY% geq 3 goto vbad
+echo [preflight] VISSIM dispatch not responding (try %_VTRY%/3) -- clearing zombie VISSIM + stale locks...
+taskkill /F /IM VISSIM220.exe            >nul 2>&1
+del /Q "%TEMP%\VISSIM\*.lock"            >nul 2>&1
+del /Q "%TEMP%\VISSIM\vissim_msgs*.txt"  >nul 2>&1
+del /Q "%TEMP%\VISSIM\CommonDialogs.log" >nul 2>&1
+timeout /t 2 /nobreak >nul
+goto vchk
+:vbad
+echo [preflight] WARNING: VISSIM COM still unhealthy after cleanup.
+echo             Try the admin FlexNet bounce or a reboot (CLAUDE.md soft reset), then retry.
+echo             Continuing anyway; TrafficLayer may fail to spawn VISSIM.
+goto vdone
+:vok
+echo [preflight] VISSIM dispatch OK.
+:vdone
 
 REM --- 2. launch TrafficLayer (spawns VISSIM, then waits for CarMaker) ------
 echo [2/3] Launching TrafficLayer (DSProxy). It spawns VISSIM, then waits on port 2444...

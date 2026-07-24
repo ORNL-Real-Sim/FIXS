@@ -24,7 +24,7 @@ REPO = HERE.parents[3]
 CMEXE = REPO / "ProprietaryFiles" / "CM13_proj" / "src" / "CarMaker_headless.win64.exe"
 CMPROJ = REPO / "ProprietaryFiles" / "CM13_proj"
 RUNCFG = HERE / "config.vanilla.yaml"
-TESTRUN = "SimpleLoop_VISSIM_rs"
+TESTRUN = "SimpleLoop_rs"
 PY = sys.executable
 RATES = [200, 600]
 

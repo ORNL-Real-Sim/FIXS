@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
-<!-- SUMO configuration for simple loop scenario -->
+<!-- SUMO configuration for the multi-vehicle subscription repro (issue #176). -->
 <configuration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/sumoConfiguration.xsd">
 
     <input>
         <net-file value="simple_loop.net.xml"/>
-        <route-files value="simple_loop.rou.xml"/>
+        <route-files value="simple_loop_traffic.rou.xml"/>
     </input>
 
     <time>

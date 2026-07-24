@@ -2,9 +2,12 @@
 
 <configuration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/sumoConfiguration.xsd">
 
+    <!-- Network is the SHARED SimpleTrafficLight family (single source of truth,
+         same net as the #172 CM/VISSIM signal demo + the xodr for Carla). The old
+         local 2000 m copy diverged from the co-sim network -- do not re-add one. -->
     <input>
-        <net-file value="simple_traffic_light.net.xml"/>
-        <route-files value="simple_traffic_light.rou.xml"/>
+        <net-file value="../../Sumo/networks/simple_traffic_light/simple_traffic_light.net.xml"/>
+        <route-files value="../../Sumo/networks/simple_traffic_light/simple_traffic_light.rou.xml"/>
     </input>
 
     <random>

@@ -39,7 +39,11 @@
 	#define SOCKET_ERROR (-1)
 //extern int close(int __fildes);
 
-	#include <CarMaker.h>
+	// NOTE: SocketHelper is generic transport (shared by TrafficLayer and the
+	// SDK-free VirtualEnvironment core). It must NEVER pull a simulator SDK. The
+	// BSD socket set above is sufficient on the RT/dSPACE (non-WIN32) target;
+	// <CarMaker.h> was a leftover and is removed so the core stays CI-buildable.
+	// Anything needing CarMaker belongs in the CarMaker backend TU, not here.
 
 #else
 	#include <winsock2.h>

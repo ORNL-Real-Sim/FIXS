@@ -1,0 +1,136 @@
+<?xml version="1.0" standalone="yes"?>
+<OpenDRIVE>
+  <header revMajor="1" revMinor="4" name="simple_loop" version="1.00" north="0" south="0" east="0" west="0"/>
+  <road name="bottom" length="170.000000" id="1" junction="-1">
+    <link><predecessor elementType="junction" elementId="104"/><successor elementType="junction" elementId="101"/></link>
+    <type s="0" type="town"/>
+    <planView>
+      <geometry s="0" x="15.000000" y="0.000000" hdg="0.000000000000" length="170.000000"><line/></geometry>
+    </planView>
+    <elevationProfile><elevation s="0" a="0" b="0.07303691306" c="-4.051474111e-06" d="-6.928355229e-06"/><elevation s="21.25" a="1.483722469" b="0.06347896918" c="-0.0004527766794" d="-5.115002839e-06"/><elevation s="42.5" a="2.579111546" b="0.0373067299" c="-0.000782997038" d="-1.962905204e-06"/><elevation s="63.75" a="2.999472001" b="0.001370232642" c="-0.0009082842628" d="1.702941903e-06"/><elevation s="85" a="2.634783257" b="-0.03492489442" c="-0.0007958470372" d="4.923079507e-06"/><elevation s="106.25" a="1.580494982" b="-0.06207915923" c="-0.0004751134586" d="6.854703792e-06"/><elevation s="127.5" a="0.1125451302" b="-0.07298549967" c="-3.002884755e-05" d="6.992252414e-06"/><elevation s="148.75" a="-1.384861061" b="-0.06478940875" c="0.0004229151876" d="5.299724892e-06"/></elevationProfile>
+    <lanes>
+      <laneSection s="0">
+        <center><lane id="0" type="none" level="false"/></center>
+        <right><lane id="-1" type="driving" level="false"><link/><width sOffset="0" a="6.0" b="0" c="0" d="0"/><roadMark sOffset="0" type="solid" weight="standard" color="standard" width="0.12"/></lane></right>
+      </laneSection>
+    </lanes>
+  </road>
+  <road name="right" length="170.000000" id="2" junction="-1">
+    <link><predecessor elementType="junction" elementId="101"/><successor elementType="junction" elementId="102"/></link>
+    <type s="0" type="town"/>
+    <planView>
+      <geometry s="0" x="200.000000" y="15.000000" hdg="1.570796326795" length="170.000000"><line/></geometry>
+    </planView>
+    <elevationProfile><elevation s="0" a="-3" b="5.145314675e-17" c="0.0009083681263" d="-1.833246205e-06"/><elevation s="21.25" a="-2.607406304" b="0.03612216965" c="0.000787491172" d="-5.019924679e-06"/><elevation s="42.5" a="-1.532378424" b="0.06279011525" c="0.000460504838" d="-6.892742631e-06"/><elevation s="63.75" a="-0.0562824708" b="0.07302405858" c="1.299097313e-05" d="-6.961529049e-06"/><elevation s="85" a="1.434544244" b="0.06414547856" c="-0.0004379230078" d="-5.208280521e-06"/><elevation s="106.25" a="2.549908942" b="0.0384781582" c="-0.0007742197807" d="-2.091873262e-06"/><elevation s="127.5" a="2.997888189" b="0.002739982963" c="-0.0009078806836" d="1.572038168e-06"/><elevation s="148.75" a="2.661232767" b="-0.03371532564" c="-0.0008039227646" d="4.824501414e-06"/></elevationProfile>
+    <lanes>
+      <laneSection s="0">
+        <center><lane id="0" type="none" level="false"/></center>
+        <right><lane id="-1" type="driving" level="false"><link/><width sOffset="0" a="6.0" b="0" c="0" d="0"/><roadMark sOffset="0" type="solid" weight="standard" color="standard" width="0.12"/></lane></right>
+      </laneSection>
+    </lanes>
+  </road>
+  <road name="top" length="170.000000" id="3" junction="-1">
+    <link><predecessor elementType="junction" elementId="102"/><successor elementType="junction" elementId="103"/></link>
+    <type s="0" type="town"/>
+    <planView>
+      <geometry s="0" x="185.000000" y="200.000000" hdg="3.141592653590" length="170.000000"><line/></geometry>
+    </planView>
+    <elevationProfile><elevation s="0" a="1.102182119e-15" b="-0.07303691306" c="4.051474111e-06" d="6.928355229e-06"/><elevation s="21.25" a="-1.483722469" b="-0.06347896918" c="0.0004527766794" d="5.115002839e-06"/><elevation s="42.5" a="-2.579111546" b="-0.0373067299" c="0.000782997038" d="1.962905204e-06"/><elevation s="63.75" a="-2.999472001" b="-0.001370232642" c="0.0009082842628" d="-1.702941903e-06"/><elevation s="85" a="-2.634783257" b="0.03492489442" c="0.0007958470372" d="-4.923079507e-06"/><elevation s="106.25" a="-1.580494982" b="0.06207915923" c="0.0004751134586" d="-6.854703792e-06"/><elevation s="127.5" a="-0.1125451302" b="0.07298549967" c="3.002884755e-05" d="-6.992252414e-06"/><elevation s="148.75" a="1.384861061" b="0.06478940875" c="-0.0004229151876" d="-5.299724892e-06"/></elevationProfile>
+    <lanes>
+      <laneSection s="0">
+        <center><lane id="0" type="none" level="false"/></center>
+        <right><lane id="-1" type="driving" level="false"><link/><width sOffset="0" a="6.0" b="0" c="0" d="0"/><roadMark sOffset="0" type="solid" weight="standard" color="standard" width="0.12"/></lane></right>
+      </laneSection>
+    </lanes>
+  </road>
+  <road name="left" length="170.000000" id="4" junction="-1">
+    <link><predecessor elementType="junction" elementId="103"/><successor elementType="junction" elementId="104"/></link>
+    <type s="0" type="town"/>
+    <planView>
+      <geometry s="0" x="0.000000" y="185.000000" hdg="-1.570796326795" length="170.000000"><line/></geometry>
+    </planView>
+    <elevationProfile><elevation s="0" a="3" b="4.024998981e-17" c="-0.0009083681263" d="1.833246205e-06"/><elevation s="21.25" a="2.607406304" b="-0.03612216965" c="-0.000787491172" d="5.019924679e-06"/><elevation s="42.5" a="1.532378424" b="-0.06279011525" c="-0.000460504838" d="6.892742631e-06"/><elevation s="63.75" a="0.0562824708" b="-0.07302405858" c="-1.299097313e-05" d="6.961529049e-06"/><elevation s="85" a="-1.434544244" b="-0.06414547856" c="0.0004379230078" d="5.208280521e-06"/><elevation s="106.25" a="-2.549908942" b="-0.0384781582" c="0.0007742197807" d="2.091873262e-06"/><elevation s="127.5" a="-2.997888189" b="-0.002739982963" c="0.0009078806836" d="-1.572038168e-06"/><elevation s="148.75" a="-2.661232767" b="0.03371532564" c="0.0008039227646" d="-4.824501414e-06"/></elevationProfile>
+    <lanes>
+      <laneSection s="0">
+        <center><lane id="0" type="none" level="false"/></center>
+        <right><lane id="-1" type="driving" level="false"><link/><width sOffset="0" a="6.0" b="0" c="0" d="0"/><roadMark sOffset="0" type="solid" weight="standard" color="standard" width="0.12"/></lane></right>
+      </laneSection>
+    </lanes>
+  </road>
+  <road name="conn_br" length="23.561945" id="5" junction="101">
+    <link><predecessor elementType="road" elementId="1" contactPoint="end"/><successor elementType="road" elementId="2" contactPoint="start"/></link>
+    <type s="0" type="town"/>
+    <planView>
+      <geometry s="0" x="185.000000" y="0.000000" hdg="0.000000000000" length="23.561945"><arc curvature="0.066666666667"/></geometry>
+    </planView>
+    <elevationProfile><elevation s="0" a="-2.519808771" b="-0.03963604221" c="0.0007522132032" d="3.002980885e-06"/><elevation s="11.781" a="-2.877449071" b="-0.0206620732" c="0.0008587413835" d="1.029017415e-06"/></elevationProfile>
+    <lanes>
+      <laneSection s="0">
+        <center><lane id="0" type="none" level="false"/></center>
+        <right><lane id="-1" type="driving" level="false"><link><predecessor id="-1"/><successor id="-1"/></link><width sOffset="0" a="6.0" b="0" c="0" d="0"/><roadMark sOffset="0" type="solid" weight="standard" color="standard" width="0.12"/></lane></right>
+      </laneSection>
+    </lanes>
+  </road>
+  <road name="conn_tr" length="23.561945" id="6" junction="102">
+    <link><predecessor elementType="road" elementId="2" contactPoint="end"/><successor elementType="road" elementId="3" contactPoint="start"/></link>
+    <type s="0" type="town"/>
+    <planView>
+      <geometry s="0" x="200.000000" y="185.000000" hdg="1.570796326795" length="23.561945"><arc curvature="0.066666666667"/></geometry>
+    </planView>
+    <elevationProfile><elevation s="0" a="1.628055207" b="-0.06134635137" c="-0.0004851777461" d="6.543997874e-06"/><elevation s="11.781" a="0.8486971449" b="-0.07005333254" c="-0.0002525576856" d="7.126213969e-06"/></elevationProfile>
+    <lanes>
+      <laneSection s="0">
+        <center><lane id="0" type="none" level="false"/></center>
+        <right><lane id="-1" type="driving" level="false"><link><predecessor id="-1"/><successor id="-1"/></link><width sOffset="0" a="6.0" b="0" c="0" d="0"/><roadMark sOffset="0" type="solid" weight="standard" color="standard" width="0.12"/></lane></right>
+      </laneSection>
+    </lanes>
+  </road>
+  <road name="conn_tl" length="23.561945" id="7" junction="103">
+    <link><predecessor elementType="road" elementId="3" contactPoint="end"/><successor elementType="road" elementId="4" contactPoint="start"/></link>
+    <type s="0" type="town"/>
+    <planView>
+      <geometry s="0" x="15.000000" y="200.000000" hdg="3.141592653590" length="23.561945"><arc curvature="0.066666666667"/></geometry>
+    </planView>
+    <elevationProfile><elevation s="0" a="2.519808771" b="0.03963604221" c="-0.0007522132032" d="-3.002980885e-06"/><elevation s="11.781" a="2.877449071" b="0.0206620732" c="-0.0008587413835" d="-1.029017415e-06"/></elevationProfile>
+    <lanes>
+      <laneSection s="0">
+        <center><lane id="0" type="none" level="false"/></center>
+        <right><lane id="-1" type="driving" level="false"><link><predecessor id="-1"/><successor id="-1"/></link><width sOffset="0" a="6.0" b="0" c="0" d="0"/><roadMark sOffset="0" type="solid" weight="standard" color="standard" width="0.12"/></lane></right>
+      </laneSection>
+    </lanes>
+  </road>
+  <road name="conn_bl" length="23.561945" id="8" junction="104">
+    <link><predecessor elementType="road" elementId="4" contactPoint="end"/><successor elementType="road" elementId="1" contactPoint="start"/></link>
+    <type s="0" type="town"/>
+    <planView>
+      <geometry s="0" x="-0.000000" y="15.000000" hdg="-1.570796326795" length="23.561945"><arc curvature="0.066666666667"/></geometry>
+    </planView>
+    <elevationProfile><elevation s="0" a="-1.628055207" b="0.06134635137" c="0.0004851777461" d="-6.543997874e-06"/><elevation s="11.781" a="-0.8486971449" b="0.07005333254" c="0.0002525576856" d="-7.126213969e-06"/></elevationProfile>
+    <lanes>
+      <laneSection s="0">
+        <center><lane id="0" type="none" level="false"/></center>
+        <right><lane id="-1" type="driving" level="false"><link><predecessor id="-1"/><successor id="-1"/></link><width sOffset="0" a="6.0" b="0" c="0" d="0"/><roadMark sOffset="0" type="solid" weight="standard" color="standard" width="0.12"/></lane></right>
+      </laneSection>
+    </lanes>
+  </road>
+  <junction id="101" name="j1">
+    <connection id="0" incomingRoad="1" connectingRoad="5" contactPoint="start">
+      <laneLink from="-1" to="-1"/>
+    </connection>
+  </junction>
+  <junction id="102" name="j2">
+    <connection id="0" incomingRoad="2" connectingRoad="6" contactPoint="start">
+      <laneLink from="-1" to="-1"/>
+    </connection>
+  </junction>
+  <junction id="103" name="j3">
+    <connection id="0" incomingRoad="3" connectingRoad="7" contactPoint="start">
+      <laneLink from="-1" to="-1"/>
+    </connection>
+  </junction>
+  <junction id="104" name="j4">
+    <connection id="0" incomingRoad="4" connectingRoad="8" contactPoint="start">
+      <laneLink from="-1" to="-1"/>
+    </connection>
+  </junction>
+</OpenDRIVE>
