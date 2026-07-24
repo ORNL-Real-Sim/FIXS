@@ -39,7 +39,11 @@ if not exist "%YAMLCPP_BUILD%" mkdir "%YAMLCPP_BUILD%"
 pushd "%YAMLCPP_BUILD%"
 cmake -G "%CMAKE_GENERATOR%" "%YAMLCPP_DIR%"
 cmake --build . --config Release
-cmake --build . --config Debug
+if defined RS_FIXS_AUTOMATION (
+    echo [automation] Skipping yaml-cpp Debug build - the release CI only ships Release.
+) else (
+    cmake --build . --config Debug
+)
 popd
 
 REM Only pause if not called from dispatch
