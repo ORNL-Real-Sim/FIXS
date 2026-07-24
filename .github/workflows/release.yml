@@ -45,6 +45,31 @@ jobs:
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@v2
 
+      # Speed: yaml-cpp is vendored and rebuilt (Release+Debug) from source every
+      # run, but it almost never changes. Cache CommonLib/yaml-cpp/build keyed on
+      # the yaml-cpp source hash - on a hit, dispatch.bat's existing
+      # "if not exist yaml-cpp\build" guard skips step 1 entirely.
+      - name: Cache yaml-cpp build
+        uses: actions/cache@v4
+        with:
+          path: CommonLib/yaml-cpp/build
+          key: yamlcpp-${{ runner.os }}-vs2022-${{ hashFiles('CommonLib/yaml-cpp/CMakeLists.txt', 'CommonLib/yaml-cpp/include/**', 'CommonLib/yaml-cpp/src/**') }}
+
+      # Keep a rolling semver tag at dev_v0.9.0's HEAD so the build stamps the
+      # 0.9.0 line. Without it `git describe --match 'v[0-9]*'` finds v0.7.0 (the
+      # nearest ancestor semver tag) and the zip/macros mislabel as v0.7.0.
+      # Prerelease tag: sorts before the eventual real v0.9.0 release and parses
+      # to 0.9.0 in RealSimVersion.h. Only on a real push to dev_v0.9.0 (PRs and
+      # main never move it). #191.
+      - name: Roll the v0.9.0-alpha version tag to HEAD
+        if: github.event_name == 'push' && github.ref == 'refs/heads/dev_v0.9.0'
+        shell: bash
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -fa v0.9.0-alpha -m "rolling 0.9.0 dev version at $(git rev-parse --short HEAD)"
+          git push -f origin refs/tags/v0.9.0-alpha
+
       - name: Build + package (proprietary steps skipped; VE.lib builds on 0.9.0)
         shell: cmd
         run: |
