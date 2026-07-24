@@ -24,7 +24,7 @@ REM the hosted runner and VirtualEnvironment.lib ships in the alpha_v0.9.0 zip.
 REM The remaining proprietary binaries return via the ProprietaryBinaries bundle
 REM (see #191).
 if defined RS_FIXS_AUTOMATION (
-    echo [automation] RS_FIXS_AUTOMATION set - skipping proprietary steps 3/5a/5b/6 (step 4 builds).
+    echo [automation] RS_FIXS_AUTOMATION set - skipping proprietary steps 3/5a/5b/6; step 4 builds.
     echo.
 )
 
