@@ -1081,6 +1081,7 @@ int main(int argc, char* argv[]) {
 			PERF_TIC("prepare_send");
 			try {
 				MsgClient_c.clearSendStorage();
+				MsgClient_c.clearRecvStorage();   // #174 sequential: B (client-return bucket) starts empty this tick
 
 				for (unsigned int iC = 0; iC < actualClientSock.size(); iC++) {
 				//for (unsigned int iC = actualClientSock.size()-1; iC > 0; iC--) {
@@ -1094,7 +1095,15 @@ int main(int argc, char* argv[]) {
 					MsgClient_c.VehDataSend_um[actualClientSock[iC]] = {};
 					MsgClient_c.TlsDataSend_um[actualClientSock[iC]] = {};
 					MsgClient_c.DetDataSend_um[actualClientSock[iC]] = {};
-					for (auto it : MsgServer_c.VehDataRecv_um) {
+					// #174 sequential clients: publish the SUMO snapshot A OVERLAID with
+					// returns already gathered this tick from lower-port clients
+					// (B = MsgClient_c.VehDataRecv_um), B winning per id -- so a later
+					// client (e.g. VirCarlaEnv) sees an earlier client's (e.g. a speed-
+					// advisory controller) ego record. B is empty for the first
+					// (lowest-port) client, so single-client flows stay byte-identical.
+					unordered_map<string, VehFullData_t> pubSrc = MsgServer_c.VehDataRecv_um;
+					for (auto& bIt : MsgClient_c.VehDataRecv_um) pubSrc[bIt.first] = bIt.second;
+					for (auto it : pubSrc) {
 						if (ENABLE_VEH_SIMULATOR) {
 							// if id is ego, and is the first socket (XIL), send it 
 							if (it.second.id.compare(Config_c.CarMakerSetup.EgoId) == 0 && selfServerPortUserInput[iC] != Config_c.CarMakerSetup.CarMakerPort && Config_c.CarMakerSetup.EnableEgoSimulink) {
@@ -1215,6 +1224,30 @@ int main(int argc, char* argv[]) {
 						//fclose(f);
 					}
 
+					// ---- #174 sequential: RECV this client's return, merge into B ----
+					// (last-writer-wins per id; feeds the NEXT client's overlaid publish).
+					int simStateRecvC; float simTimeRecvC;
+					if (Sock_c.recvData(actualClientSock[iC], &simStateRecvC, &simTimeRecvC, MsgClient_c) < 0) {
+						if (WSAGetLastError() != WSAEINTR && WSAGetLastError() != WSAEFAULT)
+							printf("ERROR: receive from client fails\n");
+						g_shutdown.shutdownRequested = true;
+						break;
+					}
+					// drop client-returned ids SUMO doesn't know, EXCEPT Carla-owned ids
+					// (injected via the send path, so absent from SUMO until first inject).
+					if (!ENABLE_VEH_SIMULATOR) {
+						vector<string> idToRemove;
+						for (auto& rit : MsgClient_c.VehDataRecv_um) {
+							if (MsgServer_c.VehDataRecv_um.find(rit.first) == MsgServer_c.VehDataRecv_um.end()) {
+								if (ENABLE_CARLA && ENABLE_CARLA_EXTERNAL_CONTROL &&
+									find(Config_c.CarlaSetup.InterestedIds.begin(), Config_c.CarlaSetup.InterestedIds.end(), rit.first) != Config_c.CarlaSetup.InterestedIds.end())
+									continue;
+								idToRemove.push_back(rit.first);
+							}
+						}
+						for (auto& r : idToRemove) MsgClient_c.VehDataRecv_um.erase(r);
+					}
+
 				}
 			}
 			catch (const std::exception& e) {
@@ -1234,115 +1267,10 @@ int main(int argc, char* argv[]) {
 			break;
 		}
 
-		///****************************************************
-		// Traffic Layer <<<<<===== Clients (Controller, Vehicle Simulator, Models)
-		// RECV message from client (CAV CONTROLLER or VEHICLE)
-		///****************************************************
-
-		if (ENABLE_CLIENT) {
-			try {
-				MsgClient_c.clearRecvStorage();
-
-				for (unsigned int iC = 0; iC < actualClientSock.size(); iC++) {
-
-					int simStateRecv;
-					float simTimeRecv;
-
-					if (ENABLE_VERBOSE) {
-						printf("receiving client at port %d\n", selfServerPortUserInput[iC]);
-
-						FILE* f = fopen(MasterLogName.c_str(), "a");
-						fprintf(f, "recv client: %d\n", selfServerPortUserInput[iC]);
-						fclose(f);
-					}
-
-					// save received message into Msg_c recv storages
-					if (Sock_c.recvData(actualClientSock[iC], &simStateRecv, &simTimeRecv, MsgClient_c) < 0) {
-						if (WSAGetLastError() != WSAEINTR && WSAGetLastError() != WSAEFAULT) {
-							printf("ERROR: receive from client fails\n");
-						}
-						g_shutdown.shutdownRequested = true;
-						break;
-					};
-
-					if (ENABLE_VERBOSE) {
-
-						for (auto& it : MsgClient_c.VehDataRecv_um) {
-							string id = it.second.id;
-							// check desired speed or desired acceleration
-							if (MsgClient_c.VehicleMessageField_set.find("speedDesired") != MsgClient_c.VehicleMessageField_set.end()) {
-								float spd = it.second.speedDesired;
-								printf("\trecv id %s speed %f\n", id.c_str(), spd);
-
-								FILE* f = fopen(MasterLogName.c_str(), "a");
-								fprintf(f, "\tid %s spd %f\n", id.c_str(), spd);
-								fclose(f);
-							}
-							else {
-								float accel = it.second.accelerationDesired;
-								printf("\trecv id %s accel %f\n", id.c_str(), accel);
-
-								FILE* f = fopen(MasterLogName.c_str(), "a");
-								fprintf(f, "\id %s accel %f\n", id.c_str(), accel);
-								fclose(f);
-							}
-
-
-						}
-
-						printf("recv complete\n");
-
-						//FILE* f = fopen(MasterLogName.c_str(), "a");
-						//fprintf(f, "recv complete\n");
-						//fclose(f);
-					}
-
-
-					//!!!! if no current vehicle in SUMO, remove it from the recv list
-					if (!ENABLE_VEH_SIMULATOR) {
-						vector <string> idToRemove;
-						for (auto& it : MsgClient_c.VehDataRecv_um) {
-							//string id = it.first;
-							//printf("current id %s\n", id);
-							if (MsgServer_c.VehDataRecv_um.find(it.first) == MsgServer_c.VehDataRecv_um.end()) {
-								// EXEMPT ids owned by Carla external control: those are
-								// INJECTED into the traffic simulator by the send path
-								// (addEgoVehicleFromXY + moveToXY), so they are NOT in
-								// the SUMO feed until after the first injection --
-								// dropping them here would deadlock that injection.
-								if (ENABLE_CARLA && ENABLE_CARLA_EXTERNAL_CONTROL &&
-									find(Config_c.CarlaSetup.InterestedIds.begin(),
-									     Config_c.CarlaSetup.InterestedIds.end(),
-									     it.first) != Config_c.CarlaSetup.InterestedIds.end()) {
-									continue;
-								}
-								idToRemove.push_back(it.first);
-
-							}
-						}
-						for (int i = 0; i < idToRemove.size(); i++) {
-							MsgClient_c.VehDataRecv_um.erase(idToRemove[i]);
-						}
-					}
-
-					int aa = 1;
-
-				}
-			}
-			catch (const std::exception& e) {
-				printf("ERROR: Exception in receive from client: %s\n", e.what());
-				g_shutdown.shutdownRequested = true;
-				break;
-			}
-			catch (...) {
-				printf("UNKNOWN ERROR: receive from client fails\n");
-				g_shutdown.shutdownRequested = true;
-				break;
-			}
-		}
-		else {
-			//Sleep(100);
-		}
+		// #174 sequential clients: client RECV now happens INLINE in the publish loop
+		// above (each client's publish overlays A with B-so-far, then recv+merge), so a
+		// lower-port client's return feeds a higher-port client's publish the same tick.
+		// The legacy broadcast-recv block that used to live here was removed.
 
 		// Check if shutdown was requested during client recv
 		if (g_shutdown.shutdownRequested) {

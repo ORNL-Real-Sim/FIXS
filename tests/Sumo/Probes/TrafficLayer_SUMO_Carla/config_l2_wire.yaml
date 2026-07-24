@@ -1,0 +1,96 @@
+# =============================================================================
+# FIXS #174 -- SUMO <-> Carla co-simulation, EgoMode 2 "Advisory" (L2), WIRE path.
+#
+# Same as config_l2_advisory.yaml, but the desired-speed advisory is NOT generated
+# inside the bridge. Instead an EXTERNAL controller (py_ego_speed_advisor.py)
+# connects to TrafficLayer as a client and streams the ego's speedDesired over
+# FIXS. TrafficLayer's SEQUENTIAL client path overlays that advisory into the feed
+# VirCarlaEnv receives, and VirCarlaEnv reads it off the wire (EgoAdvisorySource:
+# wire) -> applyEgoControl -> the real Carla ego tracks it. The genuine L2-via-FIXS
+# path (the CommonLib/EgoSpeedAdvisor stand-in moved out of the bridge, into Python).
+#
+# Client ORDER matters: the advisor MUST be on a LOWER port than VirCarlaEnv so
+# TrafficLayer processes it first (ascending-port order) -- its advisory is then in
+# bucket B before VirCarlaEnv is published. Advisor = 400, VirCarlaEnv = 440.
+#
+# Run: run_sumo_carla_l2_wire.bat (one click): CARLA + SUMO + TrafficLayer +
+# py_ego_speed_advisor.py (client 400) + VirCarlaEnv (client 440).
+# =============================================================================
+
+SimulationSetup:
+    EnableRealSim: true
+    EnableVerboseLog: false
+
+    SelectedTrafficSimulator: 'SUMO'
+
+    SimulationEndTime: 1000
+
+    VehicleMessageField: [id, type, vehicleClass, speed, speedDesired, positionX, positionY, positionZ, heading, grade, length, width, height, color, linkId, laneId]
+
+    TrafficSimulatorIP: '127.0.0.1'
+    TrafficSimulatorPort: 1337
+
+SumoSetup:
+    SpeedMode: 32
+
+# TWO ordered application clients. [0] = the advisory controller (lower port ->
+# processed FIRST); [1] = VirCarlaEnv (higher port -> sees the advisory in B).
+ApplicationSetup:
+    EnableApplicationLayer: true
+    VehicleSubscription:
+    -   type: ego
+        attribute: { id: ['ego'], radius: [500] }
+        ip: ['127.0.0.1']
+        port: [400]     # py_ego_speed_advisor.py (external L2 controller)
+    -   type: ego
+        attribute: { id: ['ego'], radius: [500] }
+        ip: ['127.0.0.1']
+        port: [440]     # VirCarlaEnv (the Carla bridge / ego owner)
+
+XilSetup:
+    EnableXil: false
+
+CarlaSetup:
+    EnableVerboseLog: true
+    EnableCosimulation: true
+
+    EnableExternalControl: true
+
+    # ---- EgoMode 2: L0 physics + EXTERNAL (wire) speed advisory ----------------
+    EgoMode: 2
+    EgoL0Driver: Pursuit
+    EgoAdvisorySource: wire        # read ego.speedDesired off the FIXS wire (from the controller)
+    EgoId: ego
+    EgoSumoType: car
+    EgoBlueprint: vehicle.tesla.model3
+    EgoSpawnPose: [20.1, -3.0, 0.0, 90.0]
+    TrafficManagerPort: 8000
+
+    EgoRoutePoints: [[15.0, -3.0], [185.0, -3.0], [192.9, -1.9], [198.5, 1.5], [201.9, 7.1], [203.0, 15.0], [203.0, 185.0], [201.9, 192.9], [198.5, 198.5], [192.9, 201.9], [185.0, 203.0], [15.0, 203.0], [7.1, 201.9], [1.5, 198.5], [-1.9, 192.9], [-3.0, 185.0], [-3.0, 15.0], [-1.9, 7.1], [1.5, 1.5], [7.1, -1.9]]
+    EgoRouteRepeat: 50
+    EgoTargetSpeed: 8.33            # fallback until the controller's advisory arrives
+
+    UseVehicleTypeAsBlueprint: false
+
+    CarlaServerIP: 127.0.0.1
+    CarlaServerPort: 2000
+
+    CarlaClientIP: 127.0.0.1
+    CarlaClientPort: 440           # VirCarlaEnv connects here (matches subscription[1])
+
+    TrafficRefreshRate: 0.1
+    CarlaTimeStep: 0.05
+
+    InterestedIds: ['ego']
+
+    EnableSpectatorFollow: true
+    CenteredViewId: ego
+    SpectatorHeight: 50
+    SpectatorAlignYaw: false
+
+# speed = MEASURED, speedDesired = the COMMANDED wire advisory (from the controller).
+DataLogSetup:
+    EnableDataLog: true
+    DataLogPath: '_datalog/l2_wire.csv'
+    DataLogWho: ['ego']
+    DataLogFields: [positionX, positionY, positionZ, heading, speed, speedDesired]

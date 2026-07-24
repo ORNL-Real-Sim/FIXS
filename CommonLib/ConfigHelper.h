@@ -209,6 +209,11 @@ struct CarlaSetup_t {
 	// knots, looped by EgoSpeedAdvisor. Empty -> L2 degenerates to constant target.
 	std::vector<std::pair<double, double>> EgoSpeedProfile;
 
+	// L2 advisory source: "local" = the in-process EgoSpeedAdvisor (self-contained
+	// demo); "wire" = read speedDesired off the ego's received FIXS record (fed by an
+	// external controller through TrafficLayer's sequential-client path). Default local.
+	std::string EgoAdvisorySource;
+
 };
 
 struct SumoSetup_t {

@@ -202,12 +202,16 @@ int main(int argc, const char* argv[]) {
         // swap-in point for a separate advisory client later. Empty profile -> the
         // advisor returns EgoTargetSpeed, so EgoMode 2 degenerates to constant L0.
         virenv::EgoSpeedAdvisor speedAdvisor;
+        // L2 advisory source: "wire" = read speedDesired off the ego's received FIXS
+        // record (an external controller feeds it through TrafficLayer's sequential
+        // client path); "local" = the in-process EgoSpeedAdvisor stand-in.
+        const bool advisoryFromWire = (cs.EgoAdvisorySource == "wire" || cs.EgoAdvisorySource == "Wire");
         if (egoMode >= 2) {
             speedAdvisor.setProfile(cs.EgoSpeedProfile);
-            std::cout << "L2 advisory: artificial speed controller, "
-                      << speedAdvisor.knotCount() << " knots, period "
-                      << speedAdvisor.period() << " s (driver: "
-                      << (useFallbackDriver ? "EgoDriver" : "TM") << ")\n";
+            std::cout << "L2 advisory source: "
+                      << (advisoryFromWire ? "EXTERNAL (wire: ego.speedDesired via TrafficLayer)"
+                                           : "LOCAL EgoSpeedAdvisor (in-process)")
+                      << " -- driver: " << (useFallbackDriver ? "EgoDriver" : "TM") << "\n";
         }
         double lastAdvisory = cs.EgoTargetSpeed;   // most-recent commanded desired speed (for the wire/log)
 
@@ -255,7 +259,16 @@ int main(int argc, const char* argv[]) {
             if (egoMode >= 2) {
                 const bool onFeedNow = std::fabs(simTime * 10.0 - std::llround(simTime * 10.0)) < 1e-6;
                 if (onFeedNow) {
-                    lastAdvisory = speedAdvisor.desiredSpeed(simTime, cs.EgoTargetSpeed);
+                    if (advisoryFromWire) {
+                        // external controller's advisory rides on the ego's received
+                        // FIXS record (TrafficLayer sequential overlay merged it in).
+                        auto itAdv = core.Msg_c.VehDataRecv_um.find(egoId);
+                        if (itAdv != core.Msg_c.VehDataRecv_um.end() && itAdv->second.speedDesired > 0.0f)
+                            lastAdvisory = itAdv->second.speedDesired;
+                        // else keep the last advisory (controller not up yet / no update)
+                    } else {
+                        lastAdvisory = speedAdvisor.desiredSpeed(simTime, cs.EgoTargetSpeed);
+                    }
                     backend.applyEgoControl(egoId, lastAdvisory);
                 }
             }

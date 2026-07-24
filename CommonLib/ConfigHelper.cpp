@@ -578,6 +578,7 @@ int ConfigHelper::getConfig(string configName) {
 				node["EgoSpeedProfile"][i][0].as<double>(), node["EgoSpeedProfile"][i][1].as<double>()));
 		}
 	}
+	CarlaSetup.EgoAdvisorySource = node["EgoAdvisorySource"] ? parserString(node, "EgoAdvisorySource") : "local";
 
 	if (node["CarlaServerIP"]) {
 		CarlaSetup.CarlaServerIP = parserString(node, "CarlaServerIP");
