@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!-- generated on 2026-06-25 08:31:30 by Eclipse SUMO netconvert Version 1.21.0
+<netconvertConfiguration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/netconvertConfiguration.xsd">
+
+    <input>
+        <node-files value="nodes.nod.xml"/>
+        <edge-files value="edges.edg.xml"/>
+    </input>
+
+    <output>
+        <output-file value="junction.net.xml"/>
+        <opendrive-output value="junction.xodr"/>
+    </output>
+
+    <processing>
+        <geometry.remove value="false"/>
+        <offset.disable-normalization value="true"/>
+    </processing>
+
+    <tls_building>
+        <tls.guess value="true"/>
+    </tls_building>
+
+    <junctions>
+        <no-turnarounds value="true"/>
+    </junctions>
+
+</netconvertConfiguration>
+-->
+
+<net version="1.20" junctionCornerDetail="5" rectangularLaneCut="true" limitTurnSpeed="5.50" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/net_file.xsd">
+
+    <location netOffset="0.00,0.00" convBoundary="-120.00,-80.00,120.00,80.00" origBoundary="-120.00,-80.00,120.00,80.00" projParameter="!"/>
+
+    <edge id=":jC_0" function="internal">
+        <lane id=":jC_0_0" index="0" speed="13.89" length="11.20" shape="-1.60,4.00 -1.60,-7.20"/>
+    </edge>
+    <edge id=":jC_1" function="internal">
+        <lane id=":jC_1_0" index="0" speed="6.51" length="9.03" shape="-1.60,4.00 -1.25,1.55 -0.20,-0.20 1.55,-1.25 4.00,-1.60"/>
+    </edge>
+    <edge id=":jC_2" function="internal">
+        <lane id=":jC_2_0" index="0" speed="6.51" length="9.03" shape="-7.20,-1.60 -4.75,-1.95 -3.00,-3.00 -1.95,-4.75 -1.60,-7.20"/>
+    </edge>
+    <edge id=":jC_3" function="internal">
+        <lane id=":jC_3_0" index="0" speed="13.89" length="11.20" shape="-7.20,-1.60 4.00,-1.60"/>
+    </edge>
+
+    <edge id="appr" from="jW" to="jC" priority="3">
+        <lane id="appr_0" index="0" speed="13.89" length="112.80" shape="-120.00,-1.60 -7.20,-1.60"/>
+    </edge>
+    <edge id="crossN" from="jN" to="jC" priority="3">
+        <lane id="crossN_0" index="0" speed="13.89" length="76.00" shape="-1.60,80.00 -1.60,4.00"/>
+    </edge>
+    <edge id="crossS" from="jC" to="jS" priority="3">
+        <lane id="crossS_0" index="0" speed="13.89" length="72.80" shape="-1.60,-7.20 -1.60,-80.00"/>
+    </edge>
+    <edge id="dep" from="jC" to="jE" priority="3">
+        <lane id="dep_0" index="0" speed="13.89" length="116.00" shape="4.00,-1.60 120.00,-1.60"/>
+    </edge>
+
+    <tlLogic id="jC" type="static" programID="0" offset="0">
+        <phase duration="42" state="GGrr"/>
+        <phase duration="3"  state="yyrr"/>
+        <phase duration="42" state="rrGG"/>
+        <phase duration="3"  state="rryy"/>
+    </tlLogic>
+
+    <junction id="jC" type="traffic_light" x="0.00" y="0.00" incLanes="crossN_0 appr_0" intLanes=":jC_0_0 :jC_1_0 :jC_2_0 :jC_3_0" shape="-3.20,4.00 0.00,4.00 0.44,1.78 1.00,1.00 1.78,0.44 2.78,0.11 4.00,0.00 4.00,-3.20 1.78,-3.64 1.00,-4.20 0.44,-4.98 0.11,-5.98 0.00,-7.20 -3.20,-7.20 -3.64,-4.98 -4.20,-4.20 -4.98,-3.64 -5.98,-3.31 -7.20,-3.20 -7.20,0.00 -4.98,0.44 -4.20,1.00 -3.64,1.78 -3.31,2.78">
+        <request index="0" response="1100" foes="1100" cont="0"/>
+        <request index="1" response="1000" foes="1000" cont="0"/>
+        <request index="2" response="0000" foes="0001" cont="0"/>
+        <request index="3" response="0000" foes="0011" cont="0"/>
+    </junction>
+    <junction id="jE" type="dead_end" x="120.00" y="0.00" incLanes="dep_0" intLanes="" shape="120.00,-3.20 120.00,0.00"/>
+    <junction id="jN" type="dead_end" x="0.00" y="80.00" incLanes="" intLanes="" shape="0.00,80.00 -3.20,80.00"/>
+    <junction id="jS" type="dead_end" x="0.00" y="-80.00" incLanes="crossS_0" intLanes="" shape="-3.20,-80.00 0.00,-80.00"/>
+    <junction id="jW" type="dead_end" x="-120.00" y="0.00" incLanes="" intLanes="" shape="-120.00,0.00 -120.00,-3.20"/>
+
+    <connection from="appr" to="crossS" fromLane="0" toLane="0" via=":jC_2_0" tl="jC" linkIndex="2" dir="r" state="O"/>
+    <connection from="appr" to="dep" fromLane="0" toLane="0" via=":jC_3_0" tl="jC" linkIndex="3" dir="s" state="O"/>
+    <connection from="crossN" to="crossS" fromLane="0" toLane="0" via=":jC_0_0" tl="jC" linkIndex="0" dir="s" state="o"/>
+    <connection from="crossN" to="dep" fromLane="0" toLane="0" via=":jC_1_0" tl="jC" linkIndex="1" dir="l" state="o"/>
+
+    <connection from=":jC_0" to="crossS" fromLane="0" toLane="0" dir="s" state="M"/>
+    <connection from=":jC_1" to="dep" fromLane="0" toLane="0" dir="l" state="M"/>
+    <connection from=":jC_2" to="crossS" fromLane="0" toLane="0" dir="r" state="M"/>
+    <connection from=":jC_3" to="dep" fromLane="0" toLane="0" dir="s" state="M"/>
+
+</net>
