@@ -26,13 +26,17 @@ if (-not (Test-Path $BuildDir)) {
     Exit-Script 1
 }
 
-# Determine version label from git
+# Determine version label from git.
+# Full semver-matched describe (e.g. v0.8.0-120-gce90f3c0) so the zip name is
+# traceable to the exact commit. --match 'v[0-9]*' ignores the rolling
+# lightweight tags (latest, alpha_v0.9.0) that would otherwise shadow the real
+# semver tag (#191); --always degrades a tagless checkout to the short SHA.
 $VersionLabel = 'dev'
 try {
-    $tag = git describe --tags --abbrev=0 2>$null
+    $describe = git describe --tags --match 'v[0-9]*' --always 2>$null
     $commit = git rev-parse --short HEAD 2>$null
-    if ($tag) {
-        $VersionLabel = "$tag-$commit"
+    if ($describe) {
+        $VersionLabel = $describe
     } elseif ($commit) {
         $VersionLabel = "dev-$commit"
     }
