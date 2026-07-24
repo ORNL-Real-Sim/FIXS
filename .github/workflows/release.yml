@@ -78,6 +78,48 @@ jobs:
           REM <nul so the trailing `pause` in dispatch.bat returns immediately.
           call scripts\dispatch\dispatch.bat <nul
 
+      # Overlay the licensed-toolchain binaries (VISSIM/CarMaker/dSPACE/MEX) that
+      # the hosted runner cannot build, pulled from the public FIXS-Binaries repo
+      # keyed by the pinned ProprietaryFiles SHA, then re-pack the complete zip.
+      # OPTIONAL: if no bundle is published for this SHA yet, ship public-core
+      # only (a warning, not a failure). When a bundle IS present, the message-
+      # contract compat guard fails the build on a wire-format mismatch (#191).
+      - name: Overlay proprietary bundle from FIXS-Binaries (if published)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $pf = (git ls-tree HEAD ProprietaryFiles).Trim().Split()[2]
+          Write-Host "Pinned ProprietaryFiles SHA: $pf"
+          $tmp = Join-Path $env:RUNNER_TEMP "fixs-bin"
+          New-Item -ItemType Directory -Path $tmp -Force | Out-Null
+          # Public repo -> a read works; --clobber avoids partial-file reruns.
+          gh release download $pf --repo ORNL-Real-Sim/FIXS-Binaries --pattern 'fixs-binaries-*.zip' --dir $tmp --clobber 2>$null
+          $bundle = Get-ChildItem $tmp -Filter 'fixs-binaries-*.zip' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $bundle) {
+            Write-Warning "No FIXS-Binaries bundle for ProprietaryFiles $pf - shipping public-core only. Publish one via scripts/dispatch/pack_binaries.ps1 -Publish on a licensed box."
+            exit 0
+          }
+          $x = Join-Path $tmp 'unzipped'
+          Expand-Archive -Path $bundle.FullName -DestinationPath $x -Force
+
+          # Compatibility guard: the bundle must have been built against the same
+          # message contract as the fresh public parts, else the zip's components
+          # disagree on the wire format.
+          $manifest = Get-Content (Join-Path $x 'manifest.json') -Raw | ConvertFrom-Json
+          $current  = (& powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dispatch/msg_contract_hash.ps1).Trim()
+          if ($manifest.msg_contract_hash -ne $current) {
+            Write-Error "Compat guard FAILED: bundle was built against message-contract $($manifest.msg_contract_hash) but the current tree is $current. Rebuild the proprietary bundle (pack_binaries.ps1) against the current ProprietaryFiles and re-publish to FIXS-Binaries."
+            exit 1
+          }
+
+          # Overlay into build/ (everything except the manifest), then re-pack.
+          Get-ChildItem $x -Exclude 'manifest.json' | ForEach-Object {
+            Copy-Item $_.FullName -Destination build -Recurse -Force
+          }
+          Write-Host "Overlaid $($manifest.file_count) proprietary files into build/; re-packing complete zip..."
+          & powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dispatch/8_create_zip.ps1 -RunMode inline
+
       - name: Sanity-check the packaged zip
         shell: pwsh
         run: |
