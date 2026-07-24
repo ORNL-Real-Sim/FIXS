@@ -76,6 +76,31 @@ try {
         }
     }
 
+    # Include the conda env spec so the fetched FIXS/ folder carries the
+    # canonical 'realsim' environment definition. carla is pulled from PyPI
+    # (carla==0.9.15), so no wheel needs to be bundled here.
+    $EnvYml = Join-Path $RepoRoot 'environment.yml'
+    if (Test-Path $EnvYml) {
+        Copy-Item -Path $EnvYml -Destination $StagingDir -Force
+        Write-Host "  + environment.yml"
+    }
+
+    # Ship the self-contained Carla/ co-sim component (sumo/ runtime + utils/ +
+    # run_cosim), minus the carla wheel. Consumers (e.g. FIXS_Applications'
+    # roosevelt_sumo_carla) fetch Carla/ from this release zip. Test-only files
+    # and the .ps1 build tooling under scripts/ stay source-side.
+    $CarlaSrc = Join-Path $RepoRoot 'Carla'
+    if (Test-Path $CarlaSrc) {
+        $carlaDest = Join-Path $StagingDir 'Carla'
+        New-Item -ItemType Directory -Path $carlaDest -Force | Out-Null
+        Get-ChildItem -Path $CarlaSrc -Exclude '*.whl' | ForEach-Object {
+            Copy-Item -Path $_.FullName -Destination $carlaDest -Recurse -Force
+        }
+        Get-ChildItem -Path $carlaDest -Recurse -Directory -Filter '__pycache__' -ErrorAction SilentlyContinue |
+            Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Host "  + Carla/ co-sim component"
+    }
+
     Compress-Archive -Path "$StagingDir\*" -DestinationPath $ZipPath -CompressionLevel Optimal
     Remove-Item $StagingDir -Recurse -Force
 
