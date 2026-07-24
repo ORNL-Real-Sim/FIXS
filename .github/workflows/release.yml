@@ -1,0 +1,102 @@
+name: Release (public core)
+
+# Automated release pipeline for #191 / #57 - two rolling channels, one workflow:
+#
+#   push -> main          publishes the 'latest' prerelease   (current train)
+#   push -> dev_v0.9.0    publishes the 'alpha_v0.9.0' prerelease (0.9.0 train)
+#
+# On pull requests it builds + packages only (NO publish) as a build gate.
+#
+# The build runs the real dispatch flow with RS_FIXS_AUTOMATION, so the licensed
+# toolchain steps (VISSIM 3, CarMaker 5a, dSPACE 5b, MEX 6) are skipped. On the
+# 0.9.0 train VirtualEnvironment (step 4) is SDK-free (#174), so it builds on the
+# hosted runner and VirtualEnvironment.lib ships in alpha_v0.9.0; on main it is
+# still skipped (needs the CarMaker SDK) until the SDK-free refactor reaches that
+# train. The remaining proprietary binaries return via the pinned
+# ProprietaryBinaries bundle (also #191).
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish the built zip to this branch''s rolling prerelease'
+        type: boolean
+        default: false
+  pull_request:
+    branches: [dev, main, dev_v0.9.0]
+  push:
+    branches: [main, dev_v0.9.0]
+
+permissions:
+  contents: write   # create/update the rolling release + tag on publish
+
+jobs:
+  build-publish:
+    # windows-2022 = VS 2022 (v17), matching the generator dispatch derives from
+    # dependencies.yaml. windows-latest ships VS 2026 (v18), incompatible.
+    runs-on: windows-2022
+    steps:
+      - name: Checkout (full history for git describe; no private submodule)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: false
+
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build + package (proprietary steps skipped; VE.lib builds on 0.9.0)
+        shell: cmd
+        run: |
+          set RS_BUILD_CONFIG=Release
+          set RS_FIXS_AUTOMATION=1
+          REM <nul so the trailing `pause` in dispatch.bat returns immediately.
+          call scripts\dispatch\dispatch.bat <nul
+
+      - name: Sanity-check the packaged zip
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem build -Filter 'fixs-build-*.zip' -ErrorAction SilentlyContinue |
+                 Select-Object -First 1
+          if (-not $zip) { Write-Error "No fixs-build-*.zip produced (see build-logs)."; exit 1 }
+          Write-Host "Packaged: $($zip.Name) ($([math]::Round($zip.Length/1MB,1)) MB)"
+          $names = Get-ChildItem build -Recurse -File | ForEach-Object { $_.Name }
+          if ($names -notcontains 'TrafficLayer.exe') {
+            Write-Error "TrafficLayer.exe missing from build/ - public core did not build."
+            exit 1
+          }
+          if ($names -contains 'VirtualEnvironment.lib') {
+            Write-Host "VirtualEnvironment.lib present (SDK-free CI build - expected on the 0.9.0 train)."
+          } else {
+            Write-Host "VirtualEnvironment.lib absent (expected on the current/main train)."
+          }
+
+      - name: Upload packaged zip as a workflow artifact (inspect on PRs)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fixs-build-zip
+          path: build/fixs-build-*.zip
+          if-no-files-found: warn
+
+      - name: Publish rolling prerelease (main -> latest, dev_v0.9.0 -> alpha_v0.9.0)
+        if: (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev_v0.9.0')) || (github.event_name == 'workflow_dispatch' && inputs.publish)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          switch ($env:GITHUB_REF) {
+            'refs/heads/main'       { & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dispatch\publish_release.ps1 -Tag latest }
+            'refs/heads/dev_v0.9.0' { & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dispatch\publish_release.ps1 -Tag alpha_v0.9.0 -Rolling }
+            default { Write-Error "Refusing to publish from $($env:GITHUB_REF) - only main/dev_v0.9.0 have a rolling channel."; exit 1 }
+          }
+
+      - name: Upload build logs (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            scripts/dispatch/build.log
+            scripts/dispatch/build_summary.log
+          if-no-files-found: ignore
