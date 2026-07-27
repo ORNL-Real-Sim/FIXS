@@ -1,0 +1,52 @@
+name: Bundle guard
+
+# Fails a PR that moves the proprietary-bundle key - i.e. bumps the
+# ProprietaryFiles submodule pointer OR changes the wire contract
+# (CommonLib/VehDataMsgDefs.h) - unless the matching Binaries-<key> release is
+# already published. This makes "moved the SHA but forgot to rebuild + publish
+# the binaries" impossible to merge through.
+#
+# Cheap: no compile, just a diff + one API call on a free Ubuntu runner.
+# To actually BLOCK a merge (not just show red), mark "bundle-guard" a REQUIRED
+# status check in the branch protection rules. (#191)
+
+on:
+  pull_request:
+    branches: [dev, dev_v0.9.0, main]
+
+jobs:
+  bundle-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: false   # only the submodule POINTER is needed, not content
+
+      - name: Require a published bundle when the key moves
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Did this PR touch either input that defines the bundle key?
+          changed=$(git diff --name-only "$BASE_SHA" HEAD -- ProprietaryFiles CommonLib/VehDataMsgDefs.h || true)
+          if [ -z "$changed" ]; then
+            echo "Bundle-key inputs unchanged (ProprietaryFiles / VehDataMsgDefs.h) - nothing to verify."
+            exit 0
+          fi
+          echo "Bundle-key inputs changed by this PR:"; echo "$changed"
+
+          # Same key formula as pack_binaries.ps1 and release.yml (pwsh is
+          # preinstalled on ubuntu-latest).
+          key=$(pwsh -NoProfile -File scripts/dispatch/bundle_key.ps1 | tr -d '[:space:]')
+          echo "Required bundle release: Binaries-$key"
+
+          if gh release view "Binaries-$key" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "OK - Binaries-$key is published; safe to merge."
+            exit 0
+          fi
+
+          echo "::error title=Missing proprietary binaries bundle::This PR moves the proprietary-bundle key to '$key' but release 'Binaries-$key' is not published. On a licensed box run a full dispatch, then scripts/dispatch/pack_binaries.ps1 -Publish, and re-run this check before merging."
+          exit 1

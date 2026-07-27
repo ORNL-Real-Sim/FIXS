@@ -55,20 +55,19 @@ jobs:
           path: CommonLib/yaml-cpp/build
           key: yamlcpp-${{ runner.os }}-vs2022-${{ hashFiles('CommonLib/yaml-cpp/CMakeLists.txt', 'CommonLib/yaml-cpp/include/**', 'CommonLib/yaml-cpp/src/**') }}
 
-      # Keep a rolling semver tag at dev_v0.9.0's HEAD so the build stamps the
-      # 0.9.0 line. Without it `git describe --match 'v[0-9]*'` finds v0.7.0 (the
-      # nearest ancestor semver tag) and the zip/macros mislabel as v0.7.0.
-      # Prerelease tag: sorts before the eventual real v0.9.0 release and parses
-      # to 0.9.0 in RealSimVersion.h. Only on a real push to dev_v0.9.0 (PRs and
-      # main never move it). #191.
-      - name: Roll the v0.9.0-alpha version tag to HEAD
+      # Place the v0.9.0-alpha tag at HEAD *locally* so this build's
+      # `git describe --match 'v[0-9]*'` stamps the 0.9.0 line (otherwise it
+      # finds v0.7.0, the nearest ancestor, and mislabels as v0.7.0). LOCAL only
+      # - the real, persistent v0.9.0-alpha tag is (re)created by the publish
+      # step as a prerelease Release anchored to this commit, so there's exactly
+      # ONE tag and it's never orphaned if the build fails. #191.
+      - name: Stamp v0.9.0-alpha for this build (local tag, for git describe)
         if: github.event_name == 'push' && github.ref == 'refs/heads/dev_v0.9.0'
         shell: bash
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -fa v0.9.0-alpha -m "rolling 0.9.0 dev version at $(git rev-parse --short HEAD)"
-          git push -f origin refs/tags/v0.9.0-alpha
+          git tag -fa v0.9.0-alpha -m "0.9.0 dev version at $(git rev-parse --short HEAD)"
 
       - name: Build + package (proprietary steps skipped; VE.lib builds on 0.9.0)
         shell: cmd
@@ -79,45 +78,41 @@ jobs:
           call scripts\dispatch\dispatch.bat <nul
 
       # Overlay the licensed-toolchain binaries (VISSIM/CarMaker/dSPACE/MEX) that
-      # the hosted runner cannot build, pulled from the public FIXS-Binaries repo
-      # keyed by the pinned ProprietaryFiles SHA, then re-pack the complete zip.
-      # OPTIONAL: if no bundle is published for this SHA yet, ship public-core
-      # only (a warning, not a failure). When a bundle IS present, the message-
-      # contract compat guard fails the build on a wire-format mismatch (#191).
-      - name: Overlay proprietary bundle from FIXS-Binaries (if published)
+      # the hosted runner cannot build, pulled from the Binaries-<key> release on
+      # THIS repo (native token). The composite key = ProprietaryFiles SHA +
+      # message-contract hash, so an exact key match IS the compatibility
+      # guarantee - no separate guard needed. Then re-pack the complete zip.
+      # OPTIONAL for now: if no bundle is published for this key yet, ship
+      # public-core with a warning (bootstrap). Flip to a hard failure once the
+      # first bundle exists, so a "complete" release can never silently drop its
+      # binaries. The bundle-guard PR check makes the missing-bundle case
+      # unmergeable in the first place (#191).
+      - name: Overlay proprietary bundle (Binaries-<key>, if published)
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $pf = (git ls-tree HEAD ProprietaryFiles).Trim().Split()[2]
-          Write-Host "Pinned ProprietaryFiles SHA: $pf"
+          $key = (& scripts/dispatch/bundle_key.ps1).Trim()
+          $tag = "Binaries-$key"
+          Write-Host "Bundle key: $key  ->  release $tag"
           $tmp = Join-Path $env:RUNNER_TEMP "fixs-bin"
           New-Item -ItemType Directory -Path $tmp -Force | Out-Null
-          # Public repo -> a read works; --clobber avoids partial-file reruns.
-          gh release download $pf --repo ORNL-Real-Sim/FIXS-Binaries --pattern 'fixs-binaries-*.zip' --dir $tmp --clobber 2>$null
+          gh release download $tag --repo $env:GITHUB_REPOSITORY --pattern 'fixs-binaries-*.zip' --dir $tmp --clobber 2>$null
           $bundle = Get-ChildItem $tmp -Filter 'fixs-binaries-*.zip' -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $bundle) {
-            Write-Warning "No FIXS-Binaries bundle for ProprietaryFiles $pf - shipping public-core only. Publish one via scripts/dispatch/pack_binaries.ps1 -Publish on a licensed box."
+            Write-Warning "No $tag release - shipping public-core only. Publish it via scripts/dispatch/pack_binaries.ps1 -Publish on a licensed box."
             exit 0
           }
           $x = Join-Path $tmp 'unzipped'
           Expand-Archive -Path $bundle.FullName -DestinationPath $x -Force
-
-          # Compatibility guard: the bundle must have been built against the same
-          # message contract as the fresh public parts, else the zip's components
-          # disagree on the wire format.
-          $manifest = Get-Content (Join-Path $x 'manifest.json') -Raw | ConvertFrom-Json
-          $current  = (& powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dispatch/msg_contract_hash.ps1).Trim()
-          if ($manifest.msg_contract_hash -ne $current) {
-            Write-Error "Compat guard FAILED: bundle was built against message-contract $($manifest.msg_contract_hash) but the current tree is $current. Rebuild the proprietary bundle (pack_binaries.ps1) against the current ProprietaryFiles and re-publish to FIXS-Binaries."
-            exit 1
-          }
-
           # Overlay into build/ (everything except the manifest), then re-pack.
+          # No wire-format check needed: the key encodes the contract hash, so a
+          # matching $tag is guaranteed compatible.
           Get-ChildItem $x -Exclude 'manifest.json' | ForEach-Object {
             Copy-Item $_.FullName -Destination build -Recurse -Force
           }
-          Write-Host "Overlaid $($manifest.file_count) proprietary files into build/; re-packing complete zip..."
+          $n = (Get-ChildItem $x -Recurse -File | Where-Object { $_.Name -ne 'manifest.json' }).Count
+          Write-Host "Overlaid $n proprietary files into build/; re-packing complete zip..."
           & powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dispatch/8_create_zip.ps1 -RunMode inline
 
       - name: Sanity-check the packaged zip
@@ -146,15 +141,20 @@ jobs:
           path: build/fixs-build-*.zip
           if-no-files-found: warn
 
-      - name: Publish rolling prerelease (main -> latest, dev_v0.9.0 -> alpha_v0.9.0)
+      # main -> latest ; dev_v0.9.0 -> v0.9.0-alpha (ONE tag: the release IS the
+      # version stamp). -Target $GITHUB_SHA anchors the release+tag to the exact
+      # commit built - without it gh defaults a new tag to the default branch
+      # (main), which had wrongly pinned the alpha release to main.
+      - name: Publish rolling prerelease (main -> latest, dev_v0.9.0 -> v0.9.0-alpha)
         if: (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev_v0.9.0')) || (github.event_name == 'workflow_dispatch' && inputs.publish)
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          $sha = $env:GITHUB_SHA
           switch ($env:GITHUB_REF) {
-            'refs/heads/main'       { & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dispatch\publish_release.ps1 -Tag latest }
-            'refs/heads/dev_v0.9.0' { & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dispatch\publish_release.ps1 -Tag alpha_v0.9.0 -Rolling }
+            'refs/heads/main'       { & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dispatch\publish_release.ps1 -Tag latest -Target $sha }
+            'refs/heads/dev_v0.9.0' { & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dispatch\publish_release.ps1 -Tag v0.9.0-alpha -Rolling -Target $sha }
             default { Write-Error "Refusing to publish from $($env:GITHUB_REF) - only main/dev_v0.9.0 have a rolling channel."; exit 1 }
           }
 

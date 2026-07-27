@@ -1,20 +1,27 @@
 # ============================================================================
-# Pack FIXS-Binaries bundle (issue #191)
+# Pack FIXS proprietary-binaries bundle (issue #191)
 # ----------------------------------------------------------------------------
 # Run on a LICENSED workstation AFTER a full dispatch (build/ must already hold
 # the CarMaker / VISSIM / dSPACE / MATLAB outputs). Zips ONLY the proprietary-
 # toolchain subset of build/ - at their build/-relative paths - into
-# fixs-binaries-<PF-sha>.zip, plus a manifest for the CI compatibility guard.
-# The FIXS release CI downloads this, unzips it INTO build/ (overlay), and packs
-# everything into the single canonical FIXS release zip.
+# fixs-binaries-<key>.zip, and (with -Publish) uploads it as the release
+# Binaries-<key> on the FIXS repo itself.
+#
+# <key> is the COMPOSITE bundle key (bundle_key.ps1):
+#   <ProprietaryFiles-sha[:12]>-<message-contract-hash[:8]>
+# The FIXS release CI (release.yml) computes the same key from its tree,
+# downloads Binaries-<key>, unzips it INTO build/ (overlay), and packs the
+# single canonical FIXS release zip. Because the key encodes both the
+# proprietary source AND the wire contract, a key match IS the compatibility
+# guarantee - no separate guard needed.
 #
 # Usage:
-#   pack_binaries.ps1                 # pack only, into .\dist\
-#   pack_binaries.ps1 -Publish        # pack + upload to the FIXS-Binaries repo
+#   pack_binaries.ps1               # pack only, into .\dist\
+#   pack_binaries.ps1 -Publish      # pack + publish the Binaries-<key> release
 # ============================================================================
 param(
     [switch]$Publish,
-    [string]$BinariesRepo = 'ORNL-Real-Sim/FIXS-Binaries',
+    [string]$Repo = 'ORNL-Real-Sim/FIXS',
     [string]$OutDir
 )
 
@@ -28,7 +35,7 @@ if (-not (Test-Path $BuildDir)) {
     exit 1
 }
 
-# --- The proprietary subset (build/-relative globs) -------------------------
+# --- Proprietary subset (build/-relative globs) -----------------------------
 # Exactly the files dispatch step 7 copies from licensed-toolchain outputs; the
 # hosted CI cannot produce these.
 $Patterns = @(
@@ -36,7 +43,8 @@ $Patterns = @(
     'DriverModel_RealSim_v2021.dll',        # VISSIM driver model (2021)
     'CarMaker\*\CarMaker.win64.exe',        # CarMaker executable (per CM version)
     'CarMaker\*\*.mexw64',                  # libcarmaker4sl MEX (per CM version)
-    'CarMaker\*\libRealSimDsLib_*.a',       # dSPACE library (per CM version)
+    'CarMaker\*\libRealSimDsLib_*.a',       # dSPACE library staged under CarMaker
+    'CommonLib\libRealSimDsLib_*.a',        # dSPACE library staged under CommonLib
     'CommonLib\RealSimSocket.mexw64'        # MATLAB MEX
 )
 
@@ -50,14 +58,11 @@ if ($found.Count -eq 0) {
     exit 1
 }
 
-# --- Keys: ProprietaryFiles submodule SHA + message-contract hash -----------
-$pfLine = (& git -C $RepoRoot ls-tree HEAD ProprietaryFiles) 2>&1
-if ($LASTEXITCODE -ne 0 -or -not $pfLine) {
-    Write-Error "Could not read the ProprietaryFiles submodule pointer via git ls-tree."
-    exit 1
-}
-$pfSha = ($pfLine -split '\s+')[2]
-$msgHash = & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'msg_contract_hash.ps1') -RepoRoot $RepoRoot
+# --- Composite key + its two dimensions (for the manifest) ------------------
+$key     = (& (Join-Path $PSScriptRoot 'bundle_key.ps1') -RepoRoot $RepoRoot).Trim()
+$pfSha   = (($( & git -C $RepoRoot ls-tree HEAD ProprietaryFiles )) -split '\s+')[2]
+$msgHash = (& (Join-Path $PSScriptRoot 'msg_contract_hash.ps1') -RepoRoot $RepoRoot).Trim()
+$tag     = "Binaries-$key"
 
 # --- Stage the overlay at build/-relative paths + manifest ------------------
 $Stage = Join-Path ([System.IO.Path]::GetTempPath()) "fixs-binaries-stage-$(Get-Random)"
@@ -72,18 +77,18 @@ foreach ($f in $found) {
 }
 
 $manifest = [ordered]@{
+    bundle_key            = $key
     proprietary_files_sha = $pfSha
-    msg_contract_hash     = $msgHash.Trim()
+    msg_contract_hash     = $msgHash
     file_count            = $found.Count
     files                 = $relList
-    packed_from           = 'build/'
     note                  = 'Overlay: unzip into build/ (excluding manifest.json) before packing the FIXS release zip.'
 }
 $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path (Join-Path $Stage 'manifest.json') -Encoding utf8
 
 # --- Zip --------------------------------------------------------------------
 New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
-$BundleName = "fixs-binaries-$pfSha.zip"
+$BundleName = "fixs-binaries-$key.zip"
 $BundlePath = Join-Path $OutDir $BundleName
 if (Test-Path $BundlePath) { Remove-Item $BundlePath -Force }
 Compress-Archive -Path "$Stage\*" -DestinationPath $BundlePath -CompressionLevel Optimal
@@ -91,8 +96,9 @@ Remove-Item $Stage -Recurse -Force
 
 $size = [math]::Round((Get-Item $BundlePath).Length / 1MB, 1)
 Write-Host "Packed $BundleName ($size MB, $($found.Count) files)"
+Write-Host "  bundle key:           $key"
 Write-Host "  ProprietaryFiles SHA: $pfSha"
-Write-Host "  msg-contract hash:    $($msgHash.Trim())"
+Write-Host "  msg-contract hash:    $msgHash"
 $relList | ForEach-Object { Write-Host "    + $_" }
 
 # --- Publish (optional) -----------------------------------------------------
@@ -101,22 +107,25 @@ if ($Publish) {
         Write-Error "GitHub CLI (gh) required for -Publish."
         exit 1
     }
-    $notes = "Prebuilt FIXS binaries for ProprietaryFiles ``$pfSha``.`nmsg-contract: ``$($msgHash.Trim())``"
-    # Rolling per-SHA release: create if new, clobber the asset if the SHA was
-    # already published (a rebuild for the same source).
-    & gh release view $pfSha --repo $BinariesRepo *> $null
+    $notes = "Prebuilt FIXS proprietary-toolchain binaries.`nBundle key: ``$key`` (ProprietaryFiles ``$pfSha``, msg-contract ``$msgHash``)."
+    # Per-key prerelease: create if new, clobber the asset if the key was already
+    # published (a rebuild for the same inputs).
+    & gh release view $tag --repo $Repo *> $null
     if ($LASTEXITCODE -eq 0) {
-        Write-Host "Release '$pfSha' exists - updating asset..."
-        & gh release upload $pfSha $BundlePath --repo $BinariesRepo --clobber
+        Write-Host "Release '$tag' exists - updating asset..."
+        & gh release upload $tag $BundlePath --repo $Repo --clobber
     } else {
-        Write-Host "Creating release '$pfSha'..."
-        & gh release create $pfSha $BundlePath --repo $BinariesRepo `
-            --title "FIXS binaries @ ProprietaryFiles $($pfSha.Substring(0,12))" --notes $notes
+        Write-Host "Creating release '$tag'..."
+        # --target the built commit so the bundle release doesn't default-anchor
+        # to the repo's default branch (main).
+        $target = (& git -C $RepoRoot rev-parse HEAD).Trim()
+        & gh release create $tag $BundlePath --repo $Repo --prerelease --target $target `
+            --title "FIXS binaries $key" --notes $notes
     }
     if ($LASTEXITCODE -eq 0) {
-        Write-Host "Published to $BinariesRepo (tag $pfSha)."
+        Write-Host "Published $tag to $Repo."
     } else {
-        Write-Error "Upload to $BinariesRepo failed."
+        Write-Error "Publish to $Repo failed."
         exit 1
     }
 }
