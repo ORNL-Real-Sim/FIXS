@@ -7,13 +7,12 @@
 # fixs-binaries-<key>.zip, and (with -Publish) uploads it as the release
 # Binaries-<key> on the FIXS repo itself.
 #
-# <key> is the COMPOSITE bundle key (bundle_key.ps1):
-#   <ProprietaryFiles-sha[:12]>-<message-contract-hash[:8]>
+# <key> is the bundle key (bundle_key.ps1): <ProprietaryFiles-sha[:12]>.
 # The FIXS release CI (release.yml) computes the same key from its tree,
 # downloads Binaries-<key>, unzips it INTO build/ (overlay), and packs the
-# single canonical FIXS release zip. Because the key encodes both the
-# proprietary source AND the wire contract, a key match IS the compatibility
-# guarantee - no separate guard needed.
+# single canonical FIXS release zip. The key pairs a bundle to the proprietary
+# source it was built from; a bundle-guard PR check enforces "PF pointer moved
+# -> a matching Binaries-<key> must exist".
 #
 # Usage:
 #   pack_binaries.ps1               # pack only, into .\dist\
