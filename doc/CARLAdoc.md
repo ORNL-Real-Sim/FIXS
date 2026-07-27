@@ -28,9 +28,31 @@ make LibCarla GENERATOR="Visual Studio 2019" TOOLSET="msvc-14.2"
 
 which will provide the necessary dependencies for the FIXS-CARLA
 
-Once the build is finished, copy the directory `${CARLA_Root}\PythonAPI\carla\dependencies\` into the `${FIXS_Root}\CommonLib\` and rename the directory as **libcarla**.
+### Providing libcarla to the build (automated — issue #109)
 
-Then you can build the **VirCarlaEnv**, note that only the Release version is supported.
+`VirCarlaEnv` links the Carla C++ client `CommonLib/libcarla` (~800 MB). It is
+**gitignored** and acquired automatically by `scripts/dispatch/fetch_carla_deps.ps1`
+(dispatch step **4c**), driven by a per-machine `~/.fixs/carla.json`:
+
+- **`"mode": "prebuilt"`** *(recommended — no Carla source build needed):* downloads
+  the **public** `fixs-deps-<carla_version>` release (libcarla Release subset + libsumo),
+  verifies its SHA-256, and extracts it into `CommonLib/`. This is the exact artifact
+  the release CI uses.
+- **`"mode": "source"`** *(for developers who build Carla from source):* after
+  `make LibCarla`, copies `${carla_root}\PythonAPI\carla\dependencies\{lib,include}`
+  into `CommonLib\libcarla`. Set `carla_root` in `~/.fixs/carla.json`.
+
+Example `~/.fixs/carla.json`:
+
+    { "mode": "source", "carla_root": "C:/src_ext/Carla" }
+
+The dispatch then builds **VirCarlaEnv** — only the **Release** configuration is
+supported (the Carla deps ship no debug Boost, and `carla_client_debug.lib` is dropped
+from the hosted subset). To regenerate/republish the hosted deps after a Carla version
+bump, run `scripts/dispatch/pack_carla_deps.ps1 -Publish` on a box that has the source deps.
+
+*(Manual fallback: copy `${CARLA_Root}\PythonAPI\carla\dependencies\` into
+`${FIXS_Root}\CommonLib\` and rename it **libcarla**.)*
 
 ## Simulation Setups
 
