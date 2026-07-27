@@ -47,6 +47,15 @@ def main():
         print(f"{csv_path} has no ego rows"); return 2
     err = [m - c for m, c in zip(spd, des)]
 
+    # optional overlay: SUMO's view of the ego (from py_ego_speed_advisor's l2_sumo.csv)
+    # -- the Carla->TL->SUMO moveToXY shadow. Should track Carla's measured speed.
+    ts, ss = [], []
+    sumo_path = DL / "l2_sumo.csv"
+    if sumo_path.is_file():
+        with open(sumo_path) as fh:
+            for row in csv.DictReader(l for l in fh if not l.startswith("#")):
+                ts.append(float(row["simTime"])); ss.append(float(row["speed"]))
+
     fig = make_subplots(
         rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.09, row_heights=[0.64, 0.36],
         subplot_titles=("measured speed vs commanded advisory", "tracking error (measured - commanded)"))
@@ -54,6 +63,9 @@ def main():
                              line=dict(color="#dc2626", width=2)), row=1, col=1)
     fig.add_trace(go.Scatter(x=t, y=spd, name="measured speed (Carla PhysX)",
                              line=dict(color="#2563eb", width=1.4)), row=1, col=1)
+    if ss:
+        fig.add_trace(go.Scatter(x=ts, y=ss, name="SUMO's view of ego speed",
+                                 line=dict(color="#7c3aed", width=1.2, dash="dot")), row=1, col=1)
     fig.add_trace(go.Scatter(x=t, y=err, name="error", line=dict(color="#059669", width=1.2),
                              showlegend=False), row=2, col=1)
     fig.add_hline(y=0, line=dict(color="gray", width=1), row=2, col=1)
@@ -72,7 +84,9 @@ def main():
     print("\nL2 speed-tracking summary")
     print(f"  rows                : {len(t)}")
     print(f"  commanded range     : {min(des):.2f} .. {max(des):.2f} m/s")
-    print(f"  measured range      : {min(spd):.2f} .. {max(spd):.2f} m/s")
+    print(f"  measured range      : {min(spd):.2f} .. {max(spd):.2f} m/s  (Carla)")
+    if ss:
+        print(f"  SUMO-view range     : {min(ss):.2f} .. {max(ss):.2f} m/s  ({len(ss)} rows)")
     if settled:
         print(f"  |error| mean (t>5s) : {sum(settled)/len(settled):.3f} m/s")
         print(f"  |error| 95th (t>5s) : {pct(settled, 95):.3f} m/s")

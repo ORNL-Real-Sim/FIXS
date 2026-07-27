@@ -74,6 +74,15 @@ def main() -> int:
             time.sleep(0.5)
     print("[advisor] connected")
 
+    # Log SUMO's view of the ego -- what this controller receives from TrafficLayer,
+    # i.e. the Carla->TL->SUMO moveToXY shadow. Overlay it on Carla's own view
+    # (VirCarlaEnv's _datalog/l2.csv) to check the write-back keeps them consistent.
+    DL = HERE / "_datalog"
+    DL.mkdir(exist_ok=True)
+    sumo_log = open(DL / "l2_sumo.csv", "w")
+    sumo_log.write("# SUMO's view of the ego as received from TrafficLayer (SUMO/VISSIM wire convention)\n")
+    sumo_log.write("simTime,id,speed,positionX,positionY,heading\n")
+
     last_adv = 0.0
     try:
         tick = 0
@@ -104,6 +113,8 @@ def main() -> int:
                 cmd.linkId = ego.linkId
                 cmd.laneId = ego.laneId
                 sh.vehicle_data_send_list.append(cmd)
+                sumo_log.write(f"{sim_time},{EGO_ID},{ego.speed},{ego.positionX},"
+                               f"{ego.positionY},{ego.heading}\n")
             # (if the ego isn't visible yet -- pre-injection -- send nothing this tick)
             sh.sendData(sim_state, sim_time, sock)
 
@@ -118,6 +129,10 @@ def main() -> int:
         try:
             sock.close()
         except OSError:
+            pass
+        try:
+            sumo_log.close()
+        except (OSError, NameError):
             pass
     print(f"[advisor] done (last advisory {last_adv:.2f} m/s)")
     return 0
