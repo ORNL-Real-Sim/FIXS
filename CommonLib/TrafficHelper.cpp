@@ -795,7 +795,15 @@ int TrafficHelper::sendToSUMO(double simTime, MsgHelper Msg_c) {
 						carlaInjectedIds_.insert(idStr);
 					}
 					SUMO_TRACI_NAMESPACE::Vehicle::moveToXY(idStr, "", -1, positionX, positionY, heading, 6);
-					if (vehicleExist) SUMO_TRACI_NAMESPACE::Vehicle::setSpeed(idStr, speed);
+					// #174: a position-teleported shadow must NOT be given a commanded speed.
+					// setSpeed(speedDesired) made getSpeed report the COMMAND (a "shadow speed")
+					// decoupled from the actual moveToXY motion, which also fed SUMO's background
+					// car-following the wrong ego speed. This mirrors the CarMaker-ego teleport
+					// (moveToXY-only), which was made setSpeed-free in e138f3ea ("Resolve
+					// ambiguity in getting ego speed", 2026-02-07) for exactly this reason; the
+					// #174 Carla branch had re-introduced it. SUMO now derives the ego speed from
+					// the teleport position deltas (== Carla's real speed).
+					// (removed: setSpeed(idStr, speed) -- speed here is speedDesired, the command)
 				}
 				catch (const std::exception& e) {
 					printf("Carla external-control inject '%s' failed: %s\n", idStr.c_str(), e.what());
