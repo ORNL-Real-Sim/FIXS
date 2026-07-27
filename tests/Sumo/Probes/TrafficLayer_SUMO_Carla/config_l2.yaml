@@ -12,7 +12,7 @@
 # TrafficLayer processes it first (ascending-port order) -- its advisory is then in
 # bucket B before VirCarlaEnv is published. Advisor = 400, VirCarlaEnv = 440.
 #
-# Run: run_sumo_carla_l2_wire.bat (one click): CARLA + SUMO + TrafficLayer +
+# Run: run_sumo_carla_l2.bat (one click): CARLA + SUMO + TrafficLayer +
 # py_ego_speed_advisor.py (client 400) + VirCarlaEnv (client 440).
 # =============================================================================
 
@@ -91,6 +91,6 @@ CarlaSetup:
 # speed = MEASURED, speedDesired = the COMMANDED wire advisory (from the controller).
 DataLogSetup:
     EnableDataLog: true
-    DataLogPath: '_datalog/l2_wire.csv'
+    DataLogPath: '_datalog/l2.csv'
     DataLogWho: ['ego']
     DataLogFields: [positionX, positionY, positionZ, heading, speed, speedDesired]

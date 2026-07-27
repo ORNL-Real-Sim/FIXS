@@ -11,16 +11,16 @@ REM  ego (full PhysX) tracks it.
 REM
 REM  Client ORDER matters (ascending port): the advisor is on 400 (processed
 REM  first), VirCarlaEnv on 440 (sees the advisory in bucket B). Both from
-REM  config_l2_wire.yaml.
+REM  config_l2.yaml.
 REM
 REM    1. launch CARLA + wait for RPC   3. load simple_loop.xodr
 REM    4. SUMO (background)   5. TrafficLayer (opens clients 400 + 440)
 REM    6. py_ego_speed_advisor.py (client 400)   7. VirCarlaEnv (client 440)
 REM
 REM  Watch: the ego repeatedly accelerates to ~12 m/s, cruises, slows to ~4 m/s --
-REM  chasing the EXTERNAL controller's advisory. Verify: _datalog\l2_wire.csv has
+REM  chasing the EXTERNAL controller's advisory. Verify: _datalog\l2.csv has
 REM  `speed` (measured) tracking `speedDesired` (the wire advisory); plot with
-REM  plot_l2_wire.py.
+REM  plot_l2.py.
 REM
 REM  If CARLA is ALREADY running with the world loaded:  set SKIP_CARLA=1 first.
 REM ============================================================================
@@ -33,7 +33,7 @@ set ENVFILE=%CARLADIR%\carla.env
 set TL=%RepoRoot%\TrafficLayer\x64\Release\TrafficLayer.exe
 set VCE=%RepoRoot%\VirCarlaEnv\x64\Release\VirCarlaEnv.exe
 if not exist "%VCE%" set VCE=%RepoRoot%\tests\SumoCarla\VirCarlaEnv.exe
-set CONFIG=%HERE%config_l2_wire.yaml
+set CONFIG=%HERE%config_l2.yaml
 set TLS=%HERE%traffic_light_table.csv
 set ADVISOR=%HERE%py_ego_speed_advisor.py
 set SUMOCFG=%RepoRoot%\tests\Sumo\networks\simple_loop\simple_loop.sumocfg

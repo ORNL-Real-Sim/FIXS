@@ -50,7 +50,7 @@ def desired_speed(t: float) -> float:
 
 
 def main() -> int:
-    cfg_path = sys.argv[1] if len(sys.argv) > 1 else str(HERE / "config_l2_wire.yaml")
+    cfg_path = sys.argv[1] if len(sys.argv) > 1 else str(HERE / "config_l2.yaml")
     cfg = ConfigHelper()
     cfg.getConfig(cfg_path)
 
