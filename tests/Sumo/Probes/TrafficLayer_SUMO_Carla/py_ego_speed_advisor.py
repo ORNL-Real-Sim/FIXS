@@ -1,11 +1,11 @@
 """L2 external speed-advisory controller (FIXS TrafficLayer client).
 
-This is the relocated, out-of-process form of CommonLib/EgoSpeedAdvisor: a
-standalone Python controller that connects to TrafficLayer as a client, receives
+A standalone Python controller that connects to TrafficLayer as a client, receives
 the ego state each tick, and streams back a desired ego speed (speedDesired) on
 the ego's record. TrafficLayer's sequential-client path overlays that record into
 the feed VirCarlaEnv receives, so the Carla ego (real PhysX) tracks the advisory
--- the genuine "L2 via FIXS" path, with no bespoke ego-forwarding in TL.
+-- the genuine "L2 via FIXS" path, with no bespoke ego-forwarding in TL. This is
+the artificial-controller stand-in for a real external CAV speed planner.
 
 It MUST connect on a LOWER port than VirCarlaEnv so TL processes it first
 (ascending-port order), i.e. its advisory is in bucket B before VirCarlaEnv is
@@ -32,8 +32,8 @@ from CommonLib.VehDataMsgDefs import VehData  # noqa: E402
 HERE = pathlib.Path(__file__).resolve().parent
 EGO_ID = "ego"
 
-# Same trapezoid as CommonLib/EgoSpeedAdvisor's demo profile: accelerate 4->12
-# (0-8s), cruise 12 (8-16s), decelerate 12->4 (16-24s), cruise 4 (24-32s), loop.
+# Demo speed profile (trapezoid): accelerate 4->12 (0-8s), cruise 12 (8-16s),
+# decelerate 12->4 (16-24s), cruise 4 (24-32s), then loop.
 PROFILE = [(0.0, 4.0), (8.0, 12.0), (16.0, 12.0), (24.0, 4.0), (32.0, 4.0)]
 PERIOD = PROFILE[-1][0]
 

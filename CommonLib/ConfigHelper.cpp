@@ -570,16 +570,6 @@ int ConfigHelper::getConfig(string configName) {
 	CarlaSetup.EgoRouteRepeat = node["EgoRouteRepeat"] ? parserInteger(node, "EgoRouteRepeat") : 50;
 	CarlaSetup.EgoTargetSpeed = node["EgoTargetSpeed"] ? parserDouble(node, "EgoTargetSpeed") : 8.33;
 
-	// #174 L2 (EgoMode 2): the artificial external speed-advisory profile fed to the
-	// ego's L0 driver -- a list of [time_s, speed_mps] knots, looped (EgoSpeedAdvisor).
-	if (node["EgoSpeedProfile"]) {
-		for (std::size_t i = 0; i < node["EgoSpeedProfile"].size(); i++) {
-			CarlaSetup.EgoSpeedProfile.push_back(std::make_pair(
-				node["EgoSpeedProfile"][i][0].as<double>(), node["EgoSpeedProfile"][i][1].as<double>()));
-		}
-	}
-	CarlaSetup.EgoAdvisorySource = node["EgoAdvisorySource"] ? parserString(node, "EgoAdvisorySource") : "local";
-
 	if (node["CarlaServerIP"]) {
 		CarlaSetup.CarlaServerIP = parserString(node, "CarlaServerIP");
 	}

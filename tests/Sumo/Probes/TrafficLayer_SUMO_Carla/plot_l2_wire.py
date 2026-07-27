@@ -1,19 +1,19 @@
 """Verify L2 ego speed-tracking from the FIXS DataLogger CSV.
 
-L2 (EgoMode 2) feeds the ego's L0 driver an external desired-speed advisory
-(CommonLib/EgoSpeedAdvisor). This TEST-SPECIFIC script reads the CSV written by
-run_sumo_carla_l2_advisory.bat (_datalog/l2_advisory.csv) -- where `speed` is the
-ego's MEASURED speed and `speedDesired` is the COMMANDED advisory -- and shows
-how well the measured speed tracks the command, plus the tracking error.
+L2 (EgoMode 2) drives the ego's target from an EXTERNAL desired-speed advisory
+streamed over FIXS by py_ego_speed_advisor.py. This TEST-SPECIFIC script reads the
+CSV written by run_sumo_carla_l2_wire.bat (_datalog/l2_wire.csv) -- where `speed`
+is the ego's MEASURED speed and `speedDesired` is the COMMANDED wire advisory --
+and shows how well the measured speed tracks the command, plus the tracking error.
 
-Run:  python plot_l2_advisory.py
+Run:  python plot_l2_wire.py
 """
 from __future__ import annotations
 import csv, math, pathlib, sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 DL = HERE / "_datalog"
-CSV = DL / "l2_advisory.csv"
+CSV = DL / "l2_wire.csv"
 
 
 def load(path):
@@ -39,7 +39,7 @@ def main():
     except ImportError:
         print("matplotlib not available in this interpreter"); return 2
     if not CSV.is_file():
-        print(f"missing {CSV} -- run run_sumo_carla_l2_advisory.bat first"); return 2
+        print(f"missing {CSV} -- run run_sumo_carla_l2_wire.bat first"); return 2
 
     d = load(CSV)
     if not d["t"]:
@@ -64,7 +64,7 @@ def main():
     ax[1].set_xlabel("sim time [s]"); ax[1].set_ylabel("error [m/s]"); ax[1].grid(alpha=.3)
 
     fig.tight_layout(rect=[0, 0, 1, 0.96])
-    out = DL / "l2_advisory.png"
+    out = DL / "l2_wire.png"
     fig.savefig(out, dpi=130)
     print(f"wrote {out}")
 

@@ -32,7 +32,6 @@
 #include "CarlaBackend.h"
 #include "../../CommonLib/VirEnvCore.h"
 #include "../../CommonLib/DataLogger.h"
-#include "../../CommonLib/EgoSpeedAdvisor.h"
 #include "MsgHelper.h"
 #include "ConfigHelper.h"
 
@@ -201,19 +200,14 @@ int main(int argc, const char* argv[]) {
         // real external CAV controller would stream over FIXS). SDK-free module;
         // swap-in point for a separate advisory client later. Empty profile -> the
         // advisor returns EgoTargetSpeed, so EgoMode 2 degenerates to constant L0.
-        virenv::EgoSpeedAdvisor speedAdvisor;
-        // L2 advisory source: "wire" = read speedDesired off the ego's received FIXS
-        // record (an external controller feeds it through TrafficLayer's sequential
-        // client path); "local" = the in-process EgoSpeedAdvisor stand-in.
-        const bool advisoryFromWire = (cs.EgoAdvisorySource == "wire" || cs.EgoAdvisorySource == "Wire");
-        if (egoMode >= 2) {
-            speedAdvisor.setProfile(cs.EgoSpeedProfile);
-            std::cout << "L2 advisory source: "
-                      << (advisoryFromWire ? "EXTERNAL (wire: ego.speedDesired via TrafficLayer)"
-                                           : "LOCAL EgoSpeedAdvisor (in-process)")
-                      << " -- driver: " << (useFallbackDriver ? "EgoDriver" : "TM") << "\n";
-        }
-        double lastAdvisory = cs.EgoTargetSpeed;   // most-recent commanded desired speed (for the wire/log)
+        // L2 (EgoMode >= 2): the ego's target speed comes from an EXTERNAL controller
+        // over FIXS -- read off the ego's received record (ego.speedDesired), which an
+        // advisory client (e.g. py_ego_speed_advisor.py) feeds through TrafficLayer's
+        // sequential-client path. No controller attached -> falls back to EgoTargetSpeed.
+        if (egoMode >= 2)
+            std::cout << "L2: external speed advisory via FIXS (ego.speedDesired) -- driver: "
+                      << (useFallbackDriver ? "EgoDriver" : "TM") << "\n";
+        double lastAdvisory = cs.EgoTargetSpeed;   // most-recent commanded desired speed (for the driver/log)
 
         const int sock0 = 0;
         // #174 A/B: optional applied-pose log keyed by SUMO id (set RS_POSE_LOG=path)
@@ -259,16 +253,12 @@ int main(int argc, const char* argv[]) {
             if (egoMode >= 2) {
                 const bool onFeedNow = std::fabs(simTime * 10.0 - std::llround(simTime * 10.0)) < 1e-6;
                 if (onFeedNow) {
-                    if (advisoryFromWire) {
-                        // external controller's advisory rides on the ego's received
-                        // FIXS record (TrafficLayer sequential overlay merged it in).
-                        auto itAdv = core.Msg_c.VehDataRecv_um.find(egoId);
-                        if (itAdv != core.Msg_c.VehDataRecv_um.end() && itAdv->second.speedDesired > 0.0f)
-                            lastAdvisory = itAdv->second.speedDesired;
-                        // else keep the last advisory (controller not up yet / no update)
-                    } else {
-                        lastAdvisory = speedAdvisor.desiredSpeed(simTime, cs.EgoTargetSpeed);
-                    }
+                    // the external controller's advisory rides on the ego's received
+                    // FIXS record (TrafficLayer's sequential overlay merged it in).
+                    auto itAdv = core.Msg_c.VehDataRecv_um.find(egoId);
+                    if (itAdv != core.Msg_c.VehDataRecv_um.end() && itAdv->second.speedDesired > 0.0f)
+                        lastAdvisory = itAdv->second.speedDesired;
+                    // else keep the last advisory (controller not up yet / no update)
                     backend.applyEgoControl(egoId, lastAdvisory);
                 }
             }

@@ -1,13 +1,12 @@
 # =============================================================================
-# FIXS #174 -- SUMO <-> Carla co-simulation, EgoMode 2 "Advisory" (L2), WIRE path.
+# FIXS #174 -- SUMO <-> Carla co-simulation, EgoMode 2 "Advisory" (L2).
 #
-# Same as config_l2_advisory.yaml, but the desired-speed advisory is NOT generated
-# inside the bridge. Instead an EXTERNAL controller (py_ego_speed_advisor.py)
-# connects to TrafficLayer as a client and streams the ego's speedDesired over
+# The ego's desired speed comes from an EXTERNAL controller (py_ego_speed_advisor.py)
+# that connects to TrafficLayer as a client and streams the ego's speedDesired over
 # FIXS. TrafficLayer's SEQUENTIAL client path overlays that advisory into the feed
-# VirCarlaEnv receives, and VirCarlaEnv reads it off the wire (EgoAdvisorySource:
-# wire) -> applyEgoControl -> the real Carla ego tracks it. The genuine L2-via-FIXS
-# path (the CommonLib/EgoSpeedAdvisor stand-in moved out of the bridge, into Python).
+# VirCarlaEnv receives; VirCarlaEnv reads it off the wire -> applyEgoControl -> the
+# real Carla ego (full PhysX) tracks it. The genuine L2-via-FIXS path: a backend-
+# agnostic controller drives the ego without knowing it is Carla.
 #
 # Client ORDER matters: the advisor MUST be on a LOWER port than VirCarlaEnv so
 # TrafficLayer processes it first (ascending-port order) -- its advisory is then in
@@ -56,10 +55,11 @@ CarlaSetup:
 
     EnableExternalControl: true
 
-    # ---- EgoMode 2: L0 physics + EXTERNAL (wire) speed advisory ----------------
+    # ---- EgoMode 2: L0 physics + EXTERNAL speed advisory over FIXS -------------
+    # The ego reads its target from ego.speedDesired on its received FIXS record,
+    # fed by py_ego_speed_advisor.py through TrafficLayer's sequential-client path.
     EgoMode: 2
     EgoL0Driver: Pursuit
-    EgoAdvisorySource: wire        # read ego.speedDesired off the FIXS wire (from the controller)
     EgoId: ego
     EgoSumoType: car
     EgoBlueprint: vehicle.tesla.model3

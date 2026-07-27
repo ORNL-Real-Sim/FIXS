@@ -20,7 +20,7 @@ REM
 REM  Watch: the ego repeatedly accelerates to ~12 m/s, cruises, slows to ~4 m/s --
 REM  chasing the EXTERNAL controller's advisory. Verify: _datalog\l2_wire.csv has
 REM  `speed` (measured) tracking `speedDesired` (the wire advisory); plot with
-REM  plot_l2_advisory.py (point it at l2_wire.csv) or plot_l2_wire below.
+REM  plot_l2_wire.py.
 REM
 REM  If CARLA is ALREADY running with the world loaded:  set SKIP_CARLA=1 first.
 REM ============================================================================
