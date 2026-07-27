@@ -108,9 +108,16 @@ if ($Publish) {
     }
     $notes = "Prebuilt FIXS proprietary-toolchain binaries.`nBundle key: ``$key`` (ProprietaryFiles ``$pfSha``, msg-contract ``$msgHash``)."
     # Per-key prerelease: create if new, clobber the asset if the key was already
-    # published (a rebuild for the same inputs).
+    # published (a rebuild for the same inputs). Guard the existence-check against
+    # Windows PowerShell 5.1: with $ErrorActionPreference='Stop', gh's "release not
+    # found" stderr on a first publish is wrapped as a terminating NativeCommandError
+    # and would abort before the create. Drop to Continue just around the probe.
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     & gh release view $tag --repo $Repo *> $null
-    if ($LASTEXITCODE -eq 0) {
+    $releaseExists = ($LASTEXITCODE -eq 0)
+    $ErrorActionPreference = $prevEAP
+    if ($releaseExists) {
         Write-Host "Release '$tag' exists - updating asset..."
         & gh release upload $tag $BundlePath --repo $Repo --clobber
     } else {
