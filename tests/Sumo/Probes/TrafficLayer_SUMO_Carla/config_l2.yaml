@@ -59,7 +59,11 @@ CarlaSetup:
     # The ego reads its target from ego.speedDesired on its received FIXS record,
     # fed by py_ego_speed_advisor.py through TrafficLayer's sequential-client path.
     EgoMode: 2
-    EgoL0Driver: Pursuit
+    # TM = Carla's native Traffic Manager drives the ego (steering on the map +
+    # longitudinal). The external advisory just sets TM's desired speed
+    # (applyEgoControl -> SetDesiredSpeed) -- no controller on our side. (Pursuit =
+    # the SDK-free EgoDriver module instead; needs EgoRoutePoints.)
+    EgoL0Driver: TM
     EgoId: ego
     EgoSumoType: car
     EgoBlueprint: vehicle.tesla.model3
