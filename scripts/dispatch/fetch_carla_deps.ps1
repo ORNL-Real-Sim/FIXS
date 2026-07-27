@@ -40,12 +40,11 @@ function Read-CarlaConfig {
 }
 
 function Get-DepsVersion {
-    # machine-independent Carla version from dependencies.yaml (e.g. "0.9.15")
+    # machine-independent Carla version from dependencies.yaml's carla: block
     $depsYaml = Join-Path $RepoRoot 'dependencies.yaml'
     if (Test-Path $depsYaml) {
-        $m = Select-String -Path $depsYaml -Pattern '^\s*(carla_version|version)\s*:\s*["'']?([0-9][0-9.]*)' |
-             Where-Object { $_.Line -match 'carla' } | Select-Object -First 1
-        if ($m) { return $m.Matches[0].Groups[2].Value }
+        $c = Get-Content $depsYaml -Raw
+        if ($c -match '(?ms)^\s*carla:\s.*?^\s*version:\s*["'']?([0-9][0-9.]*)') { return $Matches[1] }
     }
     return '0.9.15'
 }
@@ -56,17 +55,23 @@ if (-not $Force -and (Test-Path $SentinelLib)) {
     exit 0
 }
 
-$cfg = Read-CarlaConfig
-if (-not $cfg) {
-    Write-Warning "No ~/.fixs/carla.json - skipping libcarla acquisition (Carla is optional; VirCarlaEnv will not build). See doc/CARLAdoc.md."
-    exit 0
+# Resolve the mode. An explicit -Mode (e.g. CI passing 'prebuilt') does NOT need
+# ~/.fixs/carla.json - prebuilt fetches by version. Only 'source' needs carla_root.
+if (-not $Mode) {
+    $cfg = Read-CarlaConfig
+    if (-not $cfg) {
+        Write-Warning "No ~/.fixs/carla.json and no -Mode - skipping libcarla acquisition (Carla is optional; VirCarlaEnv will not build). See doc/CARLAdoc.md."
+        exit 0
+    }
+    $Mode = if ($cfg.mode) { $cfg.mode } else { 'source' }
+} else {
+    $cfg = Read-CarlaConfig   # may be $null; only 'source' mode dereferences it
 }
-if (-not $Mode) { $Mode = if ($cfg.mode) { $cfg.mode } else { 'source' } }
 Write-Host "libcarla acquisition mode: $Mode"
 New-Item -ItemType Directory -Path $LibCarla -Force | Out-Null
 
 if ($Mode -eq 'source') {
-    if (-not $cfg.carla_root) { Write-Error "carla.json mode=source but carla_root is unset."; exit 1 }
+    if (-not $cfg -or -not $cfg.carla_root) { Write-Error "source mode needs ~/.fixs/carla.json with carla_root."; exit 1 }
     $src = Join-Path $cfg.carla_root 'PythonAPI\carla\dependencies'
     if (-not (Test-Path $src)) {
         Write-Error "Carla deps not found: $src`nBuild LibCarla from the Carla source first (see doc/CARLAdoc.md), or switch carla.json to mode 'prebuilt'."
