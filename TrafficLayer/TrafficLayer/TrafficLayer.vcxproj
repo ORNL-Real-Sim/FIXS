@@ -23,6 +23,7 @@
     <ClCompile Include="..\..\CommonLib\MsgHelper.cpp" />
     <ClCompile Include="..\..\CommonLib\SocketHelper.cpp" />
     <ClCompile Include="..\..\CommonLib\TrafficHelper.cpp" />
+    <ClCompile Include="..\..\CommonLib\XilGuard.cpp" />
     <ClCompile Include="..\..\CommonLib\VissimDSProxyHelper.cpp" />
     <ClCompile Include="DSProxyMode.cpp" />
     <ClCompile Include="mainTrafficLayer.cpp" />

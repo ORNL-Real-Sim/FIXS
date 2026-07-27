@@ -293,6 +293,18 @@ int main(int argc, const char* argv[]) {
                         d.heading = (float)es.heading; d.grade = (float)es.grade;
                         core.Msg_c.VehDataSend_um[core.Sock_c.serverSock[sock0]].push_back(d);
                         if (dataLog.isOpen() && logWanted(d.id)) dataLog.logVehicle(simTime, d);
+                        // Also log the SUMO-VIEW ego (what SUMO reports back this feed) on the
+                        // SAME clock as the Carla view, so a plot compares them directly. It's
+                        // the ego ~2 ticks stale (Carla is a step ahead + SUMO getPosition is
+                        // n-1); logged as id "ego_sumo".
+                        if (dataLog.isOpen()) {
+                            auto itSumo = core.Msg_c.VehDataRecv_um.find(egoId);
+                            if (itSumo != core.Msg_c.VehDataRecv_um.end()) {
+                                VehFullData_t dsumo = itSumo->second;
+                                dsumo.id = "ego_sumo";
+                                dataLog.logVehicle(simTime, dsumo);
+                            }
+                        }
                     }
                     if (spectatorFollow && egoId == centeredViewId && backend.egoActor()) {
                         carla::geom::Transform eTf = backend.egoActor()->GetTransform();
