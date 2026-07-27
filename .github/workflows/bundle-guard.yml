@@ -1,10 +1,13 @@
 name: Bundle guard
 
-# Fails a PR that moves the proprietary-bundle key - i.e. bumps the
-# ProprietaryFiles submodule pointer OR changes the wire contract
-# (CommonLib/VehDataMsgDefs.h) - unless the matching Binaries-<key> release is
-# already published. This makes "moved the SHA but forgot to rebuild + publish
-# the binaries" impossible to merge through.
+# Fails a PR that bumps the ProprietaryFiles submodule pointer unless the
+# matching Binaries-<key> release is already published. This makes "moved the
+# SHA but forgot to rebuild + publish the binaries" impossible to merge through.
+#
+# Scope is deliberately just the proprietary-source pointer - it does NOT try to
+# catch a FIXS-side wire-contract change (that can only be proven by running the
+# licensed binaries, so it's a separate licensed-box concern, not a hosted PR
+# check).
 #
 # Cheap: no compile, just a diff + one API call on a free Ubuntu runner.
 # To actually BLOCK a merge (not just show red), mark "bundle-guard" a REQUIRED
@@ -30,13 +33,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Did this PR touch either input that defines the bundle key?
-          changed=$(git diff --name-only "$BASE_SHA" HEAD -- ProprietaryFiles CommonLib/VehDataMsgDefs.h || true)
+          # Did this PR move the ProprietaryFiles submodule pointer?
+          changed=$(git diff --name-only "$BASE_SHA" HEAD -- ProprietaryFiles || true)
           if [ -z "$changed" ]; then
-            echo "Bundle-key inputs unchanged (ProprietaryFiles / VehDataMsgDefs.h) - nothing to verify."
+            echo "ProprietaryFiles pointer unchanged - nothing to verify."
             exit 0
           fi
-          echo "Bundle-key inputs changed by this PR:"; echo "$changed"
+          echo "ProprietaryFiles pointer moved by this PR:"; echo "$changed"
 
           # Same key formula as pack_binaries.ps1 and release.yml (pwsh is
           # preinstalled on ubuntu-latest).

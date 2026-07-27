@@ -79,9 +79,9 @@ jobs:
 
       # Overlay the licensed-toolchain binaries (VISSIM/CarMaker/dSPACE/MEX) that
       # the hosted runner cannot build, pulled from the Binaries-<key> release on
-      # THIS repo (native token). The composite key = ProprietaryFiles SHA +
-      # message-contract hash, so an exact key match IS the compatibility
-      # guarantee - no separate guard needed. Then re-pack the complete zip.
+      # THIS repo (native token). The key = ProprietaryFiles SHA (bundle_key.ps1),
+      # so the bundle is paired to the proprietary source it was built from. Then
+      # re-pack the complete zip.
       # OPTIONAL for now: if no bundle is published for this key yet, ship
       # public-core with a warning (bootstrap). Flip to a hard failure once the
       # first bundle exists, so a "complete" release can never silently drop its
