@@ -38,8 +38,8 @@ if (-not (Test-Path $BuildDir)) {
 # Exactly the files dispatch step 7 copies from licensed-toolchain outputs; the
 # hosted CI cannot produce these.
 $Patterns = @(
-    'DriverModel_RealSim.dll',              # VISSIM driver model
-    'DriverModel_RealSim_v2021.dll',        # VISSIM driver model (2021)
+    'DriverModel_RealSim.dll',              # VISSIM driver model (default, int API, 2021+)
+    'DriverModel_RealSim_legacy.dll',       # VISSIM driver model (frozen, long API, <=2020)
     'CarMaker\*\CarMaker.win64.exe',        # CarMaker executable (per CM version)
     'CarMaker\*\*.mexw64',                  # libcarmaker4sl MEX (per CM version)
     'CarMaker\*\libRealSimDsLib_*.a',       # dSPACE library staged under CarMaker
@@ -108,9 +108,16 @@ if ($Publish) {
     }
     $notes = "Prebuilt FIXS proprietary-toolchain binaries.`nBundle key: ``$key`` (ProprietaryFiles ``$pfSha``, msg-contract ``$msgHash``)."
     # Per-key prerelease: create if new, clobber the asset if the key was already
-    # published (a rebuild for the same inputs).
+    # published (a rebuild for the same inputs). Guard the existence-check against
+    # Windows PowerShell 5.1: with $ErrorActionPreference='Stop', gh's "release not
+    # found" stderr on a first publish is wrapped as a terminating NativeCommandError
+    # and would abort before the create. Drop to Continue just around the probe.
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     & gh release view $tag --repo $Repo *> $null
-    if ($LASTEXITCODE -eq 0) {
+    $releaseExists = ($LASTEXITCODE -eq 0)
+    $ErrorActionPreference = $prevEAP
+    if ($releaseExists) {
         Write-Host "Release '$tag' exists - updating asset..."
         & gh release upload $tag $BundlePath --repo $Repo --clobber
     } else {
