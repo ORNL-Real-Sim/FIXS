@@ -184,7 +184,7 @@ def _tl_junction_ids(tl_table):
     return ids
 
 
-def generate_config_yaml(path, tl_table, carla_host, carla_port):
+def generate_config_yaml(path, tl_table, carla_host, carla_port, realtime=True, refresh=0.05):
     """Write a probe-shaped VirCarlaEnv scenario config: mirror EVERY SUMO vehicle
     (#176 all:['true']) into CARLA and sync the tl_table's junctions. Visualization-
     only (#77): no XIL, no ego. Machine bits (CARLA host/port) come from the resolved
@@ -192,6 +192,8 @@ def generate_config_yaml(path, tl_table, carla_host, carla_port):
     tests/Sumo/Probes/TrafficLayer_SUMO_Carla/config.yaml. Regenerated on --reimport."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     junctions = _tl_junction_ids(tl_table) if tl_table else []
+    rt = "true" if realtime else "false"
+    half = round(refresh / 2.0, 6)
     sig = ""
     if junctions:
         names = ", ".join(f"'{j}'" for j in junctions)
@@ -229,11 +231,13 @@ CarlaSetup:
   EnableExternalControl: false          # #77 visualization-only
   UseVehicleTypeAsBlueprint: false
   EnableSpectatorFollow: false          # no ego to follow; run_cosim frames the view
+  RealtimePacing: {rt}                   # standalone viz -> pace to real time (--fast makes this false)
+  TrafficRefreshRate: {refresh}          # data cadence (s); matches the SUMO --step-length feed
+  CarlaTimeStep: 0.0                     # render sub-step: 0 = tick 1:1 with the feed; a divisor (e.g. {half}) interpolates for smoother motion
   CarlaServerIP: {carla_host}
   CarlaServerPort: {carla_port}
   CarlaClientIP: 127.0.0.1
   CarlaClientPort: 440
-  TrafficRefreshRate: 0.1
 """
     with open(path, "w", encoding="utf-8") as f:
         f.write(text)
@@ -929,7 +933,9 @@ def main():
         backend = args.engine or read_backend(config_yaml)
         if backend == "cpp":
             if args.reimport or not os.path.isfile(config_yaml):
-                generate_config_yaml(config_yaml, tl_table, args.carla_host, args.carla_port)
+                generate_config_yaml(config_yaml, tl_table, args.carla_host,
+                                     args.carla_port, realtime=not args.fast,
+                                     refresh=args.step_length)
             print(f"[cosim] engine=cpp (FIXS-native); config {config_yaml}")
             return run_native_stack(config_yaml, sumocfg, tl_table, cfg, args)
 
