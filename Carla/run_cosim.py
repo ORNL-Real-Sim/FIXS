@@ -810,8 +810,18 @@ def main():
                 repo, picked_tag, cache_name=target_map)
             _carla, sumo_dir = import_map.open_bundle(zip_path, cache_name=target_map)
         sumocfg = import_map.bundle_sumocfg(sumo_dir)
-        # The chosen CARLA source ships no sumo/ (e.g. a carla-only local pick, or a
-        # raw export): fill the SUMO slot separately - pick a sumo scenario now.
+        # A Local (already-imported) pick opens no bundle, and a carla-only pick's
+        # bundle has no sumo/ - but the map's sumo/ may already be cached at
+        # ~/.fixs/maps/<name>/sumo (from a prior import or a separate sumo pick).
+        # Reuse it before prompting.
+        if sumocfg is None:
+            cached_sumo = import_map.map_sumo_dir(target_map)
+            if cached_sumo:
+                sumo_dir = cached_sumo
+                sumocfg = import_map.bundle_sumocfg(sumo_dir)
+                print(f"[cosim] using cached SUMO scenario for '{target_map}': {sumocfg}")
+        # Still nothing (first time, no cache): pick one now. choose_sumo_source
+        # caches it under ~/.fixs/maps/<name>/sumo so the next run reuses it.
         if sumocfg is None:
             sumo_dir = import_map.choose_sumo_source(cache_name=target_map)
             sumocfg = import_map.bundle_sumocfg(sumo_dir)
