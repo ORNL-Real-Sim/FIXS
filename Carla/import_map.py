@@ -513,10 +513,12 @@ def _dir_with_sumocfg(root):
     return None
 
 
-def _sumo_scenario_dir(src):
+def _sumo_scenario_dir(src, cache_name=None):
     """If `src` (a .zip or folder) is a SUMO-only scenario - a .sumocfg present,
-    no CARLA asset (.xodr/.fbx) - return the dir holding the .sumocfg (unpacking a
-    zip once, beside it). Else None. This is the sumo half of classify_source."""
+    no CARLA asset (.xodr/.fbx) - return the dir holding the .sumocfg. A zip is
+    unpacked once into the map's folder ~/.fixs/maps/<cache_name>/sumo/ (so a
+    separately-picked scenario lands under its map, cooked-name), else a sibling
+    `<stem>_unpacked/`. Else None. The sumo half of classify_source."""
     if os.path.isfile(src) and src.lower().endswith(".zip"):
         with zipfile.ZipFile(src) as z:
             names = [n.lower() for n in z.namelist()]
@@ -524,9 +526,9 @@ def _sumo_scenario_dir(src):
                 return None
             if any(n.endswith((".xodr", ".fbx")) for n in names):
                 return None  # carries CARLA geometry -> not sumo-only
-            unpacked = os.path.join(
-                os.path.dirname(os.path.abspath(src)),
-                os.path.splitext(os.path.basename(src))[0] + "_unpacked")
+            unpacked = os.path.join(_map_cache_dir(cache_name), "sumo") if cache_name else \
+                os.path.join(os.path.dirname(os.path.abspath(src)),
+                             os.path.splitext(os.path.basename(src))[0] + "_unpacked")
             if not os.path.isdir(unpacked) or os.path.getmtime(src) > os.path.getmtime(unpacked):
                 shutil.rmtree(unpacked, ignore_errors=True)
                 os.makedirs(unpacked, exist_ok=True)
@@ -544,17 +546,18 @@ def _sumo_scenario_dir(src):
     return None
 
 
-def classify_source(src):
+def classify_source(src, cache_name=None):
     """What a map source provides, as (carla_src, sumo_src):
       - bundle (carla/ + sumo/) -> (carla dir, sumo dir)
       - carla-only pkg/export   -> (carla src, None)
       - sumo-only scenario      -> (None, sumo dir)
     A source fills the CARLA slot, the SUMO slot, or both; run_cosim fills any slot
-    a pick leaves empty. Zips are unpacked as needed."""
-    carla_src, sumo_dir = open_bundle(src)          # bundle split, else (src, None)
+    a pick leaves empty. Zips are unpacked (into ~/.fixs/maps/<cache_name>/ when the
+    cooked map name is known) as needed."""
+    carla_src, sumo_dir = open_bundle(src, cache_name)   # bundle split, else (src, None)
     if sumo_dir is not None:
         return carla_src, sumo_dir                  # bundle: both slots
-    sdir = _sumo_scenario_dir(src)
+    sdir = _sumo_scenario_dir(src, cache_name)
     if sdir is not None:
         return None, sdir                           # sumo-only
     return carla_src, None                          # carla-only
@@ -878,18 +881,19 @@ def choose_map(repo, tag_prefix="", carla_root=None):
         print("[import] invalid choice; enter a number, or L for a local file.")
 
 
-def choose_sumo_source():
+def choose_sumo_source(cache_name=None):
     """Prompt for a SUMO scenario (a .zip or folder holding a .sumocfg) and return
     the dir that contains it, or None. Fills the SUMO slot separately when the
     chosen CARLA source ships no sumo/ - e.g. a carla-only local pick or a raw
-    export. Returns None in a non-interactive session so the caller can fail with
-    a clear 'pass --sumocfg' message."""
+    export. `cache_name` (the cooked map name) lands the extracted scenario under
+    ~/.fixs/maps/<cache_name>/sumo/. Returns None in a non-interactive session so
+    the caller can fail with a clear 'pass --sumocfg' message."""
     if not sys.stdin.isatty():
         return None
     print("\n[cosim] the chosen map has no SUMO scenario; select one now "
           "(a .zip or folder containing a .sumocfg).")
     path = _select_package("SUMO scenario", None)  # native picker / typed path
-    _carla_src, sumo_dir = classify_source(path)
+    _carla_src, sumo_dir = classify_source(path, cache_name)
     if sumo_dir is None:
         print(f"[cosim] no .sumocfg found in {path}")
     return sumo_dir

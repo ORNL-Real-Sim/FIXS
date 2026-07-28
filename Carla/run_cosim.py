@@ -535,7 +535,7 @@ def main():
         # The chosen CARLA source ships no sumo/ (e.g. a carla-only local pick, or a
         # raw export): fill the SUMO slot separately - pick a sumo scenario now.
         if sumocfg is None:
-            sumo_dir = import_map.choose_sumo_source()
+            sumo_dir = import_map.choose_sumo_source(cache_name=target_map)
             sumocfg = import_map.bundle_sumocfg(sumo_dir)
     if sumocfg is None:
         sys.exit("[cosim] no SUMO scenario to run: pass --sumocfg, or choose a map "
