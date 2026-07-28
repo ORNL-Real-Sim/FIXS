@@ -816,27 +816,43 @@ def _prompt(msg):
                  "--map / --package to run without prompting.")
 
 
-def choose_map(repo, tag_prefix=""):
-    """Interactive chooser covering both cases: pick one of `repo`'s published
-    map-* releases (auto-downloaded + cached), or select a local .zip / folder by
-    hand. Returns (name, tag, local_path): for a release (name, tag, None); for a
-    local pick (name, None, path). Exits if the session is non-interactive."""
+def choose_map(repo, tag_prefix="", carla_root=None):
+    """Interactive chooser. Lists ONLINE maps (repo's releases from the
+    Digital-Twin-Library) and, when carla_root is given, LOCAL maps already cooked
+    into that CARLA - clearly separated - plus a hand-picked local .zip/folder.
+    Returns (name, tag, local_path):
+      online release -> (name, tag,  None)
+      local cooked   -> (name, None, None)   # already imported: run as-is
+      local file     -> (name, None, path)
+    Exits if the session is non-interactive."""
     releases = list_map_releases(repo, tag_prefix)
-    print("\n[import] Available map versions (newest first):")
-    for i, r in enumerate(releases, 1):
-        pkg = _package_from_tag(r["tag"], tag_prefix)
-        flag = "  (pre-release)" if r["prerelease"] else ""
-        print(f"   {i}) {pkg:<26} {r['date']}{flag}")
-    if not releases:
-        print("   (no published releases found)")
+    cooked = list_imported_maps(carla_root) if carla_root else []
+
+    print("\n[import] Pick a map to run:")
+    menu = []  # menu number -> ("release", release) | ("cooked", name)
+    if releases:
+        print("  Online (Digital-Twin-Library):")
+        for r in releases:
+            menu.append(("release", r))
+            pkg = _package_from_tag(r["tag"], tag_prefix)
+            flag = "  (pre-release)" if r["prerelease"] else ""
+            print(f"   {len(menu):>2}) {pkg:<26} {r['date']}{flag}")
+    if cooked:
+        print("  Local (already imported into CARLA):")
+        for name in cooked:
+            menu.append(("cooked", name))
+            print(f"   {len(menu):>2}) {name}")
+    if not menu:
+        print("   (no online releases or imported maps found)")
     print("   L) select a local .zip / folder instead")
+
     if not sys.stdin.isatty():
-        sys.exit("[import] non-interactive session: cannot prompt. Pass --package "
-                 "(+ --package-url/--package-dir), or --map, to choose non-interactively.")
+        sys.exit("[import] non-interactive session: cannot prompt. Pass --map / --package "
+                 "(+ --package-url/--package-dir) to choose non-interactively.")
     while True:
-        hint = f"[1-{len(releases)} / L]" if releases else "[L]"
-        default = ", Enter = 1 (newest)" if releases else ""
-        ans = _prompt(f"[import] Which version? {hint}{default}: ").strip().lower()
+        hint = f"[1-{len(menu)} / L]" if menu else "[L]"
+        default = ", Enter = 1" if releases else ""
+        ans = _prompt(f"[import] Which? {hint}{default}: ").strip().lower()
         if ans == "" and releases:
             r = releases[0]
             return _package_from_tag(r["tag"], tag_prefix), r["tag"], None
@@ -848,9 +864,11 @@ def choose_map(repo, tag_prefix=""):
             if not name:
                 sys.exit("[import] no package name given; cannot import.")
             return name, None, path
-        if ans.isdigit() and 1 <= int(ans) <= len(releases):
-            r = releases[int(ans) - 1]
-            return _package_from_tag(r["tag"], tag_prefix), r["tag"], None
+        if ans.isdigit() and 1 <= int(ans) <= len(menu):
+            kind, payload = menu[int(ans) - 1]
+            if kind == "release":
+                return _package_from_tag(payload["tag"], tag_prefix), payload["tag"], None
+            return payload, None, None  # cooked: already imported, run as-is
         print("[import] invalid choice; enter a number, or L for a local file.")
 
 
@@ -953,7 +971,7 @@ def pick_and_import(repo, tag_prefix="", carla_root=None, ue4_root=None, force=F
     then download + cook it. If the chosen version is already cooked, skip the
     download (unless the user opts to re-import, or force=True)."""
     carla_root, ue4_root = _resolve_carla(carla_root, ue4_root)
-    name, tag, local = choose_map(repo, tag_prefix)
+    name, tag, local = choose_map(repo, tag_prefix, carla_root)
 
     if map_is_imported(carla_root, name) and not force:
         print(f"[import] '{name}' is already imported: {cooked_map_path(carla_root, name)}")

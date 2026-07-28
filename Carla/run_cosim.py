@@ -298,10 +298,11 @@ def _net_from_sumocfg(sumocfg):
     return None
 
 
-def resolve_tl_table(sumocfg):
+def resolve_tl_table(sumocfg, force=False):
     """Find this scenario's traffic-light table: a traffic_light_table.csv committed
     next to the sumocfg, else one generated from the SUMO net (cached under
-    ~/.fixs/tables). Returns a path, or None if neither is possible. Generation
+    ~/.fixs/tables). `force` regenerates from the net even if a cache exists (used
+    on --reimport). Returns a path, or None if neither is possible. Generation
     needs pandas/shapely but not SUMO installed."""
     scen = os.path.dirname(os.path.abspath(sumocfg))
     committed = os.path.join(scen, "traffic_light_table.csv")
@@ -314,7 +315,7 @@ def resolve_tl_table(sumocfg):
         return None
     cache = os.path.join(os.path.dirname(env.CONFIG_PATH), "tables")
     out = os.path.join(cache, os.path.splitext(os.path.basename(net))[0] + "_tls.csv")
-    if os.path.isfile(out):
+    if os.path.isfile(out) and not force:
         print(f"[cosim] TL table: cached generated {out}")
         return out
     try:
@@ -432,7 +433,8 @@ def main():
     elif args.map:                               # legacy: --map is a cooked-map name
         target_map = args.map
     else:                                        # pick from catalog / local
-        target_map, picked_tag, picked_local = import_map.choose_map(repo, tag_prefix)
+        target_map, picked_tag, picked_local = import_map.choose_map(
+            repo, tag_prefix, cfg.get("carla_root") if cfg else None)
         picked = import_map.catalog_entry(catalog, target_map)
         if picked:                               # a catalog pick: use its real name + settings
             settings = picked.get("settings", {})
@@ -454,6 +456,18 @@ def main():
     if not args.no_launch and cfg is not None and cfg.get("mode") == "source":
         resolved = None if args.reimport else \
             import_map.resolve_cooked_map(cfg["carla_root"], target_map)
+
+        # Already imported? If this was a FRESH source pick (an online release or a
+        # local .zip/folder), offer to reimport - re-cook + re-place TLs/signs +
+        # regenerate the TL table. A pick of an already-imported map (both picked_*
+        # None) is run as-is, no prompt.
+        if resolved is not None and (picked_tag or picked_local) \
+                and not args.reimport and sys.stdin.isatty():
+            ans = input(f"[cosim] '{resolved[0]}' is already imported. Reimport "
+                        f"(re-cook + re-place TLs/signs + regen TL table)? [y/N]: ").strip().lower()
+            if ans.startswith("y"):
+                args.reimport = True
+                resolved = None
 
         # Materialize the bundle if we must import, or need its sumo/ (no --sumocfg).
         # download_release_zip caches under ~/.fixs/maps; open_bundle splits it.
@@ -524,7 +538,7 @@ def main():
     # the sumocfg, else generated from the SUMO net (cached ~/.fixs/tables).
     tl_table = args.tl_table
     if tls_manager == "sumo" and not tl_table:
-        tl_table = resolve_tl_table(sumocfg)
+        tl_table = resolve_tl_table(sumocfg, force=args.reimport)
 
     # TL + sign placement (source build only; idempotent via markers). Runs after
     # the import + sumocfg/TL-table resolution so the table exists to place from.
