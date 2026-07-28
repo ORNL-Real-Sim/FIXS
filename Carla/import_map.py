@@ -236,6 +236,133 @@ def _select_package(name, package_url):
     return path
 
 
+def _has_descriptor(src):
+    """True if the package at `src` (a .zip or a folder) already carries a CARLA
+    map descriptor - any *.json other than the road-painter decals file. A raw
+    RoadRunner export carries none (only .fbx/.xodr/.geojson/.rrdata.xml), which
+    is how stage_package tells a hand-authored package from one whose descriptor
+    must be generated.
+
+    `.geojson` deliberately does not count: like CARLA's own `fnmatch("*.json")`,
+    the check needs the literal '.json', so `<map>.geojson` is ignored."""
+    def is_desc(fname):
+        base = os.path.basename(fname).lower()
+        return base.endswith(".json") and base != "roadpainter_decals.json"
+    if os.path.isfile(src) and src.lower().endswith(".zip"):
+        with zipfile.ZipFile(src) as z:
+            return any(is_desc(n) for n in z.namelist())
+    if os.path.isdir(src):
+        for _root, _dirs, files in os.walk(src):
+            if any(is_desc(f) for f in files):
+                return True
+    return False
+
+
+def _tile_xy(fbx_name, map_name):
+    """(x, y) parsed from a strict `<map_name>_Tile_<x>_<y>.fbx`, else None.
+
+    Strict on purpose: CARLA reads the streaming-grid index off the last two
+    underscore tokens of the tile name (LoadAssetMaterialsCommandlet.cpp), so a
+    loose `<map>_Tile_0_0_final.fbx` would silently cook as tile (0,0) and
+    collide. Anything not exactly `<map>_Tile_<int>_<int>.fbx` is not a tile we
+    own - the caller warns about it rather than guessing."""
+    stem = fbx_name[:-4] if fbx_name.lower().endswith(".fbx") else fbx_name
+    m = re.fullmatch(re.escape(map_name) + r"_Tile_(\d+)_(\d+)", stem)
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+def _tile_size(asset_dir):
+    """RoadRunner tile edge length, in metres, for a tiled export in `asset_dir`.
+
+    Prefer the export's own TilesInfo.txt (`firstTileCenterX,firstTileCenterY,
+    tileSize`); fall back to 2000 when it is absent - the common case. 2000 is
+    both the cook commandlet's own default (PrepareAssetsForCookingCommandlet)
+    and the maximum Unreal honours (FbxStaticMeshImport clamps TileSize > 2000),
+    so the descriptor and the cook agree with nothing to infer."""
+    info = os.path.join(asset_dir, "TilesInfo.txt")
+    if os.path.isfile(info):
+        try:
+            with open(info, encoding="utf-8") as f:
+                for line in f:
+                    nums = re.findall(r"-?\d+(?:\.\d+)?", line)
+                    if len(nums) >= 3:
+                        return int(round(float(nums[2])))
+        except (OSError, ValueError):
+            pass
+        print(f"[import] warning: {info} present but unparseable; using tile_size=2000")
+    return 2000
+
+
+def generate_descriptor(import_dir, map_name):
+    """Synthesise Import/<map_name>.json for a raw RoadRunner export that shipped
+    no CARLA descriptor, deriving everything from the staged filenames (see
+    FIXS_Applications #4). stage_package isolates a raw export under
+    Import/<map_name>/, so that subtree is scanned - never the shared Import/
+    root. Returns the descriptor path.
+
+    Resolve, never guess: exit loudly when the export cannot be described - no
+    <map_name>.xodr staged, the same map staged in two places, or an .xodr with
+    neither a <map_name>.fbx nor <map_name>_Tile_<x>_<y>.fbx beside it."""
+    import json
+
+    subtree = os.path.join(import_dir, map_name)
+    scan_root = subtree if os.path.isdir(subtree) else import_dir
+    # Exactly one <map_name>.xodr is expected in the staged subtree; walk it to
+    # also cover an export that carried its own inner folder.
+    xodr_dirs = [root for root, _dirs, files in os.walk(scan_root)
+                 if map_name + ".xodr" in files]
+    if not xodr_dirs:
+        sys.exit(f"[import] cannot describe '{map_name}': no {map_name}.xodr under "
+                 f"{scan_root}. A raw RoadRunner export must be named after the map "
+                 f"({map_name}.xodr + {map_name}.fbx or {map_name}_Tile_<x>_<y>.fbx).")
+    if len(xodr_dirs) > 1:
+        where = "\n".join(f"             {os.path.relpath(d, import_dir)}"
+                          for d in sorted(xodr_dirs))
+        sys.exit(f"[import] cannot describe '{map_name}': {map_name}.xodr is staged "
+                 f"in {len(xodr_dirs)} places (staged more than once?). Keep one so a "
+                 f"single descriptor maps to a single destination:\n{where}")
+
+    asset_dir = xodr_dirs[0]
+    rel = lambda p: os.path.relpath(p, import_dir).replace(os.sep, "/")
+    single = os.path.join(asset_dir, map_name + ".fbx")
+    tiles = sorted(os.path.join(asset_dir, f) for f in os.listdir(asset_dir)
+                   if _tile_xy(f, map_name) is not None)
+    if os.path.isfile(single) and tiles:
+        sys.exit(f"[import] cannot describe '{map_name}': both {map_name}.fbx and "
+                 f"{map_name}_Tile_*.fbx present - a map is single-source or tiled, "
+                 f"not both.")
+
+    entry = {"name": map_name,
+             "xodr": rel(os.path.join(asset_dir, map_name + ".xodr")),
+             "use_carla_materials": False}  # RoadRunner ships its own materials
+    if os.path.isfile(single):
+        entry["source"] = rel(single)
+        kind = "single-source"
+    elif tiles:
+        entry["tile_size"] = _tile_size(asset_dir)
+        entry["tiles"] = [rel(t) for t in tiles]
+        kind = f"tiled, {len(tiles)} tiles, tile_size={entry['tile_size']}"
+    else:
+        sys.exit(f"[import] cannot describe '{map_name}': found {map_name}.xodr but "
+                 f"no {map_name}.fbx or {map_name}_Tile_<x>_<y>.fbx beside it.")
+
+    # Surface, don't silently drop, RoadRunner layer-split exports: extra .fbx
+    # that are neither the source nor a strict tile. CARLA's own generator
+    # ignores them; a dropped layer should at least be visible.
+    for f in sorted(os.listdir(asset_dir)):
+        if f.lower().endswith(".fbx") and f != map_name + ".fbx" \
+                and _tile_xy(f, map_name) is None:
+            print(f"[import] warning: ignoring unexpected fbx {f!r} (not {map_name}.fbx "
+                  f"or {map_name}_Tile_<x>_<y>.fbx); not part of the descriptor.")
+
+    descriptor = os.path.join(import_dir, map_name + ".json")
+    with open(descriptor, "w", encoding="utf-8") as f:
+        json.dump({"maps": [entry], "props": []}, f, indent=2)
+        f.write("\n")
+    print(f"[import] generated {descriptor} ({kind})")
+    return descriptor
+
+
 def stage_package(carla_root, name, package_url=None, package_dir=None, package_pick=False):
     """Ensure <carla_root>/Import has <name>.json (+ its assets). Sources the
     package, in order: an already-staged descriptor, an explicit --package-dir,
@@ -258,15 +385,214 @@ def stage_package(carla_root, name, package_url=None, package_dir=None, package_
             src, tmpdir = _try_gh_download(package_url)
             if src is None:
                 src = _select_package(name, package_url)
-        _stage_from_path(src, import_dir)
+        if _has_descriptor(src):
+            # Hand-authored package: <name>.json + its <name>/ asset folder land
+            # directly under Import/.
+            _stage_from_path(src, import_dir)
+        else:
+            # Raw RoadRunner export (no CARLA .json): isolate it under
+            # Import/<name>/ so repeat imports of different maps cannot collide,
+            # then synthesise Import/<name>.json from the fbx/xodr (see #4).
+            print(f"[import] '{name}' ships no CARLA descriptor; treating it as a "
+                  f"raw RoadRunner export and generating one.")
+            raw_dest = os.path.join(import_dir, name)
+            os.makedirs(raw_dest, exist_ok=True)
+            _stage_from_path(src, raw_dest)
+            generate_descriptor(import_dir, name)
     finally:
         if tmpdir:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
     if not os.path.isfile(descriptor):
         sys.exit(f"[import] after staging, descriptor still missing: {descriptor}\n"
-                 f"         (the package must contain {name}.json + its asset folder)")
+                 f"         (a packaged map must contain {name}.json; a raw export "
+                 f"must be named after the map so one can be generated)")
     return import_dir
+
+
+def _looks_like_bundle(names):
+    """True if a package's entries are rooted under a top-level `carla/` - the
+    Digital-Twin-Library combined layout (`carla/` + `sumo/`) - rather than a
+    flat/legacy CARLA-only package."""
+    tops = {n.replace("\\", "/").split("/", 1)[0] for n in names if n.strip()}
+    return "carla" in tops
+
+
+def open_bundle(src):
+    """Split a map source into its CARLA package and its SUMO scenario.
+
+    A Digital-Twin-Library map ships as one bundle - a zip (or folder) with a
+    top-level `carla/` (the CARLA import package) and `sumo/` (the scenario).
+    Returns `(carla_src, sumo_dir)`:
+      - bundle  -> (`<unpacked>/carla`, `<unpacked>/sumo`); a zip is extracted
+                   once into a sibling `<stem>_unpacked/` cache (re-extracted only
+                   when the zip is newer), a folder is used in place.
+      - legacy CARLA-only zip/folder -> `(src, None)`, unchanged behavior.
+    `carla_src` is what to hand `ensure_map`/`stage_package`; `sumo_dir` (or None)
+    is where run_cosim finds the `.sumocfg`."""
+    if os.path.isdir(src):
+        carla = os.path.join(src, "carla")
+        sumo = os.path.join(src, "sumo")
+        if os.path.isdir(carla):
+            return carla, (sumo if os.path.isdir(sumo) else None)
+        return src, None
+    if os.path.isfile(src) and src.lower().endswith(".zip"):
+        with zipfile.ZipFile(src) as z:
+            if not _looks_like_bundle(z.namelist()):
+                return src, None
+            unpacked = os.path.join(
+                os.path.dirname(os.path.abspath(src)),
+                os.path.splitext(os.path.basename(src))[0] + "_unpacked")
+            if not os.path.isdir(unpacked) or os.path.getmtime(src) > os.path.getmtime(unpacked):
+                shutil.rmtree(unpacked, ignore_errors=True)
+                os.makedirs(unpacked, exist_ok=True)
+                z.extractall(unpacked)
+                print(f"[import] unpacked bundle -> {unpacked}")
+        carla = os.path.join(unpacked, "carla")
+        sumo = os.path.join(unpacked, "sumo")
+        return (carla if os.path.isdir(carla) else unpacked), \
+               (sumo if os.path.isdir(sumo) else None)
+    return src, None
+
+
+def bundle_sumocfg(sumo_dir):
+    """The single `.sumocfg` inside a bundle's `sumo/` dir, or None if there is no
+    `sumo/`. Exits if the dir holds more than one (ambiguous - caller should pass
+    an explicit --sumocfg)."""
+    if not sumo_dir or not os.path.isdir(sumo_dir):
+        return None
+    cfgs = sorted(f for f in os.listdir(sumo_dir) if f.lower().endswith(".sumocfg"))
+    if not cfgs:
+        return None
+    if len(cfgs) > 1:
+        sys.exit(f"[import] {sumo_dir} has {len(cfgs)} .sumocfg files {cfgs}; "
+                 f"pass --sumocfg to choose one.")
+    return os.path.join(sumo_dir, cfgs[0])
+
+
+def map_name_in(carla_src):
+    """The real map/package name a staged CARLA source describes - the stem of its
+    lone `<name>.json` descriptor, else its lone `<name>.xodr`. This is the name
+    CARLA actually cooks/loads, which need NOT equal a release/location tag (e.g.
+    the `roosevelt` bundle's carla/ describes `Roosevelt_07142026`). None if it
+    cannot be told unambiguously (0 or >1 candidates)."""
+    if not carla_src or not os.path.isdir(carla_src):
+        return None
+
+    def stems(ext):
+        found = []
+        for root, _dirs, files in os.walk(carla_src):
+            for f in files:
+                if f.lower().endswith(ext):
+                    found.append(f[:-len(ext)])
+        return found
+
+    jsons = [j for j in stems(".json") if j.lower() != "roadpainter_decals"]
+    if len(jsons) == 1:
+        return jsons[0]
+    xodrs = list(set(stems(".xodr")))
+    if len(xodrs) == 1:
+        return xodrs[0]
+    return None
+
+
+def _dir_with_sumocfg(root):
+    """The directory under `root` that directly holds a .sumocfg (e.g. a lone
+    'SUMO files/' wrapper inside a scenario zip), or None."""
+    if not root or not os.path.isdir(root):
+        return None
+    for cur, _dirs, files in os.walk(root):
+        if any(f.lower().endswith(".sumocfg") for f in files):
+            return cur
+    return None
+
+
+def _sumo_scenario_dir(src):
+    """If `src` (a .zip or folder) is a SUMO-only scenario - a .sumocfg present,
+    no CARLA asset (.xodr/.fbx) - return the dir holding the .sumocfg (unpacking a
+    zip once, beside it). Else None. This is the sumo half of classify_source."""
+    if os.path.isfile(src) and src.lower().endswith(".zip"):
+        with zipfile.ZipFile(src) as z:
+            names = [n.lower() for n in z.namelist()]
+            if not any(n.endswith(".sumocfg") for n in names):
+                return None
+            if any(n.endswith((".xodr", ".fbx")) for n in names):
+                return None  # carries CARLA geometry -> not sumo-only
+            unpacked = os.path.join(
+                os.path.dirname(os.path.abspath(src)),
+                os.path.splitext(os.path.basename(src))[0] + "_unpacked")
+            if not os.path.isdir(unpacked) or os.path.getmtime(src) > os.path.getmtime(unpacked):
+                shutil.rmtree(unpacked, ignore_errors=True)
+                os.makedirs(unpacked, exist_ok=True)
+                z.extractall(unpacked)
+        return _dir_with_sumocfg(unpacked)
+    if os.path.isdir(src):
+        has_cfg = has_carla = False
+        for _cur, _dirs, files in os.walk(src):
+            for f in files:
+                fl = f.lower()
+                has_cfg = has_cfg or fl.endswith(".sumocfg")
+                has_carla = has_carla or fl.endswith((".xodr", ".fbx"))
+        if has_cfg and not has_carla:
+            return _dir_with_sumocfg(src)
+    return None
+
+
+def classify_source(src):
+    """What a map source provides, as (carla_src, sumo_src):
+      - bundle (carla/ + sumo/) -> (carla dir, sumo dir)
+      - carla-only pkg/export   -> (carla src, None)
+      - sumo-only scenario      -> (None, sumo dir)
+    A source fills the CARLA slot, the SUMO slot, or both; run_cosim fills any slot
+    a pick leaves empty. Zips are unpacked as needed."""
+    carla_src, sumo_dir = open_bundle(src)          # bundle split, else (src, None)
+    if sumo_dir is not None:
+        return carla_src, sumo_dir                  # bundle: both slots
+    sdir = _sumo_scenario_dir(src)
+    if sdir is not None:
+        return None, sdir                           # sumo-only
+    return carla_src, None                          # carla-only
+
+
+def fetch_catalog(repo):
+    """The DT-Library catalog (list of map entries), fetched fresh via gh from
+    `repo`'s catalog.json and cached at ~/.fixs/catalog.json. Falls back to the
+    cache when offline / gh is unavailable; [] if neither works. Read every run so
+    the map list, real names, and per-map settings stay current."""
+    import json
+    cache = os.path.join(os.path.dirname(env.CONFIG_PATH), "catalog.json")
+    gh = shutil.which("gh")
+    if gh:
+        try:
+            out = subprocess.run(
+                [gh, "api", f"repos/{repo}/contents/catalog.json",
+                 "-H", "Accept: application/vnd.github.raw+json"],
+                capture_output=True, text=True, timeout=15)
+            if out.returncode == 0 and out.stdout.strip():
+                maps = json.loads(out.stdout).get("maps", [])
+                try:
+                    with open(cache, "w", encoding="utf-8") as f:
+                        f.write(out.stdout)
+                except OSError:
+                    pass
+                return maps
+        except Exception:
+            pass
+    if os.path.isfile(cache):
+        try:
+            with open(cache, encoding="utf-8") as f:
+                return json.load(f).get("maps", [])
+        except (OSError, ValueError):
+            pass
+    return []
+
+
+def catalog_entry(catalog, location):
+    """The catalog entry whose `location` matches, or None."""
+    for m in catalog or []:
+        if m.get("location") == location:
+            return m
+    return None
 
 
 def run_import(carla_root, ue4_root, name):
@@ -282,7 +608,50 @@ def run_import(carla_root, ue4_root, name):
     cmd = [sys.executable, import_py, f"--package={name}"]
     print(f"[import] running: {' '.join(cmd)}  (cwd={carla_root})")
     print("[import] cooking the map can take several minutes ...")
-    return subprocess.call(cmd, cwd=carla_root, env=proc_env)
+    # CARLA's Import.py cooks EVERY *.json under Import/ (its --package flag does
+    # not filter), so a leftover package from an earlier import cross-contaminates
+    # this cook - and if it names an already-cooked map, the whole run aborts.
+    # Isolate: stash the other descriptors (+ their asset folders) for the cook,
+    # restore them after.
+    restore = _isolate_import(os.path.join(carla_root, "Import"), name)
+    try:
+        return subprocess.call(cmd, cwd=carla_root, env=proc_env)
+    finally:
+        restore()
+
+
+def _isolate_import(import_dir, keep):
+    """Temporarily move every package under `import_dir` except `keep` aside, so
+    CARLA's Import.py cooks only `keep`. Returns a restore() to move them back
+    (call it in a finally). `keep`'s own descriptor + asset folder and the shared
+    roadpainter_decals.json stay put."""
+    if not os.path.isdir(import_dir):
+        return lambda: None
+    stash = tempfile.mkdtemp(prefix="fixs-import-stash-")
+    moved = []
+    for f in sorted(os.listdir(import_dir)):
+        if not f.lower().endswith(".json") or f.lower() == "roadpainter_decals.json":
+            continue
+        base = f[:-len(".json")]
+        if base == keep:
+            continue
+        shutil.move(os.path.join(import_dir, f), os.path.join(stash, f))
+        moved.append(f)
+        folder = os.path.join(import_dir, base)
+        if os.path.isdir(folder):
+            shutil.move(folder, os.path.join(stash, base))
+            moved.append(base)
+    if moved:
+        print(f"[import] isolating '{keep}' for the cook (set aside {len(moved)} "
+              f"other Import/ item(s), restored after)")
+
+    def restore():
+        for m in moved:
+            src = os.path.join(stash, m)
+            if os.path.exists(src):
+                shutil.move(src, os.path.join(import_dir, m))
+        shutil.rmtree(stash, ignore_errors=True)
+    return restore
 
 
 def _resolve_carla(carla_root=None, ue4_root=None):

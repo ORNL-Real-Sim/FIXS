@@ -332,10 +332,14 @@ def resolve_tl_table(sumocfg):
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--sumocfg", required=True, help="SUMO .sumocfg")
+    ap.add_argument("--sumocfg", default=None,
+                    help="SUMO .sumocfg. Optional: if omitted it comes from the chosen "
+                         "map bundle's sumo/ (a DT-Library map ships its scenario). Pass "
+                         "it to override with your own demand on a shared map.")
     ap.add_argument("--map", default=None,
-                    help="CARLA map to load. If omitted, pick from the published map "
-                         "releases of --repo (lists versions, you choose, it auto-downloads).")
+                    help="Map to run: a Digital-Twin-Library location (e.g. 'roosevelt'), "
+                         "or an already-cooked map name. If omitted, pick from the catalog "
+                         "/ local ~/.fixs/maps (lists options, you choose, it auto-downloads).")
     ap.add_argument("--repo", default=None,
                     help="owner/repo whose map-* releases to offer when --map is omitted "
                          "(or a repo= line in --map-config)")
@@ -354,7 +358,8 @@ def main():
     ap.add_argument("--reimport", action="store_true",
                     help="re-import the map even if already cooked (re-download + re-cook)")
     ap.add_argument("--tl-table", default=None, help="traffic_light_table.csv (for --tls-manager sumo)")
-    ap.add_argument("--tls-manager", default="sumo", choices=["sumo", "carla", "none"])
+    ap.add_argument("--tls-manager", default=None, choices=["sumo", "carla", "none"],
+                    help="who drives the lights (default: the map's catalog setting, else 'sumo')")
     ap.add_argument("--step-length", type=float, default=0.05,
                     help="sim timestep in seconds / CARLA fixed_delta_seconds (default 0.05; "
                          "0.1 halves the ticks-per-second and is fine for traffic)")
@@ -406,47 +411,68 @@ def main():
     # version; the chosen version is what we both import AND load, so the imported
     # map and the loaded map can never drift apart.
     import import_map
-    repo = args.repo
-    picked_tag = None
-    picked_local = None
-    target_map = args.map
-    if target_map is None:
-        repo, tag_prefix = import_map.resolve_map_source(args.repo, args.tag_prefix)
+    repo, tag_prefix = import_map.resolve_map_source(args.repo, args.tag_prefix)
+    catalog = import_map.fetch_catalog(repo)
+
+    # Two slots to fill: a CARLA map (to cook + load) and a SUMO scenario. A
+    # Digital-Twin-Library bundle fills both; the catalog gives the real cooked
+    # name + per-map settings WITHOUT a download; --map / --sumocfg override; a
+    # local pick fills either slot.
+    settings = {}
+    picked_tag = None            # DT release to (lazily) download for import / sumo
+    picked_local = None          # local .zip / folder to import from
+    target_map = args.map        # provisional; a catalog location resolves to the real name
+
+    ent = import_map.catalog_entry(catalog, args.map) if args.map else None
+    if ent:                                      # --map is a DT-Library location
+        target_map = ent["map_name"]
+        settings = ent.get("settings", {})
+        picked_tag = ent["release"]
+        print(f"[cosim] map '{args.map}' -> '{target_map}'  (DT release {picked_tag})")
+    elif args.map:                               # legacy: --map is a cooked-map name
+        target_map = args.map
+    else:                                        # pick from catalog / local
         target_map, picked_tag, picked_local = import_map.choose_map(repo, tag_prefix)
-        src = f"release {picked_tag}" if picked_tag else f"local {picked_local}"
-        print(f"[cosim] selected map: {target_map}  ({src})")
+        picked = import_map.catalog_entry(catalog, target_map)
+        if picked:                               # a catalog pick: use its real name + settings
+            settings = picked.get("settings", {})
+            target_map = picked["map_name"]
+        print(f"[cosim] selected map: {target_map}")
 
-    # Resolve the TL table for signal sync + placement: an explicit --tl-table
-    # wins, else a traffic_light_table.csv committed next to the sumocfg, else one
-    # generated from the SUMO net (cached under ~/.fixs/tables).
-    tl_table = args.tl_table
-    if args.tls_manager == "sumo" and not tl_table:
-        tl_table = resolve_tl_table(args.sumocfg)
+    # Per-map settings are defaults; explicit CLI flags override.
+    no_net_offset = args.no_net_offset or settings.get("net_offset") == "zero"
+    tls_manager = args.tls_manager or settings.get("tls_manager") or "sumo"
 
-    # /Game/... path of the level to boot CARLA into; set by the source-build
-    # preflight below. None (packaged build, or --no-launch) = let the engine pick.
+    sumo_dir = None              # dir holding the chosen bundle's .sumocfg (set on open)
+    # /Game/... path to boot CARLA into (set by the source-build preflight). None
+    # (packaged build / --no-launch) = let the engine pick.
     target_level = None
 
     # Source-build preflight: a custom map must be cooked into the build before
-    # CARLA can load it. Import the target map if missing - from the picked release
-    # (downloaded + cached), a picked local .zip, or the explicit --map + url/config
-    # - else fail clearly.
+    # CARLA can load it. Import it if missing - from a DT-Library bundle (downloaded
+    # + cached, split into carla/ + sumo/) or a local pick - else fail clearly.
     if not args.no_launch and cfg is not None and cfg.get("mode") == "source":
-        # `target_map` is so far a PACKAGE name (a release tag with its prefix
-        # stripped). The map CARLA loads only shares that name by convention, so
-        # resolve it against what is actually cooked instead of trusting it.
         resolved = None if args.reimport else \
             import_map.resolve_cooked_map(cfg["carla_root"], target_map)
+
+        # Materialize the bundle if we must import, or need its sumo/ (no --sumocfg).
+        # download_release_zip caches under ~/.fixs/maps; open_bundle splits it.
+        carla_src = None
+        if (resolved is None or args.sumocfg is None) and (picked_local or picked_tag):
+            zip_path = picked_local or import_map.download_release_zip(
+                repo, picked_tag, force_redownload=args.reimport)
+            carla_src, sumo_dir = import_map.open_bundle(zip_path)
+
         if resolved is None:
-            if picked_tag is not None or picked_local is not None:
+            if carla_src is not None:                    # a DT/local bundle or raw export
+                real = import_map.map_name_in(carla_src) or target_map
                 verb = "re-importing" if args.reimport else "importing"
-                print(f"[cosim] {verb} '{target_map}' before launch ...")
-                zip_path = picked_local or import_map.download_release_zip(
-                    repo, picked_tag, force_redownload=args.reimport)
-                import_map.ensure_map(target_map, carla_root=cfg["carla_root"],
+                print(f"[cosim] {verb} '{real}' before launch ...")
+                import_map.ensure_map(real, carla_root=cfg["carla_root"],
                                       ue4_root=cfg.get("ue4_root"),
-                                      package_dir=zip_path, force=args.reimport)
-            elif args.auto_import or args.reimport:
+                                      package_dir=carla_src, force=args.reimport)
+                target_map = real
+            elif args.auto_import or args.reimport:      # legacy explicit --map + url/config
                 url = args.map_package_url
                 if args.map_config:
                     url = url or import_map.read_map_config(args.map_config).get("url")
@@ -458,52 +484,61 @@ def main():
             else:
                 sys.exit(
                     f"[cosim] map '{target_map}' is not imported into {cfg['carla_root']}.\n"
-                    f"        Import it once (e.g. import_<app>_map.bat), or pass "
-                    f"--auto-import [--map-package-url <release zip>].")
+                    f"        Pick a DT-Library map (--map <location>), a local bundle "
+                    f"(--package-dir <zip/folder>), or --auto-import [--map-package-url <zip>].")
             resolved = import_map.resolve_cooked_map(cfg["carla_root"], target_map)
 
-        # Resolution failed even after the import: the package names its map
-        # something we cannot infer, or ships several. Don't guess a name for
-        # load_world - ask which cooked map to run.
         if resolved is None:
-            print(f"[cosim] could not tell which cooked map package '{target_map}' "
-                  f"provides; pick the one to load:")
+            print(f"[cosim] could not tell which cooked map '{target_map}' provides; "
+                  f"pick the one to load:")
             target_map = import_map.choose_imported_map(cfg["carla_root"])
-            # We have a name but no package to derive the path from, so this is the
-            # one case where duplicates are genuinely undecidable - it may prompt.
             target_level = import_map.choose_level_path(cfg["carla_root"], target_map)
         else:
             if resolved[0] != target_map:
                 print(f"[cosim] package '{target_map}' provides map '{resolved[0]}'")
             target_map, target_level = resolved
 
-        # Repeat imports under different package names leave old copies of the same
-        # map behind. Loading by full path makes them harmless, so just say they are
-        # there - no question to ask, we already know which one we want.
         note = import_map.duplicate_level_note(cfg["carla_root"], target_map, target_level)
         if note:
             print(note)
 
-        # TL preflight: a map whose OpenDRIVE has no dynamic signals needs the
-        # traffic lights placed from the table (else the TL sync has no actors).
-        # Idempotent via a marker; re-done after a (re-)import that wiped it.
+    # SUMO slot: --sumocfg wins; else the chosen bundle's sumo/. A catalog map that
+    # was already cooked (so no bundle opened above) fetches its bundle now, just
+    # for sumo/ (cached).
+    sumocfg = args.sumocfg
+    if sumocfg is None:
+        if sumo_dir is None and (picked_local or picked_tag):
+            zip_path = picked_local or import_map.download_release_zip(repo, picked_tag)
+            _carla, sumo_dir = import_map.open_bundle(zip_path)
+        sumocfg = import_map.bundle_sumocfg(sumo_dir)
+    if sumocfg is None:
+        sys.exit("[cosim] no SUMO scenario to run: pass --sumocfg, or choose a map "
+                 "bundle / sumo source that provides one.")
+
+    # TL table for signal sync + placement: --tl-table wins, else committed next to
+    # the sumocfg, else generated from the SUMO net (cached ~/.fixs/tables).
+    tl_table = args.tl_table
+    if tls_manager == "sumo" and not tl_table:
+        tl_table = resolve_tl_table(sumocfg)
+
+    # TL + sign placement (source build only; idempotent via markers). Runs after
+    # the import + sumocfg/TL-table resolution so the table exists to place from.
+    if not args.no_launch and cfg is not None and cfg.get("mode") == "source":
+        imported_now = (picked_tag is not None or picked_local is not None
+                        or args.auto_import or args.reimport)
         if tl_table:
             import place_tls
             if (not place_tls.tls_placed(cfg["carla_root"], target_map)) or args.reimport:
-                if picked_tag is not None or picked_local is not None or args.auto_import or args.reimport:
+                if imported_now:
                     print(f"[cosim] placing traffic lights for '{target_map}' before launch ...")
                     place_tls.place_tls(target_map, tl_table, carla_root=cfg["carla_root"],
                                         ue4_root=cfg.get("ue4_root"), force=args.reimport)
                 else:
                     print(f"[cosim] note: traffic lights not placed for '{target_map}'. Run "
-                          f"place_tls (or pass --auto-import) to add them, else no TL sync.")
-
-        # Sign preflight: place the RoadRunner sign meshes CARLA's import culled (+
-        # fix their see-through materials). Needs no table/data; cosmetic, so it
-        # never aborts the run. Idempotent via a marker; re-done after a re-import.
+                          f"place_tls (or --reimport) to add them, else no TL sync.")
         import place_signs
         if (not place_signs.signs_placed(cfg["carla_root"], target_map)) or args.reimport:
-            if picked_tag is not None or picked_local is not None or args.auto_import or args.reimport:
+            if imported_now:
                 print(f"[cosim] placing road signs for '{target_map}' before launch ...")
                 place_signs.place_signs(target_map, carla_root=cfg["carla_root"],
                                         ue4_root=cfg.get("ue4_root"), force=args.reimport)
@@ -576,25 +611,25 @@ def main():
             # actors, else the full table).
             frame = None
             if tl_table and not args.spectator_all:
-                frame = _frame_from_table(tl_table, args.no_net_offset,
+                frame = _frame_from_table(tl_table, no_net_offset,
                                           junction=args.spectator_junction)
             if frame is None:
                 frame = _frame_from_actors(world)
             if frame is None and tl_table:
-                frame = _frame_from_table(tl_table, args.no_net_offset, whole=True)
+                frame = _frame_from_table(tl_table, no_net_offset, whole=True)
             if frame is not None:
                 position_spectator(world, frame)
             else:
                 print("[VIEW] no TL actors/table to anchor on; leaving spectator as is")
 
-        cmd = [sys.executable, SYNC, args.sumocfg,
-               "--tls-manager", args.tls_manager,
+        cmd = [sys.executable, SYNC, sumocfg,
+               "--tls-manager", tls_manager,
                "--step-length", str(args.step_length),
                "--carla-host", args.carla_host, "--carla-port", str(args.carla_port),
                "--carla-timeout", str(args.carla_timeout)]
         if tl_table:
             cmd += ["--tl-table", tl_table]
-        if args.no_net_offset:
+        if no_net_offset:
             cmd.append("--no-net-offset")
         if args.fast:
             cmd.append("--no-realtime")
