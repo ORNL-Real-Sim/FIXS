@@ -908,6 +908,25 @@ def main():
     if tls_manager == "sumo" and not tl_table:
         tl_table = resolve_tl_table(sumocfg, force=args.reimport, cache_name=target_map)
 
+    # The per-map scenario yaml, written like tl_table.csv: always, on first use
+    # (refreshed by --reimport). Deliberately BEFORE the CARLA launch and the
+    # --prep-only return - it is a config artifact, so it must not depend on a
+    # running CARLA. Its CarlaSetup.Backend then selects the bridge further down.
+    config_yaml = args.config or import_map.map_config_path(target_map)
+    if args.reimport or not os.path.isfile(config_yaml):
+        # A regenerate must not silently undo hand edits: carry the existing
+        # Backend choice over, and keep the old file as .bak to fall back on.
+        prior = read_backend(config_yaml) if os.path.isfile(config_yaml) else None
+        if prior:
+            import shutil as _sh
+            _sh.copy2(config_yaml, config_yaml + ".bak")
+            print(f"[cosim] regenerating {os.path.basename(config_yaml)} "
+                  f"(previous kept as .bak; Backend={prior} preserved)")
+        generate_config_yaml(config_yaml, tl_table, args.carla_host,
+                             args.carla_port, realtime=not args.fast,
+                             refresh=args.step_length,
+                             backend=args.engine or prior or "py")
+
     # TL + sign placement (source build only; idempotent via markers). Runs after
     # the import + sumocfg/TL-table resolution so the table exists to place from.
     if not args.no_launch and cfg is not None and cfg.get("mode") == "source":
@@ -1014,21 +1033,6 @@ def main():
         # keeps it inspectable/editable BEFORE a cpp run - and makes its
         # CarlaSetup.Backend a real switch, since a missing file would otherwise
         # always read as 'py' and could never generate itself.
-        config_yaml = args.config or import_map.map_config_path(target_map)
-        if args.reimport or not os.path.isfile(config_yaml):
-            # A regenerate must not silently undo hand edits: carry the existing
-            # Backend choice over, and keep the old file as .bak to fall back on.
-            prior = read_backend(config_yaml) if os.path.isfile(config_yaml) else None
-            if prior:
-                import shutil as _sh
-                _sh.copy2(config_yaml, config_yaml + ".bak")
-                print(f"[cosim] regenerating {os.path.basename(config_yaml)} "
-                      f"(previous kept as .bak; Backend={prior} preserved)")
-            generate_config_yaml(config_yaml, tl_table, args.carla_host,
-                                 args.carla_port, realtime=not args.fast,
-                                 refresh=args.step_length,
-                                 backend=args.engine or prior or "py")
-
         # Engine dispatch: CarlaSetup.Backend in that yaml picks the bridge
         # (--engine overrides). cpp = FIXS-native (TrafficLayer + VirCarlaEnv); py
         # (default) = the standalone run_synchronization.py bridge below.
