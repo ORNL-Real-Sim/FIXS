@@ -608,7 +608,50 @@ def run_import(carla_root, ue4_root, name):
     cmd = [sys.executable, import_py, f"--package={name}"]
     print(f"[import] running: {' '.join(cmd)}  (cwd={carla_root})")
     print("[import] cooking the map can take several minutes ...")
-    return subprocess.call(cmd, cwd=carla_root, env=proc_env)
+    # CARLA's Import.py cooks EVERY *.json under Import/ (its --package flag does
+    # not filter), so a leftover package from an earlier import cross-contaminates
+    # this cook - and if it names an already-cooked map, the whole run aborts.
+    # Isolate: stash the other descriptors (+ their asset folders) for the cook,
+    # restore them after.
+    restore = _isolate_import(os.path.join(carla_root, "Import"), name)
+    try:
+        return subprocess.call(cmd, cwd=carla_root, env=proc_env)
+    finally:
+        restore()
+
+
+def _isolate_import(import_dir, keep):
+    """Temporarily move every package under `import_dir` except `keep` aside, so
+    CARLA's Import.py cooks only `keep`. Returns a restore() to move them back
+    (call it in a finally). `keep`'s own descriptor + asset folder and the shared
+    roadpainter_decals.json stay put."""
+    if not os.path.isdir(import_dir):
+        return lambda: None
+    stash = tempfile.mkdtemp(prefix="fixs-import-stash-")
+    moved = []
+    for f in sorted(os.listdir(import_dir)):
+        if not f.lower().endswith(".json") or f.lower() == "roadpainter_decals.json":
+            continue
+        base = f[:-len(".json")]
+        if base == keep:
+            continue
+        shutil.move(os.path.join(import_dir, f), os.path.join(stash, f))
+        moved.append(f)
+        folder = os.path.join(import_dir, base)
+        if os.path.isdir(folder):
+            shutil.move(folder, os.path.join(stash, base))
+            moved.append(base)
+    if moved:
+        print(f"[import] isolating '{keep}' for the cook (set aside {len(moved)} "
+              f"other Import/ item(s), restored after)")
+
+    def restore():
+        for m in moved:
+            src = os.path.join(stash, m)
+            if os.path.exists(src):
+                shutil.move(src, os.path.join(import_dir, m))
+        shutil.rmtree(stash, ignore_errors=True)
+    return restore
 
 
 def _resolve_carla(carla_root=None, ue4_root=None):
