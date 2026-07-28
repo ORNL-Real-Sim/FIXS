@@ -418,15 +418,16 @@ def _looks_like_bundle(names):
     return "carla" in tops
 
 
-def open_bundle(src):
+def open_bundle(src, cache_name=None):
     """Split a map source into its CARLA package and its SUMO scenario.
 
     A Digital-Twin-Library map ships as one bundle - a zip (or folder) with a
     top-level `carla/` (the CARLA import package) and `sumo/` (the scenario).
     Returns `(carla_src, sumo_dir)`:
-      - bundle  -> (`<unpacked>/carla`, `<unpacked>/sumo`); a zip is extracted
-                   once into a sibling `<stem>_unpacked/` cache (re-extracted only
-                   when the zip is newer), a folder is used in place.
+      - bundle  -> (`<cache>/carla`, `<cache>/sumo`); a zip is extracted once
+                   (re-extracted only when the zip is newer). `cache_name` (the
+                   cooked map name) extracts into ~/.fixs/maps/<cache_name>/, else
+                   a sibling `<stem>_unpacked/`. A folder is used in place.
       - legacy CARLA-only zip/folder -> `(src, None)`, unchanged behavior.
     `carla_src` is what to hand `ensure_map`/`stage_package`; `sumo_dir` (or None)
     is where run_cosim finds the `.sumocfg`."""
@@ -440,11 +441,16 @@ def open_bundle(src):
         with zipfile.ZipFile(src) as z:
             if not _looks_like_bundle(z.namelist()):
                 return src, None
-            unpacked = os.path.join(
+            unpacked = _map_cache_dir(cache_name) if cache_name else os.path.join(
                 os.path.dirname(os.path.abspath(src)),
                 os.path.splitext(os.path.basename(src))[0] + "_unpacked")
-            if not os.path.isdir(unpacked) or os.path.getmtime(src) > os.path.getmtime(unpacked):
-                shutil.rmtree(unpacked, ignore_errors=True)
+            carla = os.path.join(unpacked, "carla")
+            # Compare the zip against the extracted carla/ (not `unpacked`, which may
+            # also hold the downloaded bundle.zip in a per-map cache), and clear only
+            # carla/+sumo/ on re-extract so a sibling bundle.zip is preserved.
+            if not os.path.isdir(carla) or os.path.getmtime(src) > os.path.getmtime(carla):
+                for sub in ("carla", "sumo"):
+                    shutil.rmtree(os.path.join(unpacked, sub), ignore_errors=True)
                 os.makedirs(unpacked, exist_ok=True)
                 z.extractall(unpacked)
                 print(f"[import] unpacked bundle -> {unpacked}")
@@ -922,22 +928,27 @@ def choose_imported_map(carla_root):
         print("[import] invalid choice; enter a number from the list.")
 
 
-def _map_cache_dir():
-    """Local cache for downloaded map zips: ~/.fixs/maps (next to carla.json), or
-    $FIXS_MAP_CACHE if set. Kept outside FIXS/ so `initialize` (which wipes FIXS/)
-    never deletes it, and shared across app clones so a map is downloaded once."""
+def _map_cache_dir(name=None):
+    """Local map cache: ~/.fixs/maps (next to carla.json), or $FIXS_MAP_CACHE. With
+    `name`, the per-map subfolder ~/.fixs/maps/<name>/ - named by the cooked map
+    name so it matches CARLA's Content/<name>/; it holds that map's bundle zip,
+    extracted carla/ + sumo/, and generated tl_table.csv. Kept outside FIXS/ so
+    `initialize` (which wipes FIXS/) never deletes it."""
     d = os.environ.get("FIXS_MAP_CACHE") or os.path.join(os.path.dirname(env.CONFIG_PATH), "maps")
+    if name:
+        d = os.path.join(d, name)
     os.makedirs(d, exist_ok=True)
     return d
 
 
-def download_release_zip(repo, tag, force_redownload=False):
+def download_release_zip(repo, tag, force_redownload=False, cache_name=None):
     """Return a local path to the release's .zip asset, downloading it via gh into
-    the ~/.fixs/maps/<tag>/ cache. If a cached copy already exists, ask whether to
-    reuse or re-download (default reuse); force_redownload skips the prompt and
-    re-fetches. The zip stays in the cache (not deleted) so re-imports are free."""
+    the ~/.fixs/maps/<cache_name or tag>/ cache (cache_name = the cooked map name,
+    so the zip sits beside the extracted carla/+sumo/). If a cached copy already
+    exists, ask whether to reuse or re-download (default reuse); force_redownload
+    skips the prompt. The zip stays in the cache so re-imports are free."""
     gh = _require_gh()
-    tag_dir = os.path.join(_map_cache_dir(), tag)
+    tag_dir = _map_cache_dir(cache_name or tag)
     cached = [f for f in os.listdir(tag_dir) if f.lower().endswith(".zip")] \
         if os.path.isdir(tag_dir) else []
 

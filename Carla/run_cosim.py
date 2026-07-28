@@ -298,12 +298,13 @@ def _net_from_sumocfg(sumocfg):
     return None
 
 
-def resolve_tl_table(sumocfg, force=False):
+def resolve_tl_table(sumocfg, force=False, cache_name=None):
     """Find this scenario's traffic-light table: a traffic_light_table.csv committed
-    next to the sumocfg, else one generated from the SUMO net (cached under
-    ~/.fixs/tables). `force` regenerates from the net even if a cache exists (used
-    on --reimport). Returns a path, or None if neither is possible. Generation
-    needs pandas/shapely but not SUMO installed."""
+    next to the sumocfg, else one generated from the SUMO net. It is cached in the
+    map's per-map folder ~/.fixs/maps/<cache_name>/tl_table.csv (cache_name = the
+    cooked map name), else the shared ~/.fixs/tables/<net>_tls.csv. `force`
+    regenerates even if a cache exists (used on --reimport). Returns a path, or None
+    if neither is possible. Generation needs pandas/shapely but not SUMO installed."""
     scen = os.path.dirname(os.path.abspath(sumocfg))
     committed = os.path.join(scen, "traffic_light_table.csv")
     if os.path.isfile(committed):
@@ -313,8 +314,13 @@ def resolve_tl_table(sumocfg, force=False):
     if not net or not os.path.isfile(net):
         print("[cosim] no TL table and no net to generate one from; TL sync off.")
         return None
-    cache = os.path.join(os.path.dirname(env.CONFIG_PATH), "tables")
-    out = os.path.join(cache, os.path.splitext(os.path.basename(net))[0] + "_tls.csv")
+    maps_root = os.path.join(os.path.dirname(env.CONFIG_PATH), "maps")
+    if cache_name:
+        cache = os.path.join(maps_root, cache_name)
+        out = os.path.join(cache, "tl_table.csv")
+    else:
+        cache = os.path.join(os.path.dirname(env.CONFIG_PATH), "tables")
+        out = os.path.join(cache, os.path.splitext(os.path.basename(net))[0] + "_tls.csv")
     if os.path.isfile(out) and not force:
         print(f"[cosim] TL table: cached generated {out}")
         return out
@@ -474,8 +480,8 @@ def main():
         carla_src = None
         if (resolved is None or args.sumocfg is None) and (picked_local or picked_tag):
             zip_path = picked_local or import_map.download_release_zip(
-                repo, picked_tag, force_redownload=args.reimport)
-            carla_src, sumo_dir = import_map.open_bundle(zip_path)
+                repo, picked_tag, force_redownload=args.reimport, cache_name=target_map)
+            carla_src, sumo_dir = import_map.open_bundle(zip_path, cache_name=target_map)
 
         if resolved is None:
             if carla_src is not None:                    # a DT/local bundle or raw export
@@ -522,8 +528,9 @@ def main():
     sumocfg = args.sumocfg
     if sumocfg is None:
         if sumo_dir is None and (picked_local or picked_tag):
-            zip_path = picked_local or import_map.download_release_zip(repo, picked_tag)
-            _carla, sumo_dir = import_map.open_bundle(zip_path)
+            zip_path = picked_local or import_map.download_release_zip(
+                repo, picked_tag, cache_name=target_map)
+            _carla, sumo_dir = import_map.open_bundle(zip_path, cache_name=target_map)
         sumocfg = import_map.bundle_sumocfg(sumo_dir)
         # The chosen CARLA source ships no sumo/ (e.g. a carla-only local pick, or a
         # raw export): fill the SUMO slot separately - pick a sumo scenario now.
@@ -538,7 +545,7 @@ def main():
     # the sumocfg, else generated from the SUMO net (cached ~/.fixs/tables).
     tl_table = args.tl_table
     if tls_manager == "sumo" and not tl_table:
-        tl_table = resolve_tl_table(sumocfg, force=args.reimport)
+        tl_table = resolve_tl_table(sumocfg, force=args.reimport, cache_name=target_map)
 
     # TL + sign placement (source build only; idempotent via markers). Runs after
     # the import + sumocfg/TL-table resolution so the table exists to place from.
