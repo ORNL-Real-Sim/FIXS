@@ -129,10 +129,11 @@ struct CarlaSetup_t {
 	bool EnableCosimulation;
 
 	// Co-sim bridge selector, consumed by FIXS_Applications' run_cosim.py (NOT by
-	// this engine): "py" -> the standalone run_synchronization.py bridge; "cpp" ->
-	// TrafficLayer + this VirCarlaEnv. Mirrored in ConfigHelper.py; parsed here for
-	// schema parity so both readers document the same key. Default "py".
-	std::string Backend;
+	// this engine): true -> the standalone run_synchronization.py bridge;
+	// false -> TrafficLayer + this VirCarlaEnv. A bool, not a "py"/"cpp" string,
+	// so a typo cannot silently select the wrong engine. Mirrored in
+	// ConfigHelper.py; parsed here for schema parity. Default true.
+	bool EnablePythonBackend;
 
 	bool EnableExternalControl;
 

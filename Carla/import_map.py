@@ -542,7 +542,17 @@ def _sumo_scenario_dir(src, cache_name=None):
                 has_cfg = has_cfg or fl.endswith(".sumocfg")
                 has_carla = has_carla or fl.endswith((".xodr", ".fbx"))
         if has_cfg and not has_carla:
-            return _dir_with_sumocfg(src)
+            src_dir = _dir_with_sumocfg(src)
+            # Cache a folder pick under the map (cooked-name), like the zip branch
+            # above, so a later Local (already-imported) pick of this map reuses it
+            # without a re-prompt. Skip the copy if it is already the cached dir.
+            if cache_name and src_dir:
+                dest = os.path.join(_map_cache_dir(cache_name), "sumo")
+                if os.path.abspath(src_dir) != os.path.abspath(dest):
+                    shutil.rmtree(dest, ignore_errors=True)
+                    shutil.copytree(src_dir, dest)
+                return _dir_with_sumocfg(dest)
+            return src_dir
     return None
 
 
@@ -950,6 +960,14 @@ def map_config_path(name):
     beside that map's bundle/carla/sumo/tl_table; like tl_table.csv it is a generated,
     machine-local artifact (never committed). Consumed only by run_cosim's cpp engine."""
     return os.path.join(_map_cache_dir(name), "config.yaml")
+
+
+def map_sumo_dir(name):
+    """The cached SUMO scenario dir for an already-imported map: the folder under
+    ~/.fixs/maps/<name>/sumo that directly holds a .sumocfg (where a bundle's sumo/
+    was extracted, or a separately-picked sumo landed), else None. Lets a Local
+    (already-imported) pick reuse its sumo without re-prompting for one."""
+    return _dir_with_sumocfg(os.path.join(_map_cache_dir(name), "sumo"))
 
 
 def download_release_zip(repo, tag, force_redownload=False, cache_name=None):

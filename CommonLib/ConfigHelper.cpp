@@ -396,12 +396,20 @@ int ConfigHelper::getConfig(string configName) {
 		if (SubscriptionVehicleList.vehicleSubscribeId_v.size() == 1) {
 			CarMakerSetup.EgoId = SubscriptionVehicleList.vehicleSubscribeId_v.begin()->first;
 		}
-		else {
+		else if (CarMakerSetup.EnableCosimulation) {
+			// Only a CarMaker run actually needs an ego id. This block is parsed
+			// unconditionally, so without this gate a SUMO<->Carla config (no
+			// CarMakerSetup section at all) aborted here - and an 'all' vehicle
+			// subscription (#176) populates subscribeAllVehicle, not
+			// vehicleSubscribeId_v, so there is nothing to infer from. See #214.
 			printf("ERROR: CarMakerSetup.EgoId is not defined and cannot be inferred "
 			       "(expected an explicit 'EgoId' or exactly one ego VehicleSubscription, "
 			       "found %zu). Define the ego id in config.yaml.\n",
 			       SubscriptionVehicleList.vehicleSubscribeId_v.size());
 			exit(-1);
+		}
+		else {
+			CarMakerSetup.EgoId = "";   // no CarMaker in this run; nothing to infer
 		}
 	}
 	if (node["EgoType"]) {
@@ -511,8 +519,9 @@ int ConfigHelper::getConfig(string configName) {
 	}
 
 	// Co-sim bridge selector (consumed by run_cosim.py, not this engine); parsed
-	// here for schema parity with ConfigHelper.py. Default "py".
-	CarlaSetup.Backend = node["Backend"] ? parserString(node, "Backend") : "py";
+	// here for schema parity with ConfigHelper.py. Default true (= Python bridge).
+	CarlaSetup.EnablePythonBackend = node["EnablePythonBackend"]
+		? parserFlag(node, "EnablePythonBackend") : true;
 
 	// #174: parse ego dynamics ownership + control (mode A/B). EnableEgoSimulink
 	// is the back-compat alias; if EgoDynamicsOwner is unset it derives from it.
