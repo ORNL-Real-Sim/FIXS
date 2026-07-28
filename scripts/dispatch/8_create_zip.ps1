@@ -84,6 +84,21 @@ try {
                 Remove-Item -Path $yamlTests -Recurse -Force
                 Write-Host "  - CommonLib/YAMLMatlab/Tests (test fixtures excluded)"
             }
+        } elseif ($_.Name -eq 'CarMaker') {
+            # Lowercase the CarMaker directory in the release zip for a tidier,
+            # consistent layout. Copied straight to the lowercase name (a case-only
+            # rename is a no-op on Windows' case-insensitive FS but matters in the
+            # zip, which Linux consumers read case-sensitively). build/ and the
+            # proprietary bundle keep the original casing.
+            Copy-Item -Path $_.FullName -Destination (Join-Path $StagingDir 'carmaker') -Recurse -Force
+            Write-Host "  ~ CarMaker/ -> carmaker/"
+        } elseif ($_.Name -like 'DriverModel_RealSim*.dll') {
+            # Group the VISSIM driver-model DLLs under vissim/ instead of the zip
+            # root (they land at build/ root from dispatch step 7 / the CI overlay).
+            $vissimDest = Join-Path $StagingDir 'vissim'
+            if (-not (Test-Path $vissimDest)) { New-Item -ItemType Directory -Path $vissimDest -Force | Out-Null }
+            Copy-Item -Path $_.FullName -Destination $vissimDest -Force
+            Write-Host "  ~ $($_.Name) -> vissim/"
         } else {
             Copy-Item -Path $_.FullName -Destination $StagingDir -Recurse -Force
         }
