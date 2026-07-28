@@ -496,6 +496,105 @@ def map_name_in(carla_src):
     return None
 
 
+def _dir_with_sumocfg(root):
+    """The directory under `root` that directly holds a .sumocfg (e.g. a lone
+    'SUMO files/' wrapper inside a scenario zip), or None."""
+    if not root or not os.path.isdir(root):
+        return None
+    for cur, _dirs, files in os.walk(root):
+        if any(f.lower().endswith(".sumocfg") for f in files):
+            return cur
+    return None
+
+
+def _sumo_scenario_dir(src):
+    """If `src` (a .zip or folder) is a SUMO-only scenario - a .sumocfg present,
+    no CARLA asset (.xodr/.fbx) - return the dir holding the .sumocfg (unpacking a
+    zip once, beside it). Else None. This is the sumo half of classify_source."""
+    if os.path.isfile(src) and src.lower().endswith(".zip"):
+        with zipfile.ZipFile(src) as z:
+            names = [n.lower() for n in z.namelist()]
+            if not any(n.endswith(".sumocfg") for n in names):
+                return None
+            if any(n.endswith((".xodr", ".fbx")) for n in names):
+                return None  # carries CARLA geometry -> not sumo-only
+            unpacked = os.path.join(
+                os.path.dirname(os.path.abspath(src)),
+                os.path.splitext(os.path.basename(src))[0] + "_unpacked")
+            if not os.path.isdir(unpacked) or os.path.getmtime(src) > os.path.getmtime(unpacked):
+                shutil.rmtree(unpacked, ignore_errors=True)
+                os.makedirs(unpacked, exist_ok=True)
+                z.extractall(unpacked)
+        return _dir_with_sumocfg(unpacked)
+    if os.path.isdir(src):
+        has_cfg = has_carla = False
+        for _cur, _dirs, files in os.walk(src):
+            for f in files:
+                fl = f.lower()
+                has_cfg = has_cfg or fl.endswith(".sumocfg")
+                has_carla = has_carla or fl.endswith((".xodr", ".fbx"))
+        if has_cfg and not has_carla:
+            return _dir_with_sumocfg(src)
+    return None
+
+
+def classify_source(src):
+    """What a map source provides, as (carla_src, sumo_src):
+      - bundle (carla/ + sumo/) -> (carla dir, sumo dir)
+      - carla-only pkg/export   -> (carla src, None)
+      - sumo-only scenario      -> (None, sumo dir)
+    A source fills the CARLA slot, the SUMO slot, or both; run_cosim fills any slot
+    a pick leaves empty. Zips are unpacked as needed."""
+    carla_src, sumo_dir = open_bundle(src)          # bundle split, else (src, None)
+    if sumo_dir is not None:
+        return carla_src, sumo_dir                  # bundle: both slots
+    sdir = _sumo_scenario_dir(src)
+    if sdir is not None:
+        return None, sdir                           # sumo-only
+    return carla_src, None                          # carla-only
+
+
+def fetch_catalog(repo):
+    """The DT-Library catalog (list of map entries), fetched fresh via gh from
+    `repo`'s catalog.json and cached at ~/.fixs/catalog.json. Falls back to the
+    cache when offline / gh is unavailable; [] if neither works. Read every run so
+    the map list, real names, and per-map settings stay current."""
+    import json
+    cache = os.path.join(os.path.dirname(env.CONFIG_PATH), "catalog.json")
+    gh = shutil.which("gh")
+    if gh:
+        try:
+            out = subprocess.run(
+                [gh, "api", f"repos/{repo}/contents/catalog.json",
+                 "-H", "Accept: application/vnd.github.raw+json"],
+                capture_output=True, text=True, timeout=15)
+            if out.returncode == 0 and out.stdout.strip():
+                maps = json.loads(out.stdout).get("maps", [])
+                try:
+                    with open(cache, "w", encoding="utf-8") as f:
+                        f.write(out.stdout)
+                except OSError:
+                    pass
+                return maps
+        except Exception:
+            pass
+    if os.path.isfile(cache):
+        try:
+            with open(cache, encoding="utf-8") as f:
+                return json.load(f).get("maps", [])
+        except (OSError, ValueError):
+            pass
+    return []
+
+
+def catalog_entry(catalog, location):
+    """The catalog entry whose `location` matches, or None."""
+    for m in catalog or []:
+        if m.get("location") == location:
+            return m
+    return None
+
+
 def run_import(carla_root, ue4_root, name):
     """Run CARLA's Import.py to cook the staged package. Returns its exit code."""
     import_py = os.path.join(carla_root, "Util", "BuildTools", "Import.py")
