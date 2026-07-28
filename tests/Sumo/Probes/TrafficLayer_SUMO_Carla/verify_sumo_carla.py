@@ -149,8 +149,10 @@ def main() -> int:
 
     # --- reason about the captured bridge output ---
     vce_text = "\n".join(vce_out)
-    carla_connected = "Server API version" in vce_text
-    spawns = len(re.findall(r"Spawn(?:ing|ed) actor", vce_text))
+    # Accept both the old ("Server API version" / "Spawned actor") and the current
+    # VirCarlaEnv message wording ("Carla client .../ server ..." / "Spawned Carla actor").
+    carla_connected = ("Server API version" in vce_text) or ("Carla client" in vce_text)
+    spawns = len(re.findall(r"Spawn(?:ing|ed)(?: Carla)? actor", vce_text))
     despawns = len(re.findall(r"(?:Removing Sumo actor|Destroyed Carla actor)", vce_text))
     spawn_fail = len(re.findall(r"Failed to spawn actor", vce_text))
     exceptions = [l for l in vce_out if "Exception" in l]
