@@ -510,6 +510,10 @@ int ConfigHelper::getConfig(string configName) {
 		CarlaSetup.EnableCosimulation = false;
 	}
 
+	// Co-sim bridge selector (consumed by run_cosim.py, not this engine); parsed
+	// here for schema parity with ConfigHelper.py. Default "py".
+	CarlaSetup.Backend = node["Backend"] ? parserString(node, "Backend") : "py";
+
 	// #174: parse ego dynamics ownership + control (mode A/B). EnableEgoSimulink
 	// is the back-compat alias; if EgoDynamicsOwner is unset it derives from it.
 	CarlaSetup.EnableEgoSimulink = node["EnableEgoSimulink"] ? parserFlag(node, "EnableEgoSimulink") : false;

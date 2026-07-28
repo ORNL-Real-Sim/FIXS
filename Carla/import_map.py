@@ -945,6 +945,13 @@ def _map_cache_dir(name=None):
     return d
 
 
+def map_config_path(name):
+    """The per-map VirCarlaEnv scenario yaml: ~/.fixs/maps/<name>/config.yaml. Sits
+    beside that map's bundle/carla/sumo/tl_table; like tl_table.csv it is a generated,
+    machine-local artifact (never committed). Consumed only by run_cosim's cpp engine."""
+    return os.path.join(_map_cache_dir(name), "config.yaml")
+
+
 def download_release_zip(repo, tag, force_redownload=False, cache_name=None):
     """Return a local path to the release's .zip asset, downloading it via gh into
     the ~/.fixs/maps/<cache_name or tag>/ cache (cache_name = the cooked map name,
