@@ -20,6 +20,7 @@ Examples:
       --map RP_Ver0529 --sumocfg <cfg> --tl-table <csv> --sumo-gui
 """
 import argparse
+import json
 import os
 import platform
 import signal
@@ -27,11 +28,276 @@ import socket
 import subprocess
 import sys
 import time
+import urllib.request
 
 import carla_env_setup as env
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SYNC = os.path.join(HERE, "sumo", "run_synchronization", "run_synchronization.py")
+FIXS_ROOT = os.path.dirname(HERE)          # FIXS/Carla -> FIXS (the fetched bundle root)
+APP_ROOT = os.path.dirname(FIXS_ROOT)      # FIXS -> the app dir (holds initialize.{sh,ps1})
+
+
+# --------------------------------------------------------------------------- #
+# FIXS bundle freshness. FIXS/ is a gitignored, fetched artifact; the rolling
+# v0.9.0-alpha release republishes in place, so its TAG NAME never changes -
+# compare the BUILD COMMIT (BUILD_INFO.txt) against the tag's current commit.
+# Best-effort: any hiccup (offline, rate-limited, parse) is swallowed; a stale
+# bundle only ever prompts, never blocks.
+# --------------------------------------------------------------------------- #
+def _first_group(path, pattern):
+    import re
+    try:
+        with open(path, encoding="utf-8", errors="ignore") as f:
+            m = re.search(pattern, f.read())
+        return m.group(1) if m else None
+    except OSError:
+        return None
+
+
+def _local_fixs_commit():
+    return (_first_group(os.path.join(FIXS_ROOT, "BUILD_INFO.txt"),
+                         r"Git Commit:\s*([0-9a-fA-F]{7,40})") or "").lower() or None
+
+
+def _fixs_tag_repo():
+    """(tag, repo) from FIXS_VERSION.txt: line 1 is the tag; a 'Source:' line the repo."""
+    tag, repo = None, "ORNL-Real-Sim/FIXS"
+    try:
+        with open(os.path.join(FIXS_ROOT, "FIXS_VERSION.txt"), encoding="utf-8") as f:
+            lines = [ln.strip() for ln in f if ln.strip()]
+        if lines:
+            tag = lines[0]
+        for ln in lines:
+            if ln.lower().startswith("source:"):
+                repo = ln.split(":", 1)[1].strip() or repo
+    except OSError:
+        pass
+    return tag, repo
+
+
+def _remote_fixs_commit(repo, tag, timeout=4.0):
+    """The commit the remote <tag> release points at now (target_commitish), or None
+    if it cannot be told (offline, or the field is a branch name, not a sha)."""
+    url = "https://api.github.com/repos/%s/releases/tags/%s" % (repo, tag)
+    req = urllib.request.Request(url, headers={"User-Agent": "fixs-fetch",
+                                               "Accept": "application/vnd.github+json"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        sha = (json.load(r).get("target_commitish") or "").lower()
+    is_sha = len(sha) >= 7 and all(c in "0123456789abcdef" for c in sha)
+    return sha if is_sha else None
+
+
+def _run_initialize(tag):
+    """Re-fetch the FIXS bundle for <tag> via the app's initialize script (the tag is
+    passed as its argument, so it runs non-interactively). True on success."""
+    if platform.system() == "Windows":
+        script = os.path.join(APP_ROOT, "initialize.ps1")
+        cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, tag]
+    else:
+        script = os.path.join(APP_ROOT, "initialize.sh")
+        cmd = ["bash", script, tag]
+    if not os.path.isfile(script):
+        print(f"[cosim] cannot self-update: {script} not found.")
+        return False
+    print(f"[cosim] updating FIXS -> {tag} via {os.path.basename(script)} ...")
+    return subprocess.call(cmd) == 0
+
+
+def maybe_update_fixs(no_check=False):
+    """Detect a local FIXS bundle that diverges from the published rolling release
+    and, when interactive, offer to update + relaunch. Advisory only: every failure
+    is swallowed so a run is never blocked by the check."""
+    if no_check or os.environ.get("FIXS_NO_FRESHNESS"):
+        return
+    try:
+        local = _local_fixs_commit()
+        tag, repo = _fixs_tag_repo()
+        if not local or not tag:
+            return
+        remote = _remote_fixs_commit(repo, tag)
+        if not remote:
+            return
+        n = min(len(local), len(remote))
+        if local[:n] == remote[:n]:
+            return  # up to date
+        print(f"[cosim] local FIXS bundle {local[:8]} diverges from the published "
+              f"{tag} ({remote[:8]}).")
+        if not sys.stdin.isatty():
+            print("[cosim] non-interactive; run initialize to update. Continuing.")
+            return
+        ans = input("[cosim] update the local FIXS bundle now? [y/N]: ").strip().lower()
+        if ans not in ("y", "yes"):
+            print("[cosim] keeping the current bundle.")
+            return
+        if _run_initialize(tag):
+            print("[cosim] FIXS updated; relaunching run_cosim ...")
+            os.environ["FIXS_NO_FRESHNESS"] = "1"   # the relaunch is already current
+            os.execv(sys.executable,
+                     [sys.executable, os.path.join(HERE, "run_cosim.py")] + sys.argv[1:])
+        print("[cosim] update did not complete; continuing with the current bundle.")
+    except Exception as e:
+        if os.environ.get("FIXS_DEBUG"):
+            print(f"[cosim] freshness check skipped: {e}")
+
+
+# --------------------------------------------------------------------------- #
+# Co-sim engine selection. 'py' (default) = the standalone run_synchronization.py
+# bridge; 'cpp' = the FIXS-native stack (SUMO + TrafficLayer + VirCarlaEnv), driven
+# by a scenario yaml. The bridge is chosen by CarlaSetup.Backend in that yaml, read
+# through the shipped CommonLib/ConfigHelper.py; --engine overrides per run.
+# --------------------------------------------------------------------------- #
+def _native_binaries():
+    exe = ".exe" if platform.system() == "Windows" else ""
+    return (os.path.join(FIXS_ROOT, "TrafficLayer" + exe),
+            os.path.join(FIXS_ROOT, "VirCarlaEnv" + exe))
+
+
+def read_backend(config_yaml):
+    """CarlaSetup.Backend from `config_yaml` via CommonLib/ConfigHelper.py (the
+    canonical parser the C++ engine mirrors). 'py' on absence or any parse problem."""
+    if not config_yaml or not os.path.isfile(config_yaml):
+        return "py"
+    try:
+        sys.path.insert(0, os.path.join(FIXS_ROOT, "CommonLib"))
+        import ConfigHelper
+        ch = ConfigHelper.ConfigHelper()
+        ch.getConfig(config_yaml)
+        return str(ch.Carla_setup["Backend"] or "py").strip().lower()
+    except Exception as e:
+        print(f"[cosim] could not read Backend from {config_yaml} ({e}); using 'py'.")
+        return "py"
+
+
+def _tl_junction_ids(tl_table):
+    """Unique junction ids in the TL table, for the VirCarlaEnv SignalSubscription."""
+    import csv
+    ids = []
+    try:
+        with open(tl_table, newline="", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                j = (row.get("junction_id") or "").strip()
+                if j and j not in ids:
+                    ids.append(j)
+    except (OSError, KeyError):
+        pass
+    return ids
+
+
+def generate_config_yaml(path, tl_table, carla_host, carla_port, realtime=True, refresh=0.05):
+    """Write a probe-shaped VirCarlaEnv scenario config: mirror EVERY SUMO vehicle
+    (#176 all:['true']) into CARLA and sync the tl_table's junctions. Visualization-
+    only (#77): no XIL, no ego. Machine bits (CARLA host/port) come from the resolved
+    env; Backend=cpp records the engine choice. Modelled on
+    tests/Sumo/Probes/TrafficLayer_SUMO_Carla/config.yaml. Regenerated on --reimport."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    junctions = _tl_junction_ids(tl_table) if tl_table else []
+    rt = "true" if realtime else "false"
+    half = round(refresh / 2.0, 6)
+    sig = ""
+    if junctions:
+        names = ", ".join(f"'{j}'" for j in junctions)
+        sig = ("  SignalSubscription:\n"
+               "  - type: intersection\n"
+               f"    attribute: {{ name: [{names}] }}\n"
+               "    ip: ['127.0.0.1']\n"
+               "    port: [440]\n")
+    text = f"""\
+# Auto-generated by run_cosim for the FIXS-native (cpp) co-sim bridge.
+# Visualization-only: CARLA mirrors every SUMO vehicle; SUMO owns the traffic.
+# Set CarlaSetup.Backend to 'py' to fall back to the standalone Python bridge.
+SimulationSetup:
+  EnableRealSim: true
+  EnableVerboseLog: false
+  SelectedTrafficSimulator: 'SUMO'
+  VehicleMessageField: [id, type, vehicleClass, speed, speedDesired, positionX, positionY, positionZ, heading, grade, length, width, height, color, linkId, laneId]
+  TrafficSimulatorIP: '127.0.0.1'
+  TrafficSimulatorPort: 1337
+SumoSetup:
+  SpeedMode: 32
+ApplicationSetup:
+  EnableApplicationLayer: true
+  VehicleSubscription:
+  - type: ego
+    attribute: {{ all: ['true'] }}     # #176: mirror ALL vehicles (no ego anchor)
+    ip: ['127.0.0.1']
+    port: [440]
+{sig}XilSetup:
+  EnableXil: false
+CarlaSetup:
+  Backend: cpp
+  EnableVerboseLog: true
+  EnableCosimulation: true
+  EnableExternalControl: false          # #77 visualization-only
+  UseVehicleTypeAsBlueprint: false
+  EnableSpectatorFollow: false          # no ego to follow; run_cosim frames the view
+  RealtimePacing: {rt}                   # standalone viz -> pace to real time (--fast makes this false)
+  TrafficRefreshRate: {refresh}          # data cadence (s); matches the SUMO --step-length feed
+  CarlaTimeStep: 0.0                     # render sub-step: 0 = tick 1:1 with the feed; a divisor (e.g. {half}) interpolates for smoother motion
+  CarlaServerIP: {carla_host}
+  CarlaServerPort: {carla_port}
+  CarlaClientIP: 127.0.0.1
+  CarlaClientPort: 440
+"""
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+    print(f"[cosim] generated VirCarlaEnv config -> {path}"
+          + (f" ({len(junctions)} TL junctions)" if junctions else " (no TL sync)"))
+    return path
+
+
+def run_native_stack(config_yaml, sumocfg, tl_table, cfg, args):
+    """FIXS-native bridge: launch SUMO (TraCI 1337) + TrafficLayer (-f config) +
+    VirCarlaEnv (-f config -t tl_table). CARLA is already up and the map loaded by
+    run_cosim's preflight. Ports mirror tests/Sumo/Probes/TrafficLayer_SUMO_Carla:
+    SUMO 1337, TrafficLayer<->VirCarlaEnv 440. TrafficLayer is the sole TraCI client,
+    so it steps SUMO (no external controller needed). Blocks on VirCarlaEnv - the
+    co-sim front-end - and tears the others down on exit."""
+    import shutil
+    tl_exe, vce_exe = _native_binaries()
+    missing = [p for p in (tl_exe, vce_exe) if not os.path.isfile(p)]
+    if missing:
+        sys.exit("[cosim] engine 'cpp' needs the FIXS-native binaries, not found:\n  "
+                 + "\n  ".join(missing) + "\nRe-run initialize to fetch the bundle "
+                 "(VirCarlaEnv is built only when the libcarla dep is available).")
+    sumo_bin = "sumo-gui" if args.sumo_gui else "sumo"
+    if not shutil.which(sumo_bin):
+        sys.exit(f"[cosim] {sumo_bin} not on PATH (install SUMO / add %SUMO_HOME%/bin).")
+
+    procs = []
+    try:
+        sumo_cmd = [sumo_bin, "-c", sumocfg, "--remote-port", "1337",
+                    "--step-length", str(args.step_length)]
+        if args.sumo_gui:
+            sumo_cmd.append("--start")
+        print(f"[SUMO] {' '.join(sumo_cmd)}")
+        procs.append(subprocess.Popen(sumo_cmd))
+        time.sleep(2)  # let SUMO open the TraCI port before TrafficLayer connects
+        print(f"[TL]   {os.path.basename(tl_exe)} -f {config_yaml}")
+        procs.append(subprocess.Popen([tl_exe, "-f", config_yaml]))
+        time.sleep(1)
+        vce_cmd = [vce_exe, "-f", config_yaml] + (["-t", tl_table] if tl_table else [])
+        print(f"[VCE]  {' '.join(os.path.basename(vce_cmd[0]) if i == 0 else a for i, a in enumerate(vce_cmd))}")
+        vce = subprocess.Popen(vce_cmd)
+        procs.append(vce)
+        rc = vce.wait()   # VirCarlaEnv is the front-end; block on it
+        print(f"[cosim] VirCarlaEnv exited ({rc}); stopping the native stack.")
+        return rc
+    finally:
+        for p in reversed(procs):
+            if p.poll() is None:
+                try:
+                    p.terminate()
+                except Exception:
+                    pass
+        for p in reversed(procs):
+            try:
+                p.wait(timeout=5)
+            except Exception:
+                try:
+                    p.kill()
+                except Exception:
+                    pass
 
 
 def resolve_carla_env(reconfigure=False):
@@ -298,11 +564,13 @@ def _net_from_sumocfg(sumocfg):
     return None
 
 
-def resolve_tl_table(sumocfg):
+def resolve_tl_table(sumocfg, force=False, cache_name=None):
     """Find this scenario's traffic-light table: a traffic_light_table.csv committed
-    next to the sumocfg, else one generated from the SUMO net (cached under
-    ~/.fixs/tables). Returns a path, or None if neither is possible. Generation
-    needs pandas/shapely but not SUMO installed."""
+    next to the sumocfg, else one generated from the SUMO net. It is cached in the
+    map's per-map folder ~/.fixs/maps/<cache_name>/tl_table.csv (cache_name = the
+    cooked map name), else the shared ~/.fixs/tables/<net>_tls.csv. `force`
+    regenerates even if a cache exists (used on --reimport). Returns a path, or None
+    if neither is possible. Generation needs pandas/shapely but not SUMO installed."""
     scen = os.path.dirname(os.path.abspath(sumocfg))
     committed = os.path.join(scen, "traffic_light_table.csv")
     if os.path.isfile(committed):
@@ -312,9 +580,14 @@ def resolve_tl_table(sumocfg):
     if not net or not os.path.isfile(net):
         print("[cosim] no TL table and no net to generate one from; TL sync off.")
         return None
-    cache = os.path.join(os.path.dirname(env.CONFIG_PATH), "tables")
-    out = os.path.join(cache, os.path.splitext(os.path.basename(net))[0] + "_tls.csv")
-    if os.path.isfile(out):
+    maps_root = os.path.join(os.path.dirname(env.CONFIG_PATH), "maps")
+    if cache_name:
+        cache = os.path.join(maps_root, cache_name)
+        out = os.path.join(cache, "tl_table.csv")
+    else:
+        cache = os.path.join(os.path.dirname(env.CONFIG_PATH), "tables")
+        out = os.path.join(cache, os.path.splitext(os.path.basename(net))[0] + "_tls.csv")
+    if os.path.isfile(out) and not force:
         print(f"[cosim] TL table: cached generated {out}")
         return out
     try:
@@ -391,7 +664,19 @@ def main():
     ap.add_argument("--spectator-junction", default=None,
                     help="frame this junction id (default: the busiest intersection)")
     ap.add_argument("--sumo-gui", action="store_true")
+    ap.add_argument("--engine", choices=["py", "cpp"], default=None,
+                    help="co-sim bridge: py=run_synchronization.py (default), "
+                         "cpp=TrafficLayer+VirCarlaEnv (FIXS-native). Overrides the "
+                         "scenario yaml's CarlaSetup.Backend.")
+    ap.add_argument("--config", default=None,
+                    help="[cpp] scenario yaml for the native bridge (default: "
+                         "~/.fixs/maps/<cooked>/config.yaml, generated if missing).")
+    ap.add_argument("--no-update-check", action="store_true",
+                    help="skip the FIXS-bundle freshness check against the release")
     args = ap.parse_args()
+
+    # Advisory: nudge to update a stale local FIXS bundle before doing real work.
+    maybe_update_fixs(no_check=args.no_update_check)
 
     # Resolve the saved CARLA env (running first-time setup if needed) and make
     # sure we are on its python before importing carla. --no-launch still needs
@@ -432,7 +717,8 @@ def main():
     elif args.map:                               # legacy: --map is a cooked-map name
         target_map = args.map
     else:                                        # pick from catalog / local
-        target_map, picked_tag, picked_local = import_map.choose_map(repo, tag_prefix)
+        target_map, picked_tag, picked_local = import_map.choose_map(
+            repo, tag_prefix, cfg.get("carla_root") if cfg else None)
         picked = import_map.catalog_entry(catalog, target_map)
         if picked:                               # a catalog pick: use its real name + settings
             settings = picked.get("settings", {})
@@ -455,13 +741,25 @@ def main():
         resolved = None if args.reimport else \
             import_map.resolve_cooked_map(cfg["carla_root"], target_map)
 
+        # Already imported? If this was a FRESH source pick (an online release or a
+        # local .zip/folder), offer to reimport - re-cook + re-place TLs/signs +
+        # regenerate the TL table. A pick of an already-imported map (both picked_*
+        # None) is run as-is, no prompt.
+        if resolved is not None and (picked_tag or picked_local) \
+                and not args.reimport and sys.stdin.isatty():
+            ans = input(f"[cosim] '{resolved[0]}' is already imported. Reimport "
+                        f"(re-cook + re-place TLs/signs + regen TL table)? [y/N]: ").strip().lower()
+            if ans.startswith("y"):
+                args.reimport = True
+                resolved = None
+
         # Materialize the bundle if we must import, or need its sumo/ (no --sumocfg).
         # download_release_zip caches under ~/.fixs/maps; open_bundle splits it.
         carla_src = None
         if (resolved is None or args.sumocfg is None) and (picked_local or picked_tag):
             zip_path = picked_local or import_map.download_release_zip(
-                repo, picked_tag, force_redownload=args.reimport)
-            carla_src, sumo_dir = import_map.open_bundle(zip_path)
+                repo, picked_tag, force_redownload=args.reimport, cache_name=target_map)
+            carla_src, sumo_dir = import_map.open_bundle(zip_path, cache_name=target_map)
 
         if resolved is None:
             if carla_src is not None:                    # a DT/local bundle or raw export
@@ -508,9 +806,15 @@ def main():
     sumocfg = args.sumocfg
     if sumocfg is None:
         if sumo_dir is None and (picked_local or picked_tag):
-            zip_path = picked_local or import_map.download_release_zip(repo, picked_tag)
-            _carla, sumo_dir = import_map.open_bundle(zip_path)
+            zip_path = picked_local or import_map.download_release_zip(
+                repo, picked_tag, cache_name=target_map)
+            _carla, sumo_dir = import_map.open_bundle(zip_path, cache_name=target_map)
         sumocfg = import_map.bundle_sumocfg(sumo_dir)
+        # The chosen CARLA source ships no sumo/ (e.g. a carla-only local pick, or a
+        # raw export): fill the SUMO slot separately - pick a sumo scenario now.
+        if sumocfg is None:
+            sumo_dir = import_map.choose_sumo_source(cache_name=target_map)
+            sumocfg = import_map.bundle_sumocfg(sumo_dir)
     if sumocfg is None:
         sys.exit("[cosim] no SUMO scenario to run: pass --sumocfg, or choose a map "
                  "bundle / sumo source that provides one.")
@@ -519,7 +823,7 @@ def main():
     # the sumocfg, else generated from the SUMO net (cached ~/.fixs/tables).
     tl_table = args.tl_table
     if tls_manager == "sumo" and not tl_table:
-        tl_table = resolve_tl_table(sumocfg)
+        tl_table = resolve_tl_table(sumocfg, force=args.reimport, cache_name=target_map)
 
     # TL + sign placement (source build only; idempotent via markers). Runs after
     # the import + sumocfg/TL-table resolution so the table exists to place from.
@@ -622,6 +926,20 @@ def main():
             else:
                 print("[VIEW] no TL actors/table to anchor on; leaving spectator as is")
 
+        # Engine dispatch: CarlaSetup.Backend in the scenario yaml picks the bridge
+        # (--engine overrides). cpp = FIXS-native (TrafficLayer + VirCarlaEnv); py
+        # (default) = the standalone run_synchronization.py bridge below.
+        config_yaml = args.config or import_map.map_config_path(target_map)
+        backend = args.engine or read_backend(config_yaml)
+        if backend == "cpp":
+            if args.reimport or not os.path.isfile(config_yaml):
+                generate_config_yaml(config_yaml, tl_table, args.carla_host,
+                                     args.carla_port, realtime=not args.fast,
+                                     refresh=args.step_length)
+            print(f"[cosim] engine=cpp (FIXS-native); config {config_yaml}")
+            return run_native_stack(config_yaml, sumocfg, tl_table, cfg, args)
+
+        print("[cosim] engine=py (run_synchronization.py)")
         cmd = [sys.executable, SYNC, sumocfg,
                "--tls-manager", tls_manager,
                "--step-length", str(args.step_length),

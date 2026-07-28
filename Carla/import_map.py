@@ -418,15 +418,16 @@ def _looks_like_bundle(names):
     return "carla" in tops
 
 
-def open_bundle(src):
+def open_bundle(src, cache_name=None):
     """Split a map source into its CARLA package and its SUMO scenario.
 
     A Digital-Twin-Library map ships as one bundle - a zip (or folder) with a
     top-level `carla/` (the CARLA import package) and `sumo/` (the scenario).
     Returns `(carla_src, sumo_dir)`:
-      - bundle  -> (`<unpacked>/carla`, `<unpacked>/sumo`); a zip is extracted
-                   once into a sibling `<stem>_unpacked/` cache (re-extracted only
-                   when the zip is newer), a folder is used in place.
+      - bundle  -> (`<cache>/carla`, `<cache>/sumo`); a zip is extracted once
+                   (re-extracted only when the zip is newer). `cache_name` (the
+                   cooked map name) extracts into ~/.fixs/maps/<cache_name>/, else
+                   a sibling `<stem>_unpacked/`. A folder is used in place.
       - legacy CARLA-only zip/folder -> `(src, None)`, unchanged behavior.
     `carla_src` is what to hand `ensure_map`/`stage_package`; `sumo_dir` (or None)
     is where run_cosim finds the `.sumocfg`."""
@@ -440,11 +441,16 @@ def open_bundle(src):
         with zipfile.ZipFile(src) as z:
             if not _looks_like_bundle(z.namelist()):
                 return src, None
-            unpacked = os.path.join(
+            unpacked = _map_cache_dir(cache_name) if cache_name else os.path.join(
                 os.path.dirname(os.path.abspath(src)),
                 os.path.splitext(os.path.basename(src))[0] + "_unpacked")
-            if not os.path.isdir(unpacked) or os.path.getmtime(src) > os.path.getmtime(unpacked):
-                shutil.rmtree(unpacked, ignore_errors=True)
+            carla = os.path.join(unpacked, "carla")
+            # Compare the zip against the extracted carla/ (not `unpacked`, which may
+            # also hold the downloaded bundle.zip in a per-map cache), and clear only
+            # carla/+sumo/ on re-extract so a sibling bundle.zip is preserved.
+            if not os.path.isdir(carla) or os.path.getmtime(src) > os.path.getmtime(carla):
+                for sub in ("carla", "sumo"):
+                    shutil.rmtree(os.path.join(unpacked, sub), ignore_errors=True)
                 os.makedirs(unpacked, exist_ok=True)
                 z.extractall(unpacked)
                 print(f"[import] unpacked bundle -> {unpacked}")
@@ -507,10 +513,12 @@ def _dir_with_sumocfg(root):
     return None
 
 
-def _sumo_scenario_dir(src):
+def _sumo_scenario_dir(src, cache_name=None):
     """If `src` (a .zip or folder) is a SUMO-only scenario - a .sumocfg present,
-    no CARLA asset (.xodr/.fbx) - return the dir holding the .sumocfg (unpacking a
-    zip once, beside it). Else None. This is the sumo half of classify_source."""
+    no CARLA asset (.xodr/.fbx) - return the dir holding the .sumocfg. A zip is
+    unpacked once into the map's folder ~/.fixs/maps/<cache_name>/sumo/ (so a
+    separately-picked scenario lands under its map, cooked-name), else a sibling
+    `<stem>_unpacked/`. Else None. The sumo half of classify_source."""
     if os.path.isfile(src) and src.lower().endswith(".zip"):
         with zipfile.ZipFile(src) as z:
             names = [n.lower() for n in z.namelist()]
@@ -518,9 +526,9 @@ def _sumo_scenario_dir(src):
                 return None
             if any(n.endswith((".xodr", ".fbx")) for n in names):
                 return None  # carries CARLA geometry -> not sumo-only
-            unpacked = os.path.join(
-                os.path.dirname(os.path.abspath(src)),
-                os.path.splitext(os.path.basename(src))[0] + "_unpacked")
+            unpacked = os.path.join(_map_cache_dir(cache_name), "sumo") if cache_name else \
+                os.path.join(os.path.dirname(os.path.abspath(src)),
+                             os.path.splitext(os.path.basename(src))[0] + "_unpacked")
             if not os.path.isdir(unpacked) or os.path.getmtime(src) > os.path.getmtime(unpacked):
                 shutil.rmtree(unpacked, ignore_errors=True)
                 os.makedirs(unpacked, exist_ok=True)
@@ -538,17 +546,18 @@ def _sumo_scenario_dir(src):
     return None
 
 
-def classify_source(src):
+def classify_source(src, cache_name=None):
     """What a map source provides, as (carla_src, sumo_src):
       - bundle (carla/ + sumo/) -> (carla dir, sumo dir)
       - carla-only pkg/export   -> (carla src, None)
       - sumo-only scenario      -> (None, sumo dir)
     A source fills the CARLA slot, the SUMO slot, or both; run_cosim fills any slot
-    a pick leaves empty. Zips are unpacked as needed."""
-    carla_src, sumo_dir = open_bundle(src)          # bundle split, else (src, None)
+    a pick leaves empty. Zips are unpacked (into ~/.fixs/maps/<cache_name>/ when the
+    cooked map name is known) as needed."""
+    carla_src, sumo_dir = open_bundle(src, cache_name)   # bundle split, else (src, None)
     if sumo_dir is not None:
         return carla_src, sumo_dir                  # bundle: both slots
-    sdir = _sumo_scenario_dir(src)
+    sdir = _sumo_scenario_dir(src, cache_name)
     if sdir is not None:
         return None, sdir                           # sumo-only
     return carla_src, None                          # carla-only
@@ -816,27 +825,43 @@ def _prompt(msg):
                  "--map / --package to run without prompting.")
 
 
-def choose_map(repo, tag_prefix=""):
-    """Interactive chooser covering both cases: pick one of `repo`'s published
-    map-* releases (auto-downloaded + cached), or select a local .zip / folder by
-    hand. Returns (name, tag, local_path): for a release (name, tag, None); for a
-    local pick (name, None, path). Exits if the session is non-interactive."""
+def choose_map(repo, tag_prefix="", carla_root=None):
+    """Interactive chooser. Lists ONLINE maps (repo's releases from the
+    Digital-Twin-Library) and, when carla_root is given, LOCAL maps already cooked
+    into that CARLA - clearly separated - plus a hand-picked local .zip/folder.
+    Returns (name, tag, local_path):
+      online release -> (name, tag,  None)
+      local cooked   -> (name, None, None)   # already imported: run as-is
+      local file     -> (name, None, path)
+    Exits if the session is non-interactive."""
     releases = list_map_releases(repo, tag_prefix)
-    print("\n[import] Available map versions (newest first):")
-    for i, r in enumerate(releases, 1):
-        pkg = _package_from_tag(r["tag"], tag_prefix)
-        flag = "  (pre-release)" if r["prerelease"] else ""
-        print(f"   {i}) {pkg:<26} {r['date']}{flag}")
-    if not releases:
-        print("   (no published releases found)")
+    cooked = list_imported_maps(carla_root) if carla_root else []
+
+    print("\n[import] Pick a map to run:")
+    menu = []  # menu number -> ("release", release) | ("cooked", name)
+    if releases:
+        print("  Online (Digital-Twin-Library):")
+        for r in releases:
+            menu.append(("release", r))
+            pkg = _package_from_tag(r["tag"], tag_prefix)
+            flag = "  (pre-release)" if r["prerelease"] else ""
+            print(f"   {len(menu):>2}) {pkg:<26} {r['date']}{flag}")
+    if cooked:
+        print("  Local (already imported into CARLA):")
+        for name in cooked:
+            menu.append(("cooked", name))
+            print(f"   {len(menu):>2}) {name}")
+    if not menu:
+        print("   (no online releases or imported maps found)")
     print("   L) select a local .zip / folder instead")
+
     if not sys.stdin.isatty():
-        sys.exit("[import] non-interactive session: cannot prompt. Pass --package "
-                 "(+ --package-url/--package-dir), or --map, to choose non-interactively.")
+        sys.exit("[import] non-interactive session: cannot prompt. Pass --map / --package "
+                 "(+ --package-url/--package-dir) to choose non-interactively.")
     while True:
-        hint = f"[1-{len(releases)} / L]" if releases else "[L]"
-        default = ", Enter = 1 (newest)" if releases else ""
-        ans = _prompt(f"[import] Which version? {hint}{default}: ").strip().lower()
+        hint = f"[1-{len(menu)} / L]" if menu else "[L]"
+        default = ", Enter = 1" if releases else ""
+        ans = _prompt(f"[import] Which? {hint}{default}: ").strip().lower()
         if ans == "" and releases:
             r = releases[0]
             return _package_from_tag(r["tag"], tag_prefix), r["tag"], None
@@ -848,10 +873,30 @@ def choose_map(repo, tag_prefix=""):
             if not name:
                 sys.exit("[import] no package name given; cannot import.")
             return name, None, path
-        if ans.isdigit() and 1 <= int(ans) <= len(releases):
-            r = releases[int(ans) - 1]
-            return _package_from_tag(r["tag"], tag_prefix), r["tag"], None
+        if ans.isdigit() and 1 <= int(ans) <= len(menu):
+            kind, payload = menu[int(ans) - 1]
+            if kind == "release":
+                return _package_from_tag(payload["tag"], tag_prefix), payload["tag"], None
+            return payload, None, None  # cooked: already imported, run as-is
         print("[import] invalid choice; enter a number, or L for a local file.")
+
+
+def choose_sumo_source(cache_name=None):
+    """Prompt for a SUMO scenario (a .zip or folder holding a .sumocfg) and return
+    the dir that contains it, or None. Fills the SUMO slot separately when the
+    chosen CARLA source ships no sumo/ - e.g. a carla-only local pick or a raw
+    export. `cache_name` (the cooked map name) lands the extracted scenario under
+    ~/.fixs/maps/<cache_name>/sumo/. Returns None in a non-interactive session so
+    the caller can fail with a clear 'pass --sumocfg' message."""
+    if not sys.stdin.isatty():
+        return None
+    print("\n[cosim] the chosen map has no SUMO scenario; select one now "
+          "(a .zip or folder containing a .sumocfg).")
+    path = _select_package("SUMO scenario", None)  # native picker / typed path
+    _carla_src, sumo_dir = classify_source(path, cache_name)
+    if sumo_dir is None:
+        print(f"[cosim] no .sumocfg found in {path}")
+    return sumo_dir
 
 
 def list_imported_maps(carla_root):
@@ -887,22 +932,34 @@ def choose_imported_map(carla_root):
         print("[import] invalid choice; enter a number from the list.")
 
 
-def _map_cache_dir():
-    """Local cache for downloaded map zips: ~/.fixs/maps (next to carla.json), or
-    $FIXS_MAP_CACHE if set. Kept outside FIXS/ so `initialize` (which wipes FIXS/)
-    never deletes it, and shared across app clones so a map is downloaded once."""
+def _map_cache_dir(name=None):
+    """Local map cache: ~/.fixs/maps (next to carla.json), or $FIXS_MAP_CACHE. With
+    `name`, the per-map subfolder ~/.fixs/maps/<name>/ - named by the cooked map
+    name so it matches CARLA's Content/<name>/; it holds that map's bundle zip,
+    extracted carla/ + sumo/, and generated tl_table.csv. Kept outside FIXS/ so
+    `initialize` (which wipes FIXS/) never deletes it."""
     d = os.environ.get("FIXS_MAP_CACHE") or os.path.join(os.path.dirname(env.CONFIG_PATH), "maps")
+    if name:
+        d = os.path.join(d, name)
     os.makedirs(d, exist_ok=True)
     return d
 
 
-def download_release_zip(repo, tag, force_redownload=False):
+def map_config_path(name):
+    """The per-map VirCarlaEnv scenario yaml: ~/.fixs/maps/<name>/config.yaml. Sits
+    beside that map's bundle/carla/sumo/tl_table; like tl_table.csv it is a generated,
+    machine-local artifact (never committed). Consumed only by run_cosim's cpp engine."""
+    return os.path.join(_map_cache_dir(name), "config.yaml")
+
+
+def download_release_zip(repo, tag, force_redownload=False, cache_name=None):
     """Return a local path to the release's .zip asset, downloading it via gh into
-    the ~/.fixs/maps/<tag>/ cache. If a cached copy already exists, ask whether to
-    reuse or re-download (default reuse); force_redownload skips the prompt and
-    re-fetches. The zip stays in the cache (not deleted) so re-imports are free."""
+    the ~/.fixs/maps/<cache_name or tag>/ cache (cache_name = the cooked map name,
+    so the zip sits beside the extracted carla/+sumo/). If a cached copy already
+    exists, ask whether to reuse or re-download (default reuse); force_redownload
+    skips the prompt. The zip stays in the cache so re-imports are free."""
     gh = _require_gh()
-    tag_dir = os.path.join(_map_cache_dir(), tag)
+    tag_dir = _map_cache_dir(cache_name or tag)
     cached = [f for f in os.listdir(tag_dir) if f.lower().endswith(".zip")] \
         if os.path.isdir(tag_dir) else []
 
@@ -936,7 +993,7 @@ def pick_and_import(repo, tag_prefix="", carla_root=None, ue4_root=None, force=F
     then download + cook it. If the chosen version is already cooked, skip the
     download (unless the user opts to re-import, or force=True)."""
     carla_root, ue4_root = _resolve_carla(carla_root, ue4_root)
-    name, tag, local = choose_map(repo, tag_prefix)
+    name, tag, local = choose_map(repo, tag_prefix, carla_root)
 
     if map_is_imported(carla_root, name) and not force:
         print(f"[import] '{name}' is already imported: {cooked_map_path(carla_root, name)}")
