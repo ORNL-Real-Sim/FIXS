@@ -70,9 +70,9 @@ jobs:
           git tag -fa v0.9.0-alpha -m "0.9.0 dev version at $(git rev-parse --short HEAD)"
 
       # libcarla (~460 MB release subset) is gitignored and only needed to build
-      # the PUBLIC VirCarlaEnv exe. Fetch it from the public fixs-deps-<ver>
+      # the PUBLIC VirCarlaEnv exe. Fetch it from the public fixs-native-deps
       # release (prebuilt, gh-free), cached by dependencies.yaml so it downloads
-      # at most once per deps version. On a cache hit fetch_carla_deps skips;
+      # at most once per deps version. On a cache hit fetch_native_deps skips;
       # dispatch step 4c then builds VirCarlaEnv against it. OPTIONAL: if no deps
       # release is published yet this soft-warns and VirCarlaEnv is simply absent
       # from the zip - it never fails the build. #109.
@@ -84,9 +84,9 @@ jobs:
       - name: Fetch libcarla (prebuilt) for the VirCarlaEnv build
         shell: pwsh
         run: |
-          & scripts/dispatch/fetch_carla_deps.ps1 -Mode prebuilt
+          & scripts/dispatch/fetch_native_deps.ps1 -Mode prebuilt
           if ($LASTEXITCODE -ne 0) {
-            Write-Host "::warning::libcarla prebuilt fetch failed (no fixs-deps release yet?) - VirCarlaEnv will be skipped."
+            Write-Host "::warning::libcarla prebuilt fetch failed (no fixs-native-deps release yet?) - VirCarlaEnv will be skipped."
             exit 0
           }
 

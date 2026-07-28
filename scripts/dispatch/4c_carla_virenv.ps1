@@ -3,7 +3,7 @@
 # ----------------------------------------------------------------------------
 # PUBLIC component (open-source Carla) - builds on CI and dev boxes alike, so it
 # is NOT gated by RS_FIXS_AUTOMATION. It just needs libcarla, which is acquired
-# first via fetch_carla_deps.ps1 (~/.fixs/carla.json: source copy or prebuilt
+# first via fetch_native_deps.ps1 (~/.fixs/carla.json: source copy or prebuilt
 # fetch). Depends on VirtualEnvironment.lib (step 4) + yaml-cpp + libsumo.
 #
 # Skips cleanly (exit 0) when Carla isn't configured - Carla is optional.
@@ -16,7 +16,7 @@ $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 Write-Host "=== Carla virtual environment (libcarla + VirCarlaEnv) ==="
 
 # --- 1. acquire libcarla (source copy or prebuilt fetch) --------------------
-& (Join-Path $PSScriptRoot 'fetch_carla_deps.ps1') -RepoRoot $RepoRoot
+& (Join-Path $PSScriptRoot 'fetch_native_deps.ps1') -RepoRoot $RepoRoot
 if ($LASTEXITCODE -ne 0) { Write-Warning "libcarla acquisition failed - skipping VirCarlaEnv."; exit 0 }
 
 $sentinel = Join-Path $RepoRoot 'CommonLib\libcarla\lib\carla_client.lib'
