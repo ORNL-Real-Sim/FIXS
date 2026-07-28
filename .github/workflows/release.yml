@@ -42,6 +42,29 @@ jobs:
           fetch-depth: 0
           submodules: false
 
+      # Skip the heavy build on PRs that touch nothing build-relevant (docs / *.py /
+      # tests): the job still RUNS (so the required build-publish check reports green),
+      # but the expensive steps below are gated on this output. Pushes always build. #191.
+      - name: Detect build-relevant changes
+        id: detect
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "event=${{ github.event_name }} -> always build."
+            echo "should_build=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          files=$(git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD)
+          echo "Changed files:"; echo "$files"
+          # Build unless EVERY changed file is docs / *.py / tests (nothing compiled or packaged from source).
+          relevant=$(echo "$files" | grep -vE '\.(md|py)$|^doc/|^tests/' || true)
+          if [ -z "$relevant" ]; then
+            echo "No build-relevant changes -> skipping build (required check still passes)."
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Build-relevant changes:"; echo "$relevant"
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@v2
 
@@ -77,11 +100,13 @@ jobs:
       # release is published yet this soft-warns and VirCarlaEnv is simply absent
       # from the zip - it never fails the build. #109.
       - name: Cache libcarla (native deps)
+        if: steps.detect.outputs.should_build == 'true'
         uses: actions/cache@v4
         with:
           path: CommonLib/libcarla
           key: libcarla-${{ runner.os }}-${{ hashFiles('dependencies.yaml') }}
       - name: Fetch libcarla (prebuilt) for the VirCarlaEnv build
+        if: steps.detect.outputs.should_build == 'true'
         shell: pwsh
         run: |
           & scripts/dispatch/fetch_native_deps.ps1 -Mode prebuilt
@@ -91,6 +116,7 @@ jobs:
           }
 
       - name: Build + package (proprietary steps skipped; VE.lib builds on 0.9.0)
+        if: steps.detect.outputs.should_build == 'true'
         shell: cmd
         run: |
           set RS_BUILD_CONFIG=Release
@@ -109,6 +135,7 @@ jobs:
       # binaries. The bundle-guard PR check makes the missing-bundle case
       # unmergeable in the first place (#191).
       - name: Overlay proprietary bundle (Binaries-<key>, if published)
+        if: steps.detect.outputs.should_build == 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -137,6 +164,7 @@ jobs:
           & powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dispatch/8_create_zip.ps1 -RunMode inline
 
       - name: Sanity-check the packaged zip
+        if: steps.detect.outputs.should_build == 'true'
         shell: pwsh
         run: |
           $zip = Get-ChildItem build -Filter 'fixs-build-*.zip' -ErrorAction SilentlyContinue |
@@ -155,7 +183,7 @@ jobs:
           }
 
       - name: Upload packaged zip as a workflow artifact (inspect on PRs)
-        if: always()
+        if: steps.detect.outputs.should_build == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: fixs-build-zip
