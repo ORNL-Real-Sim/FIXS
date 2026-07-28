@@ -274,33 +274,96 @@ def run_native_stack(config_yaml, sumocfg, tl_table, cfg, args):
     if not shutil.which(sumo_bin):
         sys.exit(f"[cosim] {sumo_bin} not on PATH (install SUMO / add %SUMO_HOME%/bin).")
 
-    procs = []
+    procs = []          # [(label, Popen)] in start order
+
+    def _alive(p):
+        return p.poll() is None
+
+    def _check(label, p, hint=""):
+        """Report whether a just-started component survived; die loudly if not - a
+        silent early exit is the failure mode that reads as 'nothing is happening'."""
+        if _alive(p):
+            print(f"[cosim]   OK   {label} running (pid {p.pid})")
+            return True
+        print(f"[cosim]   DEAD {label} exited immediately (code {p.returncode}). {hint}")
+        return False
+
     try:
         sumo_cmd = [sumo_bin, "-c", sumocfg, "--remote-port", "1337",
                     "--step-length", str(args.step_length)]
         if args.sumo_gui:
             sumo_cmd.append("--start")
         print(f"[SUMO] {' '.join(sumo_cmd)}")
-        procs.append(subprocess.Popen(sumo_cmd))
-        time.sleep(2)  # let SUMO open the TraCI port before TrafficLayer connects
+        sumo = subprocess.Popen(sumo_cmd)
+        procs.append(("SUMO", sumo))
+        # SUMO must be listening before TrafficLayer connects as its TraCI client.
+        for _ in range(30):
+            if _port_in_use("127.0.0.1", 1337) or not _alive(sumo):
+                break
+            time.sleep(0.5)
+        if not _check("SUMO", sumo, "check the sumocfg path / SUMO install."):
+            return 1
+        print(f"[cosim]   OK   SUMO TraCI listening on 1337"
+              if _port_in_use("127.0.0.1", 1337) else
+              "[cosim]   WARN SUMO is up but TraCI 1337 is not listening yet")
+
         print(f"[TL]   {os.path.basename(tl_exe)} -f {config_yaml}")
-        procs.append(subprocess.Popen([tl_exe, "-f", config_yaml]))
-        time.sleep(1)
+        tl = subprocess.Popen([tl_exe, "-f", config_yaml])
+        procs.append(("TrafficLayer", tl))
+        # TrafficLayer serves the bridge on 440; wait for that port before starting
+        # VirCarlaEnv, which connects to it.
+        for _ in range(30):
+            if _port_in_use("127.0.0.1", 440) or not _alive(tl):
+                break
+            time.sleep(0.5)
+        if not _check("TrafficLayer", tl,
+                      "check the config yaml (a bad key or an in-use port 440/1337)."):
+            return 1
+        if not _port_in_use("127.0.0.1", 440):
+            print("[cosim]   WARN TrafficLayer is running but port 440 is not open yet; "
+                  "VirCarlaEnv may fail to subscribe.")
+        else:
+            print("[cosim]   OK   TrafficLayer serving the bridge on 440")
+
         vce_cmd = [vce_exe, "-f", config_yaml] + (["-t", tl_table] if tl_table else [])
-        print(f"[VCE]  {' '.join(os.path.basename(vce_cmd[0]) if i == 0 else a for i, a in enumerate(vce_cmd))}")
+        print(f"[VCE]  {os.path.basename(vce_exe)} -f {config_yaml}"
+              + (f" -t {tl_table}" if tl_table else ""))
         vce = subprocess.Popen(vce_cmd)
-        procs.append(vce)
-        rc = vce.wait()   # VirCarlaEnv is the front-end; block on it
-        print(f"[cosim] VirCarlaEnv exited ({rc}); stopping the native stack.")
+        procs.append(("VirCarlaEnv", vce))
+        time.sleep(3)   # long enough for a config/CARLA-connection failure to surface
+        if not _check("VirCarlaEnv", vce,
+                      f"check CARLA is reachable at {args.carla_host}:{args.carla_port} "
+                      f"and see CarlaClient.log in {os.getcwd()}."):
+            return 1
+
+        print("\n[cosim] native stack up: SUMO + TrafficLayer + VirCarlaEnv.\n"
+              "[cosim] vehicles should now appear in the CARLA window. Ctrl+C here, or "
+              "close VirCarlaEnv, to stop.\n")
+
+        # Supervise: block on VirCarlaEnv (the front-end) but surface it if any other
+        # component dies first - otherwise a dead TrafficLayer just looks like a freeze.
+        while _alive(vce):
+            dead = [n for n, p in procs if n != "VirCarlaEnv" and not _alive(p)]
+            if dead:
+                print(f"[cosim] {', '.join(dead)} exited while the co-sim was running; "
+                      f"the feed has stopped. Shutting the stack down.")
+                break
+            time.sleep(1.0)
+        rc = vce.poll()
+        if rc is None:
+            rc = 0
+        else:
+            print(f"[cosim] VirCarlaEnv exited ({rc}); stopping the native stack.")
         return rc
     finally:
-        for p in reversed(procs):
+        for name, p in reversed(procs):
             if p.poll() is None:
+                print(f"[cosim] stopping {name} ...")
                 try:
                     p.terminate()
                 except Exception:
                     pass
-        for p in reversed(procs):
+        for _name, p in reversed(procs):
             try:
                 p.wait(timeout=5)
             except Exception:
@@ -953,10 +1016,18 @@ def main():
         # always read as 'py' and could never generate itself.
         config_yaml = args.config or import_map.map_config_path(target_map)
         if args.reimport or not os.path.isfile(config_yaml):
+            # A regenerate must not silently undo hand edits: carry the existing
+            # Backend choice over, and keep the old file as .bak to fall back on.
+            prior = read_backend(config_yaml) if os.path.isfile(config_yaml) else None
+            if prior:
+                import shutil as _sh
+                _sh.copy2(config_yaml, config_yaml + ".bak")
+                print(f"[cosim] regenerating {os.path.basename(config_yaml)} "
+                      f"(previous kept as .bak; Backend={prior} preserved)")
             generate_config_yaml(config_yaml, tl_table, args.carla_host,
                                  args.carla_port, realtime=not args.fast,
                                  refresh=args.step_length,
-                                 backend=args.engine or "py")
+                                 backend=args.engine or prior or "py")
 
         # Engine dispatch: CarlaSetup.Backend in that yaml picks the bridge
         # (--engine overrides). cpp = FIXS-native (TrafficLayer + VirCarlaEnv); py
