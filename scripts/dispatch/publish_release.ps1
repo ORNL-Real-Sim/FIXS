@@ -54,7 +54,7 @@ $msg = git log -1 --pretty=%s 2>$null
 $date = Get-Date -Format 'yyyy-MM-dd HH:mm'
 
 $notes = @"
-FIXS Build — $date
+FIXS Build - $date
 
 - Branch: $branch
 - Commit: $commit ($msg)
