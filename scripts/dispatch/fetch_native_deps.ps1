@@ -52,11 +52,18 @@ function Get-Asset([string]$name) {
     try { Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $tmp }
     catch { Write-Error "download failed ($url). Is the '$Tag' release published with '$name'? $_"; exit 1 }
     try {
-        $expected = ((Invoke-WebRequest -UseBasicParsing -Uri "$url.sha256").Content -split '\s+')[0].Trim().ToLower()
+        # The CDN serves the tiny .sha256 as octet-stream, so .Content is a byte[]
+        # (Invoke-WebRequest only string-decodes text content-types) - decode it.
+        $c = (Invoke-WebRequest -UseBasicParsing -Uri "$url.sha256").Content
+        if ($c -is [byte[]]) { $c = [System.Text.Encoding]::UTF8.GetString($c) }
+        $expected = ($c -split '\s+')[0].Trim().ToLower()
         $actual   = (Get-FileHash $tmp -Algorithm SHA256).Hash.ToLower()
         if ($expected -ne $actual) { Write-Error "checksum mismatch for ${name}: expected $expected got $actual"; exit 1 }
-        Write-Host "    checksum OK"
-    } catch { Write-Warning "    no .sha256 sidecar for $name - proceeding WITHOUT checksum verification." }
+        Write-Host "    checksum OK ($actual)"
+    } catch {
+        if ("$_" -match 'checksum mismatch') { throw }
+        Write-Warning "    could not verify .sha256 for ${name}: $($_.Exception.Message) - proceeding WITHOUT verification."
+    }
     Expand-Archive -Path $tmp -DestinationPath $CommonLib -Force
     Remove-Item $tmp -Force -ErrorAction SilentlyContinue
 }
