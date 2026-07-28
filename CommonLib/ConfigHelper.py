@@ -65,9 +65,10 @@ class ConfigHelper:
         self.Carla_setup["EnableVerboseLog"] = self.parserFlag(carla_node, "EnableVerboseLog", False)
         self.Carla_setup["EnableCosimulation"] = self.parserFlag(carla_node, "EnableCosimulation", True)
         # Co-sim bridge selector consumed by run_cosim.py (not the C++ engine):
-        # "py" = run_synchronization.py, "cpp" = TrafficLayer + VirCarlaEnv. Parity
-        # with CarlaSetup.Backend in ConfigHelper.cpp. Default "py".
-        self.Carla_setup["Backend"] = self.parserString(carla_node, "Backend", "py")
+        # true = run_synchronization.py, false = TrafficLayer + VirCarlaEnv. Parity
+        # with CarlaSetup.EnablePythonBackend in ConfigHelper.cpp. Default true.
+        self.Carla_setup["EnablePythonBackend"] = self.parserFlag(
+            carla_node, "EnablePythonBackend", True)
         self.Carla_setup["EnableEgoSimulink"] = self.parserFlag(carla_node, "EnableEgoSimulink", False)
         self.Carla_setup["CarlaServerIP"] = self.parserString(carla_node, "CarlaServerIP", "127.0.0.1")
         self.Carla_setup["CarlaServerPort"] = self.parserInteger(carla_node, "CarlaServerPort", 420)
