@@ -511,6 +511,11 @@ def main():
             zip_path = picked_local or import_map.download_release_zip(repo, picked_tag)
             _carla, sumo_dir = import_map.open_bundle(zip_path)
         sumocfg = import_map.bundle_sumocfg(sumo_dir)
+        # The chosen CARLA source ships no sumo/ (e.g. a carla-only local pick, or a
+        # raw export): fill the SUMO slot separately - pick a sumo scenario now.
+        if sumocfg is None:
+            sumo_dir = import_map.choose_sumo_source()
+            sumocfg = import_map.bundle_sumocfg(sumo_dir)
     if sumocfg is None:
         sys.exit("[cosim] no SUMO scenario to run: pass --sumocfg, or choose a map "
                  "bundle / sumo source that provides one.")

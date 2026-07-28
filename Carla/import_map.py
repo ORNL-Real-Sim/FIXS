@@ -854,6 +854,23 @@ def choose_map(repo, tag_prefix=""):
         print("[import] invalid choice; enter a number, or L for a local file.")
 
 
+def choose_sumo_source():
+    """Prompt for a SUMO scenario (a .zip or folder holding a .sumocfg) and return
+    the dir that contains it, or None. Fills the SUMO slot separately when the
+    chosen CARLA source ships no sumo/ - e.g. a carla-only local pick or a raw
+    export. Returns None in a non-interactive session so the caller can fail with
+    a clear 'pass --sumocfg' message."""
+    if not sys.stdin.isatty():
+        return None
+    print("\n[cosim] the chosen map has no SUMO scenario; select one now "
+          "(a .zip or folder containing a .sumocfg).")
+    path = _select_package("SUMO scenario", None)  # native picker / typed path
+    _carla_src, sumo_dir = classify_source(path)
+    if sumo_dir is None:
+        print(f"[cosim] no .sumocfg found in {path}")
+    return sumo_dir
+
+
 def list_imported_maps(carla_root):
     """Names of maps already cooked under this CARLA (i.e. that have a <name>.umap).
     Used to let tools that operate on an existing map (e.g. place_tls) offer a
