@@ -50,6 +50,10 @@ class ConfigHelper:
         # Sumo Setup
         sumo_node = config.get("SumoSetup", {})
         self.Sumo_setup["SpeedMode"] = sumo_node.get("SpeedMode", 0)
+        # Consumed by run_cosim.py (not the C++ engine): whether it launches SUMO
+        # itself, or waits for the user to start it. Parity with SumoSetup.AutoStart
+        # in ConfigHelper.cpp. Default true.
+        self.Sumo_setup["AutoStart"] = self.parserFlag(sumo_node, "AutoStart", True)
         # Application Setup
         app_node = config.get("ApplicationSetup", {})
         self.application_setup["EnableApplicationLayer"] = self.parserFlag(app_node, "EnableApplicationLayer", False)
