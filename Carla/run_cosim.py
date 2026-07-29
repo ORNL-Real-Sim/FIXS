@@ -349,10 +349,10 @@ def run_native_stack(config_yaml, sumocfg, tl_table, cfg, args):
               f"run; stopping it so {label} can bind.")
         _kill_pid_tree(pid)
         for _ in range(10):
-            if not _port_in_use("127.0.0.1", port):
+            if not _port_listening(port):
                 break
             time.sleep(0.5)
-        if _port_in_use("127.0.0.1", port):
+        if _port_listening(port):
             sys.exit(f"[cosim] port {port} is still in use; close the leftover "
                      f"{name} window and re-run.")
 
@@ -384,16 +384,18 @@ def run_native_stack(config_yaml, sumocfg, tl_table, cfg, args):
         procs.append(("SUMO", sumo))
         # SUMO must be listening before TrafficLayer connects as its TraCI client.
         for _ in range(30):
-            if _port_in_use("127.0.0.1", traci_port) or not _alive(sumo):
+            if _port_listening(traci_port) or not _alive(sumo):
                 break
             time.sleep(0.5)
         if not _check("SUMO", sumo, "check the sumocfg path / SUMO install."):
             return 1
-        if _port_in_use("127.0.0.1", traci_port):
+        if _port_listening(traci_port):
             print(f"[cosim]   OK   SUMO TraCI listening on {traci_port}")
         else:
-            print(f"[cosim]   ..   SUMO up; TraCI {traci_port} not open yet "
-                  f"(normal for sumo-gui)")
+            # SUMO opens the TraCI socket before it loads the net, so 15s of silence
+            # is a real problem (bad sumocfg, port taken), not a slow GUI.
+            print(f"[cosim]   WARN SUMO is up but never opened TraCI {traci_port}; "
+                  f"TrafficLayer will not be able to connect.")
         if args.sumo_gui and not sumo_autostart:
             print("[cosim]   ->   sumo-gui started PAUSED (AutoStart off): press Play "
                   "in its window when you want the simulation to run.")
@@ -404,14 +406,14 @@ def run_native_stack(config_yaml, sumocfg, tl_table, cfg, args):
         # TrafficLayer serves the bridge port; wait for it before starting
         # VirCarlaEnv, which connects to it.
         for _ in range(30):
-            if _port_in_use("127.0.0.1", bridge_port) or not _alive(tl):
+            if _port_listening(bridge_port) or not _alive(tl):
                 break
             time.sleep(0.5)
         if not _check("TrafficLayer", tl,
                       f"check the config yaml (a bad key, or ports {bridge_port}/"
                       f"{traci_port} already in use)."):
             return 1
-        if not _port_in_use("127.0.0.1", bridge_port):
+        if not _port_listening(bridge_port):
             print(f"[cosim]   WARN TrafficLayer is running but port {bridge_port} is not "
                   f"open yet; VirCarlaEnv may fail to subscribe.")
         else:
@@ -656,9 +658,30 @@ def position_spectator(world, frame, pitch=-55.0):
 
 
 def _port_in_use(host, port):
+    """True if `host:port` accepts a TCP connection.
+
+    This OPENS AND DROPS A REAL CONNECTION, so it is only safe against servers
+    that accept many clients (CARLA's RPC port). For the single-client servers in
+    the native stack use _port_listening() instead - see the note there."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.settimeout(1)
         return s.connect_ex((host, port)) == 0
+
+
+def _port_listening(port):
+    """True if something is LISTENING on `port`, observed WITHOUT connecting.
+
+    Both servers in the native stack accept exactly ONE client and stop listening
+    the moment they get it: SUMO's TraCI server defaults to --num-clients 1, and
+    TrafficLayer counts the first accept on its bridge port as VirCarlaEnv. A
+    connect() readiness probe against those is not a passive observation - it
+    *consumes* the one client slot and then hangs up, which left SUMO holding a
+    CLOSE_WAIT socket with no listener and TrafficLayer looping forever on
+    "Could not connect to TraCI server at 127.0.0.1:1337" while TrafficLayer had
+    already logged a phantom "Handling client #1 / All Clients Connected!" before
+    VirCarlaEnv was even launched. Reading the OS socket table has no such side
+    effect, so readiness polling is free to be as chatty as it likes."""
+    return _pid_on_port(port) is not None
 
 
 def _pid_on_port(port):
