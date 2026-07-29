@@ -226,9 +226,14 @@ behaviour, unchanged.**
   library entry nor a cooked map is simply *not offered* &mdash; the picker falls
   through to the full library / cooked / local-file menu, so a stale name costs a
   shortcut, never a run.
-- **The picker never filters.** App maps are listed first and take the Enter-default;
-  below them come all library releases, then **every** map cooked into this CARLA.
-  What is cooked is a property of the machine, not the application.
+- **The library section narrows to the app; the cooked section never does.** An app
+  pinned to Roosevelt is not offered Atlanta as if they were interchangeable, so
+  `Online` lists only the app's library map(s) &mdash; but `Local (already imported
+  into CARLA)` still lists **every** cooked map, because what is cooked is a
+  property of the machine, not of the application. Pick `none` at the application
+  prompt to browse the whole library. If the app's map is not in the library at all
+  there is nothing to narrow to, so the full library is listed and `Enter` instead
+  lands on that map down in the cooked section.
 - **`configs` are staged, not read in place.** Each is copied to
   `~/.fixs/apps/<id>/` on first use, because a committed yaml carries machine
   -specific values (CARLA server IP, dSPACE ports) that must not go back into the
