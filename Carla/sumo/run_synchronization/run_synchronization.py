@@ -281,8 +281,29 @@ class SimulationSynchronization(object):
 
                 sumo_transform = _lerp_sumo_transform(prev_actor.transform,
                                                       sumo_actor.transform, f)
-                carla_transform = BridgeHelper.get_carla_transform(sumo_transform,
-                                                                   sumo_actor.extent)
+                # Anchor on the SPAWNED MODEL's half-length, not SUMO's vType length.
+                #
+                # get_carla_transform steps back along the heading by extent.x to turn
+                # SUMO's front-bumper point into a CARLA actor pivot (which sits at the
+                # bounding-box centre). Passing sumo_actor.extent used SUMO's length/2 -
+                # 2.5 m for every vehicle here, since the roosevelt routes declare
+                # <vType id="car"/> and SUMO's default length is 5.0 m - while CARLA's
+                # car models span 3.63 to 5.36 m. The model's own front therefore landed
+                # up to 0.68 m away from the point SUMO reported.
+                #
+                # It was also self-contradictory: get_sumo_transform below already uses
+                # carla_actor.bounding_box.extent, so a pose pushed carla -> sumo -> carla
+                # did not round-trip. The native bridge uses the actor bbox on both
+                # sides (CarlaBackend::setVehiclePose); this makes the two agree.
+                #
+                # The SPAWN call above keeps SUMO's extent of necessity - there is no
+                # actor to measure yet - and this corrects it on the same tick, before
+                # any world.Tick(), so the provisional pose is never drawn. That the
+                # model cannot BE the SUMO length is a separate problem (front exact,
+                # rear short by the difference); fixing it means choosing a blueprint
+                # whose length matches the vType.
+                carla_transform = BridgeHelper.get_carla_transform(
+                    sumo_transform, carla_actor.bounding_box.extent)
                 # Lights are a per-step state, not something to re-send every tick.
                 if self.sync_vehicle_lights and sub == 1:
                     carla_lights = BridgeHelper.get_carla_lights_state(
