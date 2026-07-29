@@ -1040,6 +1040,27 @@ def main():
     # (packaged build / --no-launch) = let the engine pick.
     target_level = None
 
+    # Is CARLA on this machine? Decided BEFORE the source-build preflight below,
+    # because everything that preflight does - cooking the package into carla_root
+    # via Util/BuildTools/Import.py, placing TLs/signs through the local UE4 editor
+    # - writes to a LOCAL CARLA install and is wasted (minutes of cooking) when the
+    # server we will actually talk to is on another host. Best-effort by design: a
+    # map with no yaml yet cannot name a remote CARLA, and the yaml we are about to
+    # generate for it will name a local one. The authoritative host/port resolution
+    # still happens after config_yaml is final.
+    if args.carla_host is None:
+        peek = args.config or import_map.map_config_path(target_map)
+        if os.path.isfile(peek):
+            peek_host, _peek_port = read_carla_endpoint(peek)
+            if peek_host and not _is_local_host(peek_host):
+                args.carla_host = peek_host
+    if args.carla_host and not _is_local_host(args.carla_host) and not args.no_launch:
+        print(f"[cosim] CARLA host is {args.carla_host} (not this machine); "
+              f"implying --no-launch. NOTE: importing/cooking the map and placing "
+              f"TLs/signs are local-only operations - that CARLA must already have "
+              f"'{target_map}' cooked with TLs/signs placed.")
+        args.no_launch = True
+
     # Source-build preflight: a custom map must be cooked into the build before
     # CARLA can load it. Import it if missing - from a DT-Library bundle (downloaded
     # + cached, split into carla/ + sumo/) or a local pick - else fail clearly.
@@ -1177,12 +1198,12 @@ def main():
     args.carla_host = args.carla_host or DEFAULT_CARLA_HOST
     args.carla_port = args.carla_port or DEFAULT_CARLA_PORT
 
-    # A CARLA on another host (e.g. CARLA on Linux, FIXS on Windows) cannot be
-    # started or port-killed from here; only connected to. Say so once instead of
-    # launching a second local CARLA that nothing will use.
+    # Catches the case the early peek could not see: --config picked a different
+    # yaml, or the file only existed after generation. Same rule as above - a CARLA
+    # we cannot reach the filesystem of is one we can only connect to.
     if not _is_local_host(args.carla_host) and not args.no_launch:
         print(f"[cosim] CARLA host is {args.carla_host} (not this machine); "
-              f"assuming it is already running there (implying --no-launch).")
+              f"implying --no-launch.")
         args.no_launch = True
 
     # TL + sign placement (source build only; idempotent via markers). Runs after
