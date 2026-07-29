@@ -890,6 +890,26 @@ def main():
     repo, tag_prefix = import_map.resolve_map_source(args.repo, args.tag_prefix)
     catalog = import_map.fetch_catalog(repo)
 
+    def cached_sumo_dir(name):
+        """An already-extracted ~/.fixs/maps/<name>/sumo, or None.
+
+        Consulted at EVERY site that would otherwise reach for the map bundle,
+        because opening the bundle is not free: download_release_zip prompts
+        "[U]se it / [R]e-download" over a ~380MB archive that a map with its
+        sumo/ already extracted would immediately throw away. There is more than
+        one such site - the source-build preflight, and the SUMO slot below that
+        also runs for --no-launch / packaged builds - and fixing only one of them
+        just moves the prompt. --sumocfg and --reimport deliberately bypass it:
+        one supplies the scenario outright, the other means "refresh from the
+        bundle"."""
+        if args.sumocfg is not None or args.reimport:
+            return None
+        found = import_map.map_sumo_dir(name)
+        if found:
+            print(f"[cosim] using cached SUMO scenario for '{name}': "
+                  f"{import_map.bundle_sumocfg(found)}")
+        return found
+
     # Two slots to fill: a CARLA map (to cook + load) and a SUMO scenario. A
     # Digital-Twin-Library bundle fills both; the catalog gives the real cooked
     # name + per-map settings WITHOUT a download; --map / --sumocfg override; a
@@ -946,16 +966,8 @@ def main():
 
         # The bundle fills two slots - the CARLA package to cook, and the SUMO
         # scenario - so check what is actually still missing before touching it.
-        # A map that is already cooked AND whose sumo/ is already extracted under
-        # ~/.fixs/maps/<name>/sumo needs neither, and opening the bundle for it is
-        # not free: download_release_zip prompts "[U]se it / [R]e-download" over a
-        # ~380MB archive we would immediately throw away. --reimport deliberately
-        # skips the cache so the bundle refreshes both slots.
-        if args.sumocfg is None and sumo_dir is None and not args.reimport:
-            sumo_dir = import_map.map_sumo_dir(target_map)
-            if sumo_dir:
-                print(f"[cosim] using cached SUMO scenario for '{target_map}': "
-                      f"{import_map.bundle_sumocfg(sumo_dir)}")
+        if sumo_dir is None:
+            sumo_dir = cached_sumo_dir(target_map)
 
         # download_release_zip caches under ~/.fixs/maps; open_bundle splits it.
         carla_src = None
@@ -1007,26 +1019,19 @@ def main():
         if note:
             print(note)
 
-    # SUMO slot: --sumocfg wins; else the chosen bundle's sumo/. A catalog map that
-    # was already cooked (so no bundle opened above) fetches its bundle now, just
-    # for sumo/ (cached).
+    # SUMO slot: --sumocfg wins; else an already-extracted sumo/, else the chosen
+    # bundle's. This also runs for the paths that skip the source-build preflight
+    # above (--no-launch, packaged builds), so the cache is checked here too - the
+    # bundle is the LAST resort, not the first.
     sumocfg = args.sumocfg
     if sumocfg is None:
+        if sumo_dir is None:
+            sumo_dir = cached_sumo_dir(target_map)
         if sumo_dir is None and (picked_local or picked_tag):
             zip_path = picked_local or import_map.download_release_zip(
                 repo, picked_tag, cache_name=target_map)
             _carla, sumo_dir = import_map.open_bundle(zip_path, cache_name=target_map)
         sumocfg = import_map.bundle_sumocfg(sumo_dir)
-        # A Local (already-imported) pick opens no bundle, and a carla-only pick's
-        # bundle has no sumo/ - but the map's sumo/ may already be cached at
-        # ~/.fixs/maps/<name>/sumo (from a prior import or a separate sumo pick).
-        # Reuse it before prompting.
-        if sumocfg is None:
-            cached_sumo = import_map.map_sumo_dir(target_map)
-            if cached_sumo:
-                sumo_dir = cached_sumo
-                sumocfg = import_map.bundle_sumocfg(sumo_dir)
-                print(f"[cosim] using cached SUMO scenario for '{target_map}': {sumocfg}")
         # Still nothing (first time, no cache): pick one now. choose_sumo_source
         # caches it under ~/.fixs/maps/<name>/sumo so the next run reuses it.
         if sumocfg is None:
