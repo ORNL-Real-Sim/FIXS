@@ -50,6 +50,15 @@ class ConfigHelper:
         # Sumo Setup
         sumo_node = config.get("SumoSetup", {})
         self.Sumo_setup["SpeedMode"] = sumo_node.get("SpeedMode", 0)
+        # Consumed by run_cosim.py (not the C++ engine): whether it launches SUMO
+        # itself, or waits for the user to start it. Parity with SumoSetup.AutoStart
+        # in ConfigHelper.cpp. Default true.
+        self.Sumo_setup["AutoStart"] = self.parserFlag(sumo_node, "AutoStart", True)
+        # How many TraCI clients SUMO waits for before it steps. Mirrors
+        # SumoSetup.NumClients in ConfigHelper.cpp (same default). run_cosim passes
+        # it to SUMO as --num-clients; without it parsed here the key was read back
+        # as None on the python side, so the yaml value silently stayed 1.
+        self.Sumo_setup["NumClients"] = self.parserInteger(sumo_node, "NumClients", 1)
         # Application Setup
         app_node = config.get("ApplicationSetup", {})
         self.application_setup["EnableApplicationLayer"] = self.parserFlag(app_node, "EnableApplicationLayer", False)
