@@ -267,31 +267,54 @@ two apps on `roosevelt_full` silently overwrite each other. Pre-app yamls left i
   `CarlaSetup.EnablePythonBackend` to true &mdash; it would silently run the wrong
   stack. `--engine` still overrides.
 
-### Saved run setups
+### Named run setups
 
-Every run is remembered in `~/.fixs/run_profiles.json` (one profile per app), so the
-next run opens with a summary instead of the full round of questions:
+A run is six choices: application, map, scenario yaml, bridge, CARLA, SUMO. They
+are saved as a **named setup** in `~/.fixs/run_profiles.json`, and every later run
+starts from the list of them rather than from a blank prompt:
 
 ```
-[cosim] Saved setup 'roosevelt' (last run 2026-07-29 13:21):
-   1) app      roosevelt
-   2) map      roosevelt_full   (Digital-Twin-Library)
-   3) scenario config.yaml   (generated, per-map)
-   4) engine   py   (run_synchronization.py)
-   5) CARLA    source  C:/src_ext/Carla  ->  127.0.0.1:2000
-   6) SUMO     gui, step 0.05
+[cosim] Saved run setups:
+    1) roosevelt_default   roosevelt | roosevelt_full | config.yaml | py | gui   <- last run
+    2) roosevelt_headless  roosevelt | roosevelt_full | config.yaml | py | headless
+    3) mlk_dspace          mlk_eco_driving | mlk_full | ..._dSPACE.yaml | cpp | gui
+    N) new setup
+    D) delete a setup
+[cosim] Which? [1-3 / N / D], Enter = 1 (roosevelt_default):
 
-[cosim] Enter = run as-is | numbers to change (e.g. "2 4") | A = all | Q = quit:
+[cosim] Run setup 'roosevelt_default'  (last run 2026-07-29 13:21):
+   1) app       roosevelt
+   2) map       roosevelt_full            (Digital-Twin-Library)
+   3) scenario  config.yaml               (generated, this app on this map)
+   4) engine    py                        (run_synchronization.py)
+   5) CARLA     source  C:/src_ext/Carla  ->  127.0.0.1:2000
+   6) SUMO      gui, step 0.05
+
+[cosim] Enter = run it | 1-6 = change (e.g. "2 4") | S = switch setup | N = new | Q = quit:
 ```
 
-Only the slots you name are re-asked; dependent ones follow automatically (changing
-the app re-asks the map and scenario; changing the map re-asks the scenario only if
-it was that map's *generated* yaml, since an app yaml belongs to the app). Explicit
-flags outrank the profile entirely, so `run_cosim --map atlanta` changes exactly one
-thing and prompts for nothing. `--fresh` ignores the profile, `--no-app` ignores the
-manifest, `--profile <name>` selects a specific saved setup. The file is stored as
-`{active, profiles{}}` from the start so a future front-end can list and switch named
-setups without a format change.
+**It loops.** After a change the summary is redrawn, so you see the result and can
+keep editing; nothing runs until you press Enter. All six are pure decisions, so no
+map is downloaded, cooked or loaded while you are still deciding &mdash; quitting out
+leaves nothing half-done.
+
+**Every line is editable.** `4` picks the bridge, `5` switches the CARLA install or
+sets the RPC endpoint, `6` sets gui/headless and the timestep (validated against
+CARLA's 0.1 s ceiling). Dependent slots follow automatically: changing the app
+re-asks the map and scenario; changing the map re-asks the scenario only if it was
+that map's *generated* yaml, since an app yaml belongs to the app.
+
+**Editing offers to fork.** Run a setup you did not touch and it is saved back under
+its own name silently. Change something and you are asked to name it &mdash; Enter
+overwrites, typing a name forks a new one &mdash; so "try it with a different map"
+never quietly destroys the setup you meant to keep.
+
+Explicit flags outrank a saved setup, so `run_cosim --map atlanta` changes exactly
+one thing and prompts for nothing. `--profile <name>` opens one directly, `--app
+<id>` opens that app's most recent, `--fresh` starts a new one, `--no-app` ignores
+the manifest. The store is one file (`{last, setups{}}`) so the whole list can be
+read, shown and switched in one place &mdash; including by a future front-end, which
+is a swap of the prompts, not of the flow.
 
 ## Running a co-sim
 
