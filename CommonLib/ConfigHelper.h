@@ -201,6 +201,13 @@ struct CarlaSetup_t {
 	// frame waypoints injected via TM SetCustomPath. REQUIRED in practice for
 	// generated OpenDRIVE worlds -- TM default lane-following drives straight off
 	// road ends there. EgoRouteRepeat: laps of the list to queue (loop scenarios).
+	// #174 NOTE: EgoRoutePoints / EgoRouteRepeat / EgoTargetSpeed are DRIVER behavior,
+	// not simulation wiring. They live in the sim config only because the in-Carla
+	// drivers (native TM, Pursuit fallback) run inside VirCarlaEnv and read them here.
+	// The unified EgoDriver client (EgoL0Driver: Actuation) already owns these on the
+	// application side (like the XIL side's RealSimPara.speedInit / RealSimInterpSpeed).
+	// LEGACY: retire the in-Carla drivers -> these move to the driver and leave the sim
+	// config (and this struct) entirely.
 	std::vector<std::pair<double, double>> EgoRoutePoints;
 	int EgoRouteRepeat;
 	double EgoTargetSpeed;             // driver cruise speed (m/s); also the L2 fallback
