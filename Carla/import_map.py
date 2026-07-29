@@ -606,10 +606,23 @@ def fetch_catalog(repo):
     return []
 
 
-def catalog_entry(catalog, location):
-    """The catalog entry whose `location` matches, or None."""
+def catalog_entry(catalog, name):
+    """The catalog entry known by `name`, or None.
+
+    Matches any of the three names one entry answers to: its `location` (the
+    picker's Online label, and what --map takes), its `map_name` (the REAL cooked
+    CARLA name, which is what a Local pick and resolve_cooked_map deal in), and
+    its `release` tag. These deliberately differ - location 'roosevelt' vs
+    map_name 'roosevelt_full' - so matching `location` alone silently dropped the
+    entry whenever the caller held a cooked name. That made one map resolve two
+    different ways depending on which picker entry you came in through: picking
+    'roosevelt' applied the entry's settings (net_offset: zero), while picking
+    'roosevelt_full' matched nothing, fell back to defaults, and left the CARLA
+    spectator framed on a sign-flipped y."""
+    if not name:
+        return None
     for m in catalog or []:
-        if m.get("location") == location:
+        if name in (m.get("location"), m.get("map_name"), m.get("release")):
             return m
     return None
 

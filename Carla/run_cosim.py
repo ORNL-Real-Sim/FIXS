@@ -944,13 +944,29 @@ def main():
                 args.reimport = True
                 resolved = None
 
-        # Materialize the bundle if we must import, or need its sumo/ (no --sumocfg).
+        # The bundle fills two slots - the CARLA package to cook, and the SUMO
+        # scenario - so check what is actually still missing before touching it.
+        # A map that is already cooked AND whose sumo/ is already extracted under
+        # ~/.fixs/maps/<name>/sumo needs neither, and opening the bundle for it is
+        # not free: download_release_zip prompts "[U]se it / [R]e-download" over a
+        # ~380MB archive we would immediately throw away. --reimport deliberately
+        # skips the cache so the bundle refreshes both slots.
+        if args.sumocfg is None and sumo_dir is None and not args.reimport:
+            sumo_dir = import_map.map_sumo_dir(target_map)
+            if sumo_dir:
+                print(f"[cosim] using cached SUMO scenario for '{target_map}': "
+                      f"{import_map.bundle_sumocfg(sumo_dir)}")
+
         # download_release_zip caches under ~/.fixs/maps; open_bundle splits it.
         carla_src = None
-        if (resolved is None or args.sumocfg is None) and (picked_local or picked_tag):
+        need_bundle = (resolved is None                          # must cook the map
+                       or (args.sumocfg is None and sumo_dir is None))   # need its sumo/
+        if need_bundle and (picked_local or picked_tag):
             zip_path = picked_local or import_map.download_release_zip(
                 repo, picked_tag, force_redownload=args.reimport, cache_name=target_map)
-            carla_src, sumo_dir = import_map.open_bundle(zip_path, cache_name=target_map)
+            carla_src, bundle_sumo = import_map.open_bundle(zip_path, cache_name=target_map)
+            if bundle_sumo:            # keep a cached sumo/ if this bundle has none
+                sumo_dir = bundle_sumo
 
         if resolved is None:
             if carla_src is not None:                    # a DT/local bundle or raw export
