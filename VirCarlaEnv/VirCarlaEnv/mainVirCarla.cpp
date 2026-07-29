@@ -322,6 +322,11 @@ int main(int argc, const char* argv[]) {
             // paired response + clear here. Sub-steps in between only render.
             const bool onFeed = fixs::onFeedBoundary(simTime, 1e-6);
 
+            // SUMO<->CARLA elevation audit, once per exchange. Here rather than inside
+            // setVehiclePose because it asks whether the two MAPS agree, which no
+            // interpolated sub-step can change - see CarlaBackend::auditZAlignment.
+            if (onFeed) backend.auditZAlignment();
+
             // ---- POST-tick L0+: the Carla-driven ego -> FIXS (TL injects into SUMO)
             if (egoMode >= 1) {
                 virenv::EgoState es;

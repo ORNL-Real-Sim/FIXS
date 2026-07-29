@@ -53,6 +53,16 @@ public:
 
     void syncTrafficLight(const std::string& junctionId, const std::string& stateStr) override;
 
+    // ---- SUMO<->CARLA z-alignment audit (#193 placeholder) -----------------
+    // Compares the last pose applied to each mapped vehicle against the CARLA road
+    // surface under it, and reports past tolerance through the XIL guard. Called by
+    // the driver ONCE PER FIXS EXCHANGE, not per pose: it tests whether the two maps
+    // agree on elevation, which cannot change between interpolated sub-steps of the
+    // same SUMO sample. It used to live inside setVehiclePose, so a sub-stepping run
+    // paid a whole-map waypoint search per vehicle per tick (10x at CarlaTimeStep
+    // 0.01) to re-answer a question with the same answer.
+    void auditZAlignment();
+
     // mode A (EgoMode >= 1): read the Carla-driven ego actor back in FIXS terms.
     // Returns false when no ego actor is owned (EgoMode 0 -- driver readback only).
     bool readEgoState(const std::string&, EgoState& out) override;
