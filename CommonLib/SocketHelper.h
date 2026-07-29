@@ -73,6 +73,22 @@
 #define MSG_HEADER_SIZE 9
 #define MSG_EACH_HEADER_SIZE 3
 
+// #87: largest single FIXS record, in bytes. This bounds the RECEIVE scratch buffer
+// and the SEND chunk buffer -- neither ever has to hold a whole message, so message
+// size is unbounded while memory stays fixed (which is also what lets the Simulink /
+// dSPACE targets take part without dynamic allocation).
+//
+// Worst case is a vehicle record: 3 (uint16 size + uint8 type)
+//                               + 7 string fields x (1 length byte + 255 max chars) = 1792
+//                               + 93 bytes of numeric fields
+//                               = 1888. Rounded up to 2048 for headroom.
+// Strings are length-prefixed with a uint8, so 255 is a hard per-field ceiling.
+#define MAX_RECORD_SIZE 2048
+
+// #87: send-side chunk buffer. Must be >= MAX_RECORD_SIZE so a record always fits.
+// Larger just means fewer send() syscalls; it does NOT cap the message size.
+#define TX_CHUNK_SIZE 16384
+
 
 class SocketHelper
 {
@@ -119,6 +135,12 @@ public:
 
 // below should be converted to private in the future
 //private:
+
+	// #87: send-side chunk buffer. A member rather than a local so it is allocated
+	// once with the SocketHelper instead of putting TX_CHUNK_SIZE bytes on the stack
+	// of every sendData() call -- the dSPACE/CarMaker real-time tasks run on small
+	// stacks. Never holds a whole message; only one chunk at a time.
+	char txBuf[TX_CHUNK_SIZE];
 
 	int NSERVER = 0;
 	int NCLIENT = 0;
