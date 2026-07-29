@@ -70,11 +70,13 @@ CarlaSetup:
     EgoSpawnPose: [20.1, -3.0, 0.0, 90.0]   # [x, y, z, headingDeg] FIXS frame, on the loop
     TrafficManagerPort: 8000   # unused in Actuation mode
 
-    # EgoRoutePoints unused on the Carla side here (the route lives in the EgoDriver
-    # CLIENT). Kept for reference / parity with config_l0_egodriver.yaml.
-    EgoRoutePoints: [[15.0, -3.0], [185.0, -3.0], [192.9, -1.9], [198.5, 1.5], [201.9, 7.1], [203.0, 15.0], [203.0, 185.0], [201.9, 192.9], [198.5, 198.5], [192.9, 201.9], [185.0, 203.0], [15.0, 203.0], [7.1, 201.9], [1.5, 198.5], [-1.9, 192.9], [-3.0, 185.0], [-3.0, 15.0], [-1.9, 7.1], [1.5, 1.5], [7.1, -1.9]]
-    EgoRouteRepeat: 50
-    EgoTargetSpeed: 8.33
+    # NOTE: the ego's TARGET SPEED and ROUTE are DRIVER behavior, not simulation
+    # wiring, so they are NOT here. In Actuation mode VirCarlaEnv runs no in-Carla
+    # driver -- the target speed and route live with the driver, in the EgoDriver
+    # client (ego_driver_client.py: DEFAULT_TARGET_SPEED / DEFAULT_ROUTE), or come
+    # from an upstream controller (speedDesired). EgoRoutePoints/EgoRouteRepeat/
+    # EgoTargetSpeed remain in configs that use an in-Carla driver (config_l0_tm.yaml,
+    # config_l0_egodriver.yaml) only because those host the driver in VirCarlaEnv.
 
     UseVehicleTypeAsBlueprint: false
 
