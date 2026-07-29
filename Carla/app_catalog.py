@@ -125,64 +125,79 @@ def app_dir(app, root=None):
     return os.path.join(root or app_root(), "apps", app.get("dir") or app["id"])
 
 
-def scenario_dir(app_id, map_name):
-    """Where the GENERATED scenario yaml for <app> on <map> lives:
-    ~/.fixs/apps/<app_id>/maps/<map_name>/.
+def scenario_dir(app_id, map_name=None):
+    """Where an app's scenario yamls live: ~/.fixs/apps/<app_id>/, flat.
 
-    Scenario yamls are app-bounded, never map-bounded. Two reasons:
+    One folder per application, mirroring apps/<app_id>/ in the repo, with the
+    yamls sitting directly in it - the staged copies of the app's own configs and
+    the generated per-map ones side by side. `map_name` is accepted and ignored so
+    callers can pass it; the map is in the FILE name, not in a subfolder.
 
-      - They are edited. ~/.fixs/maps/ is a cache of downloaded and derived
-        artifacts that a user should be able to delete wholesale to reclaim
-        gigabytes; a hand-edited yaml sitting in there is destroyed by that
-        perfectly reasonable act.
-      - One yaml per map is not enough. The same map serves several apps, and one
-        app runs several versions of a location - so the CARLA host, ports and
-        subscriptions in the yaml belong to (app, map), not to the map. Keyed by
-        map alone, two apps on roosevelt_full silently overwrite each other.
-
-    GENERIC (below) is the key for a run with no application selected."""
-    return os.path.join(apps_home(app_id or GENERIC), "maps", map_name)
+    Scenario yamls are app-bounded, never map-bounded, because they are edited and
+    ~/.fixs/maps/ is a cache of downloaded artifacts a user should be able to
+    delete wholesale to reclaim gigabytes. GENERIC is the key for a run with no
+    application selected."""
+    return apps_home(app_id or GENERIC)
 
 
 def scenario_path(app_id, map_name):
-    """The generated scenario yaml itself: <scenario_dir>/config.yaml."""
-    return os.path.join(scenario_dir(app_id, map_name), "config.yaml")
+    """The generated scenario yaml: ~/.fixs/apps/<app_id>/<map_name>.yaml.
+
+    Named for the map rather than nested under one, so the app folder stays flat
+    and two maps under the same app still get their own file - the CARLA endpoint
+    and TL subscriptions inside are specific to (app, map)."""
+    return os.path.join(scenario_dir(app_id), f"{map_name}.yaml")
 
 
 def migrate_scenarios(app_id, map_name, legacy_dir, quiet=False):
-    """Move pre-app scenario yamls out of the map cache into the app tree, once.
+    """Move scenario yamls from where older FIXS versions put them, once.
 
-    Before scenario yamls were app-bounded they were generated into
-    ~/.fixs/maps/<map>/config.yaml (plus any variants a user added beside it).
-    Those files are hand-editable, so they are MOVED rather than abandoned - a
-    user who tuned CarlaServerIP there must not silently get a freshly generated
-    default instead. Only runs when the destination has no yaml yet, so it cannot
-    overwrite anything, and never touches the big artifacts around them."""
+    Two earlier homes, both left behind rather than abandoned - these files are
+    hand-edited, so a user who tuned CarlaServerIP in one must not silently get a
+    freshly generated default instead:
+
+        ~/.fixs/maps/<map>/*.yaml                 (before yamls were app-bounded)
+        ~/.fixs/apps/<app>/maps/<map>/*.yaml      (before the app folder went flat)
+
+    The map's own config.yaml becomes <map>.yaml; anything beside it keeps its
+    name, prefixed with the map if that would collide. Never overwrites: a name
+    already taken in the destination is left where it is."""
     import shutil
-    dest = scenario_dir(app_id, map_name)
-    try:
-        if any(f.lower().endswith((".yaml", ".yml")) for f in os.listdir(dest)):
-            return []                      # already migrated (or already configured)
-    except OSError:
-        pass                               # dest does not exist yet: nothing there to keep
-    try:
-        legacy = sorted(f for f in os.listdir(legacy_dir)
-                        if f.lower().endswith((".yaml", ".yml")))
-    except OSError:
-        return []
-    if not legacy:
-        return []
+    dest = scenario_dir(app_id)
     moved = []
-    os.makedirs(dest, exist_ok=True)
-    for name in legacy:
+    sources = [legacy_dir, os.path.join(dest, "maps", map_name)]
+    for src in sources:
         try:
-            shutil.move(os.path.join(legacy_dir, name), os.path.join(dest, name))
-            moved.append(name)
-        except OSError as exc:
-            _warn(f"could not move {name} out of the map cache ({exc}); leaving it.")
+            names = sorted(f for f in os.listdir(src)
+                           if f.lower().endswith((".yaml", ".yml")))
+        except OSError:
+            continue
+        for name in names:
+            stem, ext = os.path.splitext(name)
+            # Everything here belonged to ONE map, so everything gets that map's
+            # name: config.yaml is the generated one and becomes <map>.yaml, a
+            # variant beside it becomes <map>_<variant>.yaml. Without the prefix a
+            # variant would sort ahead of the generated yaml in the flat folder and
+            # be offered as the default - and would read as if it applied to every
+            # map the app runs, which it does not.
+            target = f"{map_name}{ext}" if stem == "config" else f"{map_name}_{name}"
+            if os.path.exists(os.path.join(dest, target)):
+                continue                   # already migrated; leave the original
+            try:
+                os.makedirs(dest, exist_ok=True)
+                shutil.move(os.path.join(src, name), os.path.join(dest, target))
+                moved.append(f"{name} -> {target}")
+            except OSError as exc:
+                _warn(f"could not move {name} ({exc}); leaving it in {src}.")
+        # Tidy the emptied nested folder so the old shape does not linger.
+        try:
+            os.rmdir(src)
+            os.rmdir(os.path.dirname(src))
+        except OSError:
+            pass
     if moved and not quiet:
-        print(f"[apps] scenario configs are app-bounded now; moved "
-              f"{', '.join(moved)}\n[apps]   {legacy_dir} -> {dest}")
+        print(f"[apps] scenario configs live flat under the app now; moved "
+              f"{', '.join(moved)}\n[apps]   -> {dest}")
     return moved
 
 

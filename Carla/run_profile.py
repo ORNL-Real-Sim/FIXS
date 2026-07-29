@@ -165,17 +165,28 @@ def suggest_name(app_id, doc):
 # Rendering
 # --------------------------------------------------------------------------- #
 def summarize(rec):
-    """One-line digest of a setup, for the list."""
+    """One-line digest of a setup, for the list.
+
+    Deliberately no engine or CARLA endpoint: those live in the scenario yaml, and
+    printing a copy of them here would mean reading every setup's yaml to draw a
+    list - or, worse, showing a remembered value that the yaml no longer says. The
+    yaml is named, which is the part that identifies the setup anyway."""
     bits = [rec.get("app") or "no app",
             rec.get("map") or "no map",
             os.path.basename(rec.get("config") or "") or "auto config",
-            rec.get("engine") or "py",
-            "gui" if rec.get("sumo_gui", True) else "headless"]
+            "gui" if rec.get("sumo_gui", True) else "headless",
+            f"step {rec.get('step_length', 0.05)}"]
     return " | ".join(bits)
 
 
-def _fmt(slot, rec, carla_cfg):
-    """The value text for one summary line."""
+def _fmt(slot, rec, carla_cfg, derived=None):
+    """The value text for one summary line.
+
+    `derived` carries the settings the SCENARIO YAML owns - the bridge and the
+    CARLA endpoint - read fresh by the caller each time this is drawn. They are
+    shown but not stored, so a yaml edited by hand is reflected here immediately
+    instead of the summary repeating a stale copy."""
+    derived = derived or {}
     if slot == "app":
         return rec.get("app") or "(none - generic co-sim)"
     if slot == "map":
@@ -190,27 +201,27 @@ def _fmt(slot, rec, carla_cfg):
             else "generated, this app on this map"
         return f"{os.path.basename(path):<26}({where})"
     if slot == "engine":
-        eng = rec.get("engine") or "py"
+        eng = derived.get("engine") or "py"
         how = "run_synchronization.py" if eng == "py" else "TrafficLayer + VirCarlaEnv"
-        return f"{eng:<26}({how})"
+        return f"{eng:<26}({how}, from the yaml)"
     if slot == "carla":
         mode = (carla_cfg or {}).get("mode") or "?"
         root = (carla_cfg or {}).get("carla_root") or "?"
-        return f"{mode}  {root}  ->  {rec.get('carla_host') or '127.0.0.1'}:" \
-               f"{rec.get('carla_port') or 2000}"
+        return f"{mode}  {root}  ->  {derived.get('carla_host') or '127.0.0.1'}:" \
+               f"{derived.get('carla_port') or 2000}"
     if slot == "sumo":
         gui = "gui" if rec.get("sumo_gui", True) else "headless"
         return f"{gui}, step {rec.get('step_length', 0.05)}"
     return "?"
 
 
-def show(name, rec, carla_cfg=None):
+def show(name, rec, carla_cfg=None, derived=None):
     """Print one setup as a numbered list of its settings."""
     when = (rec.get("updated") or "").replace("T", " ")
     stamp = f"  (last run {when})" if when else "  (new)"
     print(f"\n[cosim] Run setup '{name}'{stamp}:")
     for i, (slot, label) in enumerate(SLOTS, 1):
-        print(f"   {i}) {label:<10}{_fmt(slot, rec, carla_cfg)}")
+        print(f"   {i}) {label:<10}{_fmt(slot, rec, carla_cfg, derived)}")
 
 
 def _input(prompt, default=""):
@@ -316,19 +327,19 @@ def cascade(rec, changed):
 RUN, QUIT, SWITCH, NEW = "run", "quit", "switch", "new"
 
 
-def ask(name, rec, carla_cfg=None, interactive=True, can_switch=True):
+def ask(name, rec, carla_cfg=None, interactive=True, can_switch=True, derived=None):
     """Show a setup and ask what to do with it.
 
     Returns RUN / QUIT / SWITCH / NEW, or a set of slot keys to edit. A
     non-interactive session prints the summary and runs it - scheduled and
     scripted runs reuse a setup verbatim, and CLI flags are how they deviate."""
     if not interactive:
-        show(name, rec, carla_cfg)
+        show(name, rec, carla_cfg, derived)
         print("[cosim] non-interactive: running this setup as-is "
               "(pass flags to override, --fresh to start over).")
         return RUN
     while True:
-        show(name, rec, carla_cfg)
+        show(name, rec, carla_cfg, derived)
         extra = " | S = switch setup | N = new" if can_switch else ""
         ans = _input(f"[cosim] Enter = run it | 1-{len(SLOTS)} = change "
                      f"(e.g. \"2 4\"){extra} | Q = quit: ").lower()

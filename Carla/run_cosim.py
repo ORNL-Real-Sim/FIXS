@@ -909,15 +909,95 @@ def _menu(title, options, current=None):
 
 # --------------------------------------------------------------------------- #
 # Slot editors. One per line of the summary, so every line the menu offers is a
-# line the menu can actually change - and each returns the new value(s) rather
-# than reaching into the run, which is what lets the loop redraw and ask again.
+# line the menu can actually change.
+#
+# Two of them - the bridge and the CARLA endpoint - write to the SCENARIO YAML
+# rather than to the saved setup, because that yaml is what the engine actually
+# reads: TrafficLayer and VirCarlaEnv take CarlaSetup.* straight from it. A copy
+# of those values kept anywhere else is a second source of truth, and it goes
+# wrong in both directions - hand-editing the yaml stops having any effect, and a
+# stale saved value makes run_cosim probe one CARLA while VirCarlaEnv dials
+# another. So the yaml owns them, and the summary DERIVES them from it every time
+# it is drawn.
 # --------------------------------------------------------------------------- #
-def edit_engine(current):
-    """Which bridge runs the co-sim."""
-    return _menu("Co-sim engine:",
-                 [("py", "py    standalone run_synchronization.py bridge"),
-                  ("cpp", "cpp   FIXS-native stack (TrafficLayer + VirCarlaEnv)")],
-                 current)
+def set_yaml_scalar(path, section, key, value):
+    """Set `section.key` to `value` in a scenario yaml, in place.
+
+    A targeted line rewrite, not a parse-and-dump: these files are read by hand as
+    much as by the engine, and a round-trip through a yaml library would strip
+    every comment - the generated one is mostly comments explaining each knob.
+    Inserts the key under its section when missing, which a hand-written app yaml
+    often is. Returns True if the file now says what was asked."""
+    import re
+    try:
+        with open(path, encoding="utf-8") as f:
+            lines = f.readlines()
+    except OSError as exc:
+        print(f"[cosim] cannot read {path} ({exc}).")
+        return False
+
+    in_section, sec_at, done = False, None, False
+    for i, line in enumerate(lines):
+        if re.match(rf"^{re.escape(section)}\s*:", line):
+            in_section, sec_at = True, i
+            continue
+        if in_section:
+            m = re.match(rf"^(\s+){re.escape(key)}\s*:\s*(.*?)(\s+#.*)?$", line)
+            if m:
+                lines[i] = f"{m.group(1)}{key}: {value}{m.group(3) or ''}\n"
+                done = True
+                break
+            if line.strip() and not line[0].isspace():
+                in_section = False          # left the section without finding it
+    if not done:
+        if sec_at is None:
+            print(f"[cosim] {os.path.basename(path)} has no '{section}:' section; "
+                  f"set {key} by hand.")
+            return False
+        indent = "  "
+        for line in lines[sec_at + 1:]:     # copy the section's own indentation
+            if line.strip() and line[0].isspace():
+                indent = line[:len(line) - len(line.lstrip())]
+                break
+        lines.insert(sec_at + 1, f"{indent}{key}: {value}\n")
+        print(f"[cosim] {os.path.basename(path)} did not set {key}; adding it.")
+
+    try:
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            f.writelines(lines)
+    except OSError as exc:
+        print(f"[cosim] cannot write {path} ({exc}).")
+        return False
+    return True
+
+
+def derived_from_yaml(config_yaml, staged):
+    """The settings the SCENARIO YAML owns: which bridge, and which CARLA.
+
+    Read fresh every time the summary is drawn, so editing the yaml by hand shows
+    up immediately and is what actually runs. An app may declare which stack its
+    yaml is written for, which settles the case the yaml itself leaves open:
+    ConfigHelper defaults EnablePythonBackend to true, so a hand-written
+    native-stack yaml that omits it would otherwise read as the python bridge."""
+    if not config_yaml or not os.path.isfile(config_yaml):
+        return {"engine": declared_engine(staged, config_yaml) or "py",
+                "carla_host": None, "carla_port": None}
+    host, port = read_carla_endpoint(config_yaml)
+    return {"engine": declared_engine(staged, config_yaml) or read_backend(config_yaml),
+            "carla_host": host, "carla_port": port}
+
+
+def edit_engine(config_yaml, current):
+    """Which bridge runs the co-sim. Written into the yaml (see the note above)."""
+    picked = _menu("Co-sim engine:",
+                   [("py", "py    standalone run_synchronization.py bridge"),
+                    ("cpp", "cpp   FIXS-native stack (TrafficLayer + VirCarlaEnv)")],
+                   current)
+    if picked != current and config_yaml and os.path.isfile(config_yaml):
+        if set_yaml_scalar(config_yaml, "CarlaSetup", "EnablePythonBackend",
+                           "true" if picked == "py" else "false"):
+            print(f"[cosim] {os.path.basename(config_yaml)}: engine -> {picked}")
+    return picked
 
 
 def edit_sumo(gui, step):
@@ -945,17 +1025,22 @@ def edit_sumo(gui, step):
     return gui, step
 
 
-def edit_carla(cfg, host, port):
-    """The CARLA to talk to: which install (carla.json) and which RPC endpoint."""
+def edit_carla(cfg, config_yaml, host, port):
+    """The CARLA to talk to. Two different things live behind this line:
+
+    the INSTALL (which CarlaUE4 to launch) is a property of the machine and lives
+    in ~/.fixs/carla.json, shared by every app; the ENDPOINT (which RPC server to
+    dial) is a property of the scenario and lives in the yaml, because that is
+    where VirCarlaEnv reads it. Neither is kept in the saved setup."""
     what = _menu(
         "CARLA:",
-        [("endpoint", f"set the RPC endpoint  (now {host or '127.0.0.1'}:{port or 2000})"),
+        [("endpoint", f"set the RPC endpoint  (now {host or DEFAULT_CARLA_HOST}:"
+                      f"{port or DEFAULT_CARLA_PORT})"),
          ("install", f"switch the CARLA install  (now {(cfg or {}).get('mode', '?')} "
                      f"{(cfg or {}).get('carla_root', '?')})")],
         "endpoint")
     if what == "install":
-        cfg = env.run_setup()
-        return cfg, host, port
+        return env.run_setup(), host, port
     if sys.stdin.isatty():
         ans = _ask(f"[cosim] CARLA host [Enter = {host or DEFAULT_CARLA_HOST}]: ")
         host = ans or host or DEFAULT_CARLA_HOST
@@ -968,6 +1053,12 @@ def edit_carla(cfg, host, port):
                 port = int(ans)
                 break
             print("[cosim] enter a port number.")
+    if config_yaml and os.path.isfile(config_yaml):
+        # The C++ side takes a literal address, not a resolvable hostname.
+        wire = "127.0.0.1" if host in ("localhost", "") else host
+        set_yaml_scalar(config_yaml, "CarlaSetup", "CarlaServerIP", wire)
+        set_yaml_scalar(config_yaml, "CarlaSetup", "CarlaServerPort", port)
+        print(f"[cosim] {os.path.basename(config_yaml)}: CARLA -> {wire}:{port}")
     return cfg, host, port
 
 
@@ -1052,16 +1143,15 @@ def _edit_slots(slots, rec, ctx, cfg, apps, catalog, repo, tag_prefix):
             rec["config"], rec["config_scope"] = edit_config(
                 ctx.get("staged"), (ctx.get("app") or {}).get("title"),
                 rec["map"], rec.get("app") or run_profile.GENERIC)
-            # Pin the bridge the first time a config is chosen, so the summary
-            # states what will actually run instead of leaving it to be derived.
-            if rec.get("engine") is None:
-                rec["engine"] = (declared_engine(ctx.get("staged"), rec["config"])
-                                 or read_backend(rec["config"]))
         elif slot == "engine":
-            rec["engine"] = edit_engine(rec.get("engine"))
+            # Derived from the yaml, not from the record: the yaml owns it, so the
+            # value being edited must be the one currently in the file.
+            now = derived_from_yaml(rec.get("config"), ctx.get("staged"))
+            edit_engine(rec.get("config"), now["engine"])
         elif slot == "carla":
-            cfg, host, port = edit_carla(cfg, rec.get("carla_host"), rec.get("carla_port"))
-            rec["carla_host"], rec["carla_port"] = host, port
+            now = derived_from_yaml(rec.get("config"), ctx.get("staged"))
+            cfg, _host, _port = edit_carla(cfg, rec.get("config"),
+                                           now["carla_host"], now["carla_port"])
         elif slot == "sumo":
             rec["sumo_gui"], rec["step_length"] = edit_sumo(
                 rec.get("sumo_gui", True), rec.get("step_length", DEFAULT_STEP_LENGTH))
@@ -1131,8 +1221,11 @@ def configure_run(args, cfg, repo, tag_prefix, catalog):
                 cfg = _edit_slots(pending, rec, ctx, cfg, apps, catalog, repo, tag_prefix)
                 dirty = True
                 pending = set()
+            # Re-read the yaml-owned settings on every redraw, so a yaml edited by
+            # hand (or by the editors above) is what the summary shows.
+            derived = derived_from_yaml(rec.get("config"), ctx.get("staged"))
             action = run_profile.ask(name or "(unsaved)", rec, cfg, interactive,
-                                     can_switch=bool(doc["setups"]))
+                                     can_switch=bool(doc["setups"]), derived=derived)
             if action == run_profile.QUIT:
                 sys.exit("[cosim] cancelled.")
             if action == run_profile.RUN:
@@ -1155,13 +1248,15 @@ def configure_run(args, cfg, repo, tag_prefix, catalog):
 
 
 def _rec_to_args(rec, args):
-    """Publish the settled setup onto args, which the rest of the run reads."""
+    """Publish the settled setup onto args, which the rest of the run reads.
+
+    Only what the SETUP owns. engine and the CARLA endpoint are deliberately left
+    alone: they live in the scenario yaml, and main() resolves them from it - an
+    explicit --engine / --carla-host still overrides for that one run, which is why
+    they are not overwritten here."""
     args.app = rec.get("app")
     args.map = rec.get("map")
     args.config = rec.get("config")
-    args.engine = rec.get("engine")
-    args.carla_host = rec.get("carla_host")
-    args.carla_port = rec.get("carla_port")
     args.sumo_gui = bool(rec.get("sumo_gui", True))
     args.step_length = rec.get("step_length") or DEFAULT_STEP_LENGTH
 
@@ -1183,20 +1278,30 @@ def edit_config(staged, app_title, map_name, setup_app_id):
     # One-shot: lift pre-app yamls out of ~/.fixs/maps/<map>/ into the app tree.
     app_catalog.migrate_scenarios(setup_app_id, map_name,
                                   import_map._map_cache_dir(map_name))
-    per_map_dir = app_catalog.scenario_dir(setup_app_id, map_name)
+    app_home = app_catalog.scenario_dir(setup_app_id)
     generated = app_catalog.scenario_path(setup_app_id, map_name)
+    staged_paths = {os.path.normcase(c["path"]) for c in staged}
     try:
-        found = sorted(os.path.join(per_map_dir, f) for f in os.listdir(per_map_dir)
-                       if f.lower().endswith((".yaml", ".yml")))
+        found = sorted(os.path.join(app_home, f) for f in os.listdir(app_home)
+                       if f.lower().endswith((".yaml", ".yml"))
+                       and os.path.normcase(os.path.join(app_home, f)) not in staged_paths)
     except OSError:
         found = []
+    # The map's own generated yaml leads the per-map group, and so is what Enter
+    # takes. Sorting alone would put a variant named for it (roosevelt_full_fast)
+    # after it, but an unrelated name (config_fast) ahead of it - offering a
+    # variant as the default for a map it may not even belong to.
+    found.sort(key=lambda p: (os.path.normcase(p) != os.path.normcase(generated),
+                              os.path.normcase(p)))
 
     options = [(c["path"], f"{os.path.basename(c['path']):<42} {c['title']}"
                            + (f"  [engine {c['engine']}]" if c["engine"] else ""))
                for c in staged]
     for p in found:
-        options.append((p, f"{os.path.basename(p):<42} for this app on this map"))
-    if generated not in found:
+        note = ("generated for this map" if os.path.normcase(p) == os.path.normcase(generated)
+                else "variant in this app's folder")
+        options.append((p, f"{os.path.basename(p):<42} {note}"))
+    if not any(os.path.normcase(p) == os.path.normcase(generated) for p in found):
         options.append((generated, f"{os.path.basename(generated):<42} "
                                    f"auto-generate for this map"))
 
@@ -1605,12 +1710,13 @@ def main():
         "map_local": picked_local,
         "config": config_yaml,
         "config_scope": config_scope,
-        "engine": backend,
         "sumo_gui": bool(args.sumo_gui),
         "step_length": args.step_length,
-        "carla_host": args.carla_host,
-        "carla_port": args.carla_port,
     })
+    # engine / carla_host / carla_port are NOT stored: the scenario yaml owns them,
+    # and a copy here would go stale the moment someone edited that yaml by hand.
+    for stale in ("engine", "carla_host", "carla_port"):
+        setup.pop(stale, None)
     run_profile.save(setup_name, setup)
     args.map = target_map
 
