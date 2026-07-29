@@ -84,10 +84,20 @@ def load_doc():
     of prompts, never a failed run. An older {active, profiles:{<app_id>: rec}}
     file is upgraded in memory: each app's remembered run becomes a named setup
     '<app_id>_default', which is exactly what it was."""
+    # utf-8-SIG, not utf-8: this file gets hand-edited, and on Windows that means
+    # Notepad or PowerShell's Set-Content, both of which write a UTF-8 BOM. json.load
+    # over a plain utf-8 handle rejects a BOM, which lands in the except below and
+    # reads as "no setups at all" - every saved setup silently gone, and the picker
+    # starts asking from scratch. utf-8-sig accepts a BOM and a file without one.
     try:
-        with open(profiles_path(), encoding="utf-8") as f:
+        with open(profiles_path(), encoding="utf-8-sig") as f:
             doc = json.load(f)
-    except (OSError, ValueError):
+    except (OSError, ValueError) as exc:
+        # Distinguish "no file yet" (normal, first run) from "there is a file and it
+        # does not parse" (an edit went wrong - say so, or the loss looks like amnesia).
+        if os.path.isfile(profiles_path()) and not isinstance(exc, FileNotFoundError):
+            print(f"[cosim] {profiles_path()} could not be read ({exc}); starting from "
+                  f"no saved setups. Fix or delete that file to stop seeing this.")
         doc = {}
     if not isinstance(doc, dict):
         doc = {}

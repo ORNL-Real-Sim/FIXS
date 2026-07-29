@@ -34,6 +34,16 @@ import app_catalog
 import carla_env_setup as env
 import run_profile
 
+# Flush every line as it is printed. Redirected to a file or a pipe - which is how
+# the .bat/.sh wrappers get run from a shortcut, and how anyone captures a log -
+# python block-buffers stdout, so nothing appears until the process exits: a run that
+# is working looks like a hang, and a run that was killed loses the record of what it
+# launched. VirCarlaEnv sets std::unitbuf for the same reason.
+try:
+    sys.stdout.reconfigure(line_buffering=True)      # py3.7+
+except AttributeError:                               # pragma: no cover - old python
+    pass
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 SYNC = os.path.join(HERE, "sumo", "run_synchronization", "run_synchronization.py")
 FIXS_ROOT = os.path.dirname(HERE)          # FIXS/Carla -> FIXS (the fetched bundle root)
@@ -274,8 +284,12 @@ def get_yaml_scalar(path, section, key):
     reads - CarlaTimeStep and RealtimePacing, for instance, are read by the engine
     but absent from the python mirror, so _read_scenario_config cannot see them."""
     import re
+    # utf-8-sig, not utf-8: a scenario yaml is meant to be hand-edited, and a Windows
+    # editor (Notepad, PowerShell's Set-Content) leaves a UTF-8 BOM. Read as plain
+    # utf-8 the BOM sticks to line 1, so a section declared there stops matching and
+    # every key under it reads as absent - a default silently taking over.
     try:
-        with open(path, encoding="utf-8") as f:
+        with open(path, encoding="utf-8-sig") as f:
             lines = f.readlines()
     except OSError:
         return None
@@ -360,33 +374,105 @@ def read_realtime_pacing(config_yaml):
     return str(raw).strip().lower() in ("true", "1", "yes", "on")
 
 
-def sumo_launch_cmd(sumocfg, traci_port, num_clients, gui, autostart):
+# --------------------------------------------------------------------------- #
+# The SUMO co-sim convention.
+#
+# A DT-Library map ships ONE app-independent .sumocfg: the net, the demand, the
+# seed, the time window - what the map and its calibration own. It says nothing
+# about co-simulation, and it must not have to: a co-sim requirement does not belong
+# in a shared artifact, and otherwise every new map would need the same edit before
+# it worked. So run_cosim injects the co-sim convention on the command line, where it
+# applies to whatever map any app runs against, and the map file stays untouched.
+#
+# Injected is not hidden. What was wrong before was that ONE bridge (CARLA's
+# sumo_integration, inside the python path) injected "--lateral-resolution 0.25" and
+# "--collision.check-junctions" where nobody could see them, while the native stack
+# passed neither - so the two ran different traffic and nobody had chosen that. The
+# fix is not to stop injecting; it is to inject from ONE table, in git, for BOTH
+# bridges, and print every flag with where it came from.
+#
+# Tiers, highest first:
+#   contract    FIXS requires it; an app may not override it.
+#   convention  the default co-sim behaviour; an app may override it via apps.json.
+#   (the map's own cfg is the base, and any flag here wins over it)
+# --------------------------------------------------------------------------- #
+SUMO_CONTRACT = {
+    # One SUMO step per FIXS exchange - see FIXS_FEED_S. Not negotiable: a different
+    # step makes SUMO time and host time run at different rates.
+    "--step-length": (lambda: f"{FIXS_FEED_S:g}", "one SUMO step per FIXS exchange"),
+}
+SUMO_CONVENTION = {
+    # Sublane model. Without it a lane change is an instantaneous one-lane-width jump,
+    # which a co-sim viewer draws as the car teleporting sideways with its heading
+    # unchanged. 0.25 m is what CARLA's sumo_integration has always passed, so this
+    # keeps the shipped behaviour - now for both bridges. It is not only cosmetic:
+    # sublane is a different lane-change model, so an app whose calibration assumes
+    # SUMO's default should override it to 0.
+    "--lateral-resolution": ("0.25", "sublane: lane changes slide instead of jumping"),
+    # Also inherited from CARLA's sumo_integration; kept so the two bridges match.
+    "--collision.check-junctions": ("true", "check collisions inside junctions"),
+}
+
+
+def resolve_sumo_args(app):
+    """[(flag, value, origin)] for this run: contract over app over convention.
+
+    An app deviates through apps.json `sumo_args` - tracked, reviewed next to the app
+    declaration, and valid on every map that app runs against. A null value drops a
+    convention flag. A contract flag cannot be overridden: an app that tries is told
+    so rather than silently getting a broken clock."""
+    args = {}
+    for flag, (value, why) in SUMO_CONVENTION.items():
+        args[flag] = (value, f"convention: {why}")
+    for flag, value in ((app or {}).get("sumo_args") or {}).items():
+        if flag in SUMO_CONTRACT:
+            print(f"[cosim] app '{app.get('id')}' sets {flag} in sumo_args; ignoring "
+                  f"it - that one is the FIXS contract, not an app choice.")
+            continue
+        if value is None:
+            args.pop(flag, None)
+            print(f"[cosim] app '{app.get('id')}': {flag} dropped (sumo_args: null)")
+            continue
+        args[flag] = (str(value), f"app {app.get('id')}")
+    for flag, (value, why) in SUMO_CONTRACT.items():
+        args[flag] = (value() if callable(value) else value, f"contract: {why}")
+    return [(f, v, o) for f, (v, o) in sorted(args.items())]
+
+
+def print_sumo_args(origins):
+    """One line per injected flag, with where it came from."""
+    for flag, value, origin in origins:
+        print(f"[cosim]   ->   {flag} {value}".ljust(52) + f"[{origin}]")
+
+
+def sumo_launch_cmd(sumocfg, traci_port, num_clients, gui, autostart, app=None):
     """The SUMO command line - ONE builder, used by BOTH bridges.
 
-    Everything here is co-sim PLUMBING, decided by FIXS: where the TraCI server
-    listens, how many clients must attach, the step length (= the FIXS exchange
-    period), and whether a GUI window starts stepping immediately.
+    Three kinds of argument, and that is the whole story:
+      * the map's .sumocfg, used as it ships (never edited by us);
+      * co-sim plumbing - where the TraCI server listens, how many clients must
+        attach, whether a GUI window starts stepping;
+      * the convention above, so both bridges drive SUMO identically.
 
-    Deliberately NOT here: anything that changes how the traffic behaves. Those
-    belong in the .sumocfg, which is SUMO's own documented format, versioned with
-    the map and visible to anyone who opens the scenario in sumo-gui. That split is
-    the fix for a long-hidden divergence: the python bridge used to inject
-    '--lateral-resolution 0.25' (which switches SUMO into the SUBLANE lane-change
-    model) plus '--collision.check-junctions', while the native stack passed
-    neither - so the two bridges were not running the same traffic. Sublane moves a
-    lane change laterally over ~1-2 s; without it a lane change is an instantaneous
-    one-lane-width jump, which a viewer renders as the car teleporting sideways.
-    To choose, put it in the cfg (or ship a variant):
-        sumo -c base.sumocfg --lateral-resolution 0.25 \\
-             --save-configuration base_sublane.sumocfg
-    """
+    --start is passed EXPLICITLY as true/false rather than omitted when off. Omitting
+    it does not turn it off: a cfg that declares <start value="t"/> (roosevelt's does)
+    then starts stepping anyway, which made SumoSetup.AutoStart=false and
+    --sumo-no-start quietly do nothing on that map.
+
+    Returns (cmd, origins) - origins is [(flag, value, where-from)] for the caller to
+    print, so a run always says what it gave SUMO and why."""
     cmd = [("sumo-gui" if gui else "sumo"), "-c", sumocfg,
            "--remote-port", str(traci_port),
-           "--step-length", str(FIXS_FEED_S),
            "--num-clients", str(num_clients)]
-    if gui and autostart:
-        cmd.append("--start")
-    return cmd
+    origins = []
+    for flag, value, origin in resolve_sumo_args(app):
+        cmd += [flag, value]
+        origins.append((flag, value, origin))
+    if gui:
+        cmd += ["--start", "true" if autostart else "false"]
+        origins.append(("--start", "true" if autostart else "false",
+                        "SumoSetup.AutoStart"))
+    return cmd, origins
 
 
 def cadence_banner(engine, carla_tick, pose_refresh, realtime):
@@ -401,45 +487,6 @@ def cadence_banner(engine, carla_tick, pose_refresh, realtime):
             f"(= SUMO --step-length) | CARLA tick {carla_tick:g} s ({how}) "
             f"| pose refresh {pose_refresh:g} s "
             f"| pacing {'realtime' if realtime else 'as fast as possible'}")
-
-
-def sumocfg_step_length(sumocfg):
-    """The <step-length> a .sumocfg declares, or None.
-
-    Checked because a cfg that declares its own step length silently disagrees with
-    the FIXS feed: run_cosim passes --step-length on the command line, which WINS
-    over the cfg, so the cfg's value is a lie that survives in the file for the next
-    reader (roosevelt.sumocfg ships 1 s). Surface it instead of overriding it
-    quietly."""
-    import re
-    try:
-        with open(sumocfg, encoding="utf-8") as f:
-            m = re.search(r'<step-length\s+value\s*=\s*"([^"]+)"', f.read())
-    except OSError:
-        return None
-    if not m:
-        return None
-    try:
-        return float(m.group(1))
-    except ValueError:
-        return None
-
-
-def warn_sumocfg_step(sumocfg):
-    """Say so when a .sumocfg's own <step-length> is not the FIXS feed period.
-
-    run_cosim passes --step-length on the command line, and that WINS over the cfg,
-    so a cfg declaring something else is not merely ignored - it is a value the next
-    person to read the scenario will believe. Loud, not fatal: a shipped map bundle
-    is not ours to refuse (roosevelt.sumocfg declares 1 s, a duarouter leftover)."""
-    declared = sumocfg_step_length(sumocfg)
-    if declared is None or abs(declared - FIXS_FEED_S) < 1e-9:
-        return
-    print(f"[cosim]   WARN {os.path.basename(sumocfg)} declares "
-          f"<step-length value=\"{declared:g}\"/>, but the FIXS feed period is "
-          f"{FIXS_FEED_S:g} s and the command line overrides the cfg. The run is "
-          f"correct; the cfg is misleading. Fix it by removing that line (or "
-          f"setting it to {FIXS_FEED_S:g}) in the map's sumo/ folder.")
 
 
 def _tl_junction_ids(tl_table):
@@ -565,7 +612,7 @@ CarlaSetup:
     return path
 
 
-def run_native_stack(config_yaml, sumocfg, tl_table, cfg, args):
+def run_native_stack(config_yaml, sumocfg, tl_table, cfg, args, app=None):
     """FIXS-native bridge: launch SUMO (TraCI server) + TrafficLayer (-f config) +
     VirCarlaEnv (-f config -t tl_table). CARLA is already up and the map loaded by
     run_cosim's preflight. Ports mirror tests/Sumo/Probes/TrafficLayer_SUMO_Carla:
@@ -599,7 +646,6 @@ def run_native_stack(config_yaml, sumocfg, tl_table, cfg, args):
     carla_tick, pose_refresh = read_cadence(config_yaml)
     print(cadence_banner("cpp", carla_tick, pose_refresh,
                          read_realtime_pacing(config_yaml)))
-    warn_sumocfg_step(sumocfg)
 
     for label, port in (("SUMO (TraCI)", traci_port),
                         ("TrafficLayer (bridge)", bridge_port)):
@@ -635,8 +681,8 @@ def run_native_stack(config_yaml, sumocfg, tl_table, cfg, args):
     try:
         # Same builder the python bridge's SUMO gets, so the two engines cannot
         # drift apart in what they hand SUMO (they did: see sumo_launch_cmd).
-        sumo_cmd = sumo_launch_cmd(sumocfg, traci_port, num_clients,
-                                   args.sumo_gui, sumo_autostart)
+        sumo_cmd, sumo_origins = sumo_launch_cmd(sumocfg, traci_port, num_clients,
+                                                 args.sumo_gui, sumo_autostart, app)
         # SUMO blocks until ALL num_clients TraCI clients have connected and called
         # setOrder. TrafficLayer is one of them; anything above 1 means you are
         # attaching your own second client, so say so rather than looking hung.
@@ -644,11 +690,8 @@ def run_native_stack(config_yaml, sumocfg, tl_table, cfg, args):
             print(f"[cosim]   ->   SumoSetup.NumClients={num_clients}: SUMO will not "
                   f"step until {num_clients} TraCI clients have connected "
                   f"(TrafficLayer is one).")
-        # --start makes sumo-gui begin stepping as soon as it loads (sumo_launch_cmd
-        # adds it). Omit it and the window opens loaded but paused, so you press Play
-        # (and can watch the TraCI handshake happen first). Headless sumo has no Play
-        # button, so the flag is only meaningful for the GUI.
         print(f"[SUMO] {' '.join(sumo_cmd)}")
+        print_sumo_args(sumo_origins)
         sumo = subprocess.Popen(sumo_cmd)
         procs.append(("SUMO", sumo))
         # SUMO must be listening before TrafficLayer connects as its TraCI client.
@@ -736,7 +779,8 @@ def run_native_stack(config_yaml, sumocfg, tl_table, cfg, args):
                     pass
 
 
-def run_python_bridge(config_yaml, sumocfg, tl_table, tls_manager, no_net_offset, args):
+def run_python_bridge(config_yaml, sumocfg, tl_table, tls_manager, no_net_offset,
+                      args, app=None):
     """Standalone bridge: launch SUMO (TraCI server) + run_synchronization.py.
 
     run_cosim launches SUMO here rather than letting the bridge start its own, for
@@ -761,7 +805,6 @@ def run_python_bridge(config_yaml, sumocfg, tl_table, tls_manager, no_net_offset
     carla_tick, pose_refresh = read_cadence(config_yaml)
     realtime = read_realtime_pacing(config_yaml)
     print(cadence_banner("py", carla_tick, pose_refresh, realtime))
-    warn_sumocfg_step(sumocfg)
 
     # A leftover SUMO from a killed run still holds the TraCI port, and the new one
     # then cannot bind - same failure the native stack guards against.
@@ -776,9 +819,10 @@ def run_python_bridge(config_yaml, sumocfg, tl_table, tls_manager, no_net_offset
                 break
             time.sleep(0.5)
 
-    sumo_cmd = sumo_launch_cmd(sumocfg, traci_port, num_clients,
-                               args.sumo_gui, sumo_autostart)
+    sumo_cmd, sumo_origins = sumo_launch_cmd(sumocfg, traci_port, num_clients,
+                                             args.sumo_gui, sumo_autostart, app)
     print(f"[SUMO] {' '.join(sumo_cmd)}")
+    print_sumo_args(sumo_origins)
     sumo = subprocess.Popen(sumo_cmd)
     try:
         for _ in range(30):
@@ -1250,7 +1294,7 @@ def set_yaml_scalar(path, section, key, value, comment=None):
     of half-truth this whole change is about removing."""
     import re
     try:
-        with open(path, encoding="utf-8") as f:
+        with open(path, encoding="utf-8-sig") as f:   # tolerate a hand-editor's BOM
             lines = f.readlines()
     except OSError as exc:
         print(f"[cosim] cannot read {path} ({exc}).")
@@ -2271,11 +2315,11 @@ def main():
         # (default) = the standalone run_synchronization.py bridge below.
         if backend == "cpp":
             print(f"[cosim] engine=cpp (FIXS-native); config {config_yaml}")
-            return run_native_stack(config_yaml, sumocfg, tl_table, cfg, args)
+            return run_native_stack(config_yaml, sumocfg, tl_table, cfg, args, app)
 
         print("[cosim] engine=py (run_synchronization.py)")
         return run_python_bridge(config_yaml, sumocfg, tl_table, tls_manager,
-                                 no_net_offset, args)
+                                 no_net_offset, args, app)
     finally:
         if carla_proc is not None:
             print("[CARLA] terminating server")

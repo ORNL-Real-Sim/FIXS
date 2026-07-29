@@ -386,11 +386,18 @@ CarMaker host has always done at 0.001 s. `--carla-tick` sets it for one run and
 written through to the yaml. (`--step-length` on the CLI is accepted and taken as the
 tick, with a note.)
 
-Anything that changes **how the traffic behaves** &mdash; lane-change model
-(`--lateral-resolution`, i.e. sublane), collision checks, seed, demand, begin/end &mdash;
-belongs in the `.sumocfg`, not here, so both bridges run the same simulation. To make a
-variant: `sumo -c base.sumocfg --lateral-resolution 0.25 --save-configuration
-base_sublane.sumocfg`.
+Anything that changes **how the traffic behaves** comes from one table in `run_cosim`
+(`SUMO_CONTRACT` / `SUMO_CONVENTION`), injected on the SUMO command line for both
+bridges and printed with each flag's origin. The map's `.sumocfg` is used as it ships
+and never edited: it is app-independent, so a co-sim requirement does not belong in it.
+Precedence is `contract > app sumo_args > convention > the map's cfg`, and an app
+deviates via `sumo_args` in `apps.json`. Nothing is generated or cached: the flags are
+passed and printed, so what a run gave SUMO is in its own log.
+
+`--start` is passed explicitly as `true`/`false` rather than omitted, because omitting
+it does not turn it off &mdash; a cfg declaring `<start value="t"/>` (roosevelt's does)
+would start stepping anyway, which is why `SumoSetup.AutoStart: false` used to do
+nothing on that map.
 
 The loop is paced to **real time** by default (`CarlaSetup.RealtimePacing`, honoured by
 both bridges). Speed levers, none of which change the defaults:
