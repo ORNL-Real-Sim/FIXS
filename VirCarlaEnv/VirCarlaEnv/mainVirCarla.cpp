@@ -79,6 +79,13 @@ int main(int argc, const char* argv[]) {
     // fallback module (map-agnostic). Default is TM (see ConfigHelper).
     const bool   useFallbackDriver = (cs.EgoL0Driver == "Pursuit" || cs.EgoL0Driver == "pursuit"
                                       || cs.EgoL0Driver == "Fallback" || cs.EgoL0Driver == "EgoDriver");
+    // #174 unified EgoDriver: the driver is an EXTERNAL FIXS client that streams an
+    // ACTUATION command on the ego's record (acceleratorPedalDesired/brakePedalDesired
+    // /steerAngleDesired). Carla owns no in-process driver here -- it just applies the
+    // wire command via ApplyControl. Same path serves L0/L2 (EgoDriver client) and L4
+    // (a real external controller). No TM, no route needed on the Carla side.
+    const bool   useWireActuation = (cs.EgoL0Driver == "Actuation" || cs.EgoL0Driver == "actuation");
+    const double kMaxSteerRad = 0.7;   // must match the client's DriveCommand steer scaling
     const std::string egoId = cs.EgoId;
     if (egoMode >= 1 && cs.EgoSpawnPose.size() < 4) {
         std::cerr << "EgoMode " << egoMode << " needs EgoSpawnPose: [x, y, z, headingDeg]\n";
@@ -181,8 +188,14 @@ int main(int argc, const char* argv[]) {
             }
             // settle the spawned ego onto its tires before wiring the driver / loop
             for (int i = 0; i < 10; i++) world.Tick(30s);
+            if (useWireActuation) {
+                // No in-Carla driver: the ego stays physics-on and MANUAL (no autopilot),
+                // driven each feed by the external EgoDriver client's wire actuation.
+                std::cout << "EgoMode " << egoMode << " (Actuation): ego driven by external "
+                          << "FIXS actuation command (no TM, no route).\n";
+            }
             // native TM must be enabled AFTER spawn + physics settle (proven order)
-            if (!useFallbackDriver) {
+            if (!useFallbackDriver && !useWireActuation) {
                 backend.enableEgoTM(cs.TrafficManagerPort, cs.EgoTargetSpeed);
                 // TM builds its InMemoryMap on the FIRST tick after autopilot -- can
                 // take 15-30 s on a generated map. Absorb that ONE-TIME cost HERE
@@ -250,7 +263,7 @@ int main(int argc, const char* argv[]) {
             // Set the driver target BEFORE it runs this tick. applyEgoControl routes
             // it to native TM (SetDesiredSpeed) or the EgoDriver fallback (override);
             // it persists across sub-steps until the next feed refreshes it.
-            if (egoMode >= 2) {
+            if (egoMode >= 2 && !useWireActuation) {
                 const bool onFeedNow = std::fabs(simTime * 10.0 - std::llround(simTime * 10.0)) < 1e-6;
                 if (onFeedNow) {
                     // the external controller's advisory rides on the ego's received
@@ -260,6 +273,20 @@ int main(int argc, const char* argv[]) {
                         lastAdvisory = itAdv->second.speedDesired;
                     // else keep the last advisory (controller not up yet / no update)
                     backend.applyEgoControl(egoId, lastAdvisory);
+                }
+            }
+            // #174 unified EgoDriver: apply the external client's ACTUATION command off
+            // the ego's wire record (throttle/brake pedals + steer angle). One apply-path
+            // for L0/L2 (EgoDriver client) and L4 (real controller); no TM/route here.
+            if (useWireActuation) {
+                const bool onFeedNow = std::fabs(simTime * 10.0 - std::llround(simTime * 10.0)) < 1e-6;
+                if (onFeedNow) {
+                    auto itAct = core.Msg_c.VehDataRecv_um.find(egoId);
+                    if (itAct != core.Msg_c.VehDataRecv_um.end()) {
+                        const VehFullData_t& cmd = itAct->second;
+                        backend.applyEgoActuation(cmd.acceleratorPedalDesired, cmd.brakePedalDesired,
+                                                  cmd.steerAngleDesired / kMaxSteerRad);  // rad -> normalized
+                    }
                 }
             }
             // fallback module drives per-tick; native TM drives inside world.Tick()

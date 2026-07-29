@@ -262,6 +262,18 @@ void CarlaBackend::driveEgoFallback(double targetSpeed) {
     egoActor_->ApplyControl(c);
 }
 
+void CarlaBackend::applyEgoActuation(double throttle, double brake, double steerNorm) {
+    // #174 unified EgoDriver apply-path: the actuation comes from an external FIXS
+    // client (EgoDriver client / L4 controller) via the ego's wire record; Carla just
+    // realizes it on the physics ego. Same VehicleControl seam as driveEgoFallback.
+    if (!egoActor_) return;
+    carla::rpc::VehicleControl c;
+    c.throttle = (float)std::max(0.0, std::min(1.0, throttle));
+    c.brake    = (float)std::max(0.0, std::min(1.0, brake));
+    c.steer    = (float)std::max(-1.0, std::min(1.0, steerNorm));
+    egoActor_->ApplyControl(c);
+}
+
 void CarlaBackend::applyEgoControl(const std::string& /*egoId*/, double desiredSpeed) {
     // L2 actuation seam: route an EXTERNAL desired-speed advisory to whichever L0
     // driver owns the ego. Native TM -> SetDesiredSpeed (km/h) on the ego's TM

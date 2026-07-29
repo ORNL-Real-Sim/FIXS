@@ -1,0 +1,101 @@
+# =============================================================================
+# FIXS #174 -- SUMO <-> Carla co-simulation, unified EgoDriver as a STANDALONE
+# FIXS client (L0). Same ego as config_l0_egodriver.yaml, but the driver is no
+# longer in-process in VirCarlaEnv: ego_driver_client.py connects to TrafficLayer,
+# reads the ego state, runs pure-pursuit + speed-hold, and streams an ACTUATION
+# command (acceleratorPedalDesired/brakePedalDesired/steerAngleDesired) on the ego
+# record. VirCarlaEnv (EgoL0Driver: Actuation) just applies it via ApplyControl.
+#
+# One apply-path for the whole ladder: L0 here (EgoDriver client, internal target),
+# L2 (add an advisor client below the EgoDriver client -> it fills speedDesired,
+# the EgoDriver tracks it), L4 (a real controller fills the 3 actuation fields).
+#
+# Data flow (ascending TL port order = producer before consumer):
+#   SUMO --[bg + ego]--> TrafficLayer --[420]--> ego_driver_client (actuation)
+#                                     --[440]--> VirCarlaEnv (apply + readback)
+#   Carla ego --[VirCarlaEnv readback]--> TrafficLayer --moveToXY--> SUMO 'ego'
+#
+# Run: run_sumo_carla_l0_egodriver_client.bat
+# =============================================================================
+
+SimulationSetup:
+    EnableRealSim: true
+    EnableVerboseLog: false
+
+    SelectedTrafficSimulator: 'SUMO'
+
+    SimulationEndTime: 1000
+
+    # + the EgoDriver command channel (unified L0/L2/L4). Field-gated: only serialized
+    # because they are listed here, so other configs are unaffected.
+    VehicleMessageField: [id, type, vehicleClass, speed, speedDesired, positionX, positionY, positionZ, heading, grade, length, width, height, color, linkId, laneId, steerAngleDesired, acceleratorPedalDesired, brakePedalDesired]
+
+    TrafficSimulatorIP: '127.0.0.1'
+    TrafficSimulatorPort: 1337
+
+SumoSetup:
+    SpeedMode: 32
+
+ApplicationSetup:
+    EnableApplicationLayer: true
+    VehicleSubscription:
+    -   type: ego
+        # ego_driver_client.py -- the unified EgoDriver. LOWER port so TrafficLayer
+        # serves it BEFORE VirCarlaEnv (its actuation is in bucket B first).
+        attribute: { id: ['ego'], radius: [500] }
+        ip: ['127.0.0.1']
+        port: [420]
+    -   type: ego
+        # VirCarlaEnv -- applies the actuation, reads the ego back.
+        attribute: { id: ['ego'], radius: [500] }
+        ip: ['127.0.0.1']
+        port: [440]
+
+XilSetup:
+    EnableXil: false
+
+CarlaSetup:
+    EnableVerboseLog: true
+    EnableCosimulation: true
+    EnableExternalControl: true
+
+    # ---- EgoMode 1 (L0), driver = external FIXS actuation client ------------
+    EgoMode: 1
+    # "Actuation": no in-Carla driver. VirCarlaEnv applies the throttle/brake/steer
+    # command that ego_driver_client.py (or an L4 controller) puts on the ego record.
+    EgoL0Driver: Actuation
+    EgoId: ego
+    EgoSumoType: car
+    EgoBlueprint: vehicle.tesla.model3
+    EgoSpawnPose: [20.1, -3.0, 0.0, 90.0]   # [x, y, z, headingDeg] FIXS frame, on the loop
+    TrafficManagerPort: 8000   # unused in Actuation mode
+
+    # EgoRoutePoints unused on the Carla side here (the route lives in the EgoDriver
+    # CLIENT). Kept for reference / parity with config_l0_egodriver.yaml.
+    EgoRoutePoints: [[15.0, -3.0], [185.0, -3.0], [192.9, -1.9], [198.5, 1.5], [201.9, 7.1], [203.0, 15.0], [203.0, 185.0], [201.9, 192.9], [198.5, 198.5], [192.9, 201.9], [185.0, 203.0], [15.0, 203.0], [7.1, 201.9], [1.5, 198.5], [-1.9, 192.9], [-3.0, 185.0], [-3.0, 15.0], [-1.9, 7.1], [1.5, 1.5], [7.1, -1.9]]
+    EgoRouteRepeat: 50
+    EgoTargetSpeed: 8.33
+
+    UseVehicleTypeAsBlueprint: false
+
+    CarlaServerIP: 127.0.0.1
+    CarlaServerPort: 2000
+
+    CarlaClientIP: 127.0.0.1
+    CarlaClientPort: 440
+
+    TrafficRefreshRate: 0.1
+    CarlaTimeStep: 0.05
+
+    InterestedIds: ['ego']
+
+    EnableSpectatorFollow: true
+    CenteredViewId: ego
+    SpectatorHeight: 50
+    SpectatorAlignYaw: false
+
+DataLogSetup:
+    EnableDataLog: true
+    DataLogPath: '_datalog/l0_egodriver_client.csv'
+    DataLogWho: ['ego']
+    DataLogFields: [positionX, positionY, positionZ, heading, speed, speedDesired]
