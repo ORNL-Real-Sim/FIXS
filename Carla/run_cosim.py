@@ -44,6 +44,8 @@ APP_ROOT = os.path.dirname(FIXS_ROOT)      # FIXS -> the app dir (holds initiali
 # the yaml moves the ports for every component instead of just some of them.
 DEFAULT_TRACI_PORT = 1337    # SUMO TraCI server (TrafficLayer connects as its client)
 DEFAULT_BRIDGE_PORT = 440    # TrafficLayer serves VirCarlaEnv here
+DEFAULT_CARLA_HOST = "localhost"   # CARLA RPC; CarlaSetup.CarlaServerIP overrides
+DEFAULT_CARLA_PORT = 2000
 
 
 # --------------------------------------------------------------------------- #
@@ -203,6 +205,73 @@ def read_stack_ports(config_yaml):
         return DEFAULT_TRACI_PORT, DEFAULT_BRIDGE_PORT
 
 
+def read_carla_endpoint(config_yaml):
+    """(host, port) of the CARLA RPC server from CarlaSetup.CarlaServerIP/Port,
+    or (None, None) if unreadable.
+
+    VirCarlaEnv takes its CARLA endpoint from this yaml, so run_cosim has to
+    launch/probe/connect to the SAME one or the two disagree silently: run_cosim
+    reports a healthy CARLA on localhost:2000 while VirCarlaEnv dials whatever
+    the yaml says and times out. Note this is a DIFFERENT link from
+    CarlaSetup.CarlaClientIP/Port, which despite the name is not CARLA at all -
+    it is TrafficLayer's bridge endpoint (mainVirCarla: trafficLayerIP_)."""
+    ch = _read_scenario_config(config_yaml)
+    if ch is None:
+        return None, None
+    try:
+        host = (ch.Carla_setup["CarlaServerIP"] or "").strip() or None
+        port = int(ch.Carla_setup["CarlaServerPort"] or 0) or None
+        return host, port
+    except (TypeError, ValueError, AttributeError):
+        return None, None
+
+
+def read_sumo_num_clients(config_yaml):
+    """SumoSetup.NumClients - how many TraCI clients SUMO must wait for before it
+    starts stepping. 1 (the SUMO default) unless the yaml says otherwise."""
+    ch = _read_scenario_config(config_yaml)
+    if ch is None:
+        return 1
+    try:
+        return max(1, int(ch.Sumo_setup["NumClients"] or 1))
+    except (TypeError, ValueError, KeyError):
+        return 1
+
+
+def choose_scenario_yaml(default_path, map_name):
+    """Pick the scenario yaml to run when a map directory holds more than one.
+
+    One config.yaml is the norm and stays silent. Variants (config_xil.yaml,
+    config_fast.yaml, ...) sit beside it and used to be reachable only by typing
+    --config, so they were effectively invisible. Enter keeps the canonical
+    config.yaml, --config still wins outright, and a non-interactive run never
+    prompts - scripts and the cron/CI paths keep their old behavior."""
+    folder = os.path.dirname(default_path)
+    try:
+        found = sorted(f for f in os.listdir(folder)
+                       if f.lower().endswith((".yaml", ".yml")))
+    except OSError:
+        return default_path
+    if len(found) < 2 or not sys.stdin.isatty():
+        return default_path
+
+    canonical = os.path.basename(default_path)
+    default_idx = found.index(canonical) + 1 if canonical in found else 1
+    print(f"[cosim] {len(found)} scenario configs for '{map_name}':")
+    for i, name in enumerate(found, 1):
+        mark = "  (default)" if i == default_idx else ""
+        print(f"    {i}) {name}{mark}")
+    try:
+        ans = input(f"[cosim] Which? [1-{len(found)}], Enter = {found[default_idx - 1]}: ").strip()
+    except EOFError:
+        ans = ""
+    if ans.isdigit() and 1 <= int(ans) <= len(found):
+        default_idx = int(ans)
+    picked = os.path.join(folder, found[default_idx - 1])
+    print(f"[cosim] scenario config: {picked}")
+    return picked
+
+
 def read_sumo_autostart(config_yaml):
     """SumoSetup.AutoStart: whether sumo-gui gets --start. True (default) = it steps
     as soon as it loads; False = it opens loaded but PAUSED so you press Play.
@@ -338,6 +407,7 @@ def run_native_stack(config_yaml, sumocfg, tl_table, cfg, args):
     # component. AutoStart only decides whether sumo-gui gets --start.
     traci_port, bridge_port = read_stack_ports(config_yaml)
     sumo_autostart = read_sumo_autostart(config_yaml) and not args.sumo_no_start
+    num_clients = read_sumo_num_clients(config_yaml)
 
     for label, port in (("SUMO (TraCI)", traci_port),
                         ("TrafficLayer (bridge)", bridge_port)):
@@ -372,7 +442,15 @@ def run_native_stack(config_yaml, sumocfg, tl_table, cfg, args):
 
     try:
         sumo_cmd = [sumo_bin, "-c", sumocfg, "--remote-port", str(traci_port),
-                    "--step-length", str(args.step_length)]
+                    "--step-length", str(args.step_length),
+                    "--num-clients", str(num_clients)]
+        # SUMO blocks until ALL num_clients TraCI clients have connected and called
+        # setOrder. TrafficLayer is one of them; anything above 1 means you are
+        # attaching your own second client, so say so rather than looking hung.
+        if num_clients > 1:
+            print(f"[cosim]   ->   SumoSetup.NumClients={num_clients}: SUMO will not "
+                  f"step until {num_clients} TraCI clients have connected "
+                  f"(TrafficLayer is one).")
         # --start makes sumo-gui begin stepping as soon as it loads. Omit it and the
         # window opens loaded but paused, so you press Play (and can watch the TraCI
         # handshake happen first). Headless sumo has no Play button, so the flag is
@@ -684,6 +762,18 @@ def _port_listening(port):
     return _pid_on_port(port) is not None
 
 
+def _is_local_host(host):
+    """True if `host` names this machine, so CARLA there is ours to launch/kill."""
+    h = (host or "").strip().lower()
+    if h in ("", "localhost", "127.0.0.1", "::1", "0.0.0.0"):
+        return True
+    try:
+        return socket.gethostbyname(h) in ("127.0.0.1", "::1") \
+            or h == socket.gethostname().lower()
+    except OSError:
+        return False
+
+
 def _pid_on_port(port):
     """PID LISTENING on `port` (any host), or None. Windows netstat / Linux lsof."""
     try:
@@ -830,8 +920,13 @@ def main():
                     help="do not pace the co-sim to real time (run as fast as possible)")
     ap.add_argument("--no-net-offset", action="store_true",
                     help="zero the SUMO net offset (RoadRunner-local maps)")
-    ap.add_argument("--carla-host", default="localhost")
-    ap.add_argument("--carla-port", type=int, default=2000)
+    ap.add_argument("--carla-host", default=None,
+                    help="CARLA RPC host (default: CarlaSetup.CarlaServerIP from "
+                         "the scenario yaml, else localhost). A non-local host "
+                         "implies --no-launch.")
+    ap.add_argument("--carla-port", type=int, default=None,
+                    help="CARLA RPC port (default: CarlaSetup.CarlaServerPort from "
+                         "the scenario yaml, else 2000)")
     ap.add_argument("--carla-timeout", type=float, default=10.0,
                     help="CARLA client connect timeout in seconds (default: 10; "
                          "raise for heavy source-build maps)")
@@ -1051,7 +1146,8 @@ def main():
     # (refreshed by --reimport). Deliberately BEFORE the CARLA launch and the
     # --prep-only return - it is a config artifact, so it must not depend on a
     # running CARLA. Its CarlaSetup.Backend then selects the bridge further down.
-    config_yaml = args.config or import_map.map_config_path(target_map)
+    config_yaml = args.config or choose_scenario_yaml(
+        import_map.map_config_path(target_map), target_map)
     if args.reimport or not os.path.isfile(config_yaml):
         # A regenerate must not silently undo hand edits: carry the existing
         # Backend choice over, and keep the old file as .bak to fall back on.
@@ -1061,10 +1157,33 @@ def main():
             _sh.copy2(config_yaml, config_yaml + ".bak")
             print(f"[cosim] regenerating {os.path.basename(config_yaml)} "
                   f"(previous kept as .bak; Backend={prior} preserved)")
-        generate_config_yaml(config_yaml, tl_table, args.carla_host,
-                             args.carla_port, realtime=not args.fast,
+        generate_config_yaml(config_yaml, tl_table,
+                             args.carla_host or DEFAULT_CARLA_HOST,
+                             args.carla_port or DEFAULT_CARLA_PORT,
+                             realtime=not args.fast,
                              refresh=args.step_length,
                              backend=args.engine or prior or "py")
+
+    # CARLA RPC endpoint: the scenario yaml is the source of truth, because that
+    # is what VirCarlaEnv dials. An explicit --carla-host/--carla-port still wins
+    # (and seeds the yaml above when it is first generated), but otherwise the two
+    # must not be allowed to drift - that is how you get run_cosim reporting a
+    # healthy CARLA while VirCarlaEnv times out against a different address.
+    yaml_host, yaml_port = read_carla_endpoint(config_yaml)
+    if args.carla_host is None and yaml_host:
+        args.carla_host = yaml_host
+    if args.carla_port is None and yaml_port:
+        args.carla_port = yaml_port
+    args.carla_host = args.carla_host or DEFAULT_CARLA_HOST
+    args.carla_port = args.carla_port or DEFAULT_CARLA_PORT
+
+    # A CARLA on another host (e.g. CARLA on Linux, FIXS on Windows) cannot be
+    # started or port-killed from here; only connected to. Say so once instead of
+    # launching a second local CARLA that nothing will use.
+    if not _is_local_host(args.carla_host) and not args.no_launch:
+        print(f"[cosim] CARLA host is {args.carla_host} (not this machine); "
+              f"assuming it is already running there (implying --no-launch).")
+        args.no_launch = True
 
     # TL + sign placement (source build only; idempotent via markers). Runs after
     # the import + sumocfg/TL-table resolution so the table exists to place from.
