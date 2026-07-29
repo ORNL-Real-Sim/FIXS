@@ -606,10 +606,23 @@ def fetch_catalog(repo):
     return []
 
 
-def catalog_entry(catalog, location):
-    """The catalog entry whose `location` matches, or None."""
+def catalog_entry(catalog, name):
+    """The catalog entry known by `name`, or None.
+
+    Matches any of the three names one entry answers to: its `location` (the
+    picker's Online label, and what --map takes), its `map_name` (the REAL cooked
+    CARLA name, which is what a Local pick and resolve_cooked_map deal in), and
+    its `release` tag. These deliberately differ - location 'roosevelt' vs
+    map_name 'roosevelt_full' - so matching `location` alone silently dropped the
+    entry whenever the caller held a cooked name. That made one map resolve two
+    different ways depending on which picker entry you came in through: picking
+    'roosevelt' applied the entry's settings (net_offset: zero), while picking
+    'roosevelt_full' matched nothing, fell back to defaults, and left the CARLA
+    spectator framed on a sign-flipped y."""
+    if not name:
+        return None
     for m in catalog or []:
-        if m.get("location") == location:
+        if name in (m.get("location"), m.get("map_name"), m.get("release")):
             return m
     return None
 
@@ -835,7 +848,7 @@ def _prompt(msg):
                  "--map / --package to run without prompting.")
 
 
-def choose_map(repo, tag_prefix="", carla_root=None):
+def choose_map(repo, tag_prefix="", carla_root=None, catalog=None):
     """Interactive chooser. Lists ONLINE maps (repo's releases from the
     Digital-Twin-Library) and, when carla_root is given, LOCAL maps already cooked
     into that CARLA - clearly separated - plus a hand-picked local .zip/folder.
@@ -854,8 +867,18 @@ def choose_map(repo, tag_prefix="", carla_root=None):
         for r in releases:
             menu.append(("release", r))
             pkg = _package_from_tag(r["tag"], tag_prefix)
+            # Label with the REAL cooked map name when the catalog knows one, so an
+            # Online entry and its Local twin read as the same map ('roosevelt_full'
+            # in both lists) instead of two unrelated things ('roosevelt' vs
+            # 'roosevelt_full'). The release tag stays the identifier we return and
+            # what --map accepts; only the display changes. Safe because
+            # catalog_entry() resolves location, map_name and release alike.
+            ent = catalog_entry(catalog, pkg)
+            label = (ent or {}).get("map_name") or pkg
             flag = "  (pre-release)" if r["prerelease"] else ""
-            print(f"   {len(menu):>2}) {pkg:<26} {r['date']}{flag}")
+            if label in cooked:
+                flag += "  (already imported)"
+            print(f"   {len(menu):>2}) {label:<26} {r['date']}{flag}")
     if cooked:
         print("  Local (already imported into CARLA):")
         for name in cooked:

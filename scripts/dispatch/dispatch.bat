@@ -79,6 +79,16 @@ set "BUILD_START=%date% %time%"
 set "BUILD_START_SECONDS=%time:~0,2%%time:~3,2%%time:~6,2%"
 
 REM ====================================
+REM Step 0: Generate Version Header
+REM ====================================
+echo [0/9] Generating version header (RealSimVersion.h)...
+call powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%..\generate_version.ps1"
+if %ERRORLEVEL% neq 0 (
+    echo WARNING: Version header generation failed. Using existing or default version.
+)
+echo.
+
+REM ====================================
 REM Step 1: Compile External Libraries
 REM ====================================
 echo [1/9] Checking external libraries...
