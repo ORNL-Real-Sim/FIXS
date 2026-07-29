@@ -1038,25 +1038,37 @@ int SocketHelper::sendData(int sock, int iClient, float simTimeSend, uint8_t sim
 	// Conservative guard: flush if a maximum-size record could not fit. Cheaper than
 	// measuring every record twice, and TX_CHUNK_SIZE >= MAX_RECORD_SIZE guarantees
 	// that after a flush there is always room for one.
-	#define FIXS_TX_FLUSH_IF_NEEDED()                                     \
-		if (txLen + MAX_RECORD_SIZE > TX_CHUNK_SIZE) {                    \
-			if (sendExact(sock, txBuf, txLen) < 0) {                      \
-				fprintf(stderr, "FIXS #87: send() failed mid-message\n"); \
-				return -1;                                                \
-			}                                                             \
-			txLen = 0;                                                    \
+	//
+	// The reservation is the record's ACTUAL size, not a presumed maximum. A detector
+	// record carries a whole vector<DetectorData_t> (TlsDetector_t), so its size grows
+	// with the detector count at that intersection and is bounded only by the uint16
+	// size field (65535) -- not by MAX_RECORD_SIZE, which is the *vehicle* worst case.
+	// Reserving MAX_RECORD_SIZE here would let a large detector record run past txBuf.
+	#define FIXS_TX_FLUSH_IF_NEEDED(recBytes)                                          \
+		if ((recBytes) > TX_CHUNK_SIZE) {                                              \
+			fprintf(stderr, "FIXS #87: single record of %d B exceeds TX_CHUNK_SIZE %d" \
+			                " -- cannot send; raise TX_CHUNK_SIZE\n",                  \
+			        (int)(recBytes), (int)TX_CHUNK_SIZE);                              \
+			return -1;                                                                 \
+		}                                                                              \
+		if (txLen + (recBytes) > TX_CHUNK_SIZE) {                                      \
+			if (sendExact(sock, txBuf, txLen) < 0) {                                   \
+				fprintf(stderr, "FIXS #87: send() failed mid-message\n");              \
+				return -1;                                                             \
+			}                                                                          \
+			txLen = 0;                                                                 \
 		}
 
 	for (size_t iV = 0; iV < vehs.size(); iV++) {
-		FIXS_TX_FLUSH_IF_NEEDED();
+		FIXS_TX_FLUSH_IF_NEEDED(Msg_c.vehRecordSize(vehs[iV]));
 		Msg_c.packVehData(vehs[iV], txBuf, &txLen);
 	}
 	for (size_t iT = 0; iT < tlss.size(); iT++) {
-		FIXS_TX_FLUSH_IF_NEEDED();
+		FIXS_TX_FLUSH_IF_NEEDED(Msg_c.tlsRecordSize(tlss[iT]));
 		Msg_c.packTrafficLightData(tlss[iT], txBuf, &txLen);
 	}
 	for (size_t iD = 0; iD < dets.size(); iD++) {
-		FIXS_TX_FLUSH_IF_NEEDED();
+		FIXS_TX_FLUSH_IF_NEEDED(Msg_c.detRecordSize(dets[iD]));
 		Msg_c.packDetectorData(dets[iD], txBuf, &txLen);
 	}
 	#undef FIXS_TX_FLUSH_IF_NEEDED

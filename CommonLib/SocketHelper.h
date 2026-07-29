@@ -73,21 +73,33 @@
 #define MSG_HEADER_SIZE 9
 #define MSG_EACH_HEADER_SIZE 3
 
-// #87: largest single FIXS record, in bytes. This bounds the RECEIVE scratch buffer
-// and the SEND chunk buffer -- neither ever has to hold a whole message, so message
-// size is unbounded while memory stays fixed (which is also what lets the Simulink /
-// dSPACE targets take part without dynamic allocation).
+// #87: size of the RECEIVE scratch buffer -- one record, never a whole message, so
+// message size is unbounded while memory stays fixed (which is also what lets the
+// Simulink / dSPACE targets take part without dynamic allocation).
 //
-// Worst case is a vehicle record: 3 (uint16 size + uint8 type)
-//                               + 7 string fields x (1 length byte + 255 max chars) = 1792
-//                               + 93 bytes of numeric fields
-//                               = 1888. Rounded up to 2048 for headroom.
+// A VEHICLE record has a provable ceiling of 1888 B:
+//     3 (uint16 size + uint8 type)
+//   + 7 string fields x (1 length byte + 255 max chars) = 1792
+//   + 93 bytes of numeric fields
 // Strings are length-prefixed with a uint8, so 255 is a hard per-field ceiling.
-#define MAX_RECORD_SIZE 2048
+//
+// A DETECTOR record has NO such ceiling: TlsDetector_t carries a
+// vector<DetectorData_t>, so its size grows with the detector count at an
+// intersection and is bounded only by the uint16 size field (65535). 8192 covers a
+// few hundred realistically-named detectors; a record above it is refused loudly in
+// recvData rather than overflowing the buffer (the old code passed the declared size
+// straight to recv() with a 1024-byte buffer, so anything over 1024 already
+// corrupted the stack silently).
+//
+// Not sized to 65535: that buffer is a local in recvData, and the CarMaker / dSPACE
+// real-time tasks run on small stacks. Raise this if a scenario legitimately needs it.
+#define MAX_RECORD_SIZE 8192
 
-// #87: send-side chunk buffer. Must be >= MAX_RECORD_SIZE so a record always fits.
-// Larger just means fewer send() syscalls; it does NOT cap the message size.
-#define TX_CHUNK_SIZE 16384
+// #87: send-side chunk buffer. Must be >= the largest record actually sent; the flush
+// guard in sendData checks each record's real size against this and fails loudly
+// rather than overrunning. Larger just means fewer send() syscalls -- it does NOT cap
+// the message size, which is streamed across as many chunks as needed.
+#define TX_CHUNK_SIZE 32768
 
 
 class SocketHelper
