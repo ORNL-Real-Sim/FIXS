@@ -28,8 +28,9 @@ Schema (schema: 1)
       "maps":   ["roosevelt", ...],     # optional, DEFAULT ["<id>"]; first = default pick
       "configs":[ <config>, ... ],      # optional app-owned scenario yamls
       "defaults": {                     # optional per-app run defaults (CLI wins)
-        "engine": "py"|"cpp", "sumo_gui": true, "step_length": 0.05
-      }
+        "engine": "py"|"cpp", "sumo_gui": true
+      }                                 # no timestep: the scenario yaml owns the
+                                        # cadence, and SUMO's step is the FIXS feed
     }
   ]
 }

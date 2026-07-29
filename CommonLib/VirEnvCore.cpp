@@ -129,8 +129,11 @@ int VirEnvCore::runStep(double simTime, const char** errorMsg) {
     int   simStateRecv = 0;
     float simTimeRecv  = 0;
 
-    // ---- recv from FIXS (only on the 0.1 s update boundary, t>0) ----------
-    bool onUpdate = (simTime > 1e-5 && std::fabs(simTime * 10 - ceil(simTime * 10 - 0.5)) < 1e-5);
+    // ---- recv from FIXS (only on an exchange boundary, t>0) ----------------
+    // fixs::kFeedPeriodS is the protocol's exchange period, not a knob: the host
+    // may tick as fine as it likes, but it trades messages with TrafficLayer only
+    // here, and TrafficLayer steps the traffic simulator once per exchange.
+    bool onUpdate = (simTime > 1e-5 && fixs::onFeedBoundary(simTime, 1e-5));
     if (onUpdate) {
         Msg_c.clearRecvStorage();
         if (ENABLE_REALSIM && simTime) {
@@ -143,6 +146,26 @@ int VirEnvCore::runStep(double simTime, const char** errorMsg) {
         }
     }
     return processStep(simTime, onUpdate, simStateRecv, simTimeRecv, errorMsg);
+}
+
+// Wrap-aware interpolation of a FIXS wire heading (degrees, north = 0, CLOCKWISE
+// -- the convention documented on Pose in IVirEnvBackend.h, carried verbatim from
+// SUMO's VAR_ANGLE / VISSIM's heading; the backend, not the core, converts it to
+// its host's frame).
+//
+// Both ends are normalised into [0, 360), then the blend follows the SHORTEST arc:
+//     d = fmod(n - p + 540, 360) - 180
+// After normalisation n - p is in (-360, 360), so the +540 makes the dividend
+// non-negative -- required, because C's fmod keeps the sign of the DIVIDEND and a
+// negative remainder would pick the long way round. d then lands in [-180, 180):
+// the signed short way. f = 0 returns p; f = 1 returns n (in the seam case via a
+// renormalisation, so within ~1e-14 deg rather than bit-exact).
+static double lerpHeadingDeg(double prevDeg, double nextDeg, double f) {
+    const double p = std::fmod(std::fmod(prevDeg, 360.0) + 360.0, 360.0);
+    const double n = std::fmod(std::fmod(nextDeg, 360.0) + 360.0, 360.0);
+    const double d = std::fmod(n - p + 540.0, 360.0) - 180.0;
+    const double out = p + d * f;
+    return std::fmod(std::fmod(out, 360.0) + 360.0, 360.0);
 }
 
 //============================================================================
@@ -193,7 +216,7 @@ int VirEnvCore::processStep(double simTime, bool onUpdate, int simStateRecv, flo
         // pose) makes this exact at ANY sub-step rate; the old last-drawn anchor
         // lagged ~half a step at coarse Carla sub-steps (they never reach f=1
         // before the boundary re-stages).
-        double simTimeNext = ceil(simTime * 10 + 0.001) / 10;
+        double simTimeNext = ceil(simTime * fixs::kFeedHz + 0.001) / fixs::kFeedHz;
         for (auto& kv : id2handle_) {
             const string& idTs = kv.first;
             const VehFullData_t& v = Msg_c.VehDataRecv_um[idTs];
@@ -294,12 +317,27 @@ int VirEnvCore::processStep(double simTime, bool onUpdate, int simStateRecv, flo
                 out.x = pS.pose.x + (nS.pose.x - pS.pose.x) * f;
                 out.y = pS.pose.y + (nS.pose.y - pS.pose.y) * f;
                 out.z = pS.pose.z + (nS.pose.z - pS.pose.z) * f;
+                // Heading has to be interpolated too, on the SHORTEST ARC. Taking
+                // only the latest sample (what this did before) leaves a sub-stepping
+                // host sliding its traffic smoothly while the yaw snaps once per
+                // exchange -- a car that translates along a curve but rotates in
+                // 0.1 s steps. Interpolating it linearly would be worse in one
+                // specific place: headingDeg is the FIXS wire convention (degrees,
+                // north = 0, CLOCKWISE, see IVirEnvBackend.h), so a vehicle heading
+                // due north oscillates across the 360/0 seam (359.8 -> 0.2), and a
+                // plain lerp would sweep the long way round -- a full spin in one
+                // feed interval. lerpHeadingDeg does the wrap-aware blend. A host
+                // that ticks 1:1 with the feed never gets here (the else branch
+                // applies the raw sample), so the #174 byte-identical path is
+                // untouched by this.
+                out.headingDeg = lerpHeadingDeg(pS.pose.headingDeg, nS.pose.headingDeg, f);
+                // Grade is a slope in radians (no wrap): plain lerp.
+                out.gradeRad = pS.pose.gradeRad + (nS.pose.gradeRad - pS.pose.gradeRad) * f;
             } else {
-                out.x = nS.pose.x; out.y = nS.pose.y; out.z = nS.pose.z;  // Carla 1:1 direct
+                out.x = nS.pose.x; out.y = nS.pose.y; out.z = nS.pose.z;  // 1:1 direct
+                out.headingDeg = nS.pose.headingDeg;
+                out.gradeRad   = nS.pose.gradeRad;
             }
-            // heading/grade are NOT interpolated (take the latest, as before)
-            out.headingDeg = nS.pose.headingDeg;
-            out.gradeRad   = nS.pose.gradeRad;
 
             if (backend_) backend_->setVehiclePose(h, out);
             lastSet_[idTs] = out;

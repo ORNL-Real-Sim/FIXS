@@ -61,11 +61,53 @@ int main(int argc, const char* argv[]) {
     if (config.getConfig(configPath) < 0) { std::cerr << "Bad config: " << configPath << "\n"; return -1; }
     CarlaSetup_t cs = config.CarlaSetup;
     const bool   verbose      = cs.EnableVerboseLog;
-    const double refreshRate  = cs.TrafficRefreshRate;
-    // Carla render sub-step: tick finer than the 0.1 s FIXS feed and interpolate the
-    // feed (the CarMaker trick) for smoother motion. <=0 or >=feed -> 1:1, no interp.
-    const double carlaStep    = (cs.CarlaTimeStep > 1e-9 && cs.CarlaTimeStep < refreshRate)
-                                ? cs.CarlaTimeStep : refreshRate;
+    // ---- cadence: three distinct things, one each --------------------------
+    //  feed        fixs::kFeedPeriodS -- the FIXS exchange period, which is also
+    //              the traffic simulator's step (TrafficLayer steps it once per
+    //              exchange). A protocol constant, not a knob: see FixsProtocol.h.
+    //  carlaStep   CarlaSetup.CarlaTimeStep -- the Carla world step
+    //              (fixed_delta_seconds), the analogue of CarMaker's solver dt.
+    //              Absent/0 -> the feed, i.e. tick 1:1 and do not interpolate.
+    //  poseRefresh CarlaSetup.TrafficRefreshRate -- how often the core re-applies
+    //              (interpolated) traffic poses. EXACTLY the meaning the key has on
+    //              the CarMaker side (VirEnvHelper -> core_.trafficRefreshRate_):
+    //              a visual/RPC-cost knob, independent of the world step. Absent/0
+    //              -> every tick. Coarser than the tick = fewer ApplyBatch calls on
+    //              a heavy scene while physics/sensors still run at the tick rate.
+    //
+    // These used to be entangled: TrafficRefreshRate doubled as the feed period AND
+    // as the tick when CarlaTimeStep was unset, so setting it to 0.05 silently
+    // turned interpolation OFF (carlaStep == refreshRate) and every pose was held
+    // for two ticks. Nothing falls back to anything else now.
+    const double feed        = fixs::kFeedPeriodS;
+    const double carlaStep   = (cs.CarlaTimeStep > 1e-9) ? cs.CarlaTimeStep : feed;
+    const double poseRefresh = (cs.TrafficRefreshRate > 1e-9) ? cs.TrafficRefreshRate
+                                                              : carlaStep;
+    // The exchange boundary is tested on the feed grid, so the world clock has to
+    // LAND on it: carlaStep must divide the feed exactly. With, say, 0.03 the clock
+    // steps 0.09 -> 0.12 and no tick is ever a feed boundary, so the bridge would
+    // trade no messages at all and simply hang.
+    {
+        const double slots = feed / carlaStep;
+        const double whole = (double)(long long)(slots + 0.5);
+        if (carlaStep > feed + 1e-9 || std::fabs(slots - whole) > 1e-6) {
+            std::cerr << "CarlaSetup.CarlaTimeStep (" << carlaStep << " s) must be the FIXS "
+                      << "feed period (" << feed << " s) or an exact divisor of it "
+                      << "(0.05, 0.025, 0.02, 0.01), else no Carla tick ever lands on an "
+                      << "exchange boundary.\n";
+            return -1;
+        }
+    }
+    // The core gates re-application with (int)(1.0 / poseRefresh), so a value whose
+    // reciprocal is not whole silently snaps to a different grid (0.03 -> 1/33 s).
+    if (poseRefresh < carlaStep - 1e-9 ||
+        std::fabs(1.0 / poseRefresh - (double)(long long)(1.0 / poseRefresh + 0.5)) > 1e-6) {
+        std::cerr << "CarlaSetup.TrafficRefreshRate (" << poseRefresh << " s) must be >= "
+                  << "CarlaTimeStep (" << carlaStep << " s) and have a whole reciprocal "
+                  << "(0.1, 0.05, 0.025, 0.02, 0.01). It is the pose re-apply cadence, "
+                  << "not the feed period - to tick Carla faster, set CarlaTimeStep.\n";
+        return -1;
+    }
     const uint32_t simEndTime = config.SimulationSetup.SimulationEndTime;
     const bool   enableExternalControl = cs.EnableExternalControl;
     const std::string centeredViewId   = cs.CenteredViewId;
@@ -130,7 +172,7 @@ int main(int argc, const char* argv[]) {
         virenv::CarlaBackend backend(&world, &client, cs.UseVehicleTypeAsBlueprint, verbose);
         virenv::VirEnvCore core;
         core.setBackend(&backend);
-        core.interpolateTraffic        = (carlaStep < refreshRate - 1e-9);  // sub-step -> interpolate the 0.1s feed
+        core.interpolateTraffic        = (carlaStep < feed - 1e-9);  // sub-step -> interpolate the feed
         core.sendEgoFromCore           = false;  // this driver owns the send (post-tick)
         core.openSignalPort            = false;  // Carla: vehicles + signals on ONE port
         core.ENABLE_REALSIM            = cs.EnableCosimulation;
@@ -142,11 +184,17 @@ int main(int argc, const char* argv[]) {
         core.egoType_                  = "";
         core.trafficLayerIP_           = cs.CarlaClientIP;
         core.vehDataPort_              = cs.CarlaClientPort;
-        core.trafficRefreshRate_       = carlaStep;   // refresh-slot fires every Carla sub-step
+        core.trafficRefreshRate_       = poseRefresh;  // pose re-apply cadence (CarMaker semantics)
         core.Msg_c.getConfig(config);
-        if (verbose && core.interpolateTraffic)
-            std::cout << "Carla sub-stepping: tick " << carlaStep << "s, interpolate the "
-                      << refreshRate << "s FIXS feed (" << (int)(refreshRate / carlaStep) << "x).\n";
+        // One line that states the whole cadence, so a run never has to be reverse
+        // engineered from three keys again.
+        std::cout << "Cadence: FIXS feed " << feed << " s (= the traffic simulator step)"
+                  << " | Carla tick " << carlaStep << " s"
+                  << (core.interpolateTraffic
+                        ? " (interpolated " + std::to_string((int)(feed / carlaStep + 0.5)) + "x)"
+                        : " (1:1 with the feed)")
+                  << " | pose refresh " << poseRefresh << " s"
+                  << " | pacing " << (realtimePacing ? "realtime" : "as fast as possible") << "\n";
 
         const char* err = nullptr;
         if (core.initialization(&err, configPath.c_str(), tlsPath.c_str()) < 0) {
@@ -253,7 +301,7 @@ int main(int argc, const char* argv[]) {
             // it to native TM (SetDesiredSpeed) or the EgoDriver fallback (override);
             // it persists across sub-steps until the next feed refreshes it.
             if (egoMode >= 2) {
-                const bool onFeedNow = std::fabs(simTime * 10.0 - std::llround(simTime * 10.0)) < 1e-6;
+                const bool onFeedNow = fixs::onFeedBoundary(simTime, 1e-6);
                 if (onFeedNow) {
                     lastAdvisory = speedAdvisor.desiredSpeed(simTime, cs.EgoTargetSpeed);
                     backend.applyEgoControl(egoId, lastAdvisory);
@@ -272,7 +320,7 @@ int main(int argc, const char* argv[]) {
 
             // FIXS feed boundary (0.1 s): a recv happened this step, so send the
             // paired response + clear here. Sub-steps in between only render.
-            const bool onFeed = std::fabs(simTime * 10.0 - std::llround(simTime * 10.0)) < 1e-6;
+            const bool onFeed = fixs::onFeedBoundary(simTime, 1e-6);
 
             // ---- POST-tick L0+: the Carla-driven ego -> FIXS (TL injects into SUMO)
             if (egoMode >= 1) {
