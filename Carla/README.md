@@ -247,25 +247,39 @@ The tree splits on **can FIXS re-create this?**, not on which entity produced it
 ```
 ~/.fixs/
   carla.json  catalog.json  run_profiles.json
-  apps/                          <- EDITED. Every scenario yaml lives here.
+  apps/                          <- EDITED. Every scenario yaml lives here, flat.
     <app>/<name>.yaml                app-owned, staged from the repo, map-independent
-    <app>/maps/<map>/config.yaml     generated for this app on this map
+    <app>/<map>.yaml                 generated for this app on this map
     _generic/...                     a run with no application selected
   maps/                          <- RE-CREATABLE. Safe to delete to reclaim disk.
     <map>/{<bundle>.zip, carla/, sumo/, tl_table.csv}
 ```
+
+`~/.fixs/apps/<app>/` mirrors `apps/<app>/` in the repo: one folder per
+application, its yamls directly inside. The generated one is **named for its map**,
+so two maps under one app each get their own file without a subfolder.
 
 Scenario yamls are **app-bounded, never map-bounded**, for two reasons. They are
 edited, and `maps/` is a cache a user should be able to delete wholesale (it is
 gigabytes) without destroying a tuned config. And one yaml per map is not enough:
 the same map serves several apps, and one app runs several versions of a location,
 so the host/ports/subscriptions belong to *(app, map)* &mdash; keyed by map alone,
-two apps on `roosevelt_full` silently overwrite each other. Pre-app yamls left in
-`maps/<map>/` are **moved** into the app tree on first use, never abandoned.
+two apps on `roosevelt_full` silently overwrite each other. Yamls left by an older
+FIXS in `maps/<map>/` or in `apps/<app>/maps/<map>/` are **moved** here on first
+use, never abandoned; a variant is prefixed with its map (`config_fast.yaml` &rarr;
+`<map>_config_fast.yaml`) so it cannot outrank the map's own yaml as the default.
 - **`engine` on a config** says which bridge that yaml is written for. Without it a
   hand-written native-stack yaml reads as `py`, because `ConfigHelper` defaults
   `CarlaSetup.EnablePythonBackend` to true &mdash; it would silently run the wrong
   stack. `--engine` still overrides.
+- **The yaml owns the bridge and the CARLA endpoint.** Neither is ever copied into
+  a saved setup: the summary derives them from the chosen yaml every time it is
+  drawn, and editing slot 4 or 5 writes them back into that yaml (a targeted line
+  rewrite, so comments survive). Anything else gives two sources of truth &mdash;
+  hand-editing the yaml stops taking effect, and a stale remembered endpoint makes
+  `run_cosim` report a healthy CARLA while VirCarlaEnv, which reads
+  `CarlaSetup.CarlaServerIP` straight from the yaml, dials a different one and
+  times out.
 
 ### Named run setups
 
