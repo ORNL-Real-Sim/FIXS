@@ -80,6 +80,23 @@ class _ReplaySock:
         return len(self.buf) - self.pos
 
 
+class _ChunkedReplaySock(_ReplaySock):
+    """recv() source that returns AT MOST `k` bytes per call, like real TCP (#87).
+
+    _ReplaySock always satisfies the full request, so it cannot exercise the
+    receive loop -- which is exactly why the short-read bug survived the #176
+    fix. A real socket returns whatever has arrived so far, and does so more
+    and more often as messages grow past one TCP segment. k=1 is the harshest
+    case and still runs in milliseconds.
+    """
+    def __init__(self, data, k):
+        super().__init__(data)
+        self.k = k
+
+    def recv(self, n):
+        return super().recv(min(n, self.k))
+
+
 def pack_message(n_veh, sim_time):
     """Pack n_veh vehicles into one wire message using the real sendData."""
     sh = _make_helper()
@@ -89,12 +106,15 @@ def pack_message(n_veh, sim_time):
     return bytes(cap.data)
 
 
-def check(n_first, n_second):
+def check(n_first, n_second, chunk=None):
     """Two complementary checks:
     1. Invariant: the total_msg_size written into the header equals the actual bytes sent
        (the precise thing the bug broke -- off by msg_each_header_size per vehicle).
     2. Behaviour: two back-to-back messages are recovered exactly via the real recv_data
-       (a short total in message1 leaves bytes that desync message2)."""
+       (a short total in message1 leaves bytes that desync message2).
+
+    chunk=None replays with full-length reads (the #176 regression). An int caps
+    every recv() at that many bytes, reproducing TCP short reads (#87)."""
     errs = []
     mh = MsgHelper(); mh.set_vehicle_message_field(FIELDS)
 
@@ -108,7 +128,7 @@ def check(n_first, n_second):
 
     # --- check 2: back-to-back round trip through the real recv_data ---
     stream = pack_message(n_first, 1.0) + pack_message(n_second, 2.0)
-    sock = _ReplaySock(stream)
+    sock = _ReplaySock(stream) if chunk is None else _ChunkedReplaySock(stream, chunk)
     sh = _make_helper()
     try:
         sh.recv_data(sock)
@@ -134,18 +154,33 @@ def check(n_first, n_second):
 
 def main():
     cases = [(1, 1), (2, 2), (5, 5), (13, 13), (40, 40), (1, 13), (13, 1)]
+    # #87: large messages (well past one TCP segment) x adversarial short reads.
+    # k=1 is the harshest short read possible; 1500 is ~one Ethernet MTU.
+    big_cases = [(200, 200), (1000, 1000)]
+    chunks = [1, 7, 64, 1500]
+
     failed = 0
     for a, b in cases:
         errs = check(a, b)
         if errs:
             failed += 1
-            print(f'FAIL  ({a},{b}): ' + '; '.join(errs))
+            print(f'FAIL  ({a},{b}) full-reads: ' + '; '.join(errs))
         else:
-            print(f'PASS  ({a},{b}): both messages recovered, stream consumed exactly')
+            print(f'PASS  ({a},{b}) full-reads: both messages recovered, stream consumed exactly')
+
+    for a, b in big_cases:
+        for k in chunks:
+            errs = check(a, b, chunk=k)
+            if errs:
+                failed += 1
+                print(f'FAIL  ({a},{b}) recv<={k}B: ' + '; '.join(errs))
+            else:
+                print(f'PASS  ({a},{b}) recv<={k}B: both messages recovered, stream consumed exactly')
+
     if failed:
         print(f'\n{failed} case(s) FAILED')
         return 1
-    print('\nAll framing cases passed (#176 regression).')
+    print('\nAll framing cases passed (#176 regression + #87 short-read/large-message).')
     return 0
 
 
