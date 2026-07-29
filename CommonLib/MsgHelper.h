@@ -39,6 +39,14 @@ public:
 	void packDetectorData(TlsDetector_t DetectorData, char* buffer, int* iByte);
 	void depackDetectorData(char* buffer, int msgSize, TlsDetector_t* DetectorData);
 
+	// #87: record sizes for the send-side size pass, so total_msg_size can be written
+	// into the 9-byte header BEFORE the body is streamed out in chunks. Each runs the
+	// matching pack*() with a NULL buffer (measure, don't write) -- one traversal serves
+	// both sizing and packing, so the two cannot drift apart.
+	int vehRecordSize(VehFullData_t VehFullData);
+	int tlsRecordSize(TrafficLightData_t TrafficLightData);
+	int detRecordSize(TlsDetector_t DetectorData);
+
 	void clearRecvStorage();
 	void clearSendStorage();
 	void clearStorage();
