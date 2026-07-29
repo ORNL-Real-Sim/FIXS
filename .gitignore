@@ -44,6 +44,15 @@ Temp/*
 # Auto-generated version file
 CommonLib/RealSimVersion.h
 
+# Build artifacts generated in CommonLib/ by build scripts (copied to build/ by dispatch)
+CommonLib/*.mexw64
+CommonLib/*.lib
+CommonLib/*.a
+# Single-header amalgamation - not used in any source file
+CommonLib/ryml_all.hpp
+
+CommonLib/libevent/build/*
+CommonLib/libevent/out/build/*
 CommonLib/yaml-cpp/build/*
 CommonLib/yaml-cpp/out/build/*
 CommonLib/libsumo/out/build/*
@@ -185,12 +194,6 @@ CommonLib/VirtualEnvironment.lib
 CommonLib/libRealSimDsLib_*.a
 
 **/build/**
-
-# Ignore CommonLib under tests/Applications/Eco_Fixed_Timming
-/tests/Applications/Eco_Fixed_Timming/CommonLib/
-
-# Ignore Experiments folder under tests/Applications/Eco_Fixed_Timming
-/tests/Applications/Eco_Fixed_Timming/Experiments/
 
 TODO.md
 

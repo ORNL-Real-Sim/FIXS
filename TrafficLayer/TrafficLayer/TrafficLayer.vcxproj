@@ -30,7 +30,6 @@
   <ItemGroup>
     <ClInclude Include="..\..\CommonLib\ConfigHelper.h" />
     <ClInclude Include="..\..\CommonLib\MsgHelper.h" />
-    <ClInclude Include="..\..\CommonLib\ryml_all.hpp" />
     <ClInclude Include="..\..\CommonLib\SocketHelper.h" />
     <ClInclude Include="..\..\CommonLib\TrafficHelper.h" />
     <ClInclude Include="..\..\CommonLib\VehDataMsgDefs.h" />
