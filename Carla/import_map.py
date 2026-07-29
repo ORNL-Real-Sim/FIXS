@@ -1020,19 +1020,18 @@ def _map_cache_dir(name=None):
     `name`, the per-map subfolder ~/.fixs/maps/<name>/ - named by the cooked map
     name so it matches CARLA's Content/<name>/; it holds that map's bundle zip,
     extracted carla/ + sumo/, and generated tl_table.csv. Kept outside FIXS/ so
-    `initialize` (which wipes FIXS/) never deletes it."""
+    `initialize` (which wipes FIXS/) never deletes it.
+
+    Everything under here is RE-CREATABLE: downloaded, extracted, or derived from
+    what was extracted. Nothing a user hand-edits lives here - scenario yamls are
+    app-bounded and live under ~/.fixs/apps/ (see app_catalog.scenario_dir), so
+    deleting this tree to reclaim disk can never destroy someone's config. It is
+    also shared: one 700MB bundle serves every app that runs that map."""
     d = os.environ.get("FIXS_MAP_CACHE") or os.path.join(os.path.dirname(env.CONFIG_PATH), "maps")
     if name:
         d = os.path.join(d, name)
     os.makedirs(d, exist_ok=True)
     return d
-
-
-def map_config_path(name):
-    """The per-map VirCarlaEnv scenario yaml: ~/.fixs/maps/<name>/config.yaml. Sits
-    beside that map's bundle/carla/sumo/tl_table; like tl_table.csv it is a generated,
-    machine-local artifact (never committed). Consumed only by run_cosim's cpp engine."""
-    return os.path.join(_map_cache_dir(name), "config.yaml")
 
 
 def map_sumo_dir(name):

@@ -37,10 +37,13 @@ import os
 import sys
 from datetime import datetime
 
+import app_catalog
 import carla_env_setup as env
 
 SCHEMA = 1
-GENERIC = "_generic"        # profile id for a run with no application selected
+# Profile id for a run with no application selected. Shared with app_catalog rather
+# than spelled twice: it is the same identity that names ~/.fixs/apps/_generic/.
+GENERIC = app_catalog.GENERIC
 
 # Slot key -> (menu label, cascade: slots invalidated when this one changes).
 # The order here is the order shown in the summary.

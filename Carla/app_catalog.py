@@ -87,6 +87,11 @@ import carla_env_setup as env
 SCHEMA = 1
 HERE = os.path.dirname(os.path.abspath(__file__))
 
+# Identity for a run with no application selected. It is a real key, not a null:
+# a generic run still has scenario yamls and a saved profile, and they need a home
+# that cannot collide with an app id (hence the leading underscore).
+GENERIC = "_generic"
+
 
 # --------------------------------------------------------------------------- #
 # Locations
@@ -118,6 +123,67 @@ def apps_home(app_id=None):
 def app_dir(app, root=None):
     """Absolute path of the app's folder under apps/ (entry['dir'], else its id)."""
     return os.path.join(root or app_root(), "apps", app.get("dir") or app["id"])
+
+
+def scenario_dir(app_id, map_name):
+    """Where the GENERATED scenario yaml for <app> on <map> lives:
+    ~/.fixs/apps/<app_id>/maps/<map_name>/.
+
+    Scenario yamls are app-bounded, never map-bounded. Two reasons:
+
+      - They are edited. ~/.fixs/maps/ is a cache of downloaded and derived
+        artifacts that a user should be able to delete wholesale to reclaim
+        gigabytes; a hand-edited yaml sitting in there is destroyed by that
+        perfectly reasonable act.
+      - One yaml per map is not enough. The same map serves several apps, and one
+        app runs several versions of a location - so the CARLA host, ports and
+        subscriptions in the yaml belong to (app, map), not to the map. Keyed by
+        map alone, two apps on roosevelt_full silently overwrite each other.
+
+    GENERIC (below) is the key for a run with no application selected."""
+    return os.path.join(apps_home(app_id or GENERIC), "maps", map_name)
+
+
+def scenario_path(app_id, map_name):
+    """The generated scenario yaml itself: <scenario_dir>/config.yaml."""
+    return os.path.join(scenario_dir(app_id, map_name), "config.yaml")
+
+
+def migrate_scenarios(app_id, map_name, legacy_dir, quiet=False):
+    """Move pre-app scenario yamls out of the map cache into the app tree, once.
+
+    Before scenario yamls were app-bounded they were generated into
+    ~/.fixs/maps/<map>/config.yaml (plus any variants a user added beside it).
+    Those files are hand-editable, so they are MOVED rather than abandoned - a
+    user who tuned CarlaServerIP there must not silently get a freshly generated
+    default instead. Only runs when the destination has no yaml yet, so it cannot
+    overwrite anything, and never touches the big artifacts around them."""
+    import shutil
+    dest = scenario_dir(app_id, map_name)
+    try:
+        if any(f.lower().endswith((".yaml", ".yml")) for f in os.listdir(dest)):
+            return []                      # already migrated (or already configured)
+    except OSError:
+        pass                               # dest does not exist yet: nothing there to keep
+    try:
+        legacy = sorted(f for f in os.listdir(legacy_dir)
+                        if f.lower().endswith((".yaml", ".yml")))
+    except OSError:
+        return []
+    if not legacy:
+        return []
+    moved = []
+    os.makedirs(dest, exist_ok=True)
+    for name in legacy:
+        try:
+            shutil.move(os.path.join(legacy_dir, name), os.path.join(dest, name))
+            moved.append(name)
+        except OSError as exc:
+            _warn(f"could not move {name} out of the map cache ({exc}); leaving it.")
+    if moved and not quiet:
+        print(f"[apps] scenario configs are app-bounded now; moved "
+              f"{', '.join(moved)}\n[apps]   {legacy_dir} -> {dest}")
+    return moved
 
 
 # --------------------------------------------------------------------------- #

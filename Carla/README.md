@@ -239,6 +239,29 @@ behaviour, unchanged.**
   -specific values (CARLA server IP, dSPACE ports) that must not go back into the
   repo. Your copy is never silently clobbered: an upstream change refreshes it only
   while you have not edited it, otherwise it lands beside it as `<name>.yaml.new`.
+
+### Where `~/.fixs` puts things
+
+The tree splits on **can FIXS re-create this?**, not on which entity produced it:
+
+```
+~/.fixs/
+  carla.json  catalog.json  run_profiles.json
+  apps/                          <- EDITED. Every scenario yaml lives here.
+    <app>/<name>.yaml                app-owned, staged from the repo, map-independent
+    <app>/maps/<map>/config.yaml     generated for this app on this map
+    _generic/...                     a run with no application selected
+  maps/                          <- RE-CREATABLE. Safe to delete to reclaim disk.
+    <map>/{<bundle>.zip, carla/, sumo/, tl_table.csv}
+```
+
+Scenario yamls are **app-bounded, never map-bounded**, for two reasons. They are
+edited, and `maps/` is a cache a user should be able to delete wholesale (it is
+gigabytes) without destroying a tuned config. And one yaml per map is not enough:
+the same map serves several apps, and one app runs several versions of a location,
+so the host/ports/subscriptions belong to *(app, map)* &mdash; keyed by map alone,
+two apps on `roosevelt_full` silently overwrite each other. Pre-app yamls left in
+`maps/<map>/` are **moved** into the app tree on first use, never abandoned.
 - **`engine` on a config** says which bridge that yaml is written for. Without it a
   hand-written native-stack yaml reads as `py`, because `ConfigHelper` defaults
   `CarlaSetup.EnablePythonBackend` to true &mdash; it would silently run the wrong

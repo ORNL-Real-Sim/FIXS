@@ -1173,6 +1173,7 @@ def main():
     # Otherwise list the published map releases of --repo and let the user pick a
     # version; the chosen version is what we both import AND load, so the imported
     # map and the loaded map can never drift apart.
+    import app_catalog
     import import_map
     repo, tag_prefix = import_map.resolve_map_source(args.repo, args.tag_prefix)
     catalog = import_map.fetch_catalog(repo)
@@ -1255,7 +1256,7 @@ def main():
     # generate for it will name a local one. The authoritative host/port resolution
     # still happens after config_yaml is final.
     if args.carla_host is None:
-        peek = args.config or import_map.map_config_path(target_map)
+        peek = args.config or app_catalog.scenario_path(profile_id, target_map)
         if os.path.isfile(peek):
             peek_host, _peek_port = read_carla_endpoint(peek)
             if peek_host and not _is_local_host(peek_host):
@@ -1369,16 +1370,22 @@ def main():
     if tls_manager == "sumo" and not tl_table:
         tl_table = resolve_tl_table(sumocfg, force=args.reimport, cache_name=target_map)
 
-    # The per-map scenario yaml, written like tl_table.csv: always, on first use
-    # (refreshed by --reimport). Deliberately BEFORE the CARLA launch and the
-    # --prep-only return - it is a config artifact, so it must not depend on a
-    # running CARLA. Its CarlaSetup.Backend then selects the bridge further down.
-    # An app's own yamls (staged in ~/.fixs/apps/<id>/, where machine-specific edits
-    # are safe) are offered alongside it. config_scope records which kind won: an
-    # app yaml is AUTHORED, not generated, so the generator below must not touch it,
-    # and the run profile uses the scope to decide whether changing the map
-    # invalidates the yaml choice.
-    map_config = import_map.map_config_path(target_map)
+    # The scenario yaml, written like tl_table.csv: always, on first use (refreshed
+    # by --reimport). Deliberately BEFORE the CARLA launch and the --prep-only
+    # return - it is a config artifact, so it must not depend on a running CARLA.
+    #
+    # Every scenario yaml is APP-BOUNDED, under ~/.fixs/apps/<app>/, because yamls
+    # are edited and ~/.fixs/maps/ is a deletable cache of downloaded artifacts.
+    # Two kinds live there, and config_scope records which one won:
+    #   'app'  the app's own yaml, staged from the repo - map-independent, AUTHORED,
+    #          so the generator below must never touch it
+    #   'map'  apps/<app>/maps/<map>/config.yaml - generated for this app on this map
+    # The scope also tells the run profile whether changing the map invalidates the
+    # yaml choice.
+    map_config = app_catalog.scenario_path(profile_id, target_map)
+    # One-shot: lift pre-app yamls out of ~/.fixs/maps/<map>/ into the app tree.
+    app_catalog.migrate_scenarios(profile_id, target_map,
+                                  import_map._map_cache_dir(target_map))
     if args.config:
         config_yaml = args.config
         config_scope = "app" if any(
