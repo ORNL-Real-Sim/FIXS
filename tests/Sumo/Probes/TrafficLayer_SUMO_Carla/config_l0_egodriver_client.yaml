@@ -28,7 +28,9 @@ SimulationSetup:
 
     # + the EgoDriver command channel (unified L0/L2/L4). Field-gated: only serialized
     # because they are listed here, so other configs are unaffected.
-    VehicleMessageField: [id, type, vehicleClass, speed, speedDesired, positionX, positionY, positionZ, heading, grade, length, width, height, color, linkId, laneId, steerAngleDesired, acceleratorPedalDesired, brakePedalDesired]
+    # speedLimit: the SUMO posted limit, read by the EgoDriver client as its auto
+    # target speed (lower at corners -> self-slows). + the EgoDriver command channel.
+    VehicleMessageField: [id, type, vehicleClass, speed, speedDesired, speedLimit, positionX, positionY, positionZ, heading, grade, length, width, height, color, linkId, laneId, steerAngleDesired, acceleratorPedalDesired, brakePedalDesired]
 
     TrafficSimulatorIP: '127.0.0.1'
     TrafficSimulatorPort: 1337

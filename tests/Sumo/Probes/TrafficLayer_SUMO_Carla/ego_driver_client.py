@@ -47,7 +47,10 @@ DEFAULT_ROUTE = [(15.0, -3.0), (185.0, -3.0), (192.9, -1.9), (198.5, 1.5), (201.
                  (192.9, 201.9), (185.0, 203.0), (15.0, 203.0), (7.1, 201.9), (1.5, 198.5),
                  (-1.9, 192.9), (-3.0, 185.0), (-3.0, 15.0), (-1.9, 7.1), (1.5, 1.5), (7.1, -1.9)]
 
-DEFAULT_TARGET_SPEED = 10.0  # m/s, L0 internal target when no advisor is present
+# Application-side target speed (the client owns its behavior -- the Carla analog of
+# the XIL side's RealSimPara.speedInit). This is the FALLBACK cruise speed, used only
+# when neither an L2 advisor nor a traffic-sim speed limit is available on the wire.
+CLIENT_TARGET_SPEED = 10.0  # m/s
 
 
 class EgoDriverParams:
@@ -204,8 +207,18 @@ def main() -> int:
                         heading = math.atan2(dy, dx)
                 prev_xy = (ego.positionX, ego.positionY)
 
-                # L2 if an upstream advisor put a speedDesired on the record; else L0 internal target
-                target = ego.speedDesired if ego.speedDesired and ego.speedDesired > 0.01 else DEFAULT_TARGET_SPEED
+                # Target-speed policy, all client-side (behavior belongs to the driver):
+                #   1. speedDesired  -- an upstream L2 advisor override, if present
+                #   2. ego.speedLimit -- the traffic sim's posted limit off the wire (auto;
+                #      lower at corners on simple_loop, so it self-slows there). SUMO-fed;
+                #      absent -> fall through (soft coupling, not a hard SUMO dependency)
+                #   3. CLIENT_TARGET_SPEED -- the client's own fallback cruise
+                if ego.speedDesired and ego.speedDesired > 0.01:
+                    target = ego.speedDesired
+                elif ego.speedLimit and ego.speedLimit > 0.1:
+                    target = ego.speedLimit
+                else:
+                    target = CLIENT_TARGET_SPEED
                 throttle, brake, steer = driver.compute(ego.positionX, ego.positionY,
                                                         heading, ego.speed, target)
 
