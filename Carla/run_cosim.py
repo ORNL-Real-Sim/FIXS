@@ -1677,18 +1677,28 @@ def main():
         or read_backend(config_yaml)
     args.engine = backend
 
-    # CARLA RPC endpoint: the scenario yaml is the source of truth, because that
-    # is what VirCarlaEnv dials. An explicit --carla-host/--carla-port still wins
-    # (and seeds the yaml above when it is first generated), but otherwise the two
-    # must not be allowed to drift - that is how you get run_cosim reporting a
-    # healthy CARLA while VirCarlaEnv times out against a different address.
+    # CARLA RPC endpoint: the scenario yaml is the source of truth, because that is
+    # what VirCarlaEnv dials - it reads CarlaSetup.CarlaServerIP/Port itself
+    # (CommonLib/ConfigHelper.cpp), it is not told by us. So the endpoint is READ
+    # from the yaml, never remembered anywhere else.
     yaml_host, yaml_port = read_carla_endpoint(config_yaml)
-    if args.carla_host is None and yaml_host:
-        args.carla_host = yaml_host
-    if args.carla_port is None and yaml_port:
-        args.carla_port = yaml_port
-    args.carla_host = args.carla_host or DEFAULT_CARLA_HOST
-    args.carla_port = args.carla_port or DEFAULT_CARLA_PORT
+    cli_host, cli_port = args.carla_host, args.carla_port
+    args.carla_host = cli_host or yaml_host or DEFAULT_CARLA_HOST
+    args.carla_port = cli_port or yaml_port or DEFAULT_CARLA_PORT
+
+    # An explicit --carla-host/--carla-port still wins - but it is written THROUGH
+    # to the yaml rather than held only in this process. Otherwise the flag moves
+    # run_cosim's probe and leaves VirCarlaEnv dialling the old address: the co-sim
+    # comes up reporting a healthy CARLA and then times out against a different one.
+    # There is one endpoint per scenario, and this is where it is written down.
+    wire = "127.0.0.1" if args.carla_host in ("localhost", "") else args.carla_host
+    if os.path.isfile(config_yaml) and (
+            (cli_host and wire != yaml_host) or (cli_port and args.carla_port != yaml_port)):
+        print(f"[cosim] --carla-host/--carla-port differ from "
+              f"{os.path.basename(config_yaml)} ({yaml_host}:{yaml_port}); updating it "
+              f"so every component dials the same CARLA.")
+        set_yaml_scalar(config_yaml, "CarlaSetup", "CarlaServerIP", wire)
+        set_yaml_scalar(config_yaml, "CarlaSetup", "CarlaServerPort", args.carla_port)
 
     # Catches the case the early peek could not see: --config picked a different
     # yaml, or the file only existed after generation. Same rule as above - a CARLA
