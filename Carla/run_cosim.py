@@ -880,9 +880,187 @@ def resolve_tl_table(sumocfg, force=False, cache_name=None):
         return None
 
 
+# --------------------------------------------------------------------------- #
+# Application + saved run profile.
+#
+# Two features that only make sense together: apps/apps.json says WHAT can be run
+# (and with which maps / scenario yamls), the run profile remembers WHAT YOU RAN
+# so the next run is one keypress. Both are optional - no manifest and no profile
+# gives exactly the pre-app-awareness behaviour.
+#
+# Precedence for every setting, strongest first:
+#   explicit CLI flag  >  saved profile  >  app defaults  >  built-in default
+# The CLI wins outright so `run_cosim --map atlanta` changes that one thing and
+# prompts for nothing.
+# --------------------------------------------------------------------------- #
+DEFAULT_STEP_LENGTH = 0.05
+
+# Profile slot -> the args attributes it owns. Kept as data so the summary, the
+# change menu and the apply step cannot drift apart.
+PROFILE_SLOTS = {
+    "app": ("app",),
+    "map": ("map",),
+    "config": ("config",),
+    "engine": ("engine",),
+    "carla": ("carla_host", "carla_port"),
+    "sumo": ("sumo_gui", "step_length"),
+}
+
+
+def _apply_profile(args, rec, skip):
+    """Fill unset args from the saved record, for every slot not in `skip`.
+    An explicitly passed flag is never overwritten - that is what makes a single
+    flag a one-shot override of the profile."""
+    applied = []
+    for slot, attrs in PROFILE_SLOTS.items():
+        if slot in skip:
+            continue
+        for attr in attrs:
+            if getattr(args, attr, None) is None and rec.get(attr) is not None:
+                setattr(args, attr, rec[attr])
+                applied.append(attr)
+    return applied
+
+
+def resolve_app_and_profile(args, cfg):
+    """Pick the application and replay the saved run setup.
+
+    Returns (app, profile_id, staged_configs):
+      app             the chosen app dict from apps/apps.json, or None (generic run)
+      profile_id      key to save this run under (the app id, or '_generic')
+      staged_configs  that app's scenario yamls, copied into ~/.fixs/apps/<id>/
+    """
+    import app_catalog
+    import run_profile
+
+    apps = [] if args.no_app else app_catalog.load_catalog()
+
+    # 1. The saved setup, and what the user wants to change about it.
+    doc = run_profile.load_doc()
+    profile_id, rec = run_profile.resolve(doc, name=args.profile, app_id=args.app)
+    changing = set(PROFILE_SLOTS)          # nothing remembered -> ask everything
+    if rec and not args.fresh:
+        changing = run_profile.review(profile_id, rec, cfg)
+        if changing is None:
+            sys.exit("[cosim] cancelled.")
+        _apply_profile(args, rec, skip=changing)
+    elif rec and args.fresh:
+        print("[cosim] --fresh: ignoring the saved setup and asking again.")
+
+    # 2. The application. --app / the profile pin it; otherwise prompt.
+    app = app_catalog.find_app(apps, args.app) if args.app else None
+    if args.app and apps and app is None:
+        print(f"[cosim] no app '{args.app}' in {app_catalog.catalog_path()}; "
+              f"continuing without one.")
+    if app is None and not args.app and apps and "app" in changing:
+        app = app_catalog.choose_app(apps)
+    if app is not None:
+        args.app = app["id"]
+        print(f"[cosim] app: {app['title']}")
+        if app.get("note"):
+            print(f"[cosim]   {app['note']}")
+
+    # 3. App defaults sit under the profile and the CLI, above the built-ins.
+    for key, attr in (("engine", "engine"), ("sumo_gui", "sumo_gui"),
+                      ("step_length", "step_length")):
+        if app and getattr(args, attr, None) is None and app["defaults"].get(key) is not None:
+            setattr(args, attr, app["defaults"][key])
+
+    # 4. Built-in fallbacks for the tri-state flags.
+    if args.sumo_gui is None:
+        args.sumo_gui = True
+    if args.step_length is None:
+        args.step_length = DEFAULT_STEP_LENGTH
+
+    staged = app_catalog.stage_configs(app) if app else []
+    return app, (app["id"] if app else run_profile.GENERIC), staged
+
+
+def remember_profile(profile_id, args, app, config_yaml, config_scope, map_origin):
+    """Save this run's setup so the next one opens with the summary + change menu."""
+    import run_profile
+    run_profile.remember(profile_id, {
+        "app": app["id"] if app else None,
+        "map": args.map,
+        "map_origin": map_origin,
+        "config": config_yaml,
+        "config_scope": config_scope,
+        "engine": args.engine,
+        "sumo_gui": bool(args.sumo_gui),
+        "step_length": args.step_length,
+        "carla_host": args.carla_host,
+        "carla_port": args.carla_port,
+    })
+
+
+def choose_app_config(staged, map_default, map_name, app_title=None):
+    """Pick the scenario yaml for this run.
+
+    The candidates are the app's own yamls (staged in ~/.fixs/apps/<id>/, where
+    machine-specific edits are safe) plus the map's generated config.yaml. Both are
+    legitimate: an app yaml drives the FIXS-native stack with the app's
+    subscriptions, the generated one is the visualisation-only default. Returns
+    (path, scope) where scope is 'app' or 'map' - the caller must not regenerate an
+    app-scoped yaml, and the run profile uses it to decide whether a map change
+    invalidates the yaml choice."""
+    if not staged:
+        return map_default, "map"
+    # The app's yamls are app-scoped, not map-scoped - they carry that application's
+    # subscriptions and endpoints and are valid on whichever map it runs against -
+    # so the heading names both, not just the map.
+    who = f"{app_title} on '{map_name}'" if app_title else f"'{map_name}'"
+    print(f"\n[cosim] Scenario config for {who}:")
+    for i, c in enumerate(staged, 1):
+        eng = f"  [engine {c['engine']}]" if c["engine"] else ""
+        print(f"   {i:>2}) {os.path.basename(c['path']):<40} {c['title']}{eng}")
+    print(f"   {len(staged) + 1:>2}) {os.path.basename(map_default):<40} "
+          f"auto-generated for this map")
+    if not sys.stdin.isatty():
+        print(f"[cosim] non-interactive: using {staged[0]['path']}")
+        return staged[0]["path"], "app"
+    while True:
+        try:
+            ans = input(f"[cosim] Which? [1-{len(staged) + 1}], Enter = 1: ").strip()
+        except EOFError:
+            return staged[0]["path"], "app"
+        if ans == "":
+            ans = "1"
+        if ans.isdigit() and 1 <= int(ans) <= len(staged):
+            picked = staged[int(ans) - 1]
+            print(f"[cosim] scenario config: {picked['path']}")
+            return picked["path"], "app"
+        if ans.isdigit() and int(ans) == len(staged) + 1:
+            return map_default, "map"
+        print("[cosim] invalid choice; enter a number from the list.")
+
+
+def declared_engine(staged, config_yaml):
+    """The bridge an app declares its yaml is written for, or None.
+
+    Needed because a hand-written app yaml usually omits
+    CarlaSetup.EnablePythonBackend, and ConfigHelper defaults that to true - so a
+    yaml built for TrafficLayer + VirCarlaEnv would silently run the python bridge
+    instead. The app says which stack it means; --engine still overrides."""
+    for c in staged or []:
+        if c["engine"] and os.path.normcase(c["path"]) == os.path.normcase(config_yaml or ""):
+            return c["engine"]
+    return None
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--app", default=None,
+                    help="application to run, by id, from the app repo's apps/apps.json. "
+                         "Omit it and you pick from the declared apps; the choice "
+                         "pre-selects that app's map(s) and scenario yamls.")
+    ap.add_argument("--no-app", action="store_true",
+                    help="ignore apps/apps.json entirely (generic, map-only co-sim)")
+    ap.add_argument("--profile", default=None,
+                    help="run setup to reuse from ~/.fixs/run_profiles.json (default: the "
+                         "one saved for the chosen app, else whatever ran last)")
+    ap.add_argument("--fresh", action="store_true",
+                    help="ignore the saved run profile and ask every question again")
     ap.add_argument("--sumocfg", default=None,
                     help="SUMO .sumocfg. Optional: if omitted it comes from the chosen "
                          "map bundle's sumo/ (a DT-Library map ships its scenario). Pass "
@@ -911,7 +1089,10 @@ def main():
     ap.add_argument("--tl-table", default=None, help="traffic_light_table.csv (for --tls-manager sumo)")
     ap.add_argument("--tls-manager", default=None, choices=["sumo", "carla", "none"],
                     help="who drives the lights (default: the map's catalog setting, else 'sumo')")
-    ap.add_argument("--step-length", type=float, default=0.05,
+    # default=None (not the literal default) so "was this flag given?" stays
+    # answerable: an unset flag may be filled from the saved run profile, an
+    # explicit one must win over it. Resolved to DEFAULT_STEP_LENGTH below.
+    ap.add_argument("--step-length", type=float, default=None,
                     help="sim timestep in seconds / CARLA fixed_delta_seconds (default 0.05; "
                          "0.1 halves the ticks-per-second and is fine for traffic)")
     ap.add_argument("--quality-level", choices=["Low", "Medium", "High", "Epic"], default=None,
@@ -946,7 +1127,13 @@ def main():
                     help="frame the whole network instead of one intersection")
     ap.add_argument("--spectator-junction", default=None,
                     help="frame this junction id (default: the busiest intersection)")
-    ap.add_argument("--sumo-gui", action="store_true")
+    # Tri-state for the same reason as --step-length: the one-click launchers always
+    # pass --sumo-gui, so a plain store_true would make "headless" unsaveable in a
+    # run profile. None = not specified, fill from the profile.
+    ap.add_argument("--sumo-gui", dest="sumo_gui", action="store_true", default=None,
+                    help="run SUMO with its GUI (default)")
+    ap.add_argument("--no-sumo-gui", dest="sumo_gui", action="store_false",
+                    help="run SUMO headless")
     ap.add_argument("--engine", choices=["py", "cpp"], default=None,
                     help="co-sim bridge: py=run_synchronization.py (default), "
                          "cpp=TrafficLayer+VirCarlaEnv (FIXS-native). Overrides the "
@@ -976,6 +1163,11 @@ def main():
     elif args.no_launch:
         print("[cosim] no CARLA env configured; running under the current python. "
               "If 'import carla' fails, run setup_carla first.")
+
+    # Application + saved run profile. Deliberately AFTER maybe_reexec: everything
+    # below can prompt, and re-execing under the env python after a prompt would
+    # ask the same questions twice.
+    app, profile_id, staged_configs = resolve_app_and_profile(args, cfg)
 
     # Decide which map to run. An explicit --map wins (seamless / scriptable).
     # Otherwise list the published map releases of --repo and let the user pick a
@@ -1012,24 +1204,37 @@ def main():
     settings = {}
     picked_tag = None            # DT release to (lazily) download for import / sumo
     picked_local = None          # local .zip / folder to import from
+    map_origin = None            # short provenance label, shown in the profile summary
     target_map = args.map        # provisional; a catalog location resolves to the real name
+    # Was the map chosen from the menu on THIS run? Only then is "you just picked a
+    # map that is already cooked - reimport it?" a question worth asking. A map that
+    # came from --map or from the saved profile is a deliberate re-run of a known
+    # setup, and prompting about re-cooking it every single time is noise.
+    picked_now = False
 
     ent = import_map.catalog_entry(catalog, args.map) if args.map else None
     if ent:                                      # --map is a DT-Library location
         target_map = ent["map_name"]
         settings = ent.get("settings", {})
         picked_tag = ent["release"]
+        map_origin = "Digital-Twin-Library"
         print(f"[cosim] map '{args.map}' -> '{target_map}'  (DT release {picked_tag})")
     elif args.map:                               # legacy: --map is a cooked-map name
         target_map = args.map
-    else:                                        # pick from catalog / local
+        map_origin = "cooked"
+    else:                                        # pick from app maps / catalog / local
+        picked_now = True
         target_map, picked_tag, picked_local = import_map.choose_map(
             repo, tag_prefix, cfg.get("carla_root") if cfg else None,
-            catalog=catalog)
+            catalog=catalog,
+            preferred=(app or {}).get("maps"),
+            app_label=(app or {}).get("title"))
         picked = import_map.catalog_entry(catalog, target_map)
         if picked:                               # a catalog pick: use its real name + settings
             settings = picked.get("settings", {})
             target_map = picked["map_name"]
+        map_origin = ("Digital-Twin-Library" if picked_tag else
+                      "local file" if picked_local else "cooked")
         print(f"[cosim] selected map: {target_map}")
 
     # Per-map settings are defaults; explicit CLI flags override.
@@ -1073,7 +1278,7 @@ def main():
         # local .zip/folder), offer to reimport - re-cook + re-place TLs/signs +
         # regenerate the TL table. A pick of an already-imported map (both picked_*
         # None) is run as-is, no prompt.
-        if resolved is not None and (picked_tag or picked_local) \
+        if resolved is not None and picked_now and (picked_tag or picked_local) \
                 and not args.reimport and sys.stdin.isatty():
             ans = input(f"[cosim] '{resolved[0]}' is already imported. Reimport "
                         f"(re-cook + re-place TLs/signs + regen TL table)? [y/N]: ").strip().lower()
@@ -1168,9 +1373,24 @@ def main():
     # (refreshed by --reimport). Deliberately BEFORE the CARLA launch and the
     # --prep-only return - it is a config artifact, so it must not depend on a
     # running CARLA. Its CarlaSetup.Backend then selects the bridge further down.
-    config_yaml = args.config or choose_scenario_yaml(
-        import_map.map_config_path(target_map), target_map)
-    if args.reimport or not os.path.isfile(config_yaml):
+    # An app's own yamls (staged in ~/.fixs/apps/<id>/, where machine-specific edits
+    # are safe) are offered alongside it. config_scope records which kind won: an
+    # app yaml is AUTHORED, not generated, so the generator below must not touch it,
+    # and the run profile uses the scope to decide whether changing the map
+    # invalidates the yaml choice.
+    map_config = import_map.map_config_path(target_map)
+    if args.config:
+        config_yaml = args.config
+        config_scope = "app" if any(
+            os.path.normcase(c["path"]) == os.path.normcase(args.config)
+            for c in staged_configs) else "map"
+    elif staged_configs:
+        config_yaml, config_scope = choose_app_config(
+            staged_configs, map_config, target_map, (app or {}).get("title"))
+    else:
+        config_yaml, config_scope = choose_scenario_yaml(map_config, target_map), "map"
+
+    if config_scope == "map" and (args.reimport or not os.path.isfile(config_yaml)):
         # A regenerate must not silently undo hand edits: carry the existing
         # Backend choice over, and keep the old file as .bak to fall back on.
         prior = read_backend(config_yaml) if os.path.isfile(config_yaml) else None
@@ -1185,6 +1405,14 @@ def main():
                              realtime=not args.fast,
                              refresh=args.step_length,
                              backend=args.engine or prior or "py")
+
+    # Which bridge runs. Resolved once, here, rather than at the dispatch below, so
+    # the saved profile records the bridge that ACTUALLY ran instead of the raw
+    # (usually empty) --engine flag. An app may declare which stack its yaml is
+    # written for; --engine still wins over everything.
+    backend = args.engine or declared_engine(staged_configs, config_yaml) \
+        or read_backend(config_yaml)
+    args.engine = backend
 
     # CARLA RPC endpoint: the scenario yaml is the source of truth, because that
     # is what VirCarlaEnv dials. An explicit --carla-host/--carla-port still wins
@@ -1206,6 +1434,13 @@ def main():
         print(f"[cosim] CARLA host is {args.carla_host} (not this machine); "
               f"implying --no-launch.")
         args.no_launch = True
+
+    # Everything is decided: remember it, so the next run opens with the summary +
+    # numbered change menu instead of the full round of questions. Saved BEFORE the
+    # launch on purpose - a setup that failed to start is exactly the one you want
+    # to come back to and tweak one slot of.
+    args.map = target_map
+    remember_profile(profile_id, args, app, config_yaml, config_scope, map_origin)
 
     # TL + sign placement (source build only; idempotent via markers). Runs after
     # the import + sumocfg/TL-table resolution so the table exists to place from.
@@ -1316,7 +1551,6 @@ def main():
         # Engine dispatch: CarlaSetup.Backend in that yaml picks the bridge
         # (--engine overrides). cpp = FIXS-native (TrafficLayer + VirCarlaEnv); py
         # (default) = the standalone run_synchronization.py bridge below.
-        backend = args.engine or read_backend(config_yaml)
         if backend == "cpp":
             print(f"[cosim] engine=cpp (FIXS-native); config {config_yaml}")
             return run_native_stack(config_yaml, sumocfg, tl_table, cfg, args)

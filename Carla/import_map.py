@@ -848,10 +848,40 @@ def _prompt(msg):
                  "--map / --package to run without prompting.")
 
 
-def choose_map(repo, tag_prefix="", carla_root=None, catalog=None):
-    """Interactive chooser. Lists ONLINE maps (repo's releases from the
-    Digital-Twin-Library) and, when carla_root is given, LOCAL maps already cooked
-    into that CARLA - clearly separated - plus a hand-picked local .zip/folder.
+def _app_map_choice(name, catalog, cooked):
+    """How an app-declared map name resolves, as (kind, label, flag, tag), or None
+    if it resolves to nothing here:
+      'release' -> the name matches a Digital-Twin-Library entry (by location,
+                   cooked map_name or release tag - see catalog_entry)
+      'cooked'  -> not in the library, but already cooked into this CARLA
+    A name that is neither is simply not offered in the app section. It is not an
+    error: the app section only re-orders what is already reachable, so the user
+    drops through to the library list, the cooked list, or a local pick - exactly
+    the menu they would have had with no app selected."""
+    ent = catalog_entry(catalog, name)
+    if ent:
+        flag = "  (Digital-Twin-Library)"
+        if (ent.get("map_name") or "") in cooked:
+            flag += "  (already imported)"
+        return "release", (ent.get("map_name") or name), flag, ent.get("release")
+    if name in cooked:
+        return "cooked", name, "  (already imported)", None
+    return None
+
+
+def choose_map(repo, tag_prefix="", carla_root=None, catalog=None,
+               preferred=None, app_label=None):
+    """Interactive chooser. Lists, in this order:
+      1. APP MAPS - the maps the selected application declares (`preferred`), if any
+      2. ONLINE   - the Digital-Twin-Library releases in `repo`
+      3. LOCAL    - every map already cooked into `carla_root`
+    plus `L` for a hand-picked .zip / folder.
+
+    The app section only re-orders and sets the Enter-default; it never filters. In
+    particular the LOCAL list stays complete for every app, because "what is cooked
+    into this CARLA" is a property of the machine, not of the application - an app
+    map that is missing must not hide the maps you could actually run.
+
     Returns (name, tag, local_path):
       online release -> (name, tag,  None)
       local cooked   -> (name, None, None)   # already imported: run as-is
@@ -859,12 +889,27 @@ def choose_map(repo, tag_prefix="", carla_root=None, catalog=None):
     Exits if the session is non-interactive."""
     releases = list_map_releases(repo, tag_prefix)
     cooked = list_imported_maps(carla_root) if carla_root else []
+    preferred = preferred or []
 
     print("\n[import] Pick a map to run:")
-    menu = []  # menu number -> ("release", release) | ("cooked", name)
+    menu = []  # menu number -> ("release", release) | ("cooked", name) | ("app", resolved)
+    app_tags = set()
+    resolved_app = [(n, _app_map_choice(n, catalog, cooked)) for n in preferred]
+    resolved_app = [(n, r) for n, r in resolved_app if r]
+    if resolved_app:
+        print(f"  App maps ({app_label or 'declared by the application'}):")
+        for name, (kind, label, flag, tag) in resolved_app:
+            if tag:
+                app_tags.add(tag)
+            menu.append(("app", (name, kind, tag)))
+            print(f"   {len(menu):>2}) {label:<26} {flag}")
     if releases:
-        print("  Online (Digital-Twin-Library):")
-        for r in releases:
+        # Releases already shown above are skipped here rather than listed twice -
+        # the same map under two numbers reads as two different maps.
+        rest = [r for r in releases if r["tag"] not in app_tags]
+        if rest:
+            print("  Online (Digital-Twin-Library):")
+        for r in rest:
             menu.append(("release", r))
             pkg = _package_from_tag(r["tag"], tag_prefix)
             # Label with the REAL cooked map name when the catalog knows one, so an
@@ -880,10 +925,15 @@ def choose_map(repo, tag_prefix="", carla_root=None, catalog=None):
                 flag += "  (already imported)"
             print(f"   {len(menu):>2}) {label:<26} {r['date']}{flag}")
     if cooked:
+        # Deliberately the FULL cooked list, app or not: what is imported into this
+        # CARLA is a property of the machine, so an app must never hide a map you
+        # could actually run. App maps are only marked, not filtered out.
+        app_names = {label for _n, (_k, label, _f, _t) in resolved_app}
         print("  Local (already imported into CARLA):")
         for name in cooked:
             menu.append(("cooked", name))
-            print(f"   {len(menu):>2}) {name}")
+            mark = "  (app map)" if name in app_names else ""
+            print(f"   {len(menu):>2}) {name}{mark}")
     if not menu:
         print("   (no online releases or imported maps found)")
     print("   L) select a local .zip / folder instead")
@@ -893,11 +943,10 @@ def choose_map(repo, tag_prefix="", carla_root=None, catalog=None):
                  "(+ --package-url/--package-dir) to choose non-interactively.")
     while True:
         hint = f"[1-{len(menu)} / L]" if menu else "[L]"
-        default = ", Enter = 1" if releases else ""
+        default = ", Enter = 1" if menu else ""
         ans = _prompt(f"[import] Which? {hint}{default}: ").strip().lower()
-        if ans == "" and releases:
-            r = releases[0]
-            return _package_from_tag(r["tag"], tag_prefix), r["tag"], None
+        if ans == "" and menu:
+            ans = "1"
         if ans == "l":
             path = _select_package("map", None)  # native file picker / typed path
             name = _infer_package_name(path)
@@ -910,7 +959,12 @@ def choose_map(repo, tag_prefix="", carla_root=None, catalog=None):
             kind, payload = menu[int(ans) - 1]
             if kind == "release":
                 return _package_from_tag(payload["tag"], tag_prefix), payload["tag"], None
-            return payload, None, None  # cooked: already imported, run as-is
+            if kind == "cooked":
+                return payload, None, None  # already imported, run as-is
+            # App map: the same two outcomes as the sections below it - a
+            # Digital-Twin-Library release to fetch, or a map already cooked here.
+            name, app_kind, tag = payload
+            return (name, tag, None) if app_kind == "release" else (name, None, None)
         print("[import] invalid choice; enter a number, or L for a local file.")
 
 

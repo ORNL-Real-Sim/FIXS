@@ -195,6 +195,76 @@ fast). Without `--auto-import` it instead prints a clear "import / place first"
 hint rather than failing opaquely. Apps keep one-click shims (`import_<app>_map`,
 `place_tls_<app>`) for explicit re-import / re-place.
 
+## Applications (`apps/apps.json`) and saved run setups
+
+FIXS is the enabler, not the owner: it defines the **application manifest schema**
+and the tooling that reads it, and hardcodes no application. An app repo that sits
+above a fetched bundle (`<repo>/FIXS/Carla/...`, hence `<repo>/apps/`) declares its
+applications in one file, `apps/apps.json`, parsed by
+[`app_catalog.py`](app_catalog.py) &mdash; the same split as the Digital-Twin-Library
+`catalog.json` that `import_map` already consumes. **No manifest = the previous
+behaviour, unchanged.**
+
+```jsonc
+{
+  "schema": 1,
+  "apps": [
+    { "id": "roosevelt", "title": "Roosevelt Rd co-sim" },
+    { "id": "mlk_eco_driving", "title": "MLK arterial eco-driving",
+      "maps": ["mlk"],
+      "configs": [
+        { "path": "MLK_Sumo_Scenario/config_Sumo_Carla_dSPACE.yaml",
+          "title": "dSPACE XIL", "engine": "cpp" }
+      ],
+      "defaults": { "engine": "cpp" } }
+  ]
+}
+```
+
+- **`maps` defaults to the app's `id`.** An app named after its location matches the
+  library entry of the same name and declares nothing. A name that matches neither a
+  library entry nor a cooked map is simply *not offered* &mdash; the picker falls
+  through to the full library / cooked / local-file menu, so a stale name costs a
+  shortcut, never a run.
+- **The picker never filters.** App maps are listed first and take the Enter-default;
+  below them come all library releases, then **every** map cooked into this CARLA.
+  What is cooked is a property of the machine, not the application.
+- **`configs` are staged, not read in place.** Each is copied to
+  `~/.fixs/apps/<id>/` on first use, because a committed yaml carries machine
+  -specific values (CARLA server IP, dSPACE ports) that must not go back into the
+  repo. Your copy is never silently clobbered: an upstream change refreshes it only
+  while you have not edited it, otherwise it lands beside it as `<name>.yaml.new`.
+- **`engine` on a config** says which bridge that yaml is written for. Without it a
+  hand-written native-stack yaml reads as `py`, because `ConfigHelper` defaults
+  `CarlaSetup.EnablePythonBackend` to true &mdash; it would silently run the wrong
+  stack. `--engine` still overrides.
+
+### Saved run setups
+
+Every run is remembered in `~/.fixs/run_profiles.json` (one profile per app), so the
+next run opens with a summary instead of the full round of questions:
+
+```
+[cosim] Saved setup 'roosevelt' (last run 2026-07-29 13:21):
+   1) app      roosevelt
+   2) map      roosevelt_full   (Digital-Twin-Library)
+   3) scenario config.yaml   (generated, per-map)
+   4) engine   py   (run_synchronization.py)
+   5) CARLA    source  C:/src_ext/Carla  ->  127.0.0.1:2000
+   6) SUMO     gui, step 0.05
+
+[cosim] Enter = run as-is | numbers to change (e.g. "2 4") | A = all | Q = quit:
+```
+
+Only the slots you name are re-asked; dependent ones follow automatically (changing
+the app re-asks the map and scenario; changing the map re-asks the scenario only if
+it was that map's *generated* yaml, since an app yaml belongs to the app). Explicit
+flags outrank the profile entirely, so `run_cosim --map atlanta` changes exactly one
+thing and prompts for nothing. `--fresh` ignores the profile, `--no-app` ignores the
+manifest, `--profile <name>` selects a specific saved setup. The file is stored as
+`{active, profiles{}}` from the start so a future front-end can list and switch named
+setups without a format change.
+
 ## Running a co-sim
 
 Once CARLA is configured (or on the auto-prompting first run), `run_cosim.py`
