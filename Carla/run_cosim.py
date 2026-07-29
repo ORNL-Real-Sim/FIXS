@@ -1024,7 +1024,8 @@ def main():
         target_map = args.map
     else:                                        # pick from catalog / local
         target_map, picked_tag, picked_local = import_map.choose_map(
-            repo, tag_prefix, cfg.get("carla_root") if cfg else None)
+            repo, tag_prefix, cfg.get("carla_root") if cfg else None,
+            catalog=catalog)
         picked = import_map.catalog_entry(catalog, target_map)
         if picked:                               # a catalog pick: use its real name + settings
             settings = picked.get("settings", {})

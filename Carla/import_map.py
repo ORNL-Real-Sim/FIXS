@@ -848,7 +848,7 @@ def _prompt(msg):
                  "--map / --package to run without prompting.")
 
 
-def choose_map(repo, tag_prefix="", carla_root=None):
+def choose_map(repo, tag_prefix="", carla_root=None, catalog=None):
     """Interactive chooser. Lists ONLINE maps (repo's releases from the
     Digital-Twin-Library) and, when carla_root is given, LOCAL maps already cooked
     into that CARLA - clearly separated - plus a hand-picked local .zip/folder.
@@ -867,8 +867,18 @@ def choose_map(repo, tag_prefix="", carla_root=None):
         for r in releases:
             menu.append(("release", r))
             pkg = _package_from_tag(r["tag"], tag_prefix)
+            # Label with the REAL cooked map name when the catalog knows one, so an
+            # Online entry and its Local twin read as the same map ('roosevelt_full'
+            # in both lists) instead of two unrelated things ('roosevelt' vs
+            # 'roosevelt_full'). The release tag stays the identifier we return and
+            # what --map accepts; only the display changes. Safe because
+            # catalog_entry() resolves location, map_name and release alike.
+            ent = catalog_entry(catalog, pkg)
+            label = (ent or {}).get("map_name") or pkg
             flag = "  (pre-release)" if r["prerelease"] else ""
-            print(f"   {len(menu):>2}) {pkg:<26} {r['date']}{flag}")
+            if label in cooked:
+                flag += "  (already imported)"
+            print(f"   {len(menu):>2}) {label:<26} {r['date']}{flag}")
     if cooked:
         print("  Local (already imported into CARLA):")
         for name in cooked:
