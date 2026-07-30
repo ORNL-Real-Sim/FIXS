@@ -797,8 +797,26 @@ int TrafficHelper::sendToSUMO(double simTime, MsgHelper Msg_c) {
 						addEgoVehicleFromXY(simTime, idStr, vehicleType, positionX, positionY);
 						carlaInjectedIds_.insert(idStr);
 					}
+					// #174 off-map guard: getPosition (n-1) is where SUMO placed the ego on
+					// the PREVIOUS moveToXY. If that's far from what we fed then, SUMO could
+					// not keep the ego on the drivable network (snapped/failed) -> the ego
+					// left the road. Isolated try so a getPosition hiccup can't skip the move.
+					auto itLast = carlaLastFed_.find(idStr);
+					if (itLast != carlaLastFed_.end()) {
+						try {
+							auto sp = SUMO_TRACI_NAMESPACE::Vehicle::getPosition(idStr);
+							double ex = sp.x - itLast->second.first, ey = sp.y - itLast->second.second;
+							fixs::RS_XIL_GUARD("ego_off_sumo_network", std::sqrt(ex * ex + ey * ey), 5.0);
+						}
+						catch (...) {}
+					}
 					SUMO_TRACI_NAMESPACE::Vehicle::moveToXY(idStr, "", -1, positionX, positionY, heading, 6);
-					if (vehicleExist) SUMO_TRACI_NAMESPACE::Vehicle::setSpeed(idStr, speed);
+					carlaLastFed_[idStr] = std::make_pair(positionX, positionY);
+					// #174: setSpeed with the ACTUAL Carla speed -- the `.speed` field, NOT
+					// `speedDesired` (the L2 command). This makes SUMO's getSpeed the true ego
+					// speed so it is safe to read from the SUMO side and background car-following
+					// sees the real speed. (The old bug used speedDesired -> a "shadow speed".)
+					SUMO_TRACI_NAMESPACE::Vehicle::setSpeed(idStr, (double)Msg_c.VehDataSend_um[0][iV].speed);
 				}
 				catch (const std::exception& e) {
 					printf("Carla external-control inject '%s' failed: %s\n", idStr.c_str(), e.what());

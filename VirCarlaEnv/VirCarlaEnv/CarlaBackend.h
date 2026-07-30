@@ -89,6 +89,11 @@ public:
                      int repeat, int tmPort);
     void driveEgoFallback(double targetSpeed);   // per-tick: EgoDriver -> ApplyControl
 
+    // #174 unified EgoDriver: apply an ACTUATION command supplied by an external FIXS
+    // client (EgoDriver client for L0/L2, a real controller for L4). throttle/brake in
+    // [0,1], steerNorm in [-1,1]. Carla owns no in-process driver in this mode.
+    void applyEgoActuation(double throttle, double brake, double steerNorm);
+
     // L2 (EgoMode >= 2): advise the active L0 driver of an EXTERNAL desired speed
     // (m/s), overriding the static EgoTargetSpeed until changed. Native TM path ->
     // tm.SetDesiredSpeed; EgoDriver fallback -> the per-tick target used by
