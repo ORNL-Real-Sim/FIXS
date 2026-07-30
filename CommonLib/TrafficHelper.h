@@ -18,6 +18,7 @@
 #define SUMO_TRACI_NAMESPACE libtraci
 #endif
 #include "SocketHelper.h"
+#include "XilGuard.h"
 
 
 class TrafficHelper
@@ -143,6 +144,9 @@ public:
 	// Carla external-control ids already added to the traffic simulator (add ONCE,
 	// then wait for insertion; see the Carla inject branch in sendToSUMO).
 	std::set<std::string> carlaInjectedIds_;
+	// #174: last (x,y) fed to moveToXY per Carla-owned id -- lets the off-map guard
+	// compare SUMO's placement (getPosition, n-1) to what we asked for last tick.
+	std::unordered_map<std::string, std::pair<double, double>> carlaLastFed_;
 
 	// #177: skip per-vehicle TraCI getters whose output is never sent. Derived
 	// once from VehicleMessageField_set in connectionSetup -- getNextTLS is only

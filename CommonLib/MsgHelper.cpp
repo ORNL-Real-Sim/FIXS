@@ -389,6 +389,9 @@ void MsgHelper::packVehData(const VehFullData_t& VehData, char* buffer, int* iBy
 	numericVehDataToBuffer<uint16_t>(VehData.lightIndicators, "lightIndicators", buffer, iByte);
 	
 	// packVehData: add new vehicle message field here
+	numericVehDataToBuffer<float>(VehData.steerAngleDesired, "steerAngleDesired", buffer, iByte);
+	numericVehDataToBuffer<float>(VehData.acceleratorPedalDesired, "acceleratorPedalDesired", buffer, iByte);
+	numericVehDataToBuffer<float>(VehData.brakePedalDesired, "brakePedalDesired", buffer, iByte);
 
 	// go back to the first byte location and parser message size
 	tempUint16 = (*iByte - initByte);
@@ -454,6 +457,9 @@ void MsgHelper::depackVehData(char* buffer, VehFullData_t& VehData) {
 	bufferToNumericVehData<uint16_t>(buffer, &iByte, "lightIndicators", tempUint16); VehData.lightIndicators = tempUint16;
 
 	// depackVehData: add new vehicle message field here
+	bufferToNumericVehData<float>(buffer, &iByte, "steerAngleDesired", tempFloat); VehData.steerAngleDesired = tempFloat;
+	bufferToNumericVehData<float>(buffer, &iByte, "acceleratorPedalDesired", tempFloat); VehData.acceleratorPedalDesired = tempFloat;
+	bufferToNumericVehData<float>(buffer, &iByte, "brakePedalDesired", tempFloat); VehData.brakePedalDesired = tempFloat;
 
 }
 

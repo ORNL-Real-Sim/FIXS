@@ -24,7 +24,14 @@ from CommonLib.MsgHelper import MsgHelper
 from CommonLib.SocketHelper import SocketHelper
 from CommonLib.VehDataMsgDefs import VehData
 
-FIELDS = ['id', 'type', 'vehicleClass', 'speed', 'acceleration', 'speedDesired']
+FIELDS = ['id', 'type', 'vehicleClass', 'speed', 'acceleration', 'speedDesired',
+          # #87: the three fields dev added in #218 land at the "add new field here"
+          # marker in packVehData. They are listed here on purpose: the size pass and
+          # the pack pass share one traversal, so a new field must flow into
+          # total_msg_size with no change to the sizing code. If that ever stops being
+          # true this test desyncs, which is the guard the old duplicated-field-list
+          # design would not have had.
+          'steerAngleDesired', 'acceleratorPedalDesired', 'brakePedalDesired']
 
 
 def make_veh(i):
