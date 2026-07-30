@@ -17,7 +17,7 @@ This guide provides comprehensive information about the FIXS repository structur
 #### **build/**
 Output directory for compiled executables and libraries, including:
 - `TrafficLayer.exe` - Central co-simulation synchronization framework executable
-- `DriverModel_RealSim.dll` / `DriverModel_RealSim_v2021.dll` - VISSIM driver model DLLs
+- `DriverModel_RealSim.dll` / `DriverModel_RealSim_legacy.dll` - VISSIM driver model DLLs (default int-API + frozen long-API legacy)
 - MATLAB/Simulink interface files (`.m`, `.mexw64`)
 
 #### **CarMaker/**
@@ -185,7 +185,6 @@ CommonLib/libsumo/
 ### `compileExternalLibraries.bat`
 Compiles required external dependencies:
 - **yaml-cpp** - YAML configuration parser library (builds both Release and Debug versions)
-- ~~libevent~~ (commented out - not currently used)
 
 **Requirements:** CMake, Visual Studio 2022
 

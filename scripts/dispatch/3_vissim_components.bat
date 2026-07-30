@@ -3,7 +3,8 @@ setlocal EnableExtensions EnableDelayedExpansion
 
 REM ====================================
 REM Build VISSIM Components
-REM Builds: DriverModel_RealSim and DriverModel_RealSim_v2021
+REM Builds: DriverModel_RealSim       (default, int API, VISSIM 2021+)
+REM         DriverModel_RealSim_legacy (frozen, long API, VISSIM <= 2020)
 REM ====================================
 
 set "SCRIPT_DIR=%~dp0"
@@ -121,9 +122,9 @@ if errorlevel 1 (
     call :TrackFailure "DriverModel_RealSim (%CFG%)"
     set "BUILD_RESULT=1"
 )
-call :BuildSolution "DriverModel_RealSim_v2021 (%CFG%)" ".\ProprietaryFiles\VISSIMserver\VISSIMserver.sln" "/target:DriverModel_RealSim_v2021 /p:Configuration=%CFG%"
+call :BuildSolution "DriverModel_RealSim_legacy (%CFG%)" ".\ProprietaryFiles\VISSIMserver\VISSIMserver.sln" "/target:DriverModel_RealSim_legacy /p:Configuration=%CFG%"
 if errorlevel 1 (
-    call :TrackFailure "DriverModel_RealSim_v2021 (%CFG%)"
+    call :TrackFailure "DriverModel_RealSim_legacy (%CFG%)"
     set "BUILD_RESULT=1"
 )
 exit /b 0

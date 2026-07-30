@@ -7,6 +7,7 @@ This document describes how to build Real-Sim FIXS from source. For general proj
 * [Build System Overview](#build-system-overview)
 * [Prerequisites](#prerequisites)
 * [Release Builds](#release-builds)
+* [Automated Release CI & Proprietary Binaries Bundle](#automated-release-ci--proprietary-binaries-bundle)
 * [Development Builds](#development-builds)
 * [Debug vs Release Configuration](#debug-vs-release-configuration)
 * [Build System Architecture](#build-system-architecture)
@@ -21,7 +22,8 @@ dispatch.bat
 ```
 
 This single command will:
-- Build external libraries (yaml-cpp, libevent)
+- Generate the version header (RealSimVersion.h) from git tags
+- Build external libraries (yaml-cpp)
 - Build core components (TrafficLayer, VirtualEnvironment)
 - Build VISSIM driver model DLLs
 - Build CarMaker executables for all detected versions
@@ -54,7 +56,7 @@ The Real-Sim FIXS build system uses a modular script-based architecture that aut
      - C++14 is required for compatibility with CarMaker SDK and dSPACE toolchain
 
 2. **CMake** (version 3.10 or higher)
-   - Required for building external libraries (yaml-cpp, libevent)
+   - Required for building external libraries (yaml-cpp)
    - Must be in PATH
    - Download from: https://cmake.org/download/
 
@@ -120,11 +122,16 @@ dispatch.bat
 
 The release build process executes the following steps:
 
+0. **Version Header** (`generate_version.ps1`)
+   - Generates `CommonLib/RealSimVersion.h` from git tags
+   - Falls back to existing header or default (0.0.0) if git is unavailable
+   - Output: `CommonLib/RealSimVersion.h` (auto-generated, not committed)
+
 1. **External Libraries** (`1_external_libraries.bat`)
    - yaml-cpp (YAML configuration parser)
-   - libevent (not currently used, but available)
    - Built in both Debug and Release configurations
-   - Output: `CommonLib/yaml-cpp/build/`, `CommonLib/libevent/build/`
+   - Output: `CommonLib/yaml-cpp/build/`
+   - Note: libevent was removed in issue #131 as it was confirmed unused
 
 2. **Core Components** (`2_core_components.bat`)
    - `TrafficLayer.exe` - Main interface executable
@@ -133,8 +140,8 @@ The release build process executes the following steps:
    - Output: Component directories + copied to `build/`
 
 3. **VISSIM Components** (`3_vissim_components.bat`)
-   - `DriverModel_RealSim.dll` - VISSIM 2022 driver model
-   - `DriverModel_RealSim_v2021.dll` - VISSIM 2021 driver model
+   - `DriverModel_RealSim.dll` - VISSIM driver model, default (int API, VISSIM 2021+, including 2022)
+   - `DriverModel_RealSim_legacy.dll` - VISSIM driver model, legacy/frozen (long API, VISSIM ≤ 2020)
    - Output: `ProprietaryFiles/VISSIMserver/` + copied to `build/`
 
 4. **CarMaker Components** (`4a_carmaker_components.ps1`)
@@ -169,8 +176,8 @@ build/
 ├── BUILD_INFO.txt                    # Build metadata and versions
 ├── TrafficLayer.exe                  # Core interface
 ├── CoordMerge.exe                    # Controller
-├── DriverModel_RealSim.dll           # VISSIM 2022 interface
-├── DriverModel_RealSim_v2021.dll     # VISSIM 2021 interface
+├── DriverModel_RealSim.dll           # VISSIM interface, default (int API, VISSIM 2021+)
+├── DriverModel_RealSim_legacy.dll    # VISSIM interface, legacy (long API, VISSIM ≤ 2020)
 ├── RealSimSocket.mexw64              # MATLAB MEX file
 ├── RealSim*.m                        # MATLAB helper scripts
 ├── CommonLib/                        # Helper libraries and headers
@@ -186,6 +193,62 @@ build/
     └── libRealSimDsLib_*.a           # dSPACE libraries (if built)
 ```
 
+## Automated Release CI & Proprietary Binaries Bundle
+
+FIXS releases are produced by a GitHub Actions pipeline (`.github/workflows/release.yml`) so downstream consumers always get a complete, consistent zip without a developer hand-running the full build. The automation boundary is drawn at **source visibility**:
+
+- **Public source → built on the hosted runner every push** (`windows-2022`, matching the VS 2022 generator; `windows-latest` ships VS 2026 and is incompatible): yaml-cpp, `TrafficLayer.exe`, `CoordMerge.exe`, `VirtualEnvironment.lib` (SDK-free on the 0.9.0 train, #174), and all `Carla/` + `CommonLib` Python. No private submodule, no token.
+- **Licensed-toolchain source → built manually on a licensed workstation**: the VISSIM DriverModel DLLs, CarMaker executables + CM4SL MEX, dSPACE libraries, and the MATLAB MEX. These need installed proprietary toolchains, so the hosted runner cannot build them. They ship as a prebuilt **bundle** that CI overlays into the build.
+
+The hosted path is made proprietary-aware by the `RS_FIXS_AUTOMATION` environment flag, which tells `dispatch.bat` to skip the licensed steps (3 / 4a / 4b / 5) and consume the downloaded bundle instead.
+
+### Rolling release channels
+
+| Branch | Rolling prerelease | Notes |
+|--------|--------------------|-------|
+| `main` | `latest` | current train |
+| `dev_v0.9.0` | `v0.9.0-alpha` | 0.9.0 train (SDK-free VirtualEnvironment, #174) |
+
+On every push to a release branch the pipeline builds the public core, overlays the matching proprietary bundle, packs one canonical zip, and (re)publishes the rolling prerelease anchored to that commit. Pull requests build + package only (no publish), and upload the zip as a workflow artifact for inspection.
+
+### The proprietary-binaries bundle
+
+The proprietary binaries live in a per-key GitHub Release on this repo, `Binaries-<key>`, where `<key>` is the **`ProprietaryFiles` submodule commit SHA** (first 12 chars; see `scripts/dispatch/bundle_key.ps1`). The key pairs a bundle to the exact proprietary source it was built from. CI reads the pinned submodule SHA from the FIXS tree (`git ls-tree HEAD ProprietaryFiles`), downloads `Binaries-<key>`, unzips it into `build/`, and packs the release zip — no private submodule checkout or cross-repo token needed.
+
+A PR check, **`bundle-guard`** (`.github/workflows/bundle-guard.yml`), makes it impossible to merge a PR that moves the `ProprietaryFiles` pointer unless the matching `Binaries-<key>` is already published — so a "bumped the SHA but forgot to rebuild the binaries" mistake cannot reach a release branch.
+
+### Publishing a new bundle (when ProprietaryFiles changes)
+
+Whenever `ProprietaryFiles` moves, a fresh bundle must be built and published on a **licensed workstation** before the FIXS submodule bump can merge:
+
+1. **Sync the submodule** to the target proprietary commit, and **clean the tree** so a crashed or partial build can't be masked by a stale artifact:
+   ```batch
+   git submodule update --init --force ProprietaryFiles
+   ```
+   Remove prior build outputs first — `build/`, the `x64/` output dirs, and the CarMaker `src*/Release/` obj dirs. Otherwise a stale output gets copied into `build/` and hides a failed rebuild.
+
+2. **Full dispatch** — no `RS_FIXS_AUTOMATION`, so the proprietary steps run:
+   ```batch
+   dispatch.bat
+   ```
+   Confirm `scripts/dispatch/build_summary.log` shows **zero failures** and every proprietary artifact in `build/` is **freshly timestamped**. (A transient `CL.exe` crash — `exit code -1073741819` / `0xC0000005`, seen on Win11 24H2 — can fail one target while the rest succeed; the clean tree makes that show up as a *missing* file rather than a stale one.)
+
+3. **Pack + publish** the bundle:
+   ```powershell
+   powershell -File scripts\dispatch\pack_binaries.ps1 -Publish
+   ```
+   This zips the proprietary subset of `build/` into `fixs-binaries-<key>.zip` + `manifest.json` and creates the `Binaries-<key>` prerelease on `ORNL-Real-Sim/FIXS`.
+
+4. **Bump the FIXS submodule pointer** to the merged `ProprietaryFiles` commit in a PR to the release branch. `bundle-guard` verifies `Binaries-<key>` exists; once it's green (and reviewed), merge. The push then triggers the pipeline, which overlays the new bundle and publishes the complete rolling zip.
+
+> **Order matters:** publish the bundle (step 3) **before** opening the submodule-bump PR, or `bundle-guard` will (correctly) block the merge.
+
+### Notes
+
+- **Bundle contents** (the files `pack_binaries.ps1` collects): both VISSIM DLLs (`DriverModel_RealSim.dll` + `_legacy.dll`), per-CM `CarMaker.win64.exe` + `libcarmaker4sl.mexw64`, the dSPACE `libRealSimDsLib_*.a`, and `RealSimSocket.mexw64`.
+- **Versioning** uses `git describe --match 'v[0-9]*'` so the rolling non-semver tag can't shadow the semver tag (which previously fell back to `0.0.0`). `CommonLib/RealSimVersion.h` is regenerated at build time by a pre-build step in `TrafficLayer.vcxproj`.
+- **`pack_binaries.ps1 -Publish`** works under both PowerShell 7 (`pwsh`, used by CI) and stock Windows PowerShell 5.1.
+
 ## Development Builds
 
 For active development, you can build individual components without running the full dispatch. This is faster and allows focused debugging.
@@ -198,7 +261,7 @@ Each component has its own build script in `scripts/dispatch/`:
 ```batch
 scripts\dispatch\1_external_libraries.bat
 ```
-Builds yaml-cpp and libevent. Only needed once or after clean builds.
+Builds yaml-cpp. Only needed once or after clean builds.
 
 #### 2. Core Components Only
 ```batch
@@ -299,29 +362,40 @@ msbuild TrafficLayer\TrafficLayer.sln /p:Configuration=Debug /p:Platform=x64
 
 ### External Libraries Debug Build
 
-External libraries (yaml-cpp, libevent) are built in both Debug and Release configurations automatically:
-- Release: `yaml-cpp.lib`, `event.lib`
-- Debug: `yaml-cppd.lib`, `eventd.lib`
+yaml-cpp is built in both Debug and Release configurations automatically:
+- Release: `yaml-cpp.lib`
+- Debug: `yaml-cppd.lib`
 
-When building components in Debug mode, make sure to link against Debug libraries (`yaml-cppd.lib`).
+When building components in Debug mode, make sure to link against the Debug library (`yaml-cppd.lib`).
 
 ## Build System Architecture
 
 ### Script Organization
 
 ```
-scripts/dispatch/
-├── dispatch.bat                     # Main orchestrator
-├── detect_tool_paths.ps1            # Auto-detection of tools
-├── yaml_helper.ps1                  # Parse dependencies.yaml
-├── 1_external_libraries.bat         # Build yaml-cpp, libevent
-├── 2_core_components.bat            # Build TrafficLayer, VirtualEnvironment
-├── 3_vissim_components.bat          # Build VISSIM DLLs
-├── 4a_carmaker_components.ps1       # Build CarMaker executables
-├── 4b_carmaker_dspace.ps1           # Build dSPACE libraries
-├── 5_mex_realsim_socket.ps1         # Build MATLAB MEX file
-└── 6_build_info.ps1                 # Generate BUILD_INFO.txt
+scripts/
+├── generate_version.ps1             # Generate RealSimVersion.h from git tags
+├── build_libsumo.ps1                # STANDALONE: Build libsumo DLLs from SUMO source
+├── build_sumo_executables.ps1       # STANDALONE: Build SUMO executables from source
+└── dispatch/
+    ├── dispatch.bat                 # Main orchestrator
+    ├── detect_tool_paths.ps1        # Auto-detection of tools
+    ├── yaml_helper.ps1              # Parse dependencies.yaml
+    ├── 1_external_libraries.bat     # Build yaml-cpp
+    ├── 2_core_components.bat        # Build TrafficLayer, VirtualEnvironment
+    ├── 3_vissim_components.bat      # Build VISSIM DLLs
+    ├── 4a_carmaker_components.ps1   # Build CarMaker executables
+    ├── 4b_carmaker_dspace.ps1       # Build dSPACE libraries
+    ├── 5_mex_realsim_socket.ps1     # Build MATLAB MEX file
+    └── 6_build_info.ps1             # Generate BUILD_INFO.txt
 ```
+
+### Standalone Utility Scripts
+
+Two scripts in `scripts/` are standalone utilities not called by `dispatch.bat`:
+
+- **`build_libsumo.ps1`**: Builds libsumo DLLs from SUMO source. Use this when the SUMO version in `dependencies.yaml` changes and you need to rebuild the vendored libsumo binaries in `CommonLib/libsumo/`.
+- **`build_sumo_executables.ps1`**: Builds the full SUMO application suite (sumo.exe, sumo-gui.exe, etc.) from source. Most users should download a pre-built SUMO release instead.
 
 ### Tool Auto-Detection
 
@@ -485,7 +559,6 @@ To perform a clean build:
    - `CarMaker/CM*/src*/libcarmaker4sl.mexw64`
 3. Optionally delete external library builds:
    - `CommonLib/yaml-cpp/build/`
-   - `CommonLib/libevent/build/`
 4. Run `dispatch.bat`
 
 ### Common Build Order Issues

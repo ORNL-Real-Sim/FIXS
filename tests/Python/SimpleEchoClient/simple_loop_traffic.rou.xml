@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!-- Routes for the multi-vehicle subscription repro (issue #176).
+     Same square loop as simple_loop.rou.xml, but with background traffic DISTRIBUTED
+     around all four edges so that "all" vs "ego radius:R" vs "ego radius:0" produce
+     distinguishable, stable vehicle counts.
+
+     Why four rotated routes: a SUMO <flow> inserts all its vehicles on its route's
+     first edge, and vehicles moving at similar speed stay clustered. To spread traffic
+     around the loop we use four routes that start on different edges; each carries a
+     flow. The result is ~34 vehicles spread around the multi-lane loop, so a position-
+     based radius subscription centred on the (moving) ego catches a strict subset, while
+     'all' catches the whole network. -->
+<routes xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/routes_file.xsd">
+
+    <!-- Vehicle type -->
+    <vType id="car" vClass="passenger" length="5.0" minGap="2.5" maxSpeed="20.0" accel="2.6" decel="4.5" sigma="0.5"/>
+
+    <!-- Four full-loop routes, each starting on a different edge (rotations of the loop).
+         The network (simple_loop.net.xml, regenerated under #174's gen_rounded_loop.py) has
+         rounded corners, so each side connects to the next via a corner_* connector edge. -->
+    <route id="loop_b" edges="bottom corner_br right corner_tr top corner_tl left corner_bl" repeat="100"/>
+    <route id="loop_r" edges="right corner_tr top corner_tl left corner_bl bottom corner_br" repeat="100"/>
+    <route id="loop_t" edges="top corner_tl left corner_bl bottom corner_br right corner_tr" repeat="100"/>
+    <route id="loop_l" edges="left corner_bl bottom corner_br right corner_tr top corner_tl" repeat="100"/>
+
+    <!-- Ego vehicle (subscribed by id 'ego'), starts on the bottom edge -->
+    <vehicle id="ego" type="car" route="loop_b" depart="0" color="1,0,0"/>
+
+    <!-- Background traffic: 12 vehicles per edge, inserted over the first 30 s.
+         With ego this gives ~34 vehicles present once insertion completes (~t=30 s). -->
+    <flow id="bgb" type="car" route="loop_b" begin="0" end="30" number="12" color="0,0,1"/>
+    <flow id="bgr" type="car" route="loop_r" begin="0" end="30" number="12" color="0,0,1"/>
+    <flow id="bgt" type="car" route="loop_t" begin="0" end="30" number="12" color="0,0,1"/>
+    <flow id="bgl" type="car" route="loop_l" begin="0" end="30" number="12" color="0,0,1"/>
+
+</routes>

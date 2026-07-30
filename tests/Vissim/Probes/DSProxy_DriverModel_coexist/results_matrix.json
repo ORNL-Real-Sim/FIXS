@@ -1,0 +1,15 @@
+{
+  "_comment": "Empirical results matrix from a known-good Stage 2 run. Use as a sanity-check after intentional FIXS DriverModel changes (especially around DRIVER_COMMAND_INIT socket setup).",
+  "vissim_version": "2022",
+  "matrix": {
+    "no_drivermodel":   { "vissim_connect": true,  "elapsed_s": 13.3 },
+    "ptv_stock":        { "vissim_connect": true,  "elapsed_s": 13.5 },
+    "bogus_dll":        { "vissim_connect": false, "elapsed_s": 14.0 },
+    "real_drivermodel": { "vissim_connect": false, "elapsed_s": 20.0 }
+  },
+  "diagnosis": {
+    "ptv_stock_passes": "DSProxy + a benign DriverModel CAN coexist in one VISSIM instance against one .inpx — the architecture is sound.",
+    "bogus_dll_fails":  "VISSIM aborts the DS handshake if the ExtDriver DLL path cannot be loaded.",
+    "real_drivermodel_fails_reason": "FIXS DriverModel_RealSim.dll runs Sock_c.socketSetup(...) unconditionally in DRIVER_COMMAND_INIT (~line 1280 of DriverModel_FIXS_Common.h), BEFORE the ENABLE_REALSIM gate. With no TrafficLayer listening on TrafficSimulatorPort, the socket-setup blocks for ~7s, which is long enough for VISSIM's DS-handshake watchdog to abort the DSProxy connection. Fix: move that socketSetup inside the `if (ENABLE_REALSIM)` block."
+  }
+}

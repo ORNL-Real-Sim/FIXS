@@ -1,0 +1,7 @@
+# Raw CSV outputs are large and bound to RNG / VISSIM patch versions —
+# they shouldn't be checked in. The compact summary.json file IS checked
+# in (see README) as the regression-comparison artifact.
+out_*/network/
+out_*/run.log
+out_*/vehicles.csv
+out_*/signals.csv

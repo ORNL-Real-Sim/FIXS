@@ -39,17 +39,60 @@ simulation to `speed_limit_lite_trace.{csv,parquet}`.
 run_speed_limit_lite.bat
 ```
 
-Output (in this folder):
+By default the bat hooks `start_vissim.py` at VISSIM 2022 (ProgID
+`VISSIM.Vissim.2200`). On a dev machine that only has VISSIM 2026
+installed, run the Python helper directly with the ProgID override:
+
+```
+python start_vissim.py --progid VISSIM.Vissim.2600
+```
+
+or set `VISSIM_PROGID=VISSIM.Vissim.2600` in the environment.
+
+Runtime outputs (gitignored, in this folder):
 
 - `speed_limit_lite_trace.csv` — human-readable trace
 - `speed_limit_lite_trace.parquet` — typed, compressed (~10× smaller)
 
-Compare against the reference:
+## Compare against the blessed baseline
+
+The blessed trace depends on **two** orthogonal axes — which VISSIM
+version dispatched, and which FIXS driver-DLL ABI is loaded into it:
+
+| File | VISSIM | DLL ABI (DLL filename today) | Notes |
+|---|---|---|---|
+| `speed_limit_lite_orig_v2022.csv` | 2022.00-13 | int (`DriverModel_RealSim_v2021.dll`) | new default |
+| `speed_limit_lite_orig_v2026.csv` | 2026 | int (`DriverModel_RealSim_v2021.dll`) | new default |
+| `speed_limit_lite_orig_v2022_legacy.csv` | 2022.00-13 | long (`DriverModel_RealSim.dll`) | VISSIM ≤ 2020 source |
+| `speed_limit_lite_orig_v2026_legacy.csv` | 2026 | long (`DriverModel_RealSim.dll`) | VISSIM ≤ 2020 source |
+
+`compare_traces.py --vissim-version {2022,2026} --api {int,legacy}` picks
+the matching CSV. Defaults: `--vissim-version 2022 --api int`.
 
 ```
 conda activate realsim_dev
-python compare_traces.py             # vs speedLimitTest1_orig.parquet
-python compare_traces.py --ref ../SpeedLimit/speedLimitTest2_orig.parquet
+python compare_traces.py                            # v2022 int (default)
+python compare_traces.py --vissim-version 2026      # v2026 int
+python compare_traces.py --api legacy               # v2022 long-API
+python compare_traces.py --vissim-version 2026 --api legacy
+```
+
+**Why both ABIs?** PTV moved the driver-model SDK from `long` to `int`
+parameters between VISSIM 2020 and 2021. On Windows x64 LLP64 both are
+32-bit, so the long-API DLL still loads in VISSIM 2021+, but it doesn't
+exercise the int-API-only code paths (SUB_EGO_ONLY, ENABLE_WARMUP,
+ENABLE_LOG, etc.). The four-baseline split locks SpeedLimitLite to
+the expected output on each (VISSIM, DLL) cell.
+
+`start_vissim.py` picks the DLL via `--driver-dll int|legacy|<path>`
+(default `int`), or `FIXS_DRIVER_DLL=int|legacy` in the env.
+
+If you need to compare against the *historical* SpeedLimit Simulink
+references for any reason (different stack — Simulink ego controller
+at 1 ms vs our Python observer at 100 ms), point `--ref` explicitly:
+
+```
+python compare_traces.py --ref ../SpeedLimit/speedLimitTest1_orig.parquet
 ```
 
 ## Reference data: why Parquet, not .mat

@@ -19,6 +19,7 @@ Please start with reading through the documentation, and playwith included Examp
       * [Additional instructions for RS Simulink libraries](#additional-instructions-for-rs-simulink-libraries)
 * [Setup Application](#setup-application)
   * [SUMO](#sumo)
+  * [VISSIM](#vissim)
 * [Run Simulations](#run-simulations)
   * [General Setups](#general-setups)
   * [dSPACE](#dspace)
@@ -442,6 +443,33 @@ call conda deactivate
 pause
 ```
 
+### VISSIM
+
+> **Status (2026-06-05):** CarMaker-VISSIM co-simulation is a Milestone 0.9.0
+> deliverable, tracked by [#101](https://github.com/ORNL-Real-Sim/FIXS/issues/101)
+> (`VirtualEnvironment.lib` changes) and **gated on
+> [#156](https://github.com/ORNL-Real-Sim/FIXS/issues/156)**, the design ticket
+> for the VISSIM DLL path (DriverModel.dll vs DrivingSimulator.dll) and the
+> signal-routing decision. The instructions below will be filled in once #156
+> lands and a runnable scenario is built under [tests/Vissim/Ipg/](../tests/Vissim/Ipg/).
+
+The CarMaker side of the FIXS bridge (`VirtualEnvironment.lib`) consumes
+`VehFullData_t` over a TrafficLayer socket and is largely
+**traffic-simulator-agnostic at runtime** — the bulk of the CarMaker-VISSIM
+integration sits in TrafficLayer + `TrafficHelper`, not in this library.
+
+Once #156's design lands, this section will cover:
+- `CarMakerSetup` parameters specific to a VISSIM-backed TrafficLayer (any
+  required differences from the SUMO setup above).
+- The launcher template for VISSIM 2022 + TrafficLayer + CarMaker, including
+  the dispatch-soft-reset playbook (see [CLAUDE.md](../CLAUDE.md) "VISSIM 2022
+  dispatch on Win11 24H2").
+- Signal-light synchronization between VISSIM signal controllers and CarMaker
+  traffic-light objects, including the signal-table format finalized by #156.
+
+Until then, see [tests/Vissim/Ipg/README.md](../tests/Vissim/Ipg/README.md) for
+the current (stale, non-runnable) dock point and what is missing.
+
 ## Run Simulations
 
 ### General Setups
@@ -496,7 +524,12 @@ CarMakerSetup:
     
     CarMakerPort: 7331
     
-    # refresh rate, default Traffic Objects updates every 0.001 seconds
+    # refresh rate, default Traffic Objects updates every 0.001 seconds.
+    # This is how often traffic poses are RE-APPLIED to CarMaker - NOT how often FIXS
+    # exchanges with TrafficLayer. That exchange is a fixed 0.1 s (fixs::kFeedPeriodS),
+    # and the core interpolates each sample across the sub-steps in between -
+    # position, heading and grade - so 0.001 here means smooth 1 kHz traffic motion
+    # off a 10 Hz feed, not a 1 kHz SUMO.
     TrafficRefreshRate: 0.001
     
     # ego settings

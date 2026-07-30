@@ -23,15 +23,7 @@ $ProgressPreference = 'SilentlyContinue'   # faster Invoke-WebRequest for large 
 # Resolve output path
 $OutputDir = [System.IO.Path]::GetFullPath($OutputDir)
 
-# Skip if this exact (non-latest) version is already present
 $VersionFile = Join-Path $OutputDir 'FIXS_VERSION.txt'
-if ((Test-Path $VersionFile) -and $Version -ne 'latest') {
-    $current = (Get-Content $VersionFile -Raw).Trim()
-    if ($current -eq $Version) {
-        Write-Host "FIXS $Version is already fetched in $OutputDir (delete $VersionFile to force)."
-        exit 0
-    }
-}
 
 Write-Host "Fetching FIXS build ($Version) from $Repo (public, no auth)..."
 $Api = "https://api.github.com/repos/$Repo"
@@ -49,7 +41,26 @@ if (-not $asset) {
     Write-Error "No 'fixs-build-*.zip' asset on release '$Version'."
     exit 1
 }
-$GitRef = if ($release.target_commitish) { $release.target_commitish } else { 'main' }
+# Skip only when the release is immutable. Two bugs used to sit in this check, one
+# masking the other: it compared the whole 4-line FIXS_VERSION.txt (-Raw) against the
+# tag, so it never matched and every run re-downloaded; and the rolling prereleases
+# ('latest', 'v0.9.0-alpha') republish in place under a fixed tag, so a matching tag
+# does NOT mean the bundle is current. Fixing only the comparison would have pinned an
+# install to the first alpha it ever fetched - so both change together. 'prerelease'
+# marks exactly the rolling channels release.yml publishes, so no tag list to maintain.
+if ((Test-Path $VersionFile) -and -not $release.prerelease) {
+    $current = (Get-Content $VersionFile | Select-Object -First 1).Trim()
+    if ($current -eq $Version) {
+        Write-Host "FIXS $Version is already fetched in $OutputDir (delete $VersionFile to force)."
+        exit 0
+    }
+}
+
+# Ref for the libsumo clone below. The rolling prereleases are anchored to the exact
+# commit built (-Target $GITHUB_SHA, #191), so target_commitish is a raw SHA - and
+# `git clone --branch` accepts only branch/tag names, not SHAs. The release tag is a
+# valid ref on both trains ('latest' and 'v0.9.0-alpha' are real tags), so use it.
+$GitRef = $Version
 
 $TempDir = Join-Path ([System.IO.Path]::GetTempPath()) "fixs-fetch-$(Get-Random)"
 New-Item -ItemType Directory -Path $TempDir -Force | Out-Null
@@ -68,7 +79,16 @@ try {
     Write-Host "Fetching libsumo DLLs from $Repo (anonymous clone)..."
     $LibsumoDest = Join-Path $OutputDir 'CommonLib\libsumo\bin'
     $LibsumoTmp = Join-Path ([System.IO.Path]::GetTempPath()) "fixs-libsumo-$(Get-Random)"
-    git clone --depth 1 --filter=blob:none --sparse --branch $GitRef --quiet "https://github.com/$Repo.git" $LibsumoTmp
+    # TrafficLayer loads the libsumo runtime at startup, so a bundle without these DLLs
+    # is unusable. Fail loudly instead of warning: the version marker below is written
+    # only on success, otherwise an incomplete bundle would be stamped as good and the
+    # skip above would keep reporting it as already fetched. Mirrors initialize.sh.
+    $n = 0
+    # advice.detachedHead: cloning a TAG checks out a detached HEAD, and git prints that
+    # advice to stderr even under --quiet. Harmless on a console, but if a caller ever
+    # redirects stderr, PS 5.1 turns it into a NativeCommandError - which under an
+    # inherited $ErrorActionPreference='Stop' aborts the install on a *successful* clone.
+    git -c advice.detachedHead=false clone --depth 1 --filter=blob:none --sparse --branch $GitRef --quiet "https://github.com/$Repo.git" $LibsumoTmp
     if ($LASTEXITCODE -eq 0) {
         Push-Location $LibsumoTmp; git sparse-checkout set CommonLib/libsumo/bin; Pop-Location
         $src = Join-Path $LibsumoTmp 'CommonLib\libsumo\bin'
@@ -77,13 +97,20 @@ try {
             Copy-Item -Path "$src\*" -Destination $LibsumoDest -Recurse -Force
             $n = (Get-ChildItem -Path $LibsumoDest -Filter '*.dll' | Measure-Object).Count
             Write-Host "  Fetched $n libsumo DLLs"
-        } else {
-            Write-Warning "libsumo bin not found in clone; copy CommonLib/libsumo/bin manually if needed."
         }
         Remove-Item $LibsumoTmp -Recurse -Force -ErrorAction SilentlyContinue
     } else {
-        Write-Warning "Could not clone for libsumo DLLs (is git installed?). Copy CommonLib/libsumo/bin manually if needed."
         Remove-Item $LibsumoTmp -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    if ($n -eq 0) {
+        Write-Error @"
+Could not fetch the libsumo runtime (ref '$GitRef') from $Repo.
+TrafficLayer cannot start without $LibsumoDest. Check that git is installed and
+the ref exists, or download libsumo-<ver>.zip from
+  https://github.com/$Repo/releases/tag/fixs-native-deps
+and extract it into $OutputDir\CommonLib\.
+"@
+        exit 1
     }
 
     # --- Version marker ---
@@ -106,3 +133,8 @@ Zip: $($asset.name)
 } finally {
     if (Test-Path $TempDir) { Remove-Item -Path $TempDir -Recurse -Force }
 }
+
+# Declare success explicitly so a caller can trust $LASTEXITCODE. Without it the
+# value left over from the last native command (git) leaks out as this script's
+# result, which is only accidentally 0.
+exit 0

@@ -1,0 +1,41 @@
+{
+  "frames": {
+    "count": 100,
+    "first": 0,
+    "last": 99
+  },
+  "vehicles": {
+    "count_first_frame": 7,
+    "count_last_frame": 88,
+    "count_grows_monotonically_ish": true,
+    "types_seen": [
+      100,
+      200,
+      300,
+      400
+    ],
+    "leading_id_resolved_count": 2419
+  },
+  "ego": {
+    "registered": true,
+    "first_seen_frame": 0,
+    "last_seen_frame": 99,
+    "vissim_vehicle_ids_used": [
+      1
+    ],
+    "x_first": 396.3762,
+    "x_last": 457.0609,
+    "moved_east": true
+  },
+  "signals": {
+    "count_per_frame_min": 20,
+    "count_per_frame_max": 20,
+    "states_observed": [
+      "Green",
+      "Red",
+      "RedAmber"
+    ],
+    "num_controllers": 5,
+    "num_signal_groups_total": 20
+  }
+}

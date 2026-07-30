@@ -38,8 +38,32 @@
 #pragma comment (lib, "Mswsock.lib")
 #pragma comment (lib, "AdvApi32.lib")
 
+// #87: the per-step DELIVERY budget handed to the Simulink model, in BYTES rather
+// than a vehicle count. Record size is not knowable at compile time -- it depends on
+// the configured VehicleMessageField set and on the runtime length of each
+// id/link/lane string -- while the S-function output port and DWork widths are
+// literally byte counts. Sizing the limit in the same unit as the constraint avoids
+// a conversion constant that goes stale when the YAML field list changes. A lean
+// field set simply fits more vehicles; a rich one fits fewer.
+//
+// This bounds what is DELIVERED, never what can be RECEIVED. The reads below always
+// drain exactly total_msg_size bytes; records past the budget are consumed and
+// DISCARDED so the stream stays byte-aligned. That is the actual #87 defect here:
+// the old code read one bufferful and abandoned the rest, so every later step parsed
+// from the middle of a record and the stream never recovered.
+//
+// DELIBERATELY LEFT AT 1024. It is tempting to raise it -- ~1024 B is only ~7
+// vehicles -- but RECVBUFFERSIZE/SENDBUFFERSIZE set the S-function port widths
+// (ssSetOutputPortWidth/ssSetInputPortWidth below), so changing them is a BREAKING
+// interface change: every existing Simulink model wired to this block fails to load
+// with a port-width mismatch. Fixing the desync does not require it. Raising the
+// budget belongs in its own change, together with model migration.
 #define RECVBUFFERSIZE 1024
 #define SENDBUFFERSIZE 1024
+
+// FIXS wire header: uint8 simState + float simTime + uint32 total_msg_size.
+// Must match MSG_HEADER_SIZE in SocketHelper.h (this file does not include it).
+#define FIXS_MSG_HEADER_SIZE 9
 
 
 // s-function parameters
@@ -74,6 +98,10 @@ int nonblockFlag = 0;
 
 // this buffer will be held until new data is received
 int gRecvSizeHold = 0;
+
+// #87: latch so the delivery-budget overflow is reported once per run rather than
+// once per timestep (see mdlUpdate). Reset alongside gRecvSizeHold in mdlStart.
+int gOverflowWarned = 0;
 
 
 double simTime = 0.0;
@@ -361,12 +389,15 @@ static void mdlStart(SimStruct* S)
     serverConnected = 0;
     nonblockFlag = 0;
     simTime = 0.0;
-    simTimePrev = 0.0;   
+    simTimePrev = 0.0;
     gRecvSizeHold = (int) 0;
+    gOverflowWarned = 0;   // #87: re-arm the once-per-run overflow warning
+
     
-    
-    real_T            *recvDataHold       = (real_T*) ssGetDWork(S, 0);
-    memset(recvDataHold, 0, sizeof(recvDataHold));
+    // #87: DWork 0 is SS_INT8 x RECVBUFFERSIZE -> size in bytes is RECVBUFFERSIZE.
+    // sizeof(recvDataHold) is the POINTER size (8 B), so this cleared 8 bytes.
+    int8_T            *recvDataHold       = (int8_T*) ssGetDWork(S, 0);
+    memset(recvDataHold, 0, RECVBUFFERSIZE);
 
 	serverSock = 0;
 
@@ -404,8 +435,15 @@ static void mdlStart(SimStruct* S)
         return;
 	}
 			
-//     int nodelayflag = 1; 	
-// 	int resultt = setsockopt(serverSock, IPPROTO_TCP, TCP_NODELAY, (char*)&nodelayflag, sizeof(int));
+	// #87: TCP_NODELAY matters more now that the sender streams a message in chunks.
+	// Without it Nagle holds a sub-MSS write until the previous segment is ACKed, and
+	// against the peer's delayed ACK that is a 40-200 ms stall -- fatal to a 10 Hz
+	// lockstep. TrafficLayer already sets this on its sockets (SocketHelper.cpp);
+	// this path was the one client left without it.
+	int nodelayflag = 1;
+	if (setsockopt(serverSock, IPPROTO_TCP, TCP_NODELAY, (char*)&nodelayflag, sizeof(int)) == SOCKET_ERROR) {
+		printf("WARNING: TCP_NODELAY could not be set (%ld); co-sim may stall on Nagle\n", WSAGetLastError());
+	}
             
 	//-------------------------
 	// Set the socket I/O mode: In this case FIONBIO
@@ -495,6 +533,37 @@ static void mdlOutputs(SimStruct *S, int_T tid)
 
 
 
+// ===========================================================================
+// #87: exact-length read, mirroring SocketHelper.cpp::recvExact and
+// SocketHelper.py::_recv_exact so this client frames like every other one.
+// Returns n on success, 0 on a clean close before any byte, SOCKET_ERROR otherwise.
+// ===========================================================================
+static int recvExactMex(SOCKET sock, char* buf, int n) {
+    int got = 0;
+    while (got < n) {
+        int r = recv(sock, buf + got, n - got, 0);
+        if (r == SOCKET_ERROR) return SOCKET_ERROR;
+        if (r == 0) return (got == 0) ? 0 : SOCKET_ERROR;
+        got += r;
+    }
+    return got;
+}
+
+// #87: consume and throw away n bytes, so a message larger than the delivery budget
+// still leaves the stream byte-aligned for the next step. Reading past what we can
+// store costs no memory -- this is what makes an unbounded message safe on a target
+// with fixed storage. Returns 0 on success, -1 on error/close.
+static int recvDiscardMex(SOCKET sock, int n) {
+    char sink[512];
+    while (n > 0) {
+        int want = (n < (int)sizeof(sink)) ? n : (int)sizeof(sink);
+        int r = recv(sock, sink, want, 0);
+        if (r == SOCKET_ERROR || r == 0) return -1;
+        n -= r;
+    }
+    return 0;
+}
+
 #define MDL_UPDATE  /* Change to #undef to remove function */
 #if defined(MDL_UPDATE)
 /* Function: mdlUpdate ======================================================
@@ -563,7 +632,11 @@ static void mdlUpdate(SimStruct* S, int_T tid)
             if (abs(u[0] - connectionStartTime) <= 1e-5){
                 int recvSize = 0;
                 char recvBuf[RECVBUFFERSIZE];
-                recvSize = recv(serverSock, recvBuf, sizeof(recvBuf), 0);
+                // #87: this first-step read exists only to sync with TrafficLayer, but it
+                // used to grab one bufferful and drop it. If the message was longer, the
+                // tail stayed in the socket and every later step parsed from mid-record.
+                // Consume exactly one whole message instead.
+                recvSize = recvExactMex(serverSock, recvBuf, FIXS_MSG_HEADER_SIZE);
                 if (recvSize == SOCKET_ERROR || recvSize < 1) {
                     serverConnected = 0;
                     socketShutdown();
@@ -571,6 +644,16 @@ static void mdlUpdate(SimStruct* S, int_T tid)
                     //ssSetLocalErrorStatus(S, "\n\nreceive from TrafficLayer failed. This may not be a real error but part of the shutdown process of RealSim Interface, TrafficLayer might have closed, then please stop VISSIM/SUMO manually.");
                     return;
                 };
+
+                uint32_T firstMsgSize = 0;
+                memcpy(&firstMsgSize, recvBuf + 5, sizeof(uint32_T));
+                if (firstMsgSize > (uint32_T)FIXS_MSG_HEADER_SIZE &&
+                    recvDiscardMex(serverSock, (int)firstMsgSize - FIXS_MSG_HEADER_SIZE) != 0) {
+                    serverConnected = 0;
+                    socketShutdown();
+                    ssSetStopRequested(S, 1);
+                    return;
+                }
             }
             
             
@@ -626,8 +709,13 @@ static void mdlUpdate(SimStruct* S, int_T tid)
                     if (enabledebug) {
                         printf("nonblock receive\n");
                     }
-                    real_T            *recvDataHold       = (real_T*) ssGetDWork(S, 0);                           
-                    memset(recvDataHold, 0, sizeof(recvDataHold));
+                    // #87: DWork 0 is declared SS_INT8 x RECVBUFFERSIZE, so its size in
+                    // BYTES is RECVBUFFERSIZE. Treat it as bytes; the historic real_T*
+                    // cast is wrong for the declared type and every other use here is
+                    // byte-wise (memcpy of recvSize, SS_UINT8 output port).
+                    int8_T            *recvDataHold       = (int8_T*) ssGetDWork(S, 0);
+                    // was sizeof(recvDataHold) -- the POINTER size (8 B), not the DWork.
+                    memset(recvDataHold, 0, RECVBUFFERSIZE);
                     memcpy(recvDataHold, recvBuf, recvSize);
                     gRecvSizeHold = recvSize;
                 }
@@ -638,7 +726,10 @@ static void mdlUpdate(SimStruct* S, int_T tid)
                     printf("enter blocking receive\n");
                 }
                             
-                recvSize = recv(serverSock, recvBuf, sizeof(recvBuf), 0);
+                // #87: honor the FIXS framing instead of grabbing one bufferful.
+                // Step 1 -- read the 9-byte header exactly (uint8 simState, float
+                // simTime, uint32 total_msg_size).
+                recvSize = recvExactMex(serverSock, recvBuf, FIXS_MSG_HEADER_SIZE);
                 if (recvSize == SOCKET_ERROR || recvSize < 1) {
                     //printf("recv() failed with error code : %d", WSAGetLastError());
                     serverConnected = 0;
@@ -648,16 +739,78 @@ static void mdlUpdate(SimStruct* S, int_T tid)
                     ssSetStopRequested(S, 1);
                     return;
                 };
-                
-                if (enabledebug) {
-                    printf("received %d bytes\n", recvSize);
+
+                uint32_T totalMsgSize = 0;
+                memcpy(&totalMsgSize, recvBuf + 5, sizeof(uint32_T));
+                if (totalMsgSize < (uint32_T)FIXS_MSG_HEADER_SIZE) {
+                    printf("FIXS #87: header declares total_msg_size %u < header size -- desync\n",
+                           (unsigned)totalMsgSize);
+                    serverConnected = 0;
+                    socketShutdown();
+                    ssSetStopRequested(S, 1);
+                    return;
                 }
 
-                real_T            *recvDataHold       = (real_T*) ssGetDWork(S, 0);                           
-                memset(recvDataHold, 0, sizeof(recvDataHold));
+                // Step 2 -- deliver as much of the body as the fixed budget holds...
+                int bodySize    = (int)totalMsgSize - FIXS_MSG_HEADER_SIZE;
+                int deliverBody = bodySize;
+                if (deliverBody > RECVBUFFERSIZE - FIXS_MSG_HEADER_SIZE) {
+                    deliverBody = RECVBUFFERSIZE - FIXS_MSG_HEADER_SIZE;
+                }
+                if (deliverBody > 0 &&
+                    recvExactMex(serverSock, recvBuf + FIXS_MSG_HEADER_SIZE, deliverBody) != deliverBody) {
+                    serverConnected = 0;
+                    socketShutdown();
+                    ssSetStopRequested(S, 1);
+                    return;
+                }
+
+                // Step 3 -- ...and drain whatever did not fit. Dropping records costs no
+                // memory, but leaving their bytes in the socket would desync every step
+                // that follows -- which is exactly what the old 1024-byte read did.
+                int overflow = bodySize - deliverBody;
+                if (overflow > 0) {
+                    // Warn ONCE, not per step. With the budget at 1024 B an 'all'
+                    // subscription overflows on every step, and an unconditional printf
+                    // in mdlUpdate is a per-step console write on the RT target -- the
+                    // same class of stall the TCP_NODELAY fix in this file removes.
+                    // enabledebug below still reports every step when asked.
+                    if (!gOverflowWarned) {
+                        gOverflowWarned = 1;
+                        printf("FIXS #87: message %u B exceeds the %d B delivery budget; "
+                               "%d B dropped this step. Narrow the subscription "
+                               "(radius/id) or raise RECVBUFFERSIZE (note: that changes "
+                               "the S-function port width and existing models must be "
+                               "re-wired). Further overflows are not reported.\n",
+                               (unsigned)totalMsgSize, RECVBUFFERSIZE, overflow);
+                    }
+                    if (recvDiscardMex(serverSock, overflow) != 0) {
+                        serverConnected = 0;
+                        socketShutdown();
+                        ssSetStopRequested(S, 1);
+                        return;
+                    }
+                }
+
+                recvSize = FIXS_MSG_HEADER_SIZE + deliverBody;
+
+                if (enabledebug) {
+                    printf("received %d bytes (message %u B, %d B dropped)\n",
+                           recvSize, (unsigned)totalMsgSize, overflow);
+                }
+
+                // #87: DWork 0 is declared SS_INT8 x RECVBUFFERSIZE, so its size in BYTES
+                // is RECVBUFFERSIZE -- NOT RECVBUFFERSIZE * sizeof(real_T), which would
+                // overrun it by 8x. The historic real_T* cast is wrong for the declared
+                // type; every other use here is byte-wise (memcpy of recvSize, SS_UINT8
+                // output port).
+                int8_T            *recvDataHold       = (int8_T*) ssGetDWork(S, 0);
+                // was sizeof(recvDataHold) -- the size of the POINTER (8 B), not the
+                // DWork. Only the first 8 bytes of the buffer were ever cleared.
+                memset(recvDataHold, 0, RECVBUFFERSIZE);
                 memcpy(recvDataHold, recvBuf, recvSize);
                 gRecvSizeHold = recvSize;
-                
+
             }
 
             if (u[0] - simTimePrev + 1e-5 >= dt){

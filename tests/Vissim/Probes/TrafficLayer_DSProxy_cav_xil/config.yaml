@@ -1,0 +1,45 @@
+# Stage B+ probe (issue #158): Python ego (DSProxy) + Python CAV controller
+# (DriverModel) + signal transmission, all through TrafficLayer.
+#
+# Single Python client on port 2444 sends BOTH the ego pose AND CAV
+# behavior commands (one VehFullData_t per message). TrafficLayer splits:
+# id matching ApplicationSetup.VehicleSubscription[0].attribute.id is the
+# ego (routed to DSProxy); everything else is a CAV behavior command
+# (routed to DriverModel via the 1337 socket).
+#
+# Multi-port routing (separate ports for ego and CAV) stays deferred —
+# the single-port simplification is enough to demonstrate the protocol
+# end-to-end.
+
+SimulationSetup:
+    EnableRealSim: false
+    EnableVerboseLog: false
+    SelectedTrafficSimulator: VISSIM
+    TrafficSimulatorPort: 1337       # used by DSProxyMode when EnableDriverModelRelay: true
+    SimulationEndTime: 30
+    VehicleMessageField: [id, type, speed, speedDesired, positionX, positionY, positionZ, heading, linkId, laneId, grade, signalLightDistance, signalLightColor]
+
+ApplicationSetup:
+    EnableApplicationLayer: true
+    VehicleSubscription:
+    -   type: ego
+        attribute: { id: ['ego'], radius: [0] }
+        ip: ['127.0.0.1']
+        port: [2444]
+
+XilSetup:
+    EnableXil: false
+
+VissimDSProxySetup:
+    Enable: true
+    NetworkFile: 'C:\src_git\RS_FIXS\156_drivingsim_dll_design\tests\Vissim\Probes\TrafficLayer_DSProxy_cav_xil\stage_network\driving_simulator_test.inpx'
+    VissimVersion: 2022
+    SimulatorFrequency: 10
+    VisibilityRadius: -1.0
+    MaxSimulatorVeh: 10
+    MaxTotalVeh: 50000
+    MaxVissimSigGrp: 1000
+
+    # NEW Stage B+ flag: also open the 1337 socket for FIXS DriverModel
+    # and relay app-side behavior cmds down to it.
+    EnableDriverModelRelay: true

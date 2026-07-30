@@ -326,11 +326,20 @@ class SumoSimulation(object):
             if sumo_gui is True:
                 logging.info('Remember to press the play button to start the simulation')
 
+            # FIXS: this used to append '--lateral-resolution 0.25' and
+            # '--collision.check-junctions'. Both are TRAFFIC BEHAVIOUR settings, and
+            # injecting them here made this bridge silently run a different simulation
+            # from the FIXS-native one, which passes neither: --lateral-resolution
+            # switches SUMO into the SUBLANE lane-change model, so with it a lane
+            # change slides over ~1-2 s and without it the vehicle jumps a full lane
+            # width in one step (which a co-sim viewer draws as a sideways teleport).
+            # They belong in the .sumocfg, SUMO's own format, where the scenario author
+            # controls them and both bridges get the same thing. run_cosim normally
+            # launches SUMO itself and this branch is not used; it is kept for a direct
+            # `python run_synchronization.py <cfg>` invocation.
             traci.start([sumo_binary,
                 '--configuration-file', cfg_file,
                 '--step-length', str(step_length),
-                '--lateral-resolution', '0.25',
-                '--collision.check-junctions'
             ])
 
         else:
