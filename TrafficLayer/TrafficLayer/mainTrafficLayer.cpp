@@ -451,8 +451,10 @@ int main(int argc, char* argv[]) {
 	time(&rawtime);
 	timeinfo = localtime(&rawtime);
 
-	char formatTimeBuffer[100];
-	strftime(formatTimeBuffer, 100, "%Y%m%d_%H%M%S", timeinfo);
+	// 15 chars + NUL for "%Y%m%d_%H%M%S". Sized to the actual format so the
+	// compiler can prove the snprintf below cannot truncate.
+	char formatTimeBuffer[32];
+	strftime(formatTimeBuffer, sizeof formatTimeBuffer, "%Y%m%d_%H%M%S", timeinfo);
 	snprintf(MasterLogNameChar, sizeof(char) * 100, "./RealSim_tmp/TrafficLayer_%s.log", formatTimeBuffer);
 
 	bool logNameExist = FIXS::Platform::fileExists(MasterLogNameChar);

@@ -1,4 +1,7 @@
 #include "SocketHelper.h"
+// After SocketHelper.h on purpose: that header establishes the winsock2.h ->
+// windows.h order, and PlatformCompat.h pulls only windows.h.
+#include "PlatformCompat.h"
 
 using namespace std;
 
@@ -253,10 +256,8 @@ void SocketHelper::socketShutdown() {
 #else
 		shutdown(selfServerSock[iS], SHUT_RDWR);
 		shutdown(clientSock[iS], SHUT_RDWR);
-	#ifdef RS_DSPACE
 		close(selfServerSock[iS]);
 		close(clientSock[iS]);
-	#endif
 #endif
 	}
 	for (int iS = 0; iS < NSERVER; iS++) {
@@ -265,9 +266,7 @@ void SocketHelper::socketShutdown() {
 		closesocket(serverSock[iS]);
 #else
 		shutdown(serverSock[iS], SHUT_RDWR);
-	#ifdef RS_DSPACE
 		close(serverSock[iS]);
-	#endif
 #endif	
 	}
 
@@ -408,7 +407,7 @@ int SocketHelper::initConnection(std::string errorLogName) {
 #ifdef WIN32
 					f << "Unable to connect to server! error: " << WSAGetLastError() << endl;
 #else
-					f << "Unable to connect to server! error: " <<  endl;
+					f << "Unable to connect to server! error: " << FIXS::Platform::socketErrorText(FIXS::Platform::socketErrorCode()) << endl;
 #endif
 					f.close();
 				}
@@ -418,10 +417,8 @@ int SocketHelper::initConnection(std::string errorLogName) {
 				WSACleanup();
 				printSocketErrorMessage(WSAGetLastError());
 #else
-				printf("Unable to connect to server! error\n");
-			#ifdef RS_DSPACE
+				printf("Unable to connect to server! error: %s\n", FIXS::Platform::socketErrorText(FIXS::Platform::socketErrorCode()).c_str());
 				close(serverSock[iS]);
-			#endif
 #endif
 				return -1;
 			}
@@ -447,7 +444,7 @@ int SocketHelper::initConnection(std::string errorLogName) {
 #ifdef WIN32
 					f << "self server socket() failed! error: " << WSAGetLastError() << endl;
 #else
-					f << "self server socket() failed! error: " << endl;
+					f << "self server socket() failed! error: " << FIXS::Platform::socketErrorText(FIXS::Platform::socketErrorCode()) << endl;
 #endif
 					f.close();
 				}
@@ -456,10 +453,8 @@ int SocketHelper::initConnection(std::string errorLogName) {
 				closesocket(selfServerSock[iS]);
 				WSACleanup();
 #else
-				fprintf(stderr, "%s: \n", "socket() failed");
-			#ifdef RS_DSPACE
+				fprintf(stderr, "%s: %s\n", "socket() failed", FIXS::Platform::socketErrorText(FIXS::Platform::socketErrorCode()).c_str());
 				close(selfServerSock[iS]);
-			#endif
 #endif
 				return -1;
 			}
@@ -482,15 +477,13 @@ int SocketHelper::initConnection(std::string errorLogName) {
 				closesocket(selfServerSock[iS]);
 				WSACleanup();
 #else
-				fprintf(stderr, "%s: \n", "bind() failed");
+				fprintf(stderr, "%s: %s\n", "bind() failed", FIXS::Platform::socketErrorText(FIXS::Platform::socketErrorCode()).c_str());
 				if (!errorLogName.empty()) {
 					fstream f(errorLogName, std::fstream::in | std::fstream::out | std::fstream::app);
-					f << "bind() failed! error: " << endl;
+					f << "bind() failed! error: " << FIXS::Platform::socketErrorText(FIXS::Platform::socketErrorCode()) << endl;
 					f.close();
 			}
-			#ifdef RS_DSPACE
 				close(selfServerSock[iS]);
-			#endif
 #endif
 				return -1;
 			}
@@ -509,13 +502,11 @@ int SocketHelper::initConnection(std::string errorLogName) {
 #else
 				if (!errorLogName.empty()) {
 					fstream f(errorLogName, std::fstream::in | std::fstream::out | std::fstream::app);
-					f << "listen() failed! error: " << endl;
+					f << "listen() failed! error: " << FIXS::Platform::socketErrorText(FIXS::Platform::socketErrorCode()) << endl;
 					f.close();
 				}
-				fprintf(stderr, "%s:\n", "listen() failed");
-			#ifdef RS_DSPACE
+				fprintf(stderr, "%s: %s\n", "listen() failed", FIXS::Platform::socketErrorText(FIXS::Platform::socketErrorCode()).c_str());
 				close(selfServerSock[iS]);
-			#endif
 #endif
 				return -1;
 			}
@@ -568,10 +559,10 @@ int SocketHelper::initConnection(std::string errorLogName) {
 #else
 				if (!errorLogName.empty()) {
 					fstream f(errorLogName, std::fstream::in | std::fstream::out | std::fstream::app);
-					f << "select error! error: " << endl;
+					f << "select error! error: " << FIXS::Platform::socketErrorText(FIXS::Platform::socketErrorCode()) << endl;
 					f.close();
 			}
-				fprintf(stderr, "%s:\n", "select error");
+				fprintf(stderr, "%s: %s\n", "select error", FIXS::Platform::socketErrorText(FIXS::Platform::socketErrorCode()).c_str());
 #endif
 			}
 
@@ -595,13 +586,11 @@ int SocketHelper::initConnection(std::string errorLogName) {
 #else
 						if (!errorLogName.empty()) {
 							fstream f(errorLogName, std::fstream::in | std::fstream::out | std::fstream::app);
-							f << "accept() failed! error: " << endl;
+							f << "accept() failed! error: " << FIXS::Platform::socketErrorText(FIXS::Platform::socketErrorCode()) << endl;
 							f.close();
 					}
-						fprintf(stderr, "%s: \n", "accept() failed");
-					#ifdef RS_DSPACE
+						fprintf(stderr, "%s: %s\n", "accept() failed", FIXS::Platform::socketErrorText(FIXS::Platform::socketErrorCode()).c_str());
 						close(clientSock[iS]);
-					#endif
 #endif
 						return -1;
 					}
@@ -668,7 +657,7 @@ int SocketHelper::initConnection(std::string errorLogName) {
 #else
 					if (!errorLogName.empty()) {
 						fstream f(errorLogName, std::fstream::in | std::fstream::out | std::fstream::app);
-						f << "select error! error: " << endl;
+						f << "select error! error: " << FIXS::Platform::socketErrorText(FIXS::Platform::socketErrorCode()) << endl;
 						f.close();
 				}
 #endif
@@ -697,14 +686,12 @@ int SocketHelper::initConnection(std::string errorLogName) {
 #else
 							if (!errorLogName.empty()) {
 								fstream f(errorLogName, std::fstream::in | std::fstream::out | std::fstream::app);
-								f << "accept() failed! error: "  << endl;
+								f << "accept() failed! error: " << FIXS::Platform::socketErrorText(FIXS::Platform::socketErrorCode()) << endl;
 								f.close();
 							}
-							fprintf(stderr, "%s: \n", "accept() failed");
+							fprintf(stderr, "%s: %s\n", "accept() failed", FIXS::Platform::socketErrorText(FIXS::Platform::socketErrorCode()).c_str());
 							//exit(1);
-						#ifdef RS_DSPACE
 							close(clientSock[iS]);
-						#endif
 #endif
 							return -1;
 						}
@@ -716,7 +703,9 @@ int SocketHelper::initConnection(std::string errorLogName) {
 						}
 
 						/* clientSock is connected to a client! */
-						printf("Handling VISSIM client #%d %s\n", iS + 1 - N_ACT_CLIENT, inet_ntoa(clientAddr[iS].sin_addr));
+						// iS is size_t here, so the subtraction is size_t: %d would
+						// read the wrong width out of the varargs (UB).
+						printf("Handling VISSIM client #%d %s\n", (int)(iS + 1 - N_ACT_CLIENT), inet_ntoa(clientAddr[iS].sin_addr));
 
 						ClientConnected[iS] = 1;
 					}
@@ -760,14 +749,12 @@ int SocketHelper::initConnection(std::string errorLogName) {
 #else
 					if (!errorLogName.empty()) {
 						fstream f(errorLogName, std::fstream::in | std::fstream::out | std::fstream::app);
-						f << "recv() client trigger failed! error: " << endl;
+						f << "recv() client trigger failed! error: " << FIXS::Platform::socketErrorText(FIXS::Platform::socketErrorCode()) << endl;
 						f.close();
 					}
 					printf("recv() failed with error code ");
 					//exit(EXIT_FAILURE);
-					#ifdef RS_DSPACE
 						close(clientSock[iS]);
-					#endif
 #endif
 					return -1;
 				}
@@ -811,13 +798,11 @@ int SocketHelper::initConnection(std::string errorLogName) {
 #else
 				if (!errorLogName.empty()) {
 					fstream f(errorLogName, std::fstream::in | std::fstream::out | std::fstream::app);
-					f << "send() server trigger failed! error: " << endl;
+					f << "send() server trigger failed! error: " << FIXS::Platform::socketErrorText(FIXS::Platform::socketErrorCode()) << endl;
 					f.close();
 				}
 				printf("send failed with error:\n");
-				#ifdef RS_DSPACE
 					close(serverSock[iS]);
-				#endif
 #endif
 				return -1;
 			}
@@ -1091,7 +1076,7 @@ int SocketHelper::sendData(int sock, int iClient, float simTimeSend, uint8_t sim
 #ifdef WIN32
 		fprintf(stderr, "%s: %d\n", "send() failed", WSAGetLastError());
 #else
-		fprintf(stderr, "%s:\n", "send() failed");
+		fprintf(stderr, "%s: %s\n", "send() failed", FIXS::Platform::socketErrorText(FIXS::Platform::socketErrorCode()).c_str());
 #endif
 		return -1;
 	}

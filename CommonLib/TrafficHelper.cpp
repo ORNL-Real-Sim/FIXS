@@ -590,6 +590,15 @@ int TrafficHelper::checkIfEgoExist(double* simTime) {
 			// only check the first vehicle, which considered as the ego vehicle
 			// break;
 		}
+
+		// #65: reached when vehicleSubscribeId_v is empty, i.e. nothing is
+		// subscribed yet, so no ego is present. Previously control fell off the
+		// end of this non-void function and returned garbage -- undefined
+		// behaviour that MSVC never diagnosed and gcc's -Wreturn-type caught.
+		// It matters because this gates SimulationMode 1 ("wait until the ego
+		// enters the network"): a garbage non-zero would declare the ego
+		// present before it exists.
+		return 0;
 	}
 	else {
 		return 0;
