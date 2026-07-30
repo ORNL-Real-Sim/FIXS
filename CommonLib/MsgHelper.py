@@ -49,7 +49,11 @@ class MsgHelper:
             'length': False,
             'width': False,
             'height': False,
-            'activeLaneChange': False
+            'activeLaneChange': False,
+            # #174 EgoDriver command channel (L2/L4), serialized at the END
+            'steerAngleDesired': False,
+            'acceleratorPedalDesired': False,
+            'brakePedalDesired': False
         }
         self.traffic_light_msg_field_valid = {
             'id': False,
@@ -217,7 +221,15 @@ class MsgHelper:
             
         if self.vehicle_msg_field_valid.get('height'):
             veh_data.height, byte_index = MsgHelper.unpack_float(byte_data, byte_index)
-            
+
+        # #174 EgoDriver command channel (serialized at the END, matching C++)
+        if self.vehicle_msg_field_valid.get('steerAngleDesired'):
+            veh_data.steerAngleDesired, byte_index = MsgHelper.unpack_float(byte_data, byte_index)
+        if self.vehicle_msg_field_valid.get('acceleratorPedalDesired'):
+            veh_data.acceleratorPedalDesired, byte_index = MsgHelper.unpack_float(byte_data, byte_index)
+        if self.vehicle_msg_field_valid.get('brakePedalDesired'):
+            veh_data.brakePedalDesired, byte_index = MsgHelper.unpack_float(byte_data, byte_index)
+
         return  veh_data
 
     def pack_veh_data(self, byte_data: bytearray, byte_index, veh_data: VehData):
@@ -257,6 +269,9 @@ class MsgHelper:
                   + self.vehicle_msg_field_valid.get('length', 0) * 4  # length
                   + self.vehicle_msg_field_valid.get('width', 0) * 4  # width
                   + self.vehicle_msg_field_valid.get('height', 0) * 4  # height
+                  + self.vehicle_msg_field_valid.get('steerAngleDesired', 0) * 4  # steerAngleDesired
+                  + self.vehicle_msg_field_valid.get('acceleratorPedalDesired', 0) * 4  # acceleratorPedalDesired
+                  + self.vehicle_msg_field_valid.get('brakePedalDesired', 0) * 4  # brakePedalDesired
             )
         )
         veh_msg_size = round(msg_size) + self.msg_each_header_size
@@ -389,6 +404,17 @@ class MsgHelper:
             
         if self.vehicle_msg_field_valid.get('height'):
             byte_data[byte_index:byte_index+4] = struct.pack('f', veh_data.height)
+            byte_index += 4
+
+        # #174 EgoDriver command channel (serialized at the END, matching C++)
+        if self.vehicle_msg_field_valid.get('steerAngleDesired'):
+            byte_data[byte_index:byte_index+4] = struct.pack('f', veh_data.steerAngleDesired)
+            byte_index += 4
+        if self.vehicle_msg_field_valid.get('acceleratorPedalDesired'):
+            byte_data[byte_index:byte_index+4] = struct.pack('f', veh_data.acceleratorPedalDesired)
+            byte_index += 4
+        if self.vehicle_msg_field_valid.get('brakePedalDesired'):
+            byte_data[byte_index:byte_index+4] = struct.pack('f', veh_data.brakePedalDesired)
             byte_index += 4
 
         # Return the FULL record size (header + body), matching the size written into the
