@@ -1,7 +1,5 @@
 #include "ConfigHelper.h"
-#include <windows.h>
-#include <shlwapi.h>
-#pragma comment(lib, "shlwapi.lib")
+#include "PlatformCompat.h"   // #65: windows.h/shlwapi live behind this now
 
 using namespace std;
 
@@ -13,9 +11,7 @@ namespace {
 	}
 
 	std::string getCurrentDirectory() {
-		char buffer[MAX_PATH];
-		GetCurrentDirectoryA(MAX_PATH, buffer);
-		return std::string(buffer);
+		return FIXS::Platform::currentDirectory();
 	}
 
 	bool isRelativePath(const std::string& path) {
@@ -28,17 +24,18 @@ namespace {
 	}
 
 	std::string combinePaths(const std::string& base, const std::string& relative) {
-		char combined[MAX_PATH];
-		PathCombineA(combined, base.c_str(), relative.c_str());
-		char normalized[MAX_PATH];
-		PathCanonicalizeA(normalized, combined);
-		return std::string(normalized);
+		return FIXS::Platform::combinePaths(base, relative);
 	}
 }
 
 
 // Value-Defintions of the different String values
-enum TypeNames_enum {
+//
+// #65: scoped (enum class) on purpose. As a plain enum these names sat at file
+// scope, and 'link' collides with POSIX link(2) from <unistd.h> -- legal on
+// MSVC, a redeclaration error on glibc. Scoping fixes it for good rather than
+// renaming one enumerator and waiting for the next collision.
+enum class TypeNames_enum {
 	ego,
 	link,
 	point,
@@ -52,12 +49,12 @@ static std::map<std::string, TypeNames_enum> s_mapTypeValues;
 
 
 ConfigHelper::ConfigHelper() {
-	s_mapTypeValues["ego"] = ego;
-	s_mapTypeValues["link"] = link;
-	s_mapTypeValues["point"] = point;
-	s_mapTypeValues["vehicleType"] = vehicleType;
-	s_mapTypeValues["intersection"] = intersection;
-	s_mapTypeValues["detector"] = detector;
+	s_mapTypeValues["ego"] = TypeNames_enum::ego;
+	s_mapTypeValues["link"] = TypeNames_enum::link;
+	s_mapTypeValues["point"] = TypeNames_enum::point;
+	s_mapTypeValues["vehicleType"] = TypeNames_enum::vehicleType;
+	s_mapTypeValues["intersection"] = TypeNames_enum::intersection;
+	s_mapTypeValues["detector"] = TypeNames_enum::detector;
 
 
 	// initialize structs;
@@ -181,6 +178,19 @@ int ConfigHelper::getConfig(string configName) {
 		SimulationSetup.SelectedTrafficSimulator = "SUMO";
 		if (!SuppressDefaultMessages) printf("\nTraffic Simulator not specified! Will use SUMO as default!\n");
 	}
+#ifndef _WIN32
+	// #65: VISSIM is a Windows-only product -- there is no Linux VISSIM to
+	// connect to, and the DSProxy path additionally needs a PTV DLL. Fail here,
+	// at parse time, rather than letting the run proceed to a connect() that
+	// can only ever time out. Checked at the parse site so every consumer of a
+	// config gets the same diagnostic, not just TrafficLayer's main().
+	if (SimulationSetup.SelectedTrafficSimulator == "VISSIM") {
+		printf("\nERROR: SelectedTrafficSimulator is 'VISSIM', but this is a Linux build of FIXS.\n"
+		       "       VISSIM is Windows-only and is not supported on this platform.\n"
+		       "       Use 'SelectedTrafficSimulator: SUMO', or run TrafficLayer on Windows.\n");
+		exit(-1);
+	}
+#endif
 	if (node["TrafficSimulatorIP"]) {
 		SimulationSetup.TrafficSimulatorIP = parserString(node, "TrafficSimulatorIP");
 	}
@@ -829,7 +839,7 @@ void ConfigHelper::parserSubscription(YAML::Node rootnode, std::string name, Sub
 			//YAML::Node valnode = attnode[att];
 
 			switch (s_mapTypeValues[type]) {
-			case ego:
+			case TypeNames_enum::ego:
 				if (att.compare("id") == 0 || att.compare("radius") == 0 || att.compare("all") == 0) {
 					extractSubscriptionAttributes(attnode, type, att, attMap);
 				}
@@ -839,7 +849,7 @@ void ConfigHelper::parserSubscription(YAML::Node rootnode, std::string name, Sub
 
 				break;
 
-			case link:
+			case TypeNames_enum::link:
 				if (att.compare("id") == 0) {
 					extractSubscriptionAttributes(attnode, type, att, attMap);
 				}
@@ -851,7 +861,7 @@ void ConfigHelper::parserSubscription(YAML::Node rootnode, std::string name, Sub
 
 				break;
 
-			case point:
+			case TypeNames_enum::point:
 				if (att.compare("radius") == 0 || att.compare("x") == 0 || att.compare("y") == 0 || att.compare("z") == 0) {
 					extractSubscriptionAttributes(attnode, type, att, attMap);
 				}
@@ -863,7 +873,7 @@ void ConfigHelper::parserSubscription(YAML::Node rootnode, std::string name, Sub
 
 				break;
 
-			case vehicleType:
+			case TypeNames_enum::vehicleType:
 				if (att.compare("id") == 0 || att.compare("radius") == 0) {
 					extractSubscriptionAttributes(attnode, type, att, attMap);
 				}
@@ -873,7 +883,7 @@ void ConfigHelper::parserSubscription(YAML::Node rootnode, std::string name, Sub
 
 				break;
 
-			case intersection:
+			case TypeNames_enum::intersection:
 				if (att.compare("id") == 0 || att.compare("name") == 0) {
 					extractSubscriptionAttributes(attnode, type, att, attMap);
 				}
@@ -885,7 +895,7 @@ void ConfigHelper::parserSubscription(YAML::Node rootnode, std::string name, Sub
 
 				break;
 
-			case detector:
+			case TypeNames_enum::detector:
 				if (att.compare("id") == 0 || att.compare("name") == 0 || att.compare("pattern") == 0) {
 					extractSubscriptionAttributes(attnode, type, att, attMap);
 				}

@@ -7,7 +7,12 @@
 #include <cstring>
 
 #include "TrafficHelper.h"
+#include "PlatformCompat.h"
+#ifdef _WIN32
 #include "DSProxyMode.h"
+#else
+#include <csignal>   // #65: POSIX replacement for SetConsoleCtrlHandler
+#endif
 
 #include "RealSimVersion.h"
 
@@ -147,12 +152,9 @@ void ConfigureSumoLibraryPath(const ConfigHelper& config) {
 
 const bool ENABLE_TIMING = false;
 
-typedef struct Timer_t {
-	LARGE_INTEGER StartingTime;
-	LARGE_INTEGER EndingTime;
-	LARGE_INTEGER ElapsedMicroseconds;
-	LARGE_INTEGER Frequency;
-};
+// #65: the Timer_t struct that stood here was dead -- one instance was declared
+// and its Frequency queried, then never read. Removed rather than ported; the
+// live timing path below uses std::chrono::steady_clock.
 
 ConfigHelper Config_c;
 SocketHelper Sock_c;
@@ -193,7 +195,7 @@ void performCleanup(bool emergencyShutdown) {
 			printf("Client notification complete.\n");
 
 			// Give clients time to receive and process shutdown notification
-			Sleep(100);
+			FIXS::Platform::sleepMs(100);
 		}
 		catch (const std::exception& e) {
 			printf("Warning: Error notifying clients: %s\n", e.what());
@@ -239,6 +241,7 @@ void performCleanup(bool emergencyShutdown) {
 	printf("Shutdown complete.\n");
 }
 
+#ifdef _WIN32
 BOOL WINAPI CtrlHandler(DWORD fdwCtrlType)
 {
 	switch (fdwCtrlType)
@@ -277,6 +280,27 @@ BOOL WINAPI CtrlHandler(DWORD fdwCtrlType)
 		return FALSE;
 	}
 }
+#else
+// #65: POSIX counterpart of the console control handler above.
+//
+// Deliberately narrower than the Windows version: it only raises the graceful
+// shutdown flag and lets the main loop do the cleanup on its next iteration.
+// Windows CTRL_CLOSE_EVENT / CTRL_LOGOFF_EVENT run performCleanup() straight
+// from the handler because the OS kills the process ~5 s later and there is no
+// loop iteration left to rely on. POSIX imposes no such deadline, so calling
+// the (not async-signal-safe) cleanup path from inside a handler would buy
+// nothing and risk deadlocking on a lock the interrupted code already held.
+extern "C" void CtrlHandler(int signum)
+{
+	switch (signum) {
+	case SIGINT:  printf("SIGINT caught\n\n");  break;
+	case SIGTERM: printf("SIGTERM caught\n\n"); break;
+	case SIGHUP:  printf("SIGHUP caught\n\n");  break;
+	default:      break;
+	}
+	g_shutdown.shutdownRequested = true;
+}
+#endif
 
 static void show_usage(std::string name)
 {
@@ -378,6 +402,7 @@ int main(int argc, char* argv[]) {
 	printf("==================================================\n");
 
 	// control-c handles
+#ifdef _WIN32
 	if (SetConsoleCtrlHandler(CtrlHandler, TRUE))
 	{
 		//printf("\nThe control-c handler is set.\n");
@@ -387,26 +412,32 @@ int main(int argc, char* argv[]) {
 		printf("\nERROR: Could not set control-c handler");
 		exit(-1);
 	}
+#else
+	if (signal(SIGINT,  CtrlHandler) == SIG_ERR ||
+		signal(SIGTERM, CtrlHandler) == SIG_ERR ||
+		signal(SIGHUP,  CtrlHandler) == SIG_ERR)
+	{
+		printf("\nERROR: Could not set control-c handler");
+		exit(-1);
+	}
+#endif
 
 
 	string TrafficLayerErrorFile = "TrafficLayer.err";
 
 	auto simStartTimestamp = chrono::system_clock::to_time_t(chrono::system_clock::now());
-	char simStartTimestampChar[100];
-	ctime_s(simStartTimestampChar, sizeof simStartTimestampChar, &simStartTimestamp);
+	string simStartTimestampChar = FIXS::Platform::formatCTime(simStartTimestamp);
 	fstream f(TrafficLayerErrorFile, std::fstream::in | std::fstream::out | std::fstream::app);
 	f << endl << "=============================================" << endl;
 	f << "Traffic Layer Starts at  " << simStartTimestampChar << endl;
 	f.close();
 
 	
-	string LogPath = ".\\RealSim_tmp";
-	if (CreateDirectoryA(LogPath.c_str(), NULL) ||
-		ERROR_ALREADY_EXISTS == GetLastError())
-	{
-		// CopyFile(...)
-	}
-	else
+	// #65: forward slashes throughout -- Win32 accepts them everywhere a
+	// backslash works, whereas a literal ".\\RealSim_tmp" on Linux would create
+	// a single directory whose NAME contains a backslash.
+	string LogPath = "./RealSim_tmp";
+	if (!FIXS::Platform::createDirectory(LogPath))
 	{
 		// Failed to create directory.
 		printf("cannot create RealSim_tmp folder, exiting...");
@@ -422,19 +453,15 @@ int main(int argc, char* argv[]) {
 
 	char formatTimeBuffer[100];
 	strftime(formatTimeBuffer, 100, "%Y%m%d_%H%M%S", timeinfo);
-	snprintf(MasterLogNameChar, sizeof(char) * 100, ".\\RealSim_tmp\\TrafficLayer_%s.log", formatTimeBuffer);
-	DWORD dwAttrib = GetFileAttributesA(MasterLogNameChar);
+	snprintf(MasterLogNameChar, sizeof(char) * 100, "./RealSim_tmp/TrafficLayer_%s.log", formatTimeBuffer);
 
-	bool logNameExist = (dwAttrib != INVALID_FILE_ATTRIBUTES &&
-		!(dwAttrib & FILE_ATTRIBUTE_DIRECTORY));
+	bool logNameExist = FIXS::Platform::fileExists(MasterLogNameChar);
 
 	int iFile = 1;
 	while (logNameExist) {
-		snprintf(MasterLogNameChar, sizeof(char) * 100, ".\\RealSim_tmp\\TrafficLayer_%s_%d.log", formatTimeBuffer,iFile);
-		DWORD dwAttrib = GetFileAttributesA(MasterLogNameChar);
+		snprintf(MasterLogNameChar, sizeof(char) * 100, "./RealSim_tmp/TrafficLayer_%s_%d.log", formatTimeBuffer,iFile);
 		iFile++;
-		logNameExist = (dwAttrib != INVALID_FILE_ATTRIBUTES &&
-			!(dwAttrib & FILE_ATTRIBUTE_DIRECTORY));	
+		logNameExist = FIXS::Platform::fileExists(MasterLogNameChar);
 	}
 	
 	string MasterLogName(MasterLogNameChar);
@@ -539,9 +566,15 @@ int main(int argc, char* argv[]) {
 	// is bypassed and we return its exit code. The bypass is intentional for
 	// 0.9.0 to avoid risking SUMO/legacy regressions; absorption into a
 	// unified loop is tracked by issue #117 (XIL orchestrator).
+	// #65: DSProxyMode/VissimDSProxyHelper LoadLibrary() PTV's proprietary
+	// DrivingSimulatorProxy.dll, so both TUs are Windows-only and are excluded
+	// from the Linux target's source list. Reaching this branch on Linux is
+	// impossible anyway -- ConfigHelper rejects a VISSIM config at parse time.
+#ifdef _WIN32
 	if (Config_c.VissimSetup.EnableDSProxy) {
 		return FIXS::DSProxy::runDSProxyMode(Config_c);
 	}
+#endif
 
 	// initialize Traffic Layer setup variables
 	bool ENABLE_REALSIM = true;
@@ -751,10 +784,11 @@ int main(int argc, char* argv[]) {
 	/********************************************
 	* Timing Analysis
 	*********************************************/
-	LARGE_INTEGER StartingTime, EndingTime, ElapsedMicroseconds;
-	LARGE_INTEGER Frequency;
-
-	QueryPerformanceFrequency(&Frequency);
+	// #65: was QueryPerformanceCounter/LARGE_INTEGER. steady_clock is the
+	// portable equivalent and already carries its own tick frequency, so the
+	// separate QueryPerformanceFrequency call is no longer needed.
+	std::chrono::steady_clock::time_point StartingTime, EndingTime;
+	long long ElapsedMicroseconds = 0;
 
 	/********************************************
 	* Connection Setups
@@ -895,9 +929,6 @@ int main(int argc, char* argv[]) {
 	MsgServer_c.getConfig(Config_c);
 	MsgClient_c.getConfig(Config_c);
 
-	Timer_t TimerDelay = { 0 };
-	QueryPerformanceFrequency(&TimerDelay.Frequency);
-
 	///********************************************
 	//* Start connection
 	//*********************************************/
@@ -1017,7 +1048,7 @@ int main(int argc, char* argv[]) {
 
 			if (ENABLE_REALSIM && !g_shutdown.trafficSimulatorClosed) {
 				if (Traffic_c.recvFromTrafficSimulator(&simTime, MsgServer_c) < 0) {
-					if (WSAGetLastError() != WSAEINTR) {
+					if (FIXS::Platform::socketErrorCode() != FIXS::Platform::kSocketErrInterrupted) {
 
 						printf("WARNING: receive from traffic simulator fails\n");
 
@@ -1062,14 +1093,13 @@ int main(int argc, char* argv[]) {
 		///****************************************************
 		if (ENABLE_TIMING) {
 
-			QueryPerformanceCounter(&EndingTime);
-			ElapsedMicroseconds.QuadPart = EndingTime.QuadPart - StartingTime.QuadPart;
-			ElapsedMicroseconds.QuadPart *= 1000000;
-			ElapsedMicroseconds.QuadPart /= Frequency.QuadPart;
+			EndingTime = std::chrono::steady_clock::now();
+			ElapsedMicroseconds = std::chrono::duration_cast<std::chrono::microseconds>(
+				EndingTime - StartingTime).count();
 
 			fstream debugLog;
 			debugLog.open("timing_sumo.txt", fstream::in | fstream::out | fstream::app);
-			debugLog << simTime << ";" << ElapsedMicroseconds.QuadPart / 1000000.0 << endl;
+			debugLog << simTime << ";" << ElapsedMicroseconds / 1000000.0 << endl;
 			debugLog.close();
 		}
 
@@ -1228,7 +1258,8 @@ int main(int argc, char* argv[]) {
 					// (last-writer-wins per id; feeds the NEXT client's overlaid publish).
 					int simStateRecvC; float simTimeRecvC;
 					if (Sock_c.recvData(actualClientSock[iC], &simStateRecvC, &simTimeRecvC, MsgClient_c) < 0) {
-						if (WSAGetLastError() != WSAEINTR && WSAGetLastError() != WSAEFAULT)
+						if (FIXS::Platform::socketErrorCode() != FIXS::Platform::kSocketErrInterrupted &&
+						FIXS::Platform::socketErrorCode() != FIXS::Platform::kSocketErrFault)
 							printf("ERROR: receive from client fails\n");
 						g_shutdown.shutdownRequested = true;
 						break;
@@ -1278,7 +1309,7 @@ int main(int argc, char* argv[]) {
 		}
 
 		if (ENABLE_TIMING) {
-			QueryPerformanceCounter(&StartingTime);
+			StartingTime = std::chrono::steady_clock::now();
 		}
 
 		///****************************************************

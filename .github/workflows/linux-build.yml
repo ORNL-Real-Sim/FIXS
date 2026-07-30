@@ -1,0 +1,145 @@
+name: Linux build (TrafficLayer)
+
+# Portability gate for #65. Compiles, links and smoke-tests TrafficLayer on
+# Linux, alongside (not instead of) the Windows MSBuild job in release.yml.
+#
+# Distro choice: 20.04 and 22.04 per the issue's scope. Both run as `container:`
+# rather than `runs-on:` images -- ubuntu-20.04 was retired from hosted runners
+# in 2025 and is only reachable as a container, and pinning both the same way
+# keeps the toolchain (glibc/gcc) determined by the image instead of by whatever
+# GitHub currently ships. 20.04 is also the artifact-worthy one: glibc is
+# forward-incompatible only, so a binary built on focal's 2.31 runs on jammy,
+# not the other way round.
+#
+# NOT covered here: VirCarlaEnv (its libcarla client toolchain is a separate
+# piece of work) and any Carla runtime (needs a GPU, out of reach for hosted CI).
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [dev, dev_v0.9.0, main]
+    paths:
+      - 'CommonLib/**'
+      - 'TrafficLayer/**'
+      - 'CMakeLists.txt'
+      - 'cmake/**'
+      - 'scripts/check_source_lists.py'
+      - '.github/workflows/linux-build.yml'
+  push:
+    branches: [main, dev_v0.9.0]
+
+jobs:
+  linux-build:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ubuntu-20.04 (focal, glibc 2.31, gcc 9)
+            image: ubuntu:20.04
+            slug: focal
+          - name: ubuntu-22.04 (jammy, glibc 2.35, gcc 11)
+            image: ubuntu:22.04
+            slug: jammy
+
+    steps:
+      - name: Install toolchain
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends \
+            build-essential cmake ninja-build git ca-certificates \
+            libxerces-c-dev libproj-dev libgdal-dev zlib1g-dev python3 python3-dev
+          echo "--- toolchain ---"
+          cmake --version | head -1
+          g++ --version | head -1
+          ldd --version | head -1
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # git describe needs tags for RealSimVersion.h
+          submodules: false     # ProprietaryFiles is private and not needed here
+
+      # git refuses to run in a checkout owned by another uid (container vs runner).
+      - name: Trust the workspace
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      # Cheap and fails fast: catches "added a TU to the .vcxproj, forgot CMake",
+      # which would otherwise mean Linux silently never compiles the new file.
+      - name: Guard - MSBuild and CMake TU lists agree
+        run: python3 scripts/check_source_lists.py
+
+      - name: Resolve SUMO version from dependencies.yaml
+        id: sumo
+        run: |
+          # tr also strips \r: dependencies.yaml is CRLF in the repo, and a
+          # trailing carriage return would silently poison the clone tag.
+          ver=$(grep -A2 '^  sumo:' dependencies.yaml | grep 'version:' | head -1 | tr -d ' "\r' | cut -d: -f2)
+          echo "version=$ver"           >> "$GITHUB_OUTPUT"
+          echo "tag=v$(echo $ver | tr . _)" >> "$GITHUB_OUTPUT"
+          echo "Resolved SUMO $ver"
+
+      # libtraci is the active TraCI client (ENABLE_LIBSUMO is commented out in
+      # TrafficHelper.h), and building only that target avoids the gdal/fox/osg
+      # chain libsumocpp would pull in. Cached because it is by far the slowest
+      # step and only changes when dependencies.yaml does.
+      - name: Cache libtracicpp
+        id: cache-traci
+        uses: actions/cache@v4
+        with:
+          path: ~/sumo-traci
+          key: libtraci-${{ matrix.slug }}-${{ steps.sumo.outputs.version }}
+
+      - name: Build libtracicpp
+        if: steps.cache-traci.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch "${{ steps.sumo.outputs.tag }}" \
+            https://github.com/eclipse-sumo/sumo "$HOME/sumo-src"
+          cmake -S "$HOME/sumo-src" -B "$HOME/sumo-build" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCHECK_OPTIONAL_LIBS=OFF \
+            -DENABLE_PYTHON_BINDINGS=OFF \
+            -DENABLE_JAVA_BINDINGS=OFF
+          cmake --build "$HOME/sumo-build" --target libtracicpp -j "$(nproc)"
+          mkdir -p "$HOME/sumo-traci/bin"
+          cp "$HOME/sumo-src/bin/libtracicpp.so" "$HOME/sumo-traci/bin/"
+
+      - name: Configure and build TrafficLayer
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DFIXS_SUMO_HOME="$HOME/sumo-traci"
+          cmake --build build -j "$(nproc)"
+          file build/TrafficLayer
+
+      - name: Smoke - starts and prints usage
+        run: |
+          export LD_LIBRARY_PATH="$HOME/sumo-traci/bin:$LD_LIBRARY_PATH"
+          ./build/TrafficLayer --help
+
+      # The Linux build must REFUSE a VISSIM config rather than hang on a
+      # connect() that can never succeed (VISSIM is Windows-only).
+      - name: Smoke - a VISSIM config is rejected on Linux
+        run: |
+          export LD_LIBRARY_PATH="$HOME/sumo-traci/bin:$LD_LIBRARY_PATH"
+          cat > /tmp/vissim.yaml <<'EOF'
+          SimulationSetup:
+            EnableFIXS: true
+            SelectedTrafficSimulator: VISSIM
+            TrafficSimulatorPort: 1337
+          EOF
+          if ./build/TrafficLayer -f /tmp/vissim.yaml > /tmp/out.txt 2>&1; then
+            echo "FAIL: a VISSIM config was accepted on Linux"; cat /tmp/out.txt; exit 1
+          fi
+          grep -q "VISSIM is Windows-only" /tmp/out.txt \
+            || { echo "FAIL: wrong diagnostic:"; cat /tmp/out.txt; exit 1; }
+          echo "OK: rejected with the expected message"
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: TrafficLayer-${{ matrix.slug }}
+          path: build/TrafficLayer
+          if-no-files-found: error

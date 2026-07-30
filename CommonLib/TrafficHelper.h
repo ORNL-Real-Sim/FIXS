@@ -234,7 +234,10 @@ public:
 private:
 	void parserSumoSubscription(libsumo::TraCIResults VehDataSubscribeTraciResults, std::string vehId, VehFullData_t& CurVehData);
 
-	const double M_PI = 3.14159265358979323846;
+	// #65: NOT named M_PI. MSVC leaves M_PI undefined unless _USE_MATH_DEFINES,
+	// so a member of that name is legal there; glibc's <math.h> defines M_PI
+	// unconditionally, which turns this declaration into a syntax error on gcc.
+	const double kPi = 3.14159265358979323846;
 
 	struct SignalSubscriptionFlags_t {
 		bool idHasSubscribed = false;

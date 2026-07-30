@@ -1814,7 +1814,7 @@ void TrafficHelper::parserSumoSubscription(libsumo::TraCIResults VehDataSubscrib
 	// grade
 	//=================
 	tempDoublePtr = static_pointer_cast<libsumo::TraCIDouble> (VehDataSubscribeTraciResults[libsumo::VAR_SLOPE]);
-	CurVehData.grade = tempDoublePtr->value * M_PI/180;
+	CurVehData.grade = tempDoublePtr->value * kPi/180;
 
 	//=================
 	// get lane change
