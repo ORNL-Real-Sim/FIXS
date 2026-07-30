@@ -79,7 +79,11 @@ def _fixs_tag_repo():
         with open(os.path.join(FIXS_ROOT, "FIXS_VERSION.txt"), encoding="utf-8") as f:
             lines = [ln.strip() for ln in f if ln.strip()]
         if lines:
-            tag = lines[0]
+            # Line 1 is the tag, but initialize.sh stamps the rolling versions as
+            # "<tag> (<published_at>)" while fetch_fixs.ps1 writes the bare tag. Take
+            # the first field so either form resolves; passing the stamped form to the
+            # releases API 404s and silently disables this check on Linux.
+            tag = lines[0].split()[0]
         for ln in lines:
             if ln.lower().startswith("source:"):
                 repo = ln.split(":", 1)[1].strip() or repo
