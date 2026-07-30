@@ -142,8 +142,16 @@ CarlaSetup:
     CarlaClientIP: 127.0.0.1
     CarlaClientPort: 440
 
-    # default Traffic Objects updates every 0.1 seconds
-    TrafficRefreshRate: 0.1
+    # The CARLA world step (fixed_delta_seconds). The FIXS feed is a fixed 0.1 s, so
+    # this must be 0.1 or an exact divisor of it (0.05 / 0.025 / 0.02 / 0.01). Finer
+    # than the feed makes the bridge interpolate traffic - position AND heading -
+    # across the sub-steps, the way the CarMaker host does at 0.001 s. 0/absent = 1:1.
+    CarlaTimeStep: 0.05
+
+    # How often traffic poses are RE-APPLIED - the same meaning this key has on the
+    # CarMaker side, NOT the feed period. Omit (or 0) for every tick; coarser than the
+    # tick trades smoothness for fewer ApplyBatch calls on a heavy scene.
+    # TrafficRefreshRate: 0.05
     
     # Interested ids should be a subset of the vehicleSubscription ids
     InterestedIds: ["ego"]
