@@ -34,7 +34,13 @@ Running a setup saves it back under the same name; `N` is how you keep the old o
 and start another. The store is one file so the whole list can be read, shown and
 switched in one place - and a future front-end can drive exactly the same file:
 
-    {"schema": 1, "last": "roosevelt_default", "setups": {"<name>": {...}}}
+    {"schema": 2, "last": "roosevelt_default", "setups": {"<name>": {...}}}
+
+Schema 2 dropped `step_length`. A setup is a choice of ARTIFACTS (app, map, scenario
+yaml) plus how you want to watch it (sumo_gui); every timestep now lives in the
+scenario yaml, or is a protocol constant. Keeping a copy here made the store a second
+owner of a number the yaml also carried, and the two disagreed silently. A schema-1
+file still loads - the stale key is simply dropped the next time the setup is saved.
 
 Explicit CLI flags outrank a saved setup: the caller applies a slot only when the
 corresponding flag was not given, so `run_cosim --map atlanta` changes exactly that
@@ -47,7 +53,7 @@ from datetime import datetime
 import app_catalog
 import carla_env_setup as env
 
-SCHEMA = 1
+SCHEMA = 2
 # Identity used in a setup's `app` field when no application is selected.
 GENERIC = app_catalog.GENERIC
 
@@ -78,10 +84,20 @@ def load_doc():
     of prompts, never a failed run. An older {active, profiles:{<app_id>: rec}}
     file is upgraded in memory: each app's remembered run becomes a named setup
     '<app_id>_default', which is exactly what it was."""
+    # utf-8-SIG, not utf-8: this file gets hand-edited, and on Windows that means
+    # Notepad or PowerShell's Set-Content, both of which write a UTF-8 BOM. json.load
+    # over a plain utf-8 handle rejects a BOM, which lands in the except below and
+    # reads as "no setups at all" - every saved setup silently gone, and the picker
+    # starts asking from scratch. utf-8-sig accepts a BOM and a file without one.
     try:
-        with open(profiles_path(), encoding="utf-8") as f:
+        with open(profiles_path(), encoding="utf-8-sig") as f:
             doc = json.load(f)
-    except (OSError, ValueError):
+    except (OSError, ValueError) as exc:
+        # Distinguish "no file yet" (normal, first run) from "there is a file and it
+        # does not parse" (an edit went wrong - say so, or the loss looks like amnesia).
+        if os.path.isfile(profiles_path()) and not isinstance(exc, FileNotFoundError):
+            print(f"[cosim] {profiles_path()} could not be read ({exc}); starting from "
+                  f"no saved setups. Fix or delete that file to stop seeing this.")
         doc = {}
     if not isinstance(doc, dict):
         doc = {}
@@ -98,6 +114,19 @@ def load_doc():
     doc.setdefault("last", None)
     doc.pop("profiles", None)
     doc.pop("active", None)
+    # schema 1 -> 2: the setup no longer owns a timestep (the scenario yaml does).
+    # Said once, out loud, rather than dropping it silently: a 0.05 s value there was
+    # what drove SUMO at half the CARLA clock, so anyone who set it deliberately
+    # should know where it went.
+    stale = [n for n, r in doc["setups"].items()
+             if isinstance(r, dict) and "step_length" in r]
+    if stale:
+        print(f"[cosim] run setup(s) {', '.join(sorted(stale))} carried step_length; "
+              f"the scenario yaml now owns the cadence (CarlaSetup.CarlaTimeStep) and "
+              f"SUMO always steps at the FIXS feed period. Dropping the stale key.")
+        for n in stale:
+            doc["setups"][n].pop("step_length", None)
+        doc["schema"] = SCHEMA
     return doc
 
 
@@ -174,8 +203,7 @@ def summarize(rec):
     bits = [rec.get("app") or "no app",
             rec.get("map") or "no map",
             os.path.basename(rec.get("config") or "") or "auto config",
-            "gui" if rec.get("sumo_gui", True) else "headless",
-            f"step {rec.get('step_length', 0.05)}"]
+            "gui" if rec.get("sumo_gui", True) else "headless"]
     return " | ".join(bits)
 
 
@@ -210,8 +238,18 @@ def _fmt(slot, rec, carla_cfg, derived=None):
         return f"{mode}  {root}  ->  {derived.get('carla_host') or '127.0.0.1'}:" \
                f"{derived.get('carla_port') or 2000}"
     if slot == "sumo":
+        # No SUMO timestep here: it is the FIXS exchange period, fixed by the
+        # protocol. The tick and the pacing come from the yaml via `derived`, so this
+        # line shows what will actually run rather than a remembered copy.
         gui = "gui" if rec.get("sumo_gui", True) else "headless"
-        return f"{gui}, step {rec.get('step_length', 0.05)}"
+        tick = derived.get("carla_tick")
+        pace = derived.get("realtime")
+        bits = [gui]
+        if tick:
+            bits.append(f"CARLA tick {tick:g} s")
+        if pace is not None:
+            bits.append("realtime" if pace else "as fast as possible")
+        return ", ".join(bits)
     return "?"
 
 

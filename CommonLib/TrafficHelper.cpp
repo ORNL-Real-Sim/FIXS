@@ -1,10 +1,16 @@
 #include "TrafficHelper.h"
+#include "FixsProtocol.h"   // fixs::kFeedPeriodS - one FIXS exchange == one traffic step
 #include <stdexcept>
 
 
 //const unsigned short selfServerPort[NSERVER] = { 420 };
 
 using namespace std;
+
+// The traffic simulator must step exactly once per FIXS exchange, so its step
+// length IS the exchange period (see FixsProtocol.h). Formatted once here rather
+// than written as a bare "0.1" at each auto-launch site.
+static const std::string kTrafficStepArg = std::to_string(fixs::kFeedPeriodS);
 
 // #177: lane id "edge_index" -> "edge" (strip the trailing _<laneIndex>).
 static std::string edgeOfLane(const std::string& laneId) {
@@ -68,7 +74,8 @@ void TrafficHelper::connectionSetup(string trafficIp, int trafficPort, int nClie
 		// This is the active implementation
 		// -----------------------------------------------------------------------
 		try {
-			std::vector<std::string> cmd = {"sumo", "-c", Config_c->SumoSetup.SumoConfigFile, "--start", "--step-length", "0.1",
+			std::vector<std::string> cmd = {"sumo", "-c", Config_c->SumoSetup.SumoConfigFile, "--start",
+				"--step-length", kTrafficStepArg,
 				"--num-clients", std::to_string(Config_c->SumoSetup.NumClients)};
 
 			printf("Launching SUMO via libsumo::Simulation::start()...\n");
@@ -89,7 +96,7 @@ void TrafficHelper::connectionSetup(string trafficIp, int trafficPort, int nClie
 			std::string sumoCmd = "sumo-gui -c \"" + Config_c->SumoSetup.SumoConfigFile +
 				"\" --remote-port " + std::to_string(trafficPort) +
 				" --num-clients " + std::to_string(Config_c->SumoSetup.NumClients) +
-				" --step-length 0.1 --start";
+				" --step-length " + kTrafficStepArg + " --start";
 
 			printf("Launching SUMO-GUI as external process...\n");
 			printf("  Command: %s\n", sumoCmd.c_str());
@@ -465,10 +472,6 @@ void TrafficHelper::getConfig() {
 	vehicleHasSubscribed_v.clear();
 	vehicleHasSubscribed_v.resize(vehicleSubscribeId_v.size());
 	fill(vehicleHasSubscribed_v.begin(), vehicleHasSubscribed_v.end(), false);
-
-	Config_c->CarMakerSetup.TrafficRefreshRate = 0.123;
-
-	int aa = 1;
 }
 
 

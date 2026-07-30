@@ -30,6 +30,7 @@
 #include "SocketHelper.h"
 #include "MsgHelper.h"
 #include "IVirEnvBackend.h"
+#include "FixsProtocol.h"   // fixs::kFeedPeriodS - the exchange period, shared with the hosts
 
 namespace virenv {
 

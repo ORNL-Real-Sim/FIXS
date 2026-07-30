@@ -364,11 +364,43 @@ python run_cosim.py --no-launch --map RP_Ver0529 \
   stock Town01; application maps ship separately.
 
 ### Timestep & speed
-`--step-length` is the **shared** timestep: SUMO's `--step-length` *and* CARLA's
-`fixed_delta_seconds` (default 0.05 s, matching CARLA's official
-`run_synchronization`; the hard max with default physics substepping is 0.1 s).
-The loop is paced to **real time** by default. Speed levers, none of which change
-the defaults:
+There is no shared timestep any more &mdash; there are **three** cadences, and only one
+of them is yours to choose:
+
+| cadence | where | value |
+| --- | --- | --- |
+| FIXS feed / handshake, = SUMO `--step-length` | `fixs::kFeedPeriodS`, `CommonLib/FixsProtocol.h` | **0.1 s, fixed** |
+| CARLA world step (`fixed_delta_seconds`) | `CarlaSetup.CarlaTimeStep` in the scenario yaml | 0.1 / 0.05 / 0.025 / 0.02 / 0.01 |
+| traffic pose re-apply | `CarlaSetup.TrafficRefreshRate` | &ge; the tick; omit for every tick |
+
+The feed is a property of the protocol, not a preference: every VirEnvCore host tests
+its FIXS send/recv boundary against a 0.1 s grid on its own sim clock, and TrafficLayer
+steps the traffic simulator exactly once per exchange. Give SUMO a different step and
+the two clocks diverge &mdash; a 0.05 s SUMO step means CARLA advances two ticks per SUMO
+step, so every sample is drawn twice and the scene plays at half speed. Both bridges
+therefore get `--step-length 0.1` from one builder (`sumo_launch_cmd`).
+
+A tick finer than the feed makes the bridge **interpolate** traffic across the
+sub-steps &mdash; position *and* heading, on the shortest arc &mdash; which is exactly what the
+CarMaker host has always done at 0.001 s. `--carla-tick` sets it for one run and is
+written through to the yaml. (`--step-length` on the CLI is accepted and taken as the
+tick, with a note.)
+
+Anything that changes **how the traffic behaves** comes from one table in `run_cosim`
+(`SUMO_CONTRACT` / `SUMO_CONVENTION`), injected on the SUMO command line for both
+bridges and printed with each flag's origin. The map's `.sumocfg` is used as it ships
+and never edited: it is app-independent, so a co-sim requirement does not belong in it.
+Precedence is `contract > app sumo_args > convention > the map's cfg`, and an app
+deviates via `sumo_args` in `apps.json`. Nothing is generated or cached: the flags are
+passed and printed, so what a run gave SUMO is in its own log.
+
+`--start` is passed explicitly as `true`/`false` rather than omitted, because omitting
+it does not turn it off &mdash; a cfg declaring `<start value="t"/>` (roosevelt's does)
+would start stepping anyway, which is why `SumoSetup.AutoStart: false` used to do
+nothing on that map.
+
+The loop is paced to **real time** by default (`CarlaSetup.RealtimePacing`, honoured by
+both bridges). Speed levers, none of which change the defaults:
 - `--carla-timeout S` &mdash; client connect timeout (default 10 s; raise for heavy
   source-build maps that are slow to answer the first RPC).
 - `--quality-level Low` &mdash; cheaper rendering on heavy maps.

@@ -102,6 +102,11 @@ void CarlaBackend::despawnVehicle(VehHandle h) {
         if (it->second) it->second->Destroy();
         actors_.erase(it);
     }
+    // Drop the applied-pose record too. It was left behind before, so it grew for the
+    // whole run (a thousand-plus arrived vehicles over a few minutes) and the pose of
+    // a destroyed actor stayed queryable through lastAppliedPose() - which the
+    // per-exchange z audit and the A/B log both read.
+    lastApplied_.erase(h);
 }
 
 void CarlaBackend::setVehiclePose(VehHandle h, const Pose& p) {
@@ -115,24 +120,41 @@ void CarlaBackend::setVehiclePose(VehHandle h, const Pose& p) {
         if (e.x > 0.1f) ext = e;   // guard a not-yet-populated bbox on the spawn frame
     }
     carla::geom::Transform carlaTf = BridgeHelper::map_transfrom_Sumo_to_Carla(sumoTransformOf(p), ext);
-    lastApplied_[h] = carlaTf;   // A/B instrumentation (driver logs it by SUMO id)
-
-    // ---- online XIL health guard (#193 placeholder): SUMO<->CARLA z alignment ---
-    // The teleport places this (physics-off) car at SUMO's z. If SUMO's road
-    // elevation diverges from the CARLA road surface under the car -- e.g. a
-    // coarsely-sampled net vs the xodr, or an inconsistent map pair -- the car
-    // floats/sinks. Compare against the CARLA road and warn past tolerance. #174
-    // only warns; the abort / snap-to-road / dyno-invalid policy is #193.
-    if (!map_) map_ = world_->GetMap();
-    if (map_) {
-        carla::SharedPtr<carla::client::Waypoint> wp = map_->GetWaypoint(carlaTf.location);
-        if (wp)
-            fixs::RS_XIL_GUARD("sumo_carla_z_mismatch",
-                               carlaTf.location.z - wp->GetTransform().location.z, kZMismatchTolM);
-    }
+    lastApplied_[h] = carlaTf;   // A/B instrumentation + the per-exchange z audit
 
     // batched, applied in flushBatch() before the world Tick -- same as mainVirCarla
     batch_.push_back(carla::rpc::Command::ApplyTransform((carla::rpc::ActorId)h, carlaTf));
+}
+
+
+//----------------------------------------------------------------------------
+//  SUMO<->CARLA z-alignment audit (#193 placeholder).
+//
+//  A teleported (physics-off) car sits at SUMO's z. If SUMO's road elevation
+//  diverges from the CARLA road surface under it -- a coarsely-sampled net against
+//  the xodr, or an inconsistent map pair -- the car floats or sinks. So compare the
+//  applied pose against the CARLA road and report past tolerance. #174 only warns;
+//  the abort / snap-to-road / dyno-invalid policy is #193.
+//
+//  Called ONCE PER FIXS EXCHANGE by the driver, not from setVehiclePose. This asks
+//  whether the two MAPS agree on elevation, and two maps do not start agreeing
+//  halfway through a 0.1 s interval - so re-asking it on every interpolated sub-step
+//  bought nothing and cost a whole-map waypoint search per vehicle per tick (at
+//  CarlaTimeStep 0.01 with a few hundred vehicles, thousands of searches per
+//  exchange). The XIL guard's own rate limiting spares only the LOG: the search
+//  happens before the guard is ever called.
+//----------------------------------------------------------------------------
+void CarlaBackend::auditZAlignment() {
+    if (!world_) return;
+    if (!map_) map_ = world_->GetMap();
+    if (!map_) return;
+    for (const std::pair<const VehHandle, carla::geom::Transform>& kv : lastApplied_) {
+        carla::SharedPtr<carla::client::Waypoint> wp = map_->GetWaypoint(kv.second.location);
+        if (wp)
+            fixs::RS_XIL_GUARD("sumo_carla_z_mismatch",
+                               kv.second.location.z - wp->GetTransform().location.z,
+                               kZMismatchTolM);
+    }
 }
 
 void CarlaBackend::flushBatch() {

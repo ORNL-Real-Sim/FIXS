@@ -28,11 +28,26 @@ Schema (schema: 1)
       "maps":   ["roosevelt", ...],     # optional, DEFAULT ["<id>"]; first = default pick
       "configs":[ <config>, ... ],      # optional app-owned scenario yamls
       "defaults": {                     # optional per-app run defaults (CLI wins)
-        "engine": "py"|"cpp", "sumo_gui": true, "step_length": 0.05
+        "engine": "py"|"cpp", "sumo_gui": true
+      },                                # no timestep: the scenario yaml owns the
+                                        # cadence, and SUMO's step is the FIXS feed
+      "sumo_args": {                    # optional: this app's deviations from the
+        "--lateral-resolution": "0",    #   co-sim SUMO convention (run_cosim's
+        "--time-to-teleport": "-1",     #   SUMO_CONVENTION). null drops a flag.
+        "--step-length": null           #   Contract flags cannot be overridden.
       }
     }
   ]
 }
+
+Why `sumo_args` and not an edit to the map's .sumocfg: a Digital-Twin-Library map
+ships ONE app-independent scenario, and a co-sim requirement does not belong in a
+shared artifact - otherwise every new map needs the same edit before it works. So
+run_cosim injects the convention on the SUMO command line (printed, with each flag's
+origin) and an app deviates HERE, tracked and reviewed next to its declaration,
+valid on every map that app runs against. An app that needs different DEMAND does not
+belong here either: that is a different scenario, and it ships as files in the app
+folder (see mlk_eco_driving) chosen with --sumocfg.
 
 A map is just a NAME - the word the picker matches against what already exists:
 a Digital-Twin-Library location / cooked map name / release tag (catalog_entry
@@ -255,6 +270,22 @@ def _normalize_app(raw):
         if defaults is not None:
             _warn(f"app '{app_id}': 'defaults' is not an object; ignoring it.")
         defaults = {}
+    # This app's deviations from the co-sim SUMO convention. Kept as raw text keyed by
+    # the SUMO flag, so a new SUMO option needs no support here; run_cosim decides
+    # precedence and prints where each flag came from. A null value drops a convention
+    # flag. Keys must look like flags, or a typo would be passed to SUMO verbatim.
+    sumo_args = raw.get("sumo_args")
+    if not isinstance(sumo_args, dict):
+        if sumo_args is not None:
+            _warn(f"app '{app_id}': 'sumo_args' is not an object; ignoring it.")
+        sumo_args = {}
+    clean_args = {}
+    for flag, value in sumo_args.items():
+        if isinstance(flag, str) and flag.startswith("--"):
+            clean_args[flag] = value
+        else:
+            _warn(f"app '{app_id}': sumo_args key '{flag}' is not a --flag; ignoring it.")
+    sumo_args = clean_args
     # No "maps" -> the app id IS the map name to look for. Apps named after their
     # location (roosevelt, atlanta) therefore need no map declaration at all.
     maps = [m for m in (_normalize_map(m, app_id) for m in raw.get("maps") or []) if m]
@@ -267,7 +298,8 @@ def _normalize_app(raw):
             "note": (raw.get("note") or "").strip() or None,
             "maps": maps,
             "configs": configs,
-            "defaults": defaults}
+            "defaults": defaults,
+            "sumo_args": sumo_args}
 
 
 def load_catalog(root=None):
