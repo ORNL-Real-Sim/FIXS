@@ -296,15 +296,18 @@ void MsgHelper::depackMsgType(char* buffer, uint16_t* msgSize, uint8_t* msgType)
 	*msgType = tempUint8;
 }
 
+// NOTE (#87): a NULL buffer means "measure, don't write" -- iByte still advances
+// exactly as it would when packing. vehRecordSize() uses this so the size pass and
+// the pack pass share ONE field traversal and cannot drift out of sync.
 void MsgHelper::stringVehDataToBuffer(string vehDataString, std::string VehDataName, char* buffer, int* iByte) {
 	if (VehicleMessageField_set.find(VehDataName) != VehicleMessageField_set.end())
 	{
 		uint8_t tempUint8;
 
 		tempUint8 = (uint8_t)vehDataString.size();
-		memcpy(buffer + *iByte, (char*)&tempUint8, sizeof(uint8_t));
+		if (buffer) memcpy(buffer + *iByte, (char*)&tempUint8, sizeof(uint8_t));
 		*iByte = *iByte + sizeof(uint8_t);
-		memcpy(buffer + *iByte, (char*)vehDataString.c_str(), tempUint8);
+		if (buffer) memcpy(buffer + *iByte, (char*)vehDataString.c_str(), tempUint8);
 		*iByte = *iByte + tempUint8;
 	}
 };
@@ -313,7 +316,7 @@ void MsgHelper::stringVehDataToBuffer(string vehDataString, std::string VehDataN
 template <typename T> void MsgHelper::numericVehDataToBuffer(T vehDataField, std::string VehDataName, char* buffer, int* iByte) {
 	if (VehicleMessageField_set.find(VehDataName) != VehicleMessageField_set.end())
 	{
-		memcpy(buffer + *iByte, (char*)&vehDataField, sizeof(T));
+		if (buffer) memcpy(buffer + *iByte, (char*)&vehDataField, sizeof(T));
 		*iByte = *iByte + sizeof(T);
 	}
 }
@@ -336,7 +339,7 @@ template <typename T> void MsgHelper::bufferToNumericVehData(char* buffer, int* 
 	}
 }
 
-void MsgHelper::packVehData(VehFullData_t VehData, char* buffer, int* iByte) {
+void MsgHelper::packVehData(const VehFullData_t& VehData, char* buffer, int* iByte) {
 
 	uint8_t tempUint8;
 	uint16_t tempUint16;
@@ -347,7 +350,7 @@ void MsgHelper::packVehData(VehFullData_t VehData, char* buffer, int* iByte) {
 
 	*iByte = *iByte + sizeof(uint16_t);
 	tempUint8 = 1;
-	memcpy(buffer + *iByte, (char*)&tempUint8, sizeof(uint8_t));
+	if (buffer) memcpy(buffer + *iByte, (char*)&tempUint8, sizeof(uint8_t));
 	*iByte = *iByte + sizeof(uint8_t);
 
 	// NOTE: order of these data field DOES matter!
@@ -392,7 +395,17 @@ void MsgHelper::packVehData(VehFullData_t VehData, char* buffer, int* iByte) {
 
 	// go back to the first byte location and parser message size
 	tempUint16 = (*iByte - initByte);
-	memcpy(buffer + initByte, (char*)&tempUint16, sizeof(tempUint16));
+	if (buffer) memcpy(buffer + initByte, (char*)&tempUint16, sizeof(tempUint16));
+}
+
+
+// #87: bytes packVehData would write for this vehicle, record header included.
+// Runs the SAME traversal with a NULL buffer, so it is correct by construction
+// rather than by a duplicated field list that has to be kept in step.
+int MsgHelper::vehRecordSize(const VehFullData_t& VehData) {
+	int iByte = 0;
+	packVehData(VehData, nullptr, &iByte);
+	return iByte;
 }
 
 void MsgHelper::depackVehData(char* buffer, VehFullData_t& VehData) {
@@ -450,7 +463,7 @@ void MsgHelper::depackVehData(char* buffer, VehFullData_t& VehData) {
 
 }
 
-void MsgHelper::packTrafficLightData(TrafficLightData_t TrafficLightData, char* buffer, int* iByte) {
+void MsgHelper::packTrafficLightData(const TrafficLightData_t& TrafficLightData, char* buffer, int* iByte) {
 	/*
 	MESSAGE STRUCTURE:
 
@@ -479,33 +492,41 @@ void MsgHelper::packTrafficLightData(TrafficLightData_t TrafficLightData, char* 
 
 	// 1 byte, uint8_t, data identifier
 	tempUint8 = 2;
-	memcpy(buffer + *iByte, (char*)&tempUint8, sizeof(uint8_t));
+	if (buffer) memcpy(buffer + *iByte, (char*)&tempUint8, sizeof(uint8_t));
 	*iByte = *iByte + sizeof(uint8_t);
 
 	// 1 byte, uint8_t, length of the string of signal light name
 	// X bytes, string, string of signal light name(max 255 bytes)
 	tempUint8 = TrafficLightData.name.size();
-	memcpy(buffer + *iByte, (char*)&tempUint8, sizeof(uint8_t));
+	if (buffer) memcpy(buffer + *iByte, (char*)&tempUint8, sizeof(uint8_t));
 	*iByte = *iByte + sizeof(uint8_t);
-	memcpy(buffer + *iByte, (char*)TrafficLightData.name.c_str(), tempUint8);
+	if (buffer) memcpy(buffer + *iByte, (char*)TrafficLightData.name.c_str(), tempUint8);
 	*iByte = *iByte + tempUint8;
 
-	// 2 bytes, uint16_t, unique number of signal light  
+	// 2 bytes, uint16_t, unique number of signal light
 	tempUint16 = TrafficLightData.id;
-	memcpy(buffer + *iByte, (char*)&tempUint16, sizeof(uint16_t));
+	if (buffer) memcpy(buffer + *iByte, (char*)&tempUint16, sizeof(uint16_t));
 	*iByte = *iByte + sizeof(uint16_t);
 
 	// 1 byte, uint8_t, length of the string of signal state.order of each phase need to be referred to an additional file
 	// X bytes, string, string of signal state
 	tempUint8 = TrafficLightData.state.size();
-	memcpy(buffer + *iByte, (char*)&tempUint8, sizeof(uint8_t));
+	if (buffer) memcpy(buffer + *iByte, (char*)&tempUint8, sizeof(uint8_t));
 	*iByte = *iByte + sizeof(uint8_t);
-	memcpy(buffer + *iByte, (char*)TrafficLightData.state.c_str(), tempUint8);
+	if (buffer) memcpy(buffer + *iByte, (char*)TrafficLightData.state.c_str(), tempUint8);
 	*iByte = *iByte + tempUint8;
 
-	// go back to the first byte location and parser message size 
+	// go back to the first byte location and parser message size
 	tempUint16 = (*iByte - initByte);
-	memcpy(buffer + initByte, (char*)&tempUint16, sizeof(tempUint16));
+	if (buffer) memcpy(buffer + initByte, (char*)&tempUint16, sizeof(tempUint16));
+}
+
+
+// #87: bytes packTrafficLightData would write, record header included. See vehRecordSize().
+int MsgHelper::tlsRecordSize(const TrafficLightData_t& TrafficLightData) {
+	int iByte = 0;
+	packTrafficLightData(TrafficLightData, nullptr, &iByte);
+	return iByte;
 }
 
 void MsgHelper::depackTrafficLightData(char* buffer, TrafficLightData_t* TrafficLightData) {
@@ -552,7 +573,7 @@ void MsgHelper::depackTrafficLightData(char* buffer, TrafficLightData_t* Traffic
 	iByte += tempUint8;
 }
 
-void MsgHelper::packDetectorData(TlsDetector_t DetectorData, char* buffer, int* iByte) {
+void MsgHelper::packDetectorData(const TlsDetector_t& DetectorData, char* buffer, int* iByte) {
 	/*
 	MESSAGE STRUCTURE:
 
@@ -590,20 +611,20 @@ void MsgHelper::packDetectorData(TlsDetector_t DetectorData, char* buffer, int* 
 
 	// !! IDENTIFIER
 	tempUint8 = 3;
-	memcpy(buffer + *iByte, (char*)&tempUint8, sizeof(uint8_t));
+	if (buffer) memcpy(buffer + *iByte, (char*)&tempUint8, sizeof(uint8_t));
 	*iByte = *iByte + sizeof(uint8_t);
 
 	// 1 byte, uint8_t, length of the string of signal light name
 	// X bytes, string, string of signal light name(max 255 bytes)
 	// 2 bytes, uint16_t, unique number of signal light
 	tempUint8 = get<1>(DetectorData).size();
-	memcpy(buffer + *iByte, (char*)&tempUint8, sizeof(uint8_t));
+	if (buffer) memcpy(buffer + *iByte, (char*)&tempUint8, sizeof(uint8_t));
 	*iByte = *iByte + sizeof(uint8_t);
-	memcpy(buffer + *iByte, (char*)get<1>(DetectorData).c_str(), tempUint8);
+	if (buffer) memcpy(buffer + *iByte, (char*)get<1>(DetectorData).c_str(), tempUint8);
 	*iByte = *iByte + tempUint8;
 
 	tempUint16 = get<0>(DetectorData);
-	memcpy(buffer + *iByte, (char*)&tempUint16, sizeof(uint16_t));
+	if (buffer) memcpy(buffer + *iByte, (char*)&tempUint16, sizeof(uint16_t));
 	*iByte = *iByte + sizeof(uint16_t);
 
 	size_t nDet = get<2>(DetectorData).size();
@@ -615,23 +636,31 @@ void MsgHelper::packDetectorData(TlsDetector_t DetectorData, char* buffer, int* 
 		DetectorData_t Det = get<2>(DetectorData)[i];
 
 		tempUint8 = Det.name.size();
-		memcpy(buffer + *iByte, (char*)&tempUint8, sizeof(uint8_t));
+		if (buffer) memcpy(buffer + *iByte, (char*)&tempUint8, sizeof(uint8_t));
 		*iByte = *iByte + sizeof(uint8_t);
-		memcpy(buffer + *iByte, (char*)Det.name.c_str(), tempUint8);
+		if (buffer) memcpy(buffer + *iByte, (char*)Det.name.c_str(), tempUint8);
 		*iByte = *iByte + tempUint8;
 
 		tempUint8 = Det.id;
-		memcpy(buffer + *iByte, (char*)&tempUint8, sizeof(uint8_t));
+		if (buffer) memcpy(buffer + *iByte, (char*)&tempUint8, sizeof(uint8_t));
 		*iByte = *iByte + sizeof(uint8_t);
 
 		tempUint8 = Det.state;
-		memcpy(buffer + *iByte, (char*)&tempUint8, sizeof(uint8_t));
+		if (buffer) memcpy(buffer + *iByte, (char*)&tempUint8, sizeof(uint8_t));
 		*iByte = *iByte + sizeof(uint8_t);
 	}
 
-	// go back to the first byte location and parser message size 
+	// go back to the first byte location and parser message size
 	tempUint16 = (*iByte - initByte);
-	memcpy(buffer + initByte, (char*)&tempUint16, sizeof(tempUint16));
+	if (buffer) memcpy(buffer + initByte, (char*)&tempUint16, sizeof(tempUint16));
+}
+
+
+// #87: bytes packDetectorData would write, record header included. See vehRecordSize().
+int MsgHelper::detRecordSize(const TlsDetector_t& DetectorData) {
+	int iByte = 0;
+	packDetectorData(DetectorData, nullptr, &iByte);
+	return iByte;
 }
 
 void MsgHelper::depackDetectorData(char* buffer, int msgSize, TlsDetector_t* DetectorData) {
