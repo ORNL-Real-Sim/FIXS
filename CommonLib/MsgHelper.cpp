@@ -399,7 +399,7 @@ void MsgHelper::packVehData(VehFullData_t VehData, char* buffer, int* iByte) {
 // #87: bytes packVehData would write for this vehicle, record header included.
 // Runs the SAME traversal with a NULL buffer, so it is correct by construction
 // rather than by a duplicated field list that has to be kept in step.
-int MsgHelper::vehRecordSize(VehFullData_t VehData) {
+int MsgHelper::vehRecordSize(const VehFullData_t& VehData) {
 	int iByte = 0;
 	packVehData(VehData, nullptr, &iByte);
 	return iByte;
@@ -517,7 +517,7 @@ void MsgHelper::packTrafficLightData(TrafficLightData_t TrafficLightData, char* 
 
 
 // #87: bytes packTrafficLightData would write, record header included. See vehRecordSize().
-int MsgHelper::tlsRecordSize(TrafficLightData_t TrafficLightData) {
+int MsgHelper::tlsRecordSize(const TrafficLightData_t& TrafficLightData) {
 	int iByte = 0;
 	packTrafficLightData(TrafficLightData, nullptr, &iByte);
 	return iByte;
@@ -651,7 +651,7 @@ void MsgHelper::packDetectorData(TlsDetector_t DetectorData, char* buffer, int* 
 
 
 // #87: bytes packDetectorData would write, record header included. See vehRecordSize().
-int MsgHelper::detRecordSize(TlsDetector_t DetectorData) {
+int MsgHelper::detRecordSize(const TlsDetector_t& DetectorData) {
 	int iByte = 0;
 	packDetectorData(DetectorData, nullptr, &iByte);
 	return iByte;

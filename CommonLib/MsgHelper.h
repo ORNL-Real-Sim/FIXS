@@ -43,9 +43,9 @@ public:
 	// into the 9-byte header BEFORE the body is streamed out in chunks. Each runs the
 	// matching pack*() with a NULL buffer (measure, don't write) -- one traversal serves
 	// both sizing and packing, so the two cannot drift apart.
-	int vehRecordSize(VehFullData_t VehFullData);
-	int tlsRecordSize(TrafficLightData_t TrafficLightData);
-	int detRecordSize(TlsDetector_t DetectorData);
+	int vehRecordSize(const VehFullData_t& VehFullData);
+	int tlsRecordSize(const TrafficLightData_t& TrafficLightData);
+	int detRecordSize(const TlsDetector_t& DetectorData);
 
 	void clearRecvStorage();
 	void clearSendStorage();

@@ -95,11 +95,15 @@
 // real-time tasks run on small stacks. Raise this if a scenario legitimately needs it.
 #define MAX_RECORD_SIZE 8192
 
-// #87: send-side chunk buffer. Must be >= the largest record actually sent; the flush
-// guard in sendData checks each record's real size against this and fails loudly
-// rather than overrunning. Larger just means fewer send() syscalls -- it does NOT cap
-// the message size, which is streamed across as many chunks as needed.
-#define TX_CHUNK_SIZE 32768
+// #87: send-side chunk buffer. Must be >= MAX_RECORD_SIZE so one record always fits
+// after a flush. Larger just means fewer send() syscalls -- it does NOT cap the
+// message size, which is streamed across as many chunks as needed.
+//
+// MAX_RECORD_SIZE, not this, is the wire contract: sendData refuses to EMIT a record
+// above MAX_RECORD_SIZE and recvData refuses to ACCEPT one, so both ends agree on
+// what is representable. Sizing the send guard off TX_CHUNK_SIZE instead would let a
+// C++ sender emit a record that a C++ receiver then rejects by dropping the link.
+#define TX_CHUNK_SIZE 16384
 
 
 class SocketHelper
@@ -148,10 +152,16 @@ public:
 // below should be converted to private in the future
 //private:
 
-	// #87: send-side chunk buffer. A member rather than a local so it is allocated
-	// once with the SocketHelper instead of putting TX_CHUNK_SIZE bytes on the stack
-	// of every sendData() call -- the dSPACE/CarMaker real-time tasks run on small
-	// stacks. Never holds a whole message; only one chunk at a time.
+	// #87: send-side chunk buffer. A member so it is reused rather than re-established
+	// on every sendData() call, and so its size is visible in one place.
+	//
+	// It does NOT move the cost off the stack: SocketHelper is itself a stack object at
+	// several call sites (TrafficHelper.cpp:894, :1844, DSProxyMode.cpp:193), so there
+	// the buffer lives on their stack instead. Together with the MAX_RECORD_SIZE local
+	// in recvData this raises stack use, which is worth knowing before either constant
+	// is increased on a real-time target.
+	//
+	// Never holds a whole message -- only one chunk at a time.
 	char txBuf[TX_CHUNK_SIZE];
 
 	int NSERVER = 0;

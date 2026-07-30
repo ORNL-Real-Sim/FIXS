@@ -88,6 +88,10 @@ class SocketHelper:
 
         return DetDataRecv_v
 
+    # #87: must match MAX_RECORD_SIZE in CommonLib/SocketHelper.h. The two ends enforce
+    # the same record ceiling so a record one accepts is never one the other refuses.
+    MAX_RECORD_SIZE = 8192
+
     @staticmethod
     def _recv_exact(sock, n):
         """Read exactly n bytes, looping until they all arrive (#87).
@@ -146,6 +150,15 @@ class SocketHelper:
                 raise ValueError(
                     f'record size {msg_size} is smaller than the record header '
                     f'({self.msg_each_header_size}) -- stream desync (#87)')
+            # #87: same ceiling SocketHelper.cpp enforces (MAX_RECORD_SIZE). No FIXS
+            # sender emits a record above it, so hitting this means the stream is
+            # desynced and msg_size was read out of the middle of a record. Without the
+            # check Python would block forever waiting for bytes that never come, where
+            # the C++ receiver fails loudly.
+            if body_size > self.MAX_RECORD_SIZE:
+                raise ValueError(
+                    f'record size {msg_size} exceeds MAX_RECORD_SIZE '
+                    f'{self.MAX_RECORD_SIZE} -- stream desync (#87)')
             received_buffer = self._recv_exact(sock, body_size)
 
             if self.enable_verbose_log:

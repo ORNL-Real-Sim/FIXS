@@ -957,7 +957,10 @@ int SocketHelper::recvData(int sock, int* simState, float* simTime, MsgHelper& M
 		}
 
 		// this recvSize is purely the message body, without the Msg_c.msgEachHeaderSize
-		if ((recvSize = recvExact(sock, recvEachDataBuf, bodySize)) == SOCKET_ERROR) {
+		// Guard on <= 0, not just SOCKET_ERROR: a clean close here is mid-message, so
+		// recvExact returns 0 and treating that as success would depack an uninitialised
+		// buffer. bodySize == 0 is legitimate (header-only record) and must not trip it.
+		if (bodySize > 0 && (recvSize = recvExact(sock, recvEachDataBuf, bodySize)) <= 0) {
 #ifdef WIN32
 			if (WSAGetLastError() == WSAEFAULT) {
 				printSocketErrorMessage(10014);
@@ -1044,13 +1047,14 @@ int SocketHelper::sendData(int sock, int iClient, float simTimeSend, uint8_t sim
 	// with the detector count at that intersection and is bounded only by the uint16
 	// size field (65535) -- not by MAX_RECORD_SIZE, which is the *vehicle* worst case.
 	// Reserving MAX_RECORD_SIZE here would let a large detector record run past txBuf.
-	#define FIXS_TX_FLUSH_IF_NEEDED(recBytes)                                          \
-		if ((recBytes) > TX_CHUNK_SIZE) {                                              \
-			fprintf(stderr, "FIXS #87: single record of %d B exceeds TX_CHUNK_SIZE %d" \
-			                " -- cannot send; raise TX_CHUNK_SIZE\n",                  \
-			        (int)(recBytes), (int)TX_CHUNK_SIZE);                              \
-			return -1;                                                                 \
-		}                                                                              \
+	#define FIXS_TX_FLUSH_IF_NEEDED(recBytes)                                            \
+		if ((recBytes) > MAX_RECORD_SIZE) {                                              \
+			fprintf(stderr, "FIXS #87: record of %d B exceeds MAX_RECORD_SIZE %d -- not" \
+			                " sent. A receiver could not accept it either; raise the"    \
+			                " constant on BOTH ends or split the record.\n",             \
+			        (int)(recBytes), (int)MAX_RECORD_SIZE);                              \
+			return -1;                                                                   \
+		}                                                                                \
 		if (txLen + (recBytes) > TX_CHUNK_SIZE) {                                      \
 			if (sendExact(sock, txBuf, txLen) < 0) {                                   \
 				fprintf(stderr, "FIXS #87: send() failed mid-message\n");              \

@@ -38,24 +38,28 @@
 #pragma comment (lib, "Mswsock.lib")
 #pragma comment (lib, "AdvApi32.lib")
 
-// #87: MAX_MSG_SIZE is the per-step DELIVERY budget handed to the Simulink model,
-// expressed in BYTES rather than a vehicle count. Record size is not knowable at
-// compile time -- it depends on the configured VehicleMessageField set and on the
-// runtime length of each id/link/lane string -- while the S-function output port
-// and DWork widths are literally byte counts. Sizing the limit in the same unit as
-// the constraint means no conversion constant that goes stale when the YAML field
-// list changes. A lean field set simply fits more vehicles; a rich one fits fewer.
+// #87: the per-step DELIVERY budget handed to the Simulink model, in BYTES rather
+// than a vehicle count. Record size is not knowable at compile time -- it depends on
+// the configured VehicleMessageField set and on the runtime length of each
+// id/link/lane string -- while the S-function output port and DWork widths are
+// literally byte counts. Sizing the limit in the same unit as the constraint avoids
+// a conversion constant that goes stale when the YAML field list changes. A lean
+// field set simply fits more vehicles; a rich one fits fewer.
 //
-// This was 1024, which silently capped the model at ~7 vehicles and, worse, left
-// the remainder of any longer message sitting in the socket -- so every subsequent
-// step parsed from the middle of a record and the stream never recovered.
+// This bounds what is DELIVERED, never what can be RECEIVED. The reads below always
+// drain exactly total_msg_size bytes; records past the budget are consumed and
+// DISCARDED so the stream stays byte-aligned. That is the actual #87 defect here:
+// the old code read one bufferful and abandoned the rest, so every later step parsed
+// from the middle of a record and the stream never recovered.
 //
-// NOTE: this bounds what is DELIVERED, not what can be RECEIVED. recvExact below
-// always drains exactly total_msg_size bytes; records that do not fit the budget
-// are consumed and discarded so the stream stays aligned. Keeping the message
-// small is the subscription config's job -- this is the graceful-degradation path.
-#define RECVBUFFERSIZE 16384
-#define SENDBUFFERSIZE 16384
+// DELIBERATELY LEFT AT 1024. It is tempting to raise it -- ~1024 B is only ~7
+// vehicles -- but RECVBUFFERSIZE/SENDBUFFERSIZE set the S-function port widths
+// (ssSetOutputPortWidth/ssSetInputPortWidth below), so changing them is a BREAKING
+// interface change: every existing Simulink model wired to this block fails to load
+// with a port-width mismatch. Fixing the desync does not require it. Raising the
+// budget belongs in its own change, together with model migration.
+#define RECVBUFFERSIZE 1024
+#define SENDBUFFERSIZE 1024
 
 // FIXS wire header: uint8 simState + float simTime + uint32 total_msg_size.
 // Must match MSG_HEADER_SIZE in SocketHelper.h (this file does not include it).
@@ -385,8 +389,10 @@ static void mdlStart(SimStruct* S)
     gRecvSizeHold = (int) 0;
     
     
-    real_T            *recvDataHold       = (real_T*) ssGetDWork(S, 0);
-    memset(recvDataHold, 0, sizeof(recvDataHold));
+    // #87: DWork 0 is SS_INT8 x RECVBUFFERSIZE -> size in bytes is RECVBUFFERSIZE.
+    // sizeof(recvDataHold) is the POINTER size (8 B), so this cleared 8 bytes.
+    int8_T            *recvDataHold       = (int8_T*) ssGetDWork(S, 0);
+    memset(recvDataHold, 0, RECVBUFFERSIZE);
 
 	serverSock = 0;
 
@@ -698,9 +704,13 @@ static void mdlUpdate(SimStruct* S, int_T tid)
                     if (enabledebug) {
                         printf("nonblock receive\n");
                     }
-                    real_T            *recvDataHold       = (real_T*) ssGetDWork(S, 0);
-                    // #87: was sizeof(recvDataHold) -- the POINTER size (8 B), not the DWork.
-                    memset(recvDataHold, 0, RECVBUFFERSIZE * sizeof(real_T));
+                    // #87: DWork 0 is declared SS_INT8 x RECVBUFFERSIZE, so its size in
+                    // BYTES is RECVBUFFERSIZE. Treat it as bytes; the historic real_T*
+                    // cast is wrong for the declared type and every other use here is
+                    // byte-wise (memcpy of recvSize, SS_UINT8 output port).
+                    int8_T            *recvDataHold       = (int8_T*) ssGetDWork(S, 0);
+                    // was sizeof(recvDataHold) -- the POINTER size (8 B), not the DWork.
+                    memset(recvDataHold, 0, RECVBUFFERSIZE);
                     memcpy(recvDataHold, recvBuf, recvSize);
                     gRecvSizeHold = recvSize;
                 }
@@ -774,10 +784,15 @@ static void mdlUpdate(SimStruct* S, int_T tid)
                            recvSize, (unsigned)totalMsgSize, overflow);
                 }
 
-                real_T            *recvDataHold       = (real_T*) ssGetDWork(S, 0);
-                // #87: was sizeof(recvDataHold) -- the size of the POINTER (8 B), not the
-                // DWork. Only the first byte of the buffer was ever cleared.
-                memset(recvDataHold, 0, RECVBUFFERSIZE * sizeof(real_T));
+                // #87: DWork 0 is declared SS_INT8 x RECVBUFFERSIZE, so its size in BYTES
+                // is RECVBUFFERSIZE -- NOT RECVBUFFERSIZE * sizeof(real_T), which would
+                // overrun it by 8x. The historic real_T* cast is wrong for the declared
+                // type; every other use here is byte-wise (memcpy of recvSize, SS_UINT8
+                // output port).
+                int8_T            *recvDataHold       = (int8_T*) ssGetDWork(S, 0);
+                // was sizeof(recvDataHold) -- the size of the POINTER (8 B), not the
+                // DWork. Only the first 8 bytes of the buffer were ever cleared.
+                memset(recvDataHold, 0, RECVBUFFERSIZE);
                 memcpy(recvDataHold, recvBuf, recvSize);
                 gRecvSizeHold = recvSize;
 

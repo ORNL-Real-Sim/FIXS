@@ -152,6 +152,27 @@ def check(n_first, n_second, chunk=None):
     return errs
 
 
+def test_framing():
+    """pytest entry point.
+
+    The file is also runnable as a script (see main()), but without a test_*
+    function `pytest tests/Python/` collects nothing here -- so the #176 and #87
+    regressions had no automated guard at all. Keep both: this asserts, main()
+    prints the per-case table that is useful when iterating by hand.
+    """
+    failures = []
+    for a, b in [(1, 1), (2, 2), (13, 13), (40, 40), (1, 13), (13, 1)]:
+        errs = check(a, b)
+        if errs:
+            failures.append(f'({a},{b}) full-reads: ' + '; '.join(errs))
+    for a, b in [(200, 200), (1000, 1000)]:
+        for k in (1, 7, 64, 1500):
+            errs = check(a, b, chunk=k)
+            if errs:
+                failures.append(f'({a},{b}) recv<={k}B: ' + '; '.join(errs))
+    assert not failures, 'framing regressions:\n  ' + '\n  '.join(failures)
+
+
 def main():
     cases = [(1, 1), (2, 2), (5, 5), (13, 13), (40, 40), (1, 13), (13, 1)]
     # #87: large messages (well past one TCP segment) x adversarial short reads.
