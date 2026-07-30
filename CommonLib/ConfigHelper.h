@@ -290,7 +290,10 @@ typedef struct SubscriptionVehicleList_t {
 typedef struct SubscriptionSignalList_t {
 	std::unordered_set <std::string> signalId_v;
 
-	bool subAllSignalFlag; 
+	// Default-initialised: this was previously an indeterminate value until the
+	// CarMaker branch assigned it. Mirrors SubscriptionVehicleList_t's
+	// subscribeAllVehicle, which is default-initialised to {false, 0}.
+	bool subAllSignalFlag = false;
 };
 
 typedef struct SubscriptionDetectorList_t {
