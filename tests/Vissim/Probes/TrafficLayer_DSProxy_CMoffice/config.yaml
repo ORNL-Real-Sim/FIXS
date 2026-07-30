@@ -1,0 +1,71 @@
+# =============================================================================
+# FIXS #168 -- CarMaker (office) <-> VISSIM co-simulation via DSProxy
+# SimpleEcho network. Vehicles only, NO traffic-signal sync.
+# =============================================================================
+#
+# Data flow (lockstep, CarMaker-triggered):
+#
+#   CarMaker.win64.exe --[ego VehFullData on port 2444]--> TrafficLayer.exe
+#   TrafficLayer --[VISSIM_SetDriverVehicles]------------> VISSIM (via DSProxy)
+#   VISSIM --[VISSIM_GetTrafficVehicles]-----------------> TrafficLayer
+#   TrafficLayer --[all background VehFullData on 2444]--> CarMaker (renders RS_Cxxx traffic)
+#
+# The ego id round-trips as 'egoCm': CarMaker tags its ego 'egoCm'; TrafficLayer
+# maps egoCm <-> the VISSIM-assigned VehicleID and re-stamps it back to 'egoCm'
+# on publish so CarMaker's VirtualEnvironment.lib skips echoing its own ego.
+
+SimulationSetup:
+    EnableRealSim: false            # DSProxy mode uses its own code path; this stays off
+    EnableVerboseLog: false
+    SelectedTrafficSimulator: VISSIM  # informational; DSProxy dispatch bypasses it
+    SimulationEndTime: 1000          # 1200 ticks at 10 Hz -- long enough to record a demo
+
+    # Mandatory fields for CarMaker's VirtualEnvironment.lib:
+    #   id, speed, vehicleClass, heading, grade, speedDesired (or accelerationDesired)
+    # (VirEnvHelper::initialization returns ERROR_INIT_MSG_FIELD otherwise.)
+    VehicleMessageField: [id, type, vehicleClass, speed, speedDesired, positionX, positionY, positionZ, heading, linkId, laneId, grade]
+
+ApplicationSetup:
+    EnableApplicationLayer: true
+
+    # The first subscription's ip/port[0] is the canonical Stage B publish
+    # endpoint. CarMaker's VirtualEnvironment.lib connects here too: with no
+    # explicit CarMakerSetup.CarMakerIP/Port, ConfigHelper falls back to this
+    # subscription's ip/port, so a single block keeps both sides aligned.
+    # The subscription id ('egoCm') also becomes CarMakerSetup.EgoId by the
+    # same fallback -- that is the ego match key for the publish re-stamp.
+    VehicleSubscription:
+    -   type: ego
+        attribute: { id: ['egoCm'], radius: [0] }
+        ip: ['127.0.0.1']
+        port: [2444]
+
+XilSetup:
+    EnableXil: false
+
+# CarMaker side. EgoId / CarMakerPort / CarMakerIP are left to fall back to the
+# subscription above so there is one source of truth for the port + ego id.
+CarMakerSetup:
+    EnableCosimulation: true        # drives ENABLE_REALSIM in VirtualEnvironment.lib
+    TrafficRefreshRate: 0.001       # write t_0 every sim step (1 kHz) -- REQUIRED so UpdRate=200
+                                    # traffic doesn't phase-lock/freeze (#168). Do not raise.
+    EnableEgoSimulink: false        # ego pose comes from User.c (office), not Simulink
+    SynchronizeTrafficSignal: false # SimpleEcho has no signals; skip signal sync entirely
+    EgoId: egoCm
+    EgoType: '110'                  # dedicated red ego type (DS_Ego, a Car clone) so the ego is distinct from the blue background in VISSIM (see recolor_network.py)
+
+# DSProxy: TrafficLayer spawns VISSIM via DrivingSimulatorProxy.dll and ticks it.
+VissimSetup:
+    EnableDSProxy: true
+    EnableDriverModelRelay: false   # no FIXS DriverModel / CAV controller in this demo
+
+    # Staged writable copy of the SimpleEcho network (run_cm_office_demo.bat
+    # mirrors tests/Vissim/SimpleEcho/simple_loop.inpx into stage_network/).
+    NetworkFile: 'stage_network\simple_loop.inpx'
+
+    VissimVersion: 2022
+    SimulatorFrequency: 10          # Hz
+    VisibilityRadius: -1.0          # unlimited
+    MaxSimulatorVeh: 10
+    MaxTotalVeh: 50000
+    MaxVissimSigGrp: 1000

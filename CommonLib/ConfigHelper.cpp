@@ -151,6 +151,15 @@ int ConfigHelper::getConfig(string configName) {
 		SimulationSetup.EnableVerboseLog = false;
 		if (!SuppressDefaultMessages) printf("\nWill disable verbose log as default!\n");
 	}
+	// SubEgoOnly (FIXS #158 Stage B+). Default true preserves legacy FIXS
+	// DriverModel behavior; set to false in the par-file to enable the
+	// per-tick send/recv path that the DSProxy + DriverModel relay needs.
+	if (node["SubEgoOnly"]) {
+		SimulationSetup.SubEgoOnly = parserFlag(node, "SubEgoOnly");
+	}
+	else {
+		SimulationSetup.SubEgoOnly = true;
+	}
 	if (node["SimulationEndTime"]) {
 		SimulationSetup.SimulationEndTime = parserDouble(node, "SimulationEndTime");
 	}
@@ -299,11 +308,17 @@ int ConfigHelper::getConfig(string configName) {
 	}
 
 	// figure out TrafficLayer IP
-	if (XilSetup.EnableXil) {
+	// Both branches assume the chosen subscription has at least one entry,
+	// which is true for every shipped scenario today. Guarding the empty
+	// case here lets a Stage A DSProxy probe config — which deliberately
+	// has no subscriptions yet — load without an access violation. The IP/
+	// port stay at default-constructed values; consumers further down the
+	// main path require at least one subscription anyway.
+	if (XilSetup.EnableXil && !XilSetup.VehicleSubscription.empty()) {
 		SimulationSetup.TrafficLayerIP = get<2>(XilSetup.VehicleSubscription[0])[0];
 		SimulationSetup.TrafficLayerPort = get<3>(XilSetup.VehicleSubscription[0])[0];
 	}
-	else {
+	else if (!XilSetup.EnableXil && !ApplicationSetup.VehicleSubscription.empty()) {
 		SimulationSetup.TrafficLayerIP = get<2>(ApplicationSetup.VehicleSubscription[0])[0];
 		SimulationSetup.TrafficLayerPort = get<3>(ApplicationSetup.VehicleSubscription[0])[0];
 	}
@@ -373,14 +388,29 @@ int ConfigHelper::getConfig(string configName) {
 		CarMakerSetup.EgoId = parserString(node, "EgoId");
 	}
 	else {
-		// try to parser ego vehicle info, if and only if there is just one vehicle subscribed
+		// Derive the ego id from the lone subscription if there is exactly one;
+		// otherwise the config is ambiguous about which vehicle is the ego. Do
+		// NOT silently fabricate a magic default (the old "egoCm" / Carla "ego"
+		// defaults differed per backend and bred cross-backend id mismatches).
+		// Fail loudly so a missing/typo'd ego is caught at parse time.
 		if (SubscriptionVehicleList.vehicleSubscribeId_v.size() == 1) {
 			CarMakerSetup.EgoId = SubscriptionVehicleList.vehicleSubscribeId_v.begin()->first;
 		}
-		else {
-			CarMakerSetup.EgoId = "egoCm";
+		else if (CarMakerSetup.EnableCosimulation) {
+			// Only a CarMaker run actually needs an ego id. This block is parsed
+			// unconditionally, so without this gate a SUMO<->Carla config (no
+			// CarMakerSetup section at all) aborted here - and an 'all' vehicle
+			// subscription (#176) populates subscribeAllVehicle, not
+			// vehicleSubscribeId_v, so there is nothing to infer from. See #214.
+			printf("ERROR: CarMakerSetup.EgoId is not defined and cannot be inferred "
+			       "(expected an explicit 'EgoId' or exactly one ego VehicleSubscription, "
+			       "found %zu). Define the ego id in config.yaml.\n",
+			       SubscriptionVehicleList.vehicleSubscribeId_v.size());
+			exit(-1);
 		}
-		//printf("\nCarMaker IP not specified! Will use localhost 127.0.0.1 as default!\n");
+		else {
+			CarMakerSetup.EgoId = "";   // no CarMaker in this run; nothing to infer
+		}
 	}
 	if (node["EgoType"]) {
 		CarMakerSetup.EgoType = parserString(node, "EgoType");
@@ -488,12 +518,21 @@ int ConfigHelper::getConfig(string configName) {
 		CarlaSetup.EnableCosimulation = false;
 	}
 
-	//if (node["EnableEgoSimulink"]) {
-	//	CarlaSetup.EnableEgoSimulink = parserFlag(node, "EnableEgoSimulink");
-	//}
-	//else {
-	//	CarlaSetup.EnableEgoSimulink = false;
-	//}
+	// Co-sim bridge selector (consumed by run_cosim.py, not this engine); parsed
+	// here for schema parity with ConfigHelper.py. Default true (= Python bridge).
+	CarlaSetup.EnablePythonBackend = node["EnablePythonBackend"]
+		? parserFlag(node, "EnablePythonBackend") : true;
+
+	// #174: parse ego dynamics ownership + control (mode A/B). EnableEgoSimulink
+	// is the back-compat alias; if EgoDynamicsOwner is unset it derives from it.
+	CarlaSetup.EnableEgoSimulink = node["EnableEgoSimulink"] ? parserFlag(node, "EnableEgoSimulink") : false;
+	if (node["EgoDynamicsOwner"]) {
+		CarlaSetup.EgoDynamicsOwner = parserString(node, "EgoDynamicsOwner");
+	}
+	else {
+		CarlaSetup.EgoDynamicsOwner = CarlaSetup.EnableEgoSimulink ? "Simulink" : "Carla";
+	}
+	CarlaSetup.EgoControl = node["EgoControl"] ? parserString(node, "EgoControl") : "None";
 	if (node["EnableExternalControl"]) {
 		CarlaSetup.EnableExternalControl = parserFlag(node, "EnableExternalControl");
 	}
@@ -514,6 +553,35 @@ int ConfigHelper::getConfig(string configName) {
 		CarlaSetup.CenteredViewId = "ego";
 		if (!SuppressDefaultMessages) printf("\nCentered View Id not specified! Will use ego as default!\n");
 	}
+
+	// Spectator BEV follow (rigid top-down snap). Default ON, 50 m up, north-up.
+	CarlaSetup.EnableSpectatorFollow = node["EnableSpectatorFollow"] ? parserFlag(node, "EnableSpectatorFollow") : true;
+	CarlaSetup.SpectatorHeight       = node["SpectatorHeight"]       ? parserDouble(node, "SpectatorHeight") : 50.0;
+	CarlaSetup.SpectatorAlignYaw     = node["SpectatorAlignYaw"]     ? parserFlag(node, "SpectatorAlignYaw") : false;
+
+	// Real-time frame pacing (spread sub-ticks evenly). Default OFF (XIL-safe).
+	CarlaSetup.RealtimePacing = node["RealtimePacing"] ? parserFlag(node, "RealtimePacing") : false;
+
+	// #174 ego driving-mode ladder (0=SumoDriver 1=CarlaDriver/L0 2=Advisory/L2 3=Control/L4)
+	CarlaSetup.EgoMode      = node["EgoMode"]      ? parserInteger(node, "EgoMode") : 0;
+	// L0 driver: native Carla TM by default; "Pursuit" selects the fallback module.
+	CarlaSetup.EgoL0Driver  = node["EgoL0Driver"]  ? parserString(node, "EgoL0Driver") : "TM";
+	CarlaSetup.EgoId        = node["EgoId"]        ? parserString(node, "EgoId") : "ego";
+	CarlaSetup.EgoSumoType  = node["EgoSumoType"]  ? parserString(node, "EgoSumoType") : "car";
+	CarlaSetup.EgoBlueprint = node["EgoBlueprint"] ? parserString(node, "EgoBlueprint") : "vehicle.tesla.model3";
+	if (node["EgoSpawnPose"]) {
+		for (std::size_t i = 0; i < node["EgoSpawnPose"].size(); i++)
+			CarlaSetup.EgoSpawnPose.push_back(node["EgoSpawnPose"][i].as<double>());
+	}
+	CarlaSetup.TrafficManagerPort = node["TrafficManagerPort"] ? parserInteger(node, "TrafficManagerPort") : 8000;
+	if (node["EgoRoutePoints"]) {
+		for (std::size_t i = 0; i < node["EgoRoutePoints"].size(); i++) {
+			CarlaSetup.EgoRoutePoints.push_back(std::make_pair(
+				node["EgoRoutePoints"][i][0].as<double>(), node["EgoRoutePoints"][i][1].as<double>()));
+		}
+	}
+	CarlaSetup.EgoRouteRepeat = node["EgoRouteRepeat"] ? parserInteger(node, "EgoRouteRepeat") : 50;
+	CarlaSetup.EgoTargetSpeed = node["EgoTargetSpeed"] ? parserDouble(node, "EgoTargetSpeed") : 8.33;
 
 	if (node["CarlaServerIP"]) {
 		CarlaSetup.CarlaServerIP = parserString(node, "CarlaServerIP");
@@ -577,12 +645,62 @@ int ConfigHelper::getConfig(string configName) {
 		//printf("\nCarMaker Port not specified! Will use 7331 as default!\n");
 	}
 
+	// Carla render sub-step (interpolate the feed for smoother motion). 0 -> 1:1.
+	CarlaSetup.CarlaTimeStep = node["CarlaTimeStep"] ? parserDouble(node, "CarlaTimeStep") : 0.0;
+
 	if (node["InterestedIds"]) {
 		parserStringVector(node, "InterestedIds", CarlaSetup.InterestedIds);
 	}
 	else {
 		CarlaSetup.InterestedIds = {"ego"};
 		if (!SuppressDefaultMessages) printf("\nDefault to track actor with id ego\n");
+	}
+
+	// ===========================================================================
+	// 			READ VissimSetup section (issue #158, Stage A)
+	// ===========================================================================
+	// Default all members up front. If the block is absent, this is the final
+	// state. If present, the per-key overrides below replace any of them.
+	VissimSetup.EnableDSProxy = false;
+	VissimSetup.NetworkFile = "";
+	VissimSetup.VissimVersion = 2022;
+	VissimSetup.DllPath = "";
+	VissimSetup.SimulatorFrequency = 10;
+	VissimSetup.VisibilityRadius = -1.0;
+	VissimSetup.MaxSimulatorVeh = 10;
+	VissimSetup.MaxSimulatorPed = 0;
+	VissimSetup.MaxSimulatorDet = 0;
+	VissimSetup.MaxTotalVeh = 50000;
+	VissimSetup.MaxVissimPed = 0;
+	VissimSetup.MaxVissimSigGrp = 1000;
+	VissimSetup.EnableDriverModelRelay = false;
+
+	node = config["VissimSetup"];
+	if (node) {
+		if (node["EnableDSProxy"])           VissimSetup.EnableDSProxy           = parserFlag(node, "EnableDSProxy");
+		if (node["NetworkFile"])             VissimSetup.NetworkFile             = parserString(node, "NetworkFile");
+		if (node["VissimVersion"])           VissimSetup.VissimVersion           = parserInteger(node, "VissimVersion");
+		if (node["DllPath"])                 VissimSetup.DllPath                 = parserString(node, "DllPath");
+		if (node["SimulatorFrequency"])      VissimSetup.SimulatorFrequency      = parserInteger(node, "SimulatorFrequency");
+		if (node["VisibilityRadius"])        VissimSetup.VisibilityRadius        = parserDouble(node, "VisibilityRadius");
+		if (node["MaxSimulatorVeh"])         VissimSetup.MaxSimulatorVeh         = parserInteger(node, "MaxSimulatorVeh");
+		if (node["MaxSimulatorPed"])         VissimSetup.MaxSimulatorPed         = parserInteger(node, "MaxSimulatorPed");
+		if (node["MaxSimulatorDet"])         VissimSetup.MaxSimulatorDet         = parserInteger(node, "MaxSimulatorDet");
+		if (node["MaxTotalVeh"])             VissimSetup.MaxTotalVeh             = parserInteger(node, "MaxTotalVeh");
+		if (node["MaxVissimPed"])            VissimSetup.MaxVissimPed            = parserInteger(node, "MaxVissimPed");
+		if (node["MaxVissimSigGrp"])         VissimSetup.MaxVissimSigGrp         = parserInteger(node, "MaxVissimSigGrp");
+		if (node["EnableDriverModelRelay"])  VissimSetup.EnableDriverModelRelay  = parserFlag(node, "EnableDriverModelRelay");
+	}
+
+	// ===========================================================================
+	// 			READ DataLog Setup section (generic FIXS infrastructure logging)
+	// ===========================================================================
+	node = config["DataLogSetup"];
+	if (node) {
+		if (node["EnableDataLog"]) DataLogSetup.EnableDataLog = parserFlag(node, "EnableDataLog");
+		if (node["DataLogPath"])   DataLogSetup.DataLogPath   = parserString(node, "DataLogPath");
+		if (node["DataLogWho"])    parserStringVector(node, "DataLogWho", DataLogSetup.DataLogWho);
+		if (node["DataLogFields"]) parserStringVector(node, "DataLogFields", DataLogSetup.DataLogFields);
 	}
 
 	return 0;

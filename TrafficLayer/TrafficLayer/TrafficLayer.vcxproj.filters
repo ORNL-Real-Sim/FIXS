@@ -62,9 +62,6 @@
     <ClInclude Include="..\..\CommonLib\yaml-cpp\include\yaml-cpp\yaml.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\CommonLib\ryml_all.hpp">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="..\..\CommonLib\traci\socket.h">
       <Filter>Header Files</Filter>
     </ClInclude>

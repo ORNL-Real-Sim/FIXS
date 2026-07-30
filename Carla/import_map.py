@@ -236,6 +236,133 @@ def _select_package(name, package_url):
     return path
 
 
+def _has_descriptor(src):
+    """True if the package at `src` (a .zip or a folder) already carries a CARLA
+    map descriptor - any *.json other than the road-painter decals file. A raw
+    RoadRunner export carries none (only .fbx/.xodr/.geojson/.rrdata.xml), which
+    is how stage_package tells a hand-authored package from one whose descriptor
+    must be generated.
+
+    `.geojson` deliberately does not count: like CARLA's own `fnmatch("*.json")`,
+    the check needs the literal '.json', so `<map>.geojson` is ignored."""
+    def is_desc(fname):
+        base = os.path.basename(fname).lower()
+        return base.endswith(".json") and base != "roadpainter_decals.json"
+    if os.path.isfile(src) and src.lower().endswith(".zip"):
+        with zipfile.ZipFile(src) as z:
+            return any(is_desc(n) for n in z.namelist())
+    if os.path.isdir(src):
+        for _root, _dirs, files in os.walk(src):
+            if any(is_desc(f) for f in files):
+                return True
+    return False
+
+
+def _tile_xy(fbx_name, map_name):
+    """(x, y) parsed from a strict `<map_name>_Tile_<x>_<y>.fbx`, else None.
+
+    Strict on purpose: CARLA reads the streaming-grid index off the last two
+    underscore tokens of the tile name (LoadAssetMaterialsCommandlet.cpp), so a
+    loose `<map>_Tile_0_0_final.fbx` would silently cook as tile (0,0) and
+    collide. Anything not exactly `<map>_Tile_<int>_<int>.fbx` is not a tile we
+    own - the caller warns about it rather than guessing."""
+    stem = fbx_name[:-4] if fbx_name.lower().endswith(".fbx") else fbx_name
+    m = re.fullmatch(re.escape(map_name) + r"_Tile_(\d+)_(\d+)", stem)
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+def _tile_size(asset_dir):
+    """RoadRunner tile edge length, in metres, for a tiled export in `asset_dir`.
+
+    Prefer the export's own TilesInfo.txt (`firstTileCenterX,firstTileCenterY,
+    tileSize`); fall back to 2000 when it is absent - the common case. 2000 is
+    both the cook commandlet's own default (PrepareAssetsForCookingCommandlet)
+    and the maximum Unreal honours (FbxStaticMeshImport clamps TileSize > 2000),
+    so the descriptor and the cook agree with nothing to infer."""
+    info = os.path.join(asset_dir, "TilesInfo.txt")
+    if os.path.isfile(info):
+        try:
+            with open(info, encoding="utf-8") as f:
+                for line in f:
+                    nums = re.findall(r"-?\d+(?:\.\d+)?", line)
+                    if len(nums) >= 3:
+                        return int(round(float(nums[2])))
+        except (OSError, ValueError):
+            pass
+        print(f"[import] warning: {info} present but unparseable; using tile_size=2000")
+    return 2000
+
+
+def generate_descriptor(import_dir, map_name):
+    """Synthesise Import/<map_name>.json for a raw RoadRunner export that shipped
+    no CARLA descriptor, deriving everything from the staged filenames (see
+    FIXS_Applications #4). stage_package isolates a raw export under
+    Import/<map_name>/, so that subtree is scanned - never the shared Import/
+    root. Returns the descriptor path.
+
+    Resolve, never guess: exit loudly when the export cannot be described - no
+    <map_name>.xodr staged, the same map staged in two places, or an .xodr with
+    neither a <map_name>.fbx nor <map_name>_Tile_<x>_<y>.fbx beside it."""
+    import json
+
+    subtree = os.path.join(import_dir, map_name)
+    scan_root = subtree if os.path.isdir(subtree) else import_dir
+    # Exactly one <map_name>.xodr is expected in the staged subtree; walk it to
+    # also cover an export that carried its own inner folder.
+    xodr_dirs = [root for root, _dirs, files in os.walk(scan_root)
+                 if map_name + ".xodr" in files]
+    if not xodr_dirs:
+        sys.exit(f"[import] cannot describe '{map_name}': no {map_name}.xodr under "
+                 f"{scan_root}. A raw RoadRunner export must be named after the map "
+                 f"({map_name}.xodr + {map_name}.fbx or {map_name}_Tile_<x>_<y>.fbx).")
+    if len(xodr_dirs) > 1:
+        where = "\n".join(f"             {os.path.relpath(d, import_dir)}"
+                          for d in sorted(xodr_dirs))
+        sys.exit(f"[import] cannot describe '{map_name}': {map_name}.xodr is staged "
+                 f"in {len(xodr_dirs)} places (staged more than once?). Keep one so a "
+                 f"single descriptor maps to a single destination:\n{where}")
+
+    asset_dir = xodr_dirs[0]
+    rel = lambda p: os.path.relpath(p, import_dir).replace(os.sep, "/")
+    single = os.path.join(asset_dir, map_name + ".fbx")
+    tiles = sorted(os.path.join(asset_dir, f) for f in os.listdir(asset_dir)
+                   if _tile_xy(f, map_name) is not None)
+    if os.path.isfile(single) and tiles:
+        sys.exit(f"[import] cannot describe '{map_name}': both {map_name}.fbx and "
+                 f"{map_name}_Tile_*.fbx present - a map is single-source or tiled, "
+                 f"not both.")
+
+    entry = {"name": map_name,
+             "xodr": rel(os.path.join(asset_dir, map_name + ".xodr")),
+             "use_carla_materials": False}  # RoadRunner ships its own materials
+    if os.path.isfile(single):
+        entry["source"] = rel(single)
+        kind = "single-source"
+    elif tiles:
+        entry["tile_size"] = _tile_size(asset_dir)
+        entry["tiles"] = [rel(t) for t in tiles]
+        kind = f"tiled, {len(tiles)} tiles, tile_size={entry['tile_size']}"
+    else:
+        sys.exit(f"[import] cannot describe '{map_name}': found {map_name}.xodr but "
+                 f"no {map_name}.fbx or {map_name}_Tile_<x>_<y>.fbx beside it.")
+
+    # Surface, don't silently drop, RoadRunner layer-split exports: extra .fbx
+    # that are neither the source nor a strict tile. CARLA's own generator
+    # ignores them; a dropped layer should at least be visible.
+    for f in sorted(os.listdir(asset_dir)):
+        if f.lower().endswith(".fbx") and f != map_name + ".fbx" \
+                and _tile_xy(f, map_name) is None:
+            print(f"[import] warning: ignoring unexpected fbx {f!r} (not {map_name}.fbx "
+                  f"or {map_name}_Tile_<x>_<y>.fbx); not part of the descriptor.")
+
+    descriptor = os.path.join(import_dir, map_name + ".json")
+    with open(descriptor, "w", encoding="utf-8") as f:
+        json.dump({"maps": [entry], "props": []}, f, indent=2)
+        f.write("\n")
+    print(f"[import] generated {descriptor} ({kind})")
+    return descriptor
+
+
 def stage_package(carla_root, name, package_url=None, package_dir=None, package_pick=False):
     """Ensure <carla_root>/Import has <name>.json (+ its assets). Sources the
     package, in order: an already-staged descriptor, an explicit --package-dir,
@@ -258,15 +385,246 @@ def stage_package(carla_root, name, package_url=None, package_dir=None, package_
             src, tmpdir = _try_gh_download(package_url)
             if src is None:
                 src = _select_package(name, package_url)
-        _stage_from_path(src, import_dir)
+        if _has_descriptor(src):
+            # Hand-authored package: <name>.json + its <name>/ asset folder land
+            # directly under Import/.
+            _stage_from_path(src, import_dir)
+        else:
+            # Raw RoadRunner export (no CARLA .json): isolate it under
+            # Import/<name>/ so repeat imports of different maps cannot collide,
+            # then synthesise Import/<name>.json from the fbx/xodr (see #4).
+            print(f"[import] '{name}' ships no CARLA descriptor; treating it as a "
+                  f"raw RoadRunner export and generating one.")
+            raw_dest = os.path.join(import_dir, name)
+            os.makedirs(raw_dest, exist_ok=True)
+            _stage_from_path(src, raw_dest)
+            generate_descriptor(import_dir, name)
     finally:
         if tmpdir:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
     if not os.path.isfile(descriptor):
         sys.exit(f"[import] after staging, descriptor still missing: {descriptor}\n"
-                 f"         (the package must contain {name}.json + its asset folder)")
+                 f"         (a packaged map must contain {name}.json; a raw export "
+                 f"must be named after the map so one can be generated)")
     return import_dir
+
+
+def _looks_like_bundle(names):
+    """True if a package's entries are rooted under a top-level `carla/` - the
+    Digital-Twin-Library combined layout (`carla/` + `sumo/`) - rather than a
+    flat/legacy CARLA-only package."""
+    tops = {n.replace("\\", "/").split("/", 1)[0] for n in names if n.strip()}
+    return "carla" in tops
+
+
+def open_bundle(src, cache_name=None):
+    """Split a map source into its CARLA package and its SUMO scenario.
+
+    A Digital-Twin-Library map ships as one bundle - a zip (or folder) with a
+    top-level `carla/` (the CARLA import package) and `sumo/` (the scenario).
+    Returns `(carla_src, sumo_dir)`:
+      - bundle  -> (`<cache>/carla`, `<cache>/sumo`); a zip is extracted once
+                   (re-extracted only when the zip is newer). `cache_name` (the
+                   cooked map name) extracts into ~/.fixs/maps/<cache_name>/, else
+                   a sibling `<stem>_unpacked/`. A folder is used in place.
+      - legacy CARLA-only zip/folder -> `(src, None)`, unchanged behavior.
+    `carla_src` is what to hand `ensure_map`/`stage_package`; `sumo_dir` (or None)
+    is where run_cosim finds the `.sumocfg`."""
+    if os.path.isdir(src):
+        carla = os.path.join(src, "carla")
+        sumo = os.path.join(src, "sumo")
+        if os.path.isdir(carla):
+            return carla, (sumo if os.path.isdir(sumo) else None)
+        return src, None
+    if os.path.isfile(src) and src.lower().endswith(".zip"):
+        with zipfile.ZipFile(src) as z:
+            if not _looks_like_bundle(z.namelist()):
+                return src, None
+            unpacked = _map_cache_dir(cache_name) if cache_name else os.path.join(
+                os.path.dirname(os.path.abspath(src)),
+                os.path.splitext(os.path.basename(src))[0] + "_unpacked")
+            carla = os.path.join(unpacked, "carla")
+            # Compare the zip against the extracted carla/ (not `unpacked`, which may
+            # also hold the downloaded bundle.zip in a per-map cache), and clear only
+            # carla/+sumo/ on re-extract so a sibling bundle.zip is preserved.
+            if not os.path.isdir(carla) or os.path.getmtime(src) > os.path.getmtime(carla):
+                for sub in ("carla", "sumo"):
+                    shutil.rmtree(os.path.join(unpacked, sub), ignore_errors=True)
+                os.makedirs(unpacked, exist_ok=True)
+                z.extractall(unpacked)
+                print(f"[import] unpacked bundle -> {unpacked}")
+        carla = os.path.join(unpacked, "carla")
+        sumo = os.path.join(unpacked, "sumo")
+        return (carla if os.path.isdir(carla) else unpacked), \
+               (sumo if os.path.isdir(sumo) else None)
+    return src, None
+
+
+def bundle_sumocfg(sumo_dir):
+    """The single `.sumocfg` inside a bundle's `sumo/` dir, or None if there is no
+    `sumo/`. Exits if the dir holds more than one (ambiguous - caller should pass
+    an explicit --sumocfg)."""
+    if not sumo_dir or not os.path.isdir(sumo_dir):
+        return None
+    cfgs = sorted(f for f in os.listdir(sumo_dir) if f.lower().endswith(".sumocfg"))
+    if not cfgs:
+        return None
+    if len(cfgs) > 1:
+        sys.exit(f"[import] {sumo_dir} has {len(cfgs)} .sumocfg files {cfgs}; "
+                 f"pass --sumocfg to choose one.")
+    return os.path.join(sumo_dir, cfgs[0])
+
+
+def map_name_in(carla_src):
+    """The real map/package name a staged CARLA source describes - the stem of its
+    lone `<name>.json` descriptor, else its lone `<name>.xodr`. This is the name
+    CARLA actually cooks/loads, which need NOT equal a release/location tag (e.g.
+    the `roosevelt` bundle's carla/ describes `Roosevelt_07142026`). None if it
+    cannot be told unambiguously (0 or >1 candidates)."""
+    if not carla_src or not os.path.isdir(carla_src):
+        return None
+
+    def stems(ext):
+        found = []
+        for root, _dirs, files in os.walk(carla_src):
+            for f in files:
+                if f.lower().endswith(ext):
+                    found.append(f[:-len(ext)])
+        return found
+
+    jsons = [j for j in stems(".json") if j.lower() != "roadpainter_decals"]
+    if len(jsons) == 1:
+        return jsons[0]
+    xodrs = list(set(stems(".xodr")))
+    if len(xodrs) == 1:
+        return xodrs[0]
+    return None
+
+
+def _dir_with_sumocfg(root):
+    """The directory under `root` that directly holds a .sumocfg (e.g. a lone
+    'SUMO files/' wrapper inside a scenario zip), or None."""
+    if not root or not os.path.isdir(root):
+        return None
+    for cur, _dirs, files in os.walk(root):
+        if any(f.lower().endswith(".sumocfg") for f in files):
+            return cur
+    return None
+
+
+def _sumo_scenario_dir(src, cache_name=None):
+    """If `src` (a .zip or folder) is a SUMO-only scenario - a .sumocfg present,
+    no CARLA asset (.xodr/.fbx) - return the dir holding the .sumocfg. A zip is
+    unpacked once into the map's folder ~/.fixs/maps/<cache_name>/sumo/ (so a
+    separately-picked scenario lands under its map, cooked-name), else a sibling
+    `<stem>_unpacked/`. Else None. The sumo half of classify_source."""
+    if os.path.isfile(src) and src.lower().endswith(".zip"):
+        with zipfile.ZipFile(src) as z:
+            names = [n.lower() for n in z.namelist()]
+            if not any(n.endswith(".sumocfg") for n in names):
+                return None
+            if any(n.endswith((".xodr", ".fbx")) for n in names):
+                return None  # carries CARLA geometry -> not sumo-only
+            unpacked = os.path.join(_map_cache_dir(cache_name), "sumo") if cache_name else \
+                os.path.join(os.path.dirname(os.path.abspath(src)),
+                             os.path.splitext(os.path.basename(src))[0] + "_unpacked")
+            if not os.path.isdir(unpacked) or os.path.getmtime(src) > os.path.getmtime(unpacked):
+                shutil.rmtree(unpacked, ignore_errors=True)
+                os.makedirs(unpacked, exist_ok=True)
+                z.extractall(unpacked)
+        return _dir_with_sumocfg(unpacked)
+    if os.path.isdir(src):
+        has_cfg = has_carla = False
+        for _cur, _dirs, files in os.walk(src):
+            for f in files:
+                fl = f.lower()
+                has_cfg = has_cfg or fl.endswith(".sumocfg")
+                has_carla = has_carla or fl.endswith((".xodr", ".fbx"))
+        if has_cfg and not has_carla:
+            src_dir = _dir_with_sumocfg(src)
+            # Cache a folder pick under the map (cooked-name), like the zip branch
+            # above, so a later Local (already-imported) pick of this map reuses it
+            # without a re-prompt. Skip the copy if it is already the cached dir.
+            if cache_name and src_dir:
+                dest = os.path.join(_map_cache_dir(cache_name), "sumo")
+                if os.path.abspath(src_dir) != os.path.abspath(dest):
+                    shutil.rmtree(dest, ignore_errors=True)
+                    shutil.copytree(src_dir, dest)
+                return _dir_with_sumocfg(dest)
+            return src_dir
+    return None
+
+
+def classify_source(src, cache_name=None):
+    """What a map source provides, as (carla_src, sumo_src):
+      - bundle (carla/ + sumo/) -> (carla dir, sumo dir)
+      - carla-only pkg/export   -> (carla src, None)
+      - sumo-only scenario      -> (None, sumo dir)
+    A source fills the CARLA slot, the SUMO slot, or both; run_cosim fills any slot
+    a pick leaves empty. Zips are unpacked (into ~/.fixs/maps/<cache_name>/ when the
+    cooked map name is known) as needed."""
+    carla_src, sumo_dir = open_bundle(src, cache_name)   # bundle split, else (src, None)
+    if sumo_dir is not None:
+        return carla_src, sumo_dir                  # bundle: both slots
+    sdir = _sumo_scenario_dir(src, cache_name)
+    if sdir is not None:
+        return None, sdir                           # sumo-only
+    return carla_src, None                          # carla-only
+
+
+def fetch_catalog(repo):
+    """The DT-Library catalog (list of map entries), fetched fresh via gh from
+    `repo`'s catalog.json and cached at ~/.fixs/catalog.json. Falls back to the
+    cache when offline / gh is unavailable; [] if neither works. Read every run so
+    the map list, real names, and per-map settings stay current."""
+    import json
+    cache = os.path.join(os.path.dirname(env.CONFIG_PATH), "catalog.json")
+    gh = shutil.which("gh")
+    if gh:
+        try:
+            out = subprocess.run(
+                [gh, "api", f"repos/{repo}/contents/catalog.json",
+                 "-H", "Accept: application/vnd.github.raw+json"],
+                capture_output=True, text=True, timeout=15)
+            if out.returncode == 0 and out.stdout.strip():
+                maps = json.loads(out.stdout).get("maps", [])
+                try:
+                    with open(cache, "w", encoding="utf-8") as f:
+                        f.write(out.stdout)
+                except OSError:
+                    pass
+                return maps
+        except Exception:
+            pass
+    if os.path.isfile(cache):
+        try:
+            with open(cache, encoding="utf-8") as f:
+                return json.load(f).get("maps", [])
+        except (OSError, ValueError):
+            pass
+    return []
+
+
+def catalog_entry(catalog, name):
+    """The catalog entry known by `name`, or None.
+
+    Matches any of the three names one entry answers to: its `location` (the
+    picker's Online label, and what --map takes), its `map_name` (the REAL cooked
+    CARLA name, which is what a Local pick and resolve_cooked_map deal in), and
+    its `release` tag. These deliberately differ - location 'roosevelt' vs
+    map_name 'roosevelt_full' - so matching `location` alone silently dropped the
+    entry whenever the caller held a cooked name. That made one map resolve two
+    different ways depending on which picker entry you came in through: picking
+    'roosevelt' applied the entry's settings (net_offset: zero), while picking
+    'roosevelt_full' matched nothing, fell back to defaults, and left the CARLA
+    spectator framed on a sign-flipped y."""
+    if not name:
+        return None
+    for m in catalog or []:
+        if name in (m.get("location"), m.get("map_name"), m.get("release")):
+            return m
+    return None
 
 
 def run_import(carla_root, ue4_root, name):
@@ -282,7 +640,50 @@ def run_import(carla_root, ue4_root, name):
     cmd = [sys.executable, import_py, f"--package={name}"]
     print(f"[import] running: {' '.join(cmd)}  (cwd={carla_root})")
     print("[import] cooking the map can take several minutes ...")
-    return subprocess.call(cmd, cwd=carla_root, env=proc_env)
+    # CARLA's Import.py cooks EVERY *.json under Import/ (its --package flag does
+    # not filter), so a leftover package from an earlier import cross-contaminates
+    # this cook - and if it names an already-cooked map, the whole run aborts.
+    # Isolate: stash the other descriptors (+ their asset folders) for the cook,
+    # restore them after.
+    restore = _isolate_import(os.path.join(carla_root, "Import"), name)
+    try:
+        return subprocess.call(cmd, cwd=carla_root, env=proc_env)
+    finally:
+        restore()
+
+
+def _isolate_import(import_dir, keep):
+    """Temporarily move every package under `import_dir` except `keep` aside, so
+    CARLA's Import.py cooks only `keep`. Returns a restore() to move them back
+    (call it in a finally). `keep`'s own descriptor + asset folder and the shared
+    roadpainter_decals.json stay put."""
+    if not os.path.isdir(import_dir):
+        return lambda: None
+    stash = tempfile.mkdtemp(prefix="fixs-import-stash-")
+    moved = []
+    for f in sorted(os.listdir(import_dir)):
+        if not f.lower().endswith(".json") or f.lower() == "roadpainter_decals.json":
+            continue
+        base = f[:-len(".json")]
+        if base == keep:
+            continue
+        shutil.move(os.path.join(import_dir, f), os.path.join(stash, f))
+        moved.append(f)
+        folder = os.path.join(import_dir, base)
+        if os.path.isdir(folder):
+            shutil.move(folder, os.path.join(stash, base))
+            moved.append(base)
+    if moved:
+        print(f"[import] isolating '{keep}' for the cook (set aside {len(moved)} "
+              f"other Import/ item(s), restored after)")
+
+    def restore():
+        for m in moved:
+            src = os.path.join(stash, m)
+            if os.path.exists(src):
+                shutil.move(src, os.path.join(import_dir, m))
+        shutil.rmtree(stash, ignore_errors=True)
+    return restore
 
 
 def _resolve_carla(carla_root=None, ue4_root=None):
@@ -447,30 +848,106 @@ def _prompt(msg):
                  "--map / --package to run without prompting.")
 
 
-def choose_map(repo, tag_prefix=""):
-    """Interactive chooser covering both cases: pick one of `repo`'s published
-    map-* releases (auto-downloaded + cached), or select a local .zip / folder by
-    hand. Returns (name, tag, local_path): for a release (name, tag, None); for a
-    local pick (name, None, path). Exits if the session is non-interactive."""
+def _app_map_choice(name, catalog, cooked):
+    """How an app-declared map name resolves, as (kind, label, flag, tag), or None
+    if it resolves to nothing:
+      'release' -> the name matches a Digital-Twin-Library entry (by location,
+                   cooked map_name or release tag - see catalog_entry)
+      'cooked'  -> not in the library, but already cooked into this CARLA
+    A name that is neither costs the app its shortcut and nothing else: the picker
+    then behaves exactly as it would with no application selected. That is
+    deliberate - a map that has not been published yet must not be able to block a
+    run, and an app manifest is data, so a typo in it should not be fatal."""
+    ent = catalog_entry(catalog, name)
+    if ent:
+        flag = "  (Digital-Twin-Library)"
+        if (ent.get("map_name") or "") in cooked:
+            flag += "  (already imported)"
+        return "release", (ent.get("map_name") or name), flag, ent.get("release")
+    if name in cooked:
+        return "cooked", name, "  (already imported)", None
+    return None
+
+
+def choose_map(repo, tag_prefix="", carla_root=None, catalog=None,
+               preferred=None, app_label=None):
+    """Interactive chooser. Two sections plus `L` for a hand-picked .zip / folder:
+      1. ONLINE - Digital-Twin-Library releases in `repo`. When an application is
+                  selected and the library HAS its map(s), this section is narrowed
+                  to those: an app pinned to Roosevelt should not be offered
+                  Atlanta as if the two were interchangeable. If the app's map is
+                  not in the library (not published yet, or cooked by hand), there
+                  is nothing to narrow to and the full library is listed instead.
+      2. LOCAL  - every map already cooked into `carla_root`. NEVER filtered: what
+                  is cooked into this CARLA is a property of the machine, not of
+                  the application, so an app can never hide a map you could
+                  actually run. App maps are marked here, not promoted.
+    To browse the whole library while a narrowing app is selected, pick "none" at
+    the application prompt.
+
+    Enter takes the app's map wherever it landed (library or cooked), else item 1.
+
+    Returns (name, tag, local_path):
+      online release -> (name, tag,  None)
+      local cooked   -> (name, None, None)   # already imported: run as-is
+      local file     -> (name, None, path)
+    Exits if the session is non-interactive."""
     releases = list_map_releases(repo, tag_prefix)
-    print("\n[import] Available map versions (newest first):")
-    for i, r in enumerate(releases, 1):
-        pkg = _package_from_tag(r["tag"], tag_prefix)
-        flag = "  (pre-release)" if r["prerelease"] else ""
-        print(f"   {i}) {pkg:<26} {r['date']}{flag}")
-    if not releases:
-        print("   (no published releases found)")
+    cooked = list_imported_maps(carla_root) if carla_root else []
+    preferred = preferred or []
+
+    resolved_app = [r for r in (_app_map_choice(n, catalog, cooked) for n in preferred) if r]
+    app_tags = {tag for _k, _l, _f, tag in resolved_app if tag}
+    app_names = {label for _k, label, _f, _t in resolved_app}
+    if app_tags:
+        releases = [r for r in releases if r["tag"] in app_tags]
+
+    print("\n[import] Pick a map to run:")
+    menu = []          # menu number -> ("release", release) | ("cooked", name)
+    default_idx = 1    # menu number Enter selects; the app's map when there is one
+    if releases:
+        who = f" for {app_label}" if app_tags and app_label else ""
+        print(f"  Online (Digital-Twin-Library){who}:")
+        for r in releases:
+            menu.append(("release", r))
+            pkg = _package_from_tag(r["tag"], tag_prefix)
+            # Label with the REAL cooked map name when the catalog knows one, so an
+            # Online entry and its Local twin read as the same map ('roosevelt_full'
+            # in both lists) instead of two unrelated things ('roosevelt' vs
+            # 'roosevelt_full'). The release tag stays the identifier we return and
+            # what --map accepts; only the display changes. Safe because
+            # catalog_entry() resolves location, map_name and release alike.
+            ent = catalog_entry(catalog, pkg)
+            label = (ent or {}).get("map_name") or pkg
+            flag = "  (pre-release)" if r["prerelease"] else ""
+            if label in cooked:
+                flag += "  (already imported)"
+            print(f"   {len(menu):>2}) {label:<26} {r['date']}{flag}")
+    if cooked:
+        print("  Local (already imported into CARLA):")
+        for name in cooked:
+            menu.append(("cooked", name))
+            mark = ""
+            if name in app_names:
+                mark = "  (app map)"
+                # An app map the library does not carry still gets to be the
+                # default - it just lives in this section instead of the one above.
+                if not app_tags:
+                    default_idx = len(menu)
+            print(f"   {len(menu):>2}) {name}{mark}")
+    if not menu:
+        print("   (no online releases or imported maps found)")
     print("   L) select a local .zip / folder instead")
+
     if not sys.stdin.isatty():
-        sys.exit("[import] non-interactive session: cannot prompt. Pass --package "
-                 "(+ --package-url/--package-dir), or --map, to choose non-interactively.")
+        sys.exit("[import] non-interactive session: cannot prompt. Pass --map / --package "
+                 "(+ --package-url/--package-dir) to choose non-interactively.")
     while True:
-        hint = f"[1-{len(releases)} / L]" if releases else "[L]"
-        default = ", Enter = 1 (newest)" if releases else ""
-        ans = _prompt(f"[import] Which version? {hint}{default}: ").strip().lower()
-        if ans == "" and releases:
-            r = releases[0]
-            return _package_from_tag(r["tag"], tag_prefix), r["tag"], None
+        hint = f"[1-{len(menu)} / L]" if menu else "[L]"
+        default = f", Enter = {default_idx}" if menu else ""
+        ans = _prompt(f"[import] Which? {hint}{default}: ").strip().lower()
+        if ans == "" and menu:
+            ans = str(default_idx)
         if ans == "l":
             path = _select_package("map", None)  # native file picker / typed path
             name = _infer_package_name(path)
@@ -479,10 +956,30 @@ def choose_map(repo, tag_prefix=""):
             if not name:
                 sys.exit("[import] no package name given; cannot import.")
             return name, None, path
-        if ans.isdigit() and 1 <= int(ans) <= len(releases):
-            r = releases[int(ans) - 1]
-            return _package_from_tag(r["tag"], tag_prefix), r["tag"], None
+        if ans.isdigit() and 1 <= int(ans) <= len(menu):
+            kind, payload = menu[int(ans) - 1]
+            if kind == "release":
+                return _package_from_tag(payload["tag"], tag_prefix), payload["tag"], None
+            return payload, None, None  # cooked: already imported, run as-is
         print("[import] invalid choice; enter a number, or L for a local file.")
+
+
+def choose_sumo_source(cache_name=None):
+    """Prompt for a SUMO scenario (a .zip or folder holding a .sumocfg) and return
+    the dir that contains it, or None. Fills the SUMO slot separately when the
+    chosen CARLA source ships no sumo/ - e.g. a carla-only local pick or a raw
+    export. `cache_name` (the cooked map name) lands the extracted scenario under
+    ~/.fixs/maps/<cache_name>/sumo/. Returns None in a non-interactive session so
+    the caller can fail with a clear 'pass --sumocfg' message."""
+    if not sys.stdin.isatty():
+        return None
+    print("\n[cosim] the chosen map has no SUMO scenario; select one now "
+          "(a .zip or folder containing a .sumocfg).")
+    path = _select_package("SUMO scenario", None)  # native picker / typed path
+    _carla_src, sumo_dir = classify_source(path, cache_name)
+    if sumo_dir is None:
+        print(f"[cosim] no .sumocfg found in {path}")
+    return sumo_dir
 
 
 def list_imported_maps(carla_root):
@@ -518,22 +1015,41 @@ def choose_imported_map(carla_root):
         print("[import] invalid choice; enter a number from the list.")
 
 
-def _map_cache_dir():
-    """Local cache for downloaded map zips: ~/.fixs/maps (next to carla.json), or
-    $FIXS_MAP_CACHE if set. Kept outside FIXS/ so `initialize` (which wipes FIXS/)
-    never deletes it, and shared across app clones so a map is downloaded once."""
+def _map_cache_dir(name=None):
+    """Local map cache: ~/.fixs/maps (next to carla.json), or $FIXS_MAP_CACHE. With
+    `name`, the per-map subfolder ~/.fixs/maps/<name>/ - named by the cooked map
+    name so it matches CARLA's Content/<name>/; it holds that map's bundle zip,
+    extracted carla/ + sumo/, and generated tl_table.csv. Kept outside FIXS/ so
+    `initialize` (which wipes FIXS/) never deletes it.
+
+    Everything under here is RE-CREATABLE: downloaded, extracted, or derived from
+    what was extracted. Nothing a user hand-edits lives here - scenario yamls are
+    app-bounded and live under ~/.fixs/apps/ (see app_catalog.scenario_dir), so
+    deleting this tree to reclaim disk can never destroy someone's config. It is
+    also shared: one 700MB bundle serves every app that runs that map."""
     d = os.environ.get("FIXS_MAP_CACHE") or os.path.join(os.path.dirname(env.CONFIG_PATH), "maps")
+    if name:
+        d = os.path.join(d, name)
     os.makedirs(d, exist_ok=True)
     return d
 
 
-def download_release_zip(repo, tag, force_redownload=False):
+def map_sumo_dir(name):
+    """The cached SUMO scenario dir for an already-imported map: the folder under
+    ~/.fixs/maps/<name>/sumo that directly holds a .sumocfg (where a bundle's sumo/
+    was extracted, or a separately-picked sumo landed), else None. Lets a Local
+    (already-imported) pick reuse its sumo without re-prompting for one."""
+    return _dir_with_sumocfg(os.path.join(_map_cache_dir(name), "sumo"))
+
+
+def download_release_zip(repo, tag, force_redownload=False, cache_name=None):
     """Return a local path to the release's .zip asset, downloading it via gh into
-    the ~/.fixs/maps/<tag>/ cache. If a cached copy already exists, ask whether to
-    reuse or re-download (default reuse); force_redownload skips the prompt and
-    re-fetches. The zip stays in the cache (not deleted) so re-imports are free."""
+    the ~/.fixs/maps/<cache_name or tag>/ cache (cache_name = the cooked map name,
+    so the zip sits beside the extracted carla/+sumo/). If a cached copy already
+    exists, ask whether to reuse or re-download (default reuse); force_redownload
+    skips the prompt. The zip stays in the cache so re-imports are free."""
     gh = _require_gh()
-    tag_dir = os.path.join(_map_cache_dir(), tag)
+    tag_dir = _map_cache_dir(cache_name or tag)
     cached = [f for f in os.listdir(tag_dir) if f.lower().endswith(".zip")] \
         if os.path.isdir(tag_dir) else []
 
@@ -567,7 +1083,7 @@ def pick_and_import(repo, tag_prefix="", carla_root=None, ue4_root=None, force=F
     then download + cook it. If the chosen version is already cooked, skip the
     download (unless the user opts to re-import, or force=True)."""
     carla_root, ue4_root = _resolve_carla(carla_root, ue4_root)
-    name, tag, local = choose_map(repo, tag_prefix)
+    name, tag, local = choose_map(repo, tag_prefix, carla_root)
 
     if map_is_imported(carla_root, name) and not force:
         print(f"[import] '{name}' is already imported: {cooked_map_path(carla_root, name)}")

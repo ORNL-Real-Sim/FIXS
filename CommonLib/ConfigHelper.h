@@ -35,6 +35,20 @@ struct SimulationSetup_t {
 
 	bool EnableVerboseLog;
 
+	// FIXS DriverModel "ego only" mode (issue #158 Stage B+).
+	//   true  (default, legacy):  DriverModel does per-vehicle send/recv
+	//                             inside the MOVE_DRIVER callback when the
+	//                             vehicle is in the subscription list,
+	//                             and skips per-tick I/O entirely when no
+	//                             subscribed vehicle is present.
+	//   false (CAV controller):   DriverModel does ONE send/recv per tick
+	//                             at DRIVER_DATA_TIME, regardless of
+	//                             subscription state. Required for the
+	//                             TrafficLayer DSProxy + DriverModel relay
+	//                             path where TL sends behavior cmds for
+	//                             arbitrary CAV vehicles per tick.
+	bool SubEgoOnly;
+
 	double SimulationEndTime;
 
 	// NEED to fix later
@@ -114,6 +128,13 @@ struct CarlaSetup_t {
 
 	bool EnableCosimulation;
 
+	// Co-sim bridge selector, consumed by FIXS_Applications' run_cosim.py (NOT by
+	// this engine): true -> the standalone run_synchronization.py bridge;
+	// false -> TrafficLayer + this VirCarlaEnv. A bool, not a "py"/"cpp" string,
+	// so a typo cannot silently select the wrong engine. Mirrored in
+	// ConfigHelper.py; parsed here for schema parity. Default true.
+	bool EnablePythonBackend;
+
 	bool EnableExternalControl;
 
 	bool UseVehicleTypeAsBlueprint;
@@ -130,9 +151,74 @@ struct CarlaSetup_t {
 
 	std::string CenteredViewId;
 
+	// Spectator (main-viewport) BEV follow of CenteredViewId. Rigid top-down snap
+	// each tick (no low-pass -> no camera oscillation). Off -> the bridge never
+	// touches the spectator, so you can free-fly the CARLA camera to inspect.
+	bool   EnableSpectatorFollow;   // master on/off
+	double SpectatorHeight;         // BEV camera height above the ego (m)
+	bool   SpectatorAlignYaw;       // true: rotate view with ego heading; false: fixed north-up
+
+	// Pace the bridge loop to real time (sleep out the remainder of each tick).
+	// FALSE for XIL -- the RT component (CarMaker/dSPACE) already paces the loop
+	// and an extra sleep would throttle it. TRUE for a STANDALONE viz demo (no RT
+	// hardware) so a follow-cam renders smooth real-time motion instead of a
+	// several-x fast-forward. This is what the native run_synchronization does.
+	bool   RealtimePacing;
+
 	double TrafficRefreshRate;
 
+	// Carla render/tick sub-step. The FIXS feed is 0.1 s; ticking Carla finer
+	// (e.g. 0.05 s) and interpolating the feed gives smoother motion -- the same
+	// trick the CarMaker side uses. Default 0 -> the bridge uses TrafficRefreshRate
+	// (1:1, no interpolation). Must evenly divide the 0.1 s feed (0.05/0.025/0.02).
+	double CarlaTimeStep;
+
 	std::vector<std::string> InterestedIds;
+
+	// #174 ego dynamics ownership + control (per-ego mode, config-driven).
+	//  EgoDynamicsOwner: "Carla" (PhysX, mode A -- bridge reads ego back) |
+	//                    "Simulink" (external owns ego, mode B -- teleport in).
+	//  EgoControl:       "TM_Advisory" (L2 TM set_desired_speed) | "External"
+	//                    (CAV client) | "None".
+	//  EnableEgoSimulink: back-compat alias; true => EgoDynamicsOwner = "Simulink".
+	std::string EgoDynamicsOwner;
+	std::string EgoControl;
+	bool        EnableEgoSimulink;
+
+	// #174 ego driving-mode ladder (integer -- modular, GUI-mappable):
+	//   0 = SumoDriver  : SUMO drives the ego; Carla teleports it (default, today)
+	//   1 = CarlaDriver : L0 -- Carla TM drives the ego (physics ON + autopilot);
+	//                     its state is read back and injected into SUMO each feed
+	//   2 = Advisory    : L2 -- as 1, plus external desired-speed advisory
+	//                     through FIXS (TM keeps steering)          [reserved]
+	//   3 = Control     : L4 -- external throttle/brake/steer through FIXS
+	//                     (full PhysX dynamics, external steers)    [reserved]
+	int EgoMode;
+	// Which L0 driver actuates the ego when EgoMode >= 1:
+	//   "TM"      -> native Carla Traffic Manager autopilot (needs a routable map)
+	//   "Pursuit" -> the SDK-free EgoDriver module (map-agnostic fallback)
+	std::string EgoL0Driver;
+	std::string EgoId;                 // FIXS id of the Carla-driven ego (mode >= 1)
+	std::string EgoSumoType;           // SUMO vType used when TL injects the ego
+	std::string EgoBlueprint;          // Carla blueprint for the ego actor
+	std::vector<double> EgoSpawnPose;  // [x, y, z, headingDeg] FIXS frame (mode >= 1)
+	int TrafficManagerPort;            // Carla TM port (client-side instance)
+
+	// Ego route for the Carla TM (the CarMaker-Route analog): [[x,y], ...] FIXS
+	// frame waypoints injected via TM SetCustomPath. REQUIRED in practice for
+	// generated OpenDRIVE worlds -- TM default lane-following drives straight off
+	// road ends there. EgoRouteRepeat: laps of the list to queue (loop scenarios).
+	// #174 NOTE: EgoRoutePoints / EgoRouteRepeat / EgoTargetSpeed are DRIVER behavior,
+	// not simulation wiring. They live in the sim config only because the in-Carla
+	// drivers (native TM, Pursuit fallback) run inside VirCarlaEnv and read them here.
+	// The unified EgoDriver client (EgoL0Driver: Actuation) already owns these on the
+	// application side (like the XIL side's RealSimPara.speedInit / RealSimInterpSpeed).
+	// LEGACY: retire the in-Carla drivers -> these move to the driver and leave the sim
+	// config (and this struct) entirely.
+	std::vector<std::pair<double, double>> EgoRoutePoints;
+	int EgoRouteRepeat;
+	double EgoTargetSpeed;             // driver cruise speed (m/s); also the L2 fallback
+	                                   // target until an external advisory arrives
 
 };
 
@@ -146,6 +232,43 @@ struct SumoSetup_t {
 	std::string SumoConfigFile;
 	int NumClients;
 	std::string RuntimeLibraryPath;
+};
+
+// VISSIM DrivingSimulatorProxy.dll coupling (issue #158, Stage A).
+// When Enable: true, TrafficLayer drives VISSIM via the DSProxy DLL instead
+// of the COM path. See doc/156_drivingsim_dll_design_proposal.md.
+struct VissimSetup_t {
+	// Enable the VISSIM DrivingSimulatorProxy.dll code path (TrafficLayer
+	// drives VISSIM via DSProxy instead of the legacy COM path). Sibling
+	// flags like EnableDriverModelRelay (Stage B+) live alongside, since a
+	// single VISSIM run can have DSProxy on AND a DriverModel attached.
+	bool EnableDSProxy;
+
+	std::string NetworkFile;        // .inpx path passed to VISSIM_Connect
+	int    VissimVersion;           // 2022 | 2026 (selects versionNo 2200/2600 + default DLL path)
+	std::string DllPath;            // optional explicit DSProxy DLL path; empty -> derive from VissimVersion
+
+	int    SimulatorFrequency;      // Hz (sub-frame interpolation if > VISSIM internal step)
+	double VisibilityRadius;        // meters; -1 = unlimited
+	int    MaxSimulatorVeh;         // ceiling on simultaneous DS-controlled vehicles
+	int    MaxSimulatorPed;
+	int    MaxSimulatorDet;
+	int    MaxTotalVeh;
+	int    MaxVissimPed;
+	int    MaxVissimSigGrp;
+
+	// Stage B+ (issue #158). When true, TrafficLayer also opens a server
+	// socket on SimulationSetup.TrafficSimulatorPort for a FIXS DriverModel
+	// callback. Per tick the loop:
+	//   - drains DriverModel's per-tick state messages (DSProxy is the
+	//     canonical source for vehicle state, so DriverModel uploads are
+	//     received and discarded — just to keep its socket buffer clear)
+	//   - relays any non-ego VehFullData_t received from app clients down
+	//     to DriverModel as behavior commands (desired speed / acceleration
+	//     / lane change for Wiedemann-integrated CAVs)
+	// Unlocks scenario 3a — Python CAV controller modulating background
+	// vehicles while DSProxy drives the ego.
+	bool EnableDriverModelRelay;
 };
 
 typedef struct SubscriptionVehicleList_t {
@@ -181,6 +304,16 @@ typedef struct SubscriptionAllList_t {
 
 };
 
+// Generic FIXS infrastructure logging (see CommonLib/DataLogger). Config-driven,
+// backend-agnostic: records the FIXS vehicle-data stream in the SUMO/VISSIM wire
+// convention. Analysis/plotting of the output lives per-test, not here.
+struct DataLogSetup_t {
+	bool EnableDataLog = false;
+	std::string DataLogPath = "auto";           // "auto" -> a component default path
+	std::vector<std::string> DataLogWho;         // vehicle ids to log; empty = all seen
+	std::vector<std::string> DataLogFields;      // VehFullData fields; empty = default core set
+};
+
 class ConfigHelper
 {
 public:
@@ -214,6 +347,8 @@ public:
 	CarMakerSetup_t CarMakerSetup;
 	SumoSetup_t SumoSetup;
 	CarlaSetup_t CarlaSetup;
+	VissimSetup_t VissimSetup;
+	DataLogSetup_t DataLogSetup;
 
 
 

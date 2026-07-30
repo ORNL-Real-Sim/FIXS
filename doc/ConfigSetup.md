@@ -94,7 +94,7 @@ When the application layer is disabled but XIL is enabled, the interface automat
 | EnableEgoSimulink | bool | false | When true, ego state comes from Simulink; when false, from User.cpp. |
 | CarMakerIP | string | inferred or `"127.0.0.1"` | Connection IP for CarMaker. Inferred from subscription if single vehicle subscribed. |
 | CarMakerPort | int | inferred or 7331 | Connection port for CarMaker. Inferred from subscription if single vehicle subscribed. |
-| TrafficRefreshRate | double | 0.001 | Update rate (seconds) for publishing traffic to CarMaker. |
+| TrafficRefreshRate | double | 0.001 | How often traffic poses are re-applied to CarMaker, i.e. CarMaker's own step. **Not** the FIXS exchange period, which is a fixed 0.1 s — the core interpolates each sample (position, heading, grade) across the sub-steps in between, so 0.001 means smooth 1 kHz traffic motion off a 10 Hz feed. |
 | EgoId | string | inferred or `"egoCm"` | Identifier for the ego vehicle in SUMO. Inferred from subscription if single vehicle subscribed. |
 | EgoType | string | `""` | SUMO vehicle type for ego. Empty uses SUMO default. |
 | SynchronizeTrafficSignal | bool | false | If enabled, subscribes to all signal controllers for synchronization. |
@@ -114,8 +114,24 @@ When the application layer is disabled but XIL is enabled, the interface automat
 | CarlaClientPort | int | inferred or 2001 | Client binding port for CARLA streaming. Inferred from subscription if single vehicle. |
 | CarlaMapName | string | `"Town01"` | Desired CARLA map name. |
 | CenteredViewId | string | `"ego"` | Actor id used for camera centering. |
-| TrafficRefreshRate | double | 0.1 | CARLA update period (seconds). |
+| CarlaTimeStep | double | 0 (= the FIXS feed) | CARLA world step, i.e. `fixed_delta_seconds`. Must be the FIXS feed period or an exact divisor of it (0.1 / 0.05 / 0.025 / 0.02 / 0.01): the exchange boundary is tested on the feed grid, so a tick that does not divide it never lands on one and the bridge would exchange nothing. Finer than the feed makes the bridge interpolate traffic — position **and** heading — across the sub-steps, exactly as the CarMaker host does at 0.001 s. |
+| TrafficRefreshRate | double | 0 (= every tick) | How often traffic poses are **re-applied**. Same meaning as the CarMakerSetup key above; **not** the feed period. Must be ≥ `CarlaTimeStep` and have a whole reciprocal. Coarser than the tick = fewer `ApplyBatch` calls on a heavy scene while physics and sensors still run at the tick rate. |
 | InterestedIds | string list | `["ego"]` | Vehicle IDs that receive mirrored CARLA updates. Should be subset of VehicleSubscription. |
+
+> **The FIXS feed period is not configurable.** It is 0.1 s (`fixs::kFeedPeriodS` in
+> `CommonLib/FixsProtocol.h`): every VirEnvCore host tests its send/recv boundary
+> against that grid on its own sim clock, and TrafficLayer steps the traffic simulator
+> exactly once per exchange. The traffic simulator's step length therefore **is** that
+> value — `run_cosim` passes `--step-length 0.1` to both bridges rather than offering
+> it as a choice. Give SUMO a different step and the two clocks run at different rates:
+> at 0.05 s, CARLA advances two ticks per SUMO step, so every sample is drawn twice and
+> the scene plays back at half speed.
+>
+> Before #219, `CarlaSetup.TrafficRefreshRate` doubled as the feed period *and* as the
+> tick whenever `CarlaTimeStep` was unset — so setting it to 0.05 silently turned
+> interpolation off. They are separate keys now and neither falls back to the other. An
+> older yaml carrying a feed-period value in it is migrated (generated yamls) or
+> reported (app-owned ones) by `run_cosim`.
 
 ## Vehicle Message Field Specifications
 

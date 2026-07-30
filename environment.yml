@@ -11,6 +11,7 @@ dependencies:
   - plotly
   - pygame
   - protobuf
+  - pytest
   - pyyaml
   - lxml
   - shapely   # used by utils/extract_sumo_tls_as_table.py

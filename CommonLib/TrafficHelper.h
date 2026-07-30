@@ -3,6 +3,7 @@
 
 #include <unordered_map>
 #include <unordered_set>
+#include <set>
 #include <tuple>
 
 #include <math.h>
@@ -17,6 +18,7 @@
 #define SUMO_TRACI_NAMESPACE libtraci
 #endif
 #include "SocketHelper.h"
+#include "XilGuard.h"
 
 
 class TrafficHelper
@@ -139,6 +141,18 @@ public:
 
 	bool ENABLE_CARLA = false;
 	bool ENABLE_CARLA_EXTERNAL_CONTROL = false;
+	// Carla external-control ids already added to the traffic simulator (add ONCE,
+	// then wait for insertion; see the Carla inject branch in sendToSUMO).
+	std::set<std::string> carlaInjectedIds_;
+	// #174: last (x,y) fed to moveToXY per Carla-owned id -- lets the off-map guard
+	// compare SUMO's placement (getPosition, n-1) to what we asked for last tick.
+	std::unordered_map<std::string, std::pair<double, double>> carlaLastFed_;
+
+	// #177: skip per-vehicle TraCI getters whose output is never sent. Derived
+	// once from VehicleMessageField_set in connectionSetup -- getNextTLS is only
+	// needed for the signalLight* fields, getLeader/getSpeed for precedingVehicle*.
+	bool NEED_NEXT_TLS = false;
+	bool NEED_PRECEDING_VEH = false;
 
 	double tSimuEnd = 90000;
 
@@ -179,6 +193,33 @@ public:
 
 	// vehicle id->edge list
 	std::unordered_map<std::string, std::vector<std::string>> VehicleId2EdgeList_um;
+
+	// #177 Phase 2: cache the upcoming-TLS list so getNextTLS (O(remaining route
+	// length)) runs ONCE PER VEHICLE instead of every step. A vehicle's getNextTLS
+	// captures every TLS from its current position to route end; it only ever PASSES
+	// those, never gains new ones, so one seed is valid for its whole route. cumDist =
+	// getNextTLS dist + odometer at seed (route-start-relative when departPos=0), so
+	// per step distance = cumDist - odometer (O(1), byte-exact -- verified vs
+	// getNextTLS). Re-seeded when the routeId changes (a reroute changes it), so a
+	// runtime route change can never give a stale answer. (True ONCE-PER-ROUTE needs
+	// the full-route walk -> deferred Phase 3 offline map; seeding a shared route map
+	// from a mid-route vehicle would miss TLS behind it.)
+	struct TlsOnRoute { std::string id; int index; double cumDist; };
+	struct VehTlsCache { std::string routeId; std::vector<TlsOnRoute> list; };
+	std::unordered_map<std::string, VehTlsCache> VehicleId2Tls_um;
+	// per-step snapshot of TLS R/Y/G state, filled on demand for the (sparse) set of
+	// TLS that are actually some subscribed vehicle's next signal, then distributed.
+	std::unordered_map<std::string, std::string> CurTlsState_um;
+
+	// #177 Phase 2: static controlled-link topology, built once from
+	// TrafficLight::getControlledLinks. tlsID -> incomingLaneId -> [(linkIndex,
+	// outgoingEdge)]. getNextTLS's tlIndex (signal head) is lane-dependent, not route-
+	// static, so we reconstruct it byte-exact each step from the subscribed CURRENT
+	// lane + next route edge (verified vs getNextTLS, 11079/11079) instead of caching
+	// a lane-stale value. Static topology -> precomputable offline (Phase 3).
+	std::unordered_map<std::string,
+		std::unordered_map<std::string, std::vector<std::pair<int, std::string>>>> TlsTopology_um;
+	bool tlsTopologyBuilt = false;
 	// vehcile id->current edge list index, do not need this as SUMO will give this
 	// std::unordered_map<std::string, std::vector<std::string>> VehicleId2EdgeListIdx_um;
 

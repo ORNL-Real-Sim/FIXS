@@ -47,6 +47,12 @@ class VehData:
     
     activeLaneChange: int = 0  # Boolean-like integer (-1, 0, or 1)
 
+    # #174 EgoDriver command channel (L2/L4). Serialized at the END, gated by
+    # VehicleMessageField. steer is a physical angle; pedals are unitless positions.
+    steerAngleDesired: float = 0.0        # rad, desired front road-wheel steer angle
+    acceleratorPedalDesired: float = 0.0  # [0,1] accelerator pedal position
+    brakePedalDesired: float = 0.0        # [0,1] brake pedal position
+
     def get(self, field_name, default=None):
         return getattr(self, field_name, default)
 

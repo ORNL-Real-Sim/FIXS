@@ -1,7 +1,8 @@
 @echo off
 REM ====================================
 REM Build External Libraries
-REM Builds yaml-cpp (and libevent if needed)
+REM Builds yaml-cpp
+REM Note: libevent was removed in issue #131 (was not used)
 REM ====================================
 
 REM Resolve repo root relative to this script's location
@@ -23,15 +24,6 @@ set "CMAKE_GENERATOR=Visual Studio %VS_CMAKE_VER% %VS_VERSION%"
 
 echo Using CMake Generator: %CMAKE_GENERATOR%
 
-REM Note: libevent is not used at this moment
-REM cd .\CommonLib\libevent
-REM if not exist build md build
-REM cd build
-REM cmake -G "%CMAKE_GENERATOR%" -DEVENT__DISABLE_MBEDTLS=ON ..
-REM cmake --build . --config Release
-REM cmake --build . --config Debug
-REM cd ..\..\..\
-
 set "YAMLCPP_DIR=%REPO_ROOT%\CommonLib\yaml-cpp"
 set "YAMLCPP_BUILD=%YAMLCPP_DIR%\build"
 
@@ -39,7 +31,11 @@ if not exist "%YAMLCPP_BUILD%" mkdir "%YAMLCPP_BUILD%"
 pushd "%YAMLCPP_BUILD%"
 cmake -G "%CMAKE_GENERATOR%" "%YAMLCPP_DIR%"
 cmake --build . --config Release
-cmake --build . --config Debug
+if defined RS_FIXS_AUTOMATION (
+    echo [automation] Skipping yaml-cpp Debug build - the release CI only ships Release.
+) else (
+    cmake --build . --config Debug
+)
 popd
 
 REM Only pause if not called from dispatch

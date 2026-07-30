@@ -26,13 +26,17 @@ if (-not (Test-Path $BuildDir)) {
     Exit-Script 1
 }
 
-# Determine version label from git
+# Determine version label from git.
+# Full semver-matched describe (e.g. v0.8.0-120-gce90f3c0) so the zip name is
+# traceable to the exact commit. --match 'v[0-9]*' ignores the rolling
+# lightweight tags (latest, alpha_v0.9.0) that would otherwise shadow the real
+# semver tag (#191); --always degrades a tagless checkout to the short SHA.
 $VersionLabel = 'dev'
 try {
-    $tag = git describe --tags --abbrev=0 2>$null
+    $describe = git describe --tags --match 'v[0-9]*' --always 2>$null
     $commit = git rev-parse --short HEAD 2>$null
-    if ($tag) {
-        $VersionLabel = "$tag-$commit"
+    if ($describe) {
+        $VersionLabel = $describe
     } elseif ($commit) {
         $VersionLabel = "dev-$commit"
     }
@@ -80,6 +84,21 @@ try {
                 Remove-Item -Path $yamlTests -Recurse -Force
                 Write-Host "  - CommonLib/YAMLMatlab/Tests (test fixtures excluded)"
             }
+        } elseif ($_.Name -eq 'CarMaker') {
+            # Lowercase the CarMaker directory in the release zip for a tidier,
+            # consistent layout. Copied straight to the lowercase name (a case-only
+            # rename is a no-op on Windows' case-insensitive FS but matters in the
+            # zip, which Linux consumers read case-sensitively). build/ and the
+            # proprietary bundle keep the original casing.
+            Copy-Item -Path $_.FullName -Destination (Join-Path $StagingDir 'carmaker') -Recurse -Force
+            Write-Host "  ~ CarMaker/ -> carmaker/"
+        } elseif ($_.Name -like 'DriverModel_RealSim*.dll') {
+            # Group the VISSIM driver-model DLLs under vissim/ instead of the zip
+            # root (they land at build/ root from dispatch step 7 / the CI overlay).
+            $vissimDest = Join-Path $StagingDir 'vissim'
+            if (-not (Test-Path $vissimDest)) { New-Item -ItemType Directory -Path $vissimDest -Force | Out-Null }
+            Copy-Item -Path $_.FullName -Destination $vissimDest -Force
+            Write-Host "  ~ $($_.Name) -> vissim/"
         } else {
             Copy-Item -Path $_.FullName -Destination $StagingDir -Recurse -Force
         }
@@ -95,9 +114,9 @@ try {
     }
 
     # Ship the self-contained Carla/ co-sim component (sumo/ runtime + utils/ +
-    # run_cosim), minus the carla wheel. After fetch + unzip, FIXS/Carla is ready
-    # to run. Test-only files (tests/Sumo/Carla) and the .ps1 build tooling under
-    # scripts/ stay source-side.
+    # run_cosim), minus the carla wheel. Consumers (e.g. FIXS_Applications'
+    # roosevelt_sumo_carla) fetch Carla/ from this release zip. Test-only files
+    # and the .ps1 build tooling under scripts/ stay source-side.
     $CarlaSrc = Join-Path $RepoRoot 'Carla'
     if (Test-Path $CarlaSrc) {
         $carlaDest = Join-Path $StagingDir 'Carla'

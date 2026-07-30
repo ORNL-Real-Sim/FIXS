@@ -11,6 +11,7 @@ realsimxil@gmail.com
     * [Preceding Vehicle](#preceding-vehicle)
     * [Multiple Clients](#multiple-clients)
 * [SumoSetup in config.yaml](#sumosetup-in-configyaml)
+* [Performance & TraCI transport (libtraci vs libsumo)](#performance--traci-transport-libtraci-vs-libsumo)
 
 ## Simulation Setups
 1. Select the message data fields, ip address and port of the TrafficLayer, vehicle id of interest in the config.yaml. In this example, vehicle id 'vehicle_0' is selected, ip address is '127.0.0.1', port is 420.  
@@ -167,3 +168,57 @@ SumoSetup:
     SpeedMode: 32
 ```
 The SpeedMode is an integer defines behavior of SetSpeed command of SUMO TraCI API. More parameters can be included in SumoSetup for future releases.
+
+## Performance & TraCI transport (libtraci vs libsumo)
+
+> Notes from the #177 investigation (measured, June 2026). Detailed data + reusable
+> benchmark harnesses live in
+> [`tests/Sumo/Probes/TrafficLayer_SUMO_CMoffice/PERF_177_TRACI.md`](../tests/Sumo/Probes/TrafficLayer_SUMO_CMoffice/PERF_177_TRACI.md).
+
+### Which transport the build uses
+`CommonLib/TrafficHelper.h` leaves `ENABLE_LIBSUMO` **commented out**, so the build
+compiles the **`libtraci`** namespace — the *socket* TraCI client. `TrafficLayer`
+therefore talks to a **separate `sumo`/`sumo-gui` process over TCP** (see
+`run_sumo_cm_demo.bat`: `sumo-gui --remote-port ...`). The alternative, `libsumo`,
+embeds SUMO **in-process** (no socket). The `#ifdef` is already in the header, so it is
+a per-build choice.
+
+Measured cost difference (SUMO 1.21, simple_loop, 36 veh):
+
+| | per single getter call | bulk subscription (1 call/step, all veh) |
+|---|---:|---:|
+| libtraci (socket) | ~78 µs (TCP round-trip) | ~150 µs/step transport penalty |
+| libsumo (in-process) | ~0.3 µs | baseline |
+
+Implication: **libsumo only wins big against per-call patterns** (one TraCI getter per
+vehicle per step). For a single bulk context subscription the socket penalty is only
+~150 µs/step. So the fix for slow SUMO co-sim is to **stop making per-vehicle
+individual TraCI calls** (fold data into the subscription / cache it), *not* to switch
+transport. After that, libtraci ≈ libsumo and you keep the GUI.
+
+### #177 root cause (slow SUMO↔CarMaker co-sim)
+The dominant per-step cost was **`Vehicle::getNextTLS(vehID)` called per traffic
+vehicle per step** in `TrafficHelper::parserSumoSubscription` (≈ 2.5 ms/veh →
+~90 ms/step at 36 veh, RTF ≈ 1.1). It is **not** the context-subscription variable
+list (that is ~free). `getNextTLS` is O(upcoming-route length); the SimpleLoop demand
+uses `repeat="100000"` (~400 k-edge route) so it walks the whole thing. The data it
+produces (`signalLight*`) is not even sent unless a `signalLight*` field is in
+`VehicleMessageField`. Same for `getLeader`/`getSpeed` (→ `precedingVehicle*`). VISSIM
+is immune because the DSProxy path makes **zero** per-vehicle TraCI calls.
+
+### Why you cannot have libsumo + sumo-gui on Windows
+`libsumo` cannot drive `sumo-gui` on Windows — confirmed at the SUMO source level
+(`src/libsumo/GUI.cpp`, a hard `#ifdef WIN32 { WRITE_WARNING("Libsumo on Windows does
+not work with GUI, falling back to plain libsumo."); return false; }`), present on the
+latest `main` and unchanged through 1.27. Reason: libsumo drives the GUI **incrementally
+from the simulation/client thread** instead of FOX's blocking main-thread event loop,
+and **FOX windows are thread-affine** ("FOX really likes to work in the main thread") —
+Win32's window/message model doesn't tolerate that, so it is hard-disabled (X11/Linux is
+"highly experimental" but works). A separately-launched `sumo-gui` cannot attach to an
+in-process libsumo sim (no server socket; it would be a *different* simulation). SUMO's
+planned **FOX→Qt** migration (issue eclipse-sumo/sumo#311) has been backlogged since
+2010, so do not count on it.
+
+**Practical guidance:** keep **libtraci + `sumo-gui`** for interactive/demo runs (GUI,
+real-time once the per-vehicle calls are fixed); use **libsumo headless** only for
+max-throughput batch runs, where CarMaker IPGMovie / Carla already provide the visual.

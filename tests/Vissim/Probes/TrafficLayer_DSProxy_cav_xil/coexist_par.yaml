@@ -1,0 +1,31 @@
+# DriverModel par-file for the Stage B+ CAV probe.
+#
+# DIFFERENT from the Stage C `coexist_par.yaml` (TrafficLayer_DSProxy_coexist_xil):
+# here we set EnableRealSim: TRUE so the DriverModel actively connects to
+# TrafficLayer on TrafficSimulatorPort and accepts behavior commands. The
+# Python client sends per-vehicle speedDesired overrides; TrafficLayer
+# relays them down to DriverModel; DriverModel returns them to VISSIM in
+# the DRIVER_DATA_DESIRED_VELOCITY callback, which Wiedemann then uses to
+# integrate the car's actual speed.
+
+SimulationSetup:
+    EnableRealSim: true                # DriverModel WILL bind a socket and call back
+    EnableVerboseLog: true             # write per-tick logs to DriverModelLog.txt for diagnosis
+    SubEgoOnly: false                  # FIXS#158 Stage B+: once-per-tick send/recv at
+                                       # DRIVER_DATA_TIME (vs per-vehicle inside MOVE_DRIVER).
+                                       # Required for the TL DSProxy + DriverModel relay tick loop.
+    SelectedTrafficSimulator: VISSIM
+    TrafficSimulatorIP: "127.0.0.1"
+    TrafficSimulatorPort: 1337
+    # Must MATCH the field list in ../TrafficLayer_DSProxy_cav_xil/config.yaml
+    # exactly — the binary VehFullData_t wire format gates each field on
+    # vehicle_msg_field_valid[field], so a mismatch between TL (packer)
+    # and DM (depacker) misaligns the per-message reader and silently
+    # blocks both sides on the next recv.
+    VehicleMessageField: [id, type, speed, speedDesired, positionX, positionY, positionZ, heading, linkId, laneId, grade, signalLightDistance, signalLightColor]
+
+ApplicationSetup:
+    EnableApplicationLayer: false
+
+XilSetup:
+    EnableXil: false

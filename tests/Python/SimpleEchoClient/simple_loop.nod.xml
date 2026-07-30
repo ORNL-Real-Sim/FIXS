@@ -1,0 +1,10 @@
+<nodes>
+    <node id="nb1" x="15.000" y="0.000" type="priority"/>
+    <node id="nb2" x="185.000" y="0.000" type="priority"/>
+    <node id="nr1" x="200.000" y="15.000" type="priority"/>
+    <node id="nr2" x="200.000" y="185.000" type="priority"/>
+    <node id="nt1" x="185.000" y="200.000" type="priority"/>
+    <node id="nt2" x="15.000" y="200.000" type="priority"/>
+    <node id="nl1" x="0.000" y="185.000" type="priority"/>
+    <node id="nl2" x="0.000" y="15.000" type="priority"/>
+</nodes>

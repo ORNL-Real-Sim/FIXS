@@ -1,0 +1,34 @@
+# Stage 2 coexistence par-file for the FIXS DriverModel DLL.
+#
+# CRITICAL: EnableRealSim must be `false` so the DLL does NOT try to open a
+# socket to TrafficLayer. With that flag off, the DLL still loads, still
+# receives all of VISSIM's DriverModel callbacks for every flagged vehicle,
+# and returns DRIVER_DATA_USE_INTERNAL_MODEL=1 — i.e. "VISSIM, use your
+# internal Wiedemann model". That is exactly the surface we want to test:
+# does VISSIM happily load BOTH DriverModel.dll AND DrivingSimulatorProxy.dll
+# in the same VISSIM process / against the same .inpx?
+#
+# Goal of the test:
+#   - DSProxy successfully spawns + connects to VISSIM
+#   - VISSIM also loads DriverModel.dll on the flagged vehicle type
+#   - DriverModelLog.txt shows DLL init lines (proof of DriverModel
+#     callbacks firing)
+#   - VISSIM-internal background traffic still spawns and behaves
+#   - The DS-controlled ego still round-trips its Create -> VehicleID
+
+SimulationSetup:
+    EnableRealSim: false      # MUST stay false for this probe
+    EnableVerboseLog: true
+
+    SelectedTrafficSimulator: 'VISSIM'
+
+    TrafficSimulatorIP: "127.0.0.1"
+    TrafficSimulatorPort: 1337
+
+    VehicleMessageField: [id, speed, positionX, positionY, heading, linkId, laneId]
+
+ApplicationSetup:
+    EnableApplicationLayer: false
+
+XilSetup:
+    EnableXil: false

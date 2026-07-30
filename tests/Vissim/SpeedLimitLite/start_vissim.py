@@ -8,6 +8,7 @@ the same scenario as SpeedLimit — just a different client stack.
 
 Requires: pywin32  (pip install pywin32)
 """
+import argparse
 import os
 import sys
 import math
@@ -27,14 +28,25 @@ LAYOUT = NET_DIR / 'speedLimit.layx'
 CONFIG = HERE / 'config.yaml'
 
 # FIXS driver model DLL (built by scripts/dispatch/3_vissim_components.bat).
-# speedLimit.inpx has a stale baked-in path (#data#..\..\VISSIMServer\...)
-# that no longer resolves after the network was elevated to
-# tests/Vissim/networks/speedLimit/, so we override at runtime.
-DRIVER_DLL = REPO_ROOT / 'ProprietaryFiles' / 'VISSIMserver' / 'x64' / 'Release' / 'DriverModel_RealSim.dll'
+# Two variants ship today (post-#147 layout):
+#   - DriverModel_RealSim.dll        — int-API source, the default ABI for
+#                                      VISSIM 2021+ and the one PTV's headers
+#                                      ship today.
+#   - DriverModel_RealSim_legacy.dll — long-API source, frozen, targets
+#                                      VISSIM <= 2020. Loads on 2021+ too
+#                                      (x64 LLP64 keeps long and int both
+#                                      32-bit), but doesn't exercise the
+#                                      int-API-only code blocks.
+# speedLimit.inpx has a stale baked-in DLL path that no longer resolves
+# after the network was elevated to tests/Vissim/networks/speedLimit/, so
+# we override at runtime regardless.
+DRIVER_DLL_DIR = REPO_ROOT / 'ProprietaryFiles' / 'VISSIMserver' / 'x64' / 'Release'
+DEFAULT_DRIVER_DLL = 'int'   # int-API; switch to 'legacy' for the long-API path
 
-# VISSIM 2022 ProgID — matches the MATLAB scripts in ../SpeedLimit/.
-# Switch to 'VISSIM.Vissim.2600' if your dev machine runs VISSIM 2026.
-VISSIM_PROGID = 'VISSIM.Vissim.2200'
+# VISSIM ProgID — 2200 (VISSIM 2022) is the documented target. Use 2600
+# (VISSIM 2026) only when your install only has 2026. Override at runtime
+# via --progid / env var VISSIM_PROGID, or hardcode default here.
+DEFAULT_VISSIM_PROGID = 'VISSIM.Vissim.2200'
 
 STOP_TIME_S = 120
 STEP_HZ = 10
@@ -59,12 +71,49 @@ def speed_unit_factor(vissim):
     return 3.6  # kilometers-per-hour (also the fallback)
 
 
+def resolve_driver_dll(value: str) -> pathlib.Path:
+    """`int` / `legacy` map to the two PF-shipped DLLs. Anything else is
+    treated as an explicit path."""
+    if value == 'int':
+        return DRIVER_DLL_DIR / 'DriverModel_RealSim.dll'
+    if value == 'legacy':
+        return DRIVER_DLL_DIR / 'DriverModel_RealSim_legacy.dll'
+    return pathlib.Path(value).expanduser().resolve()
+
+
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        '--progid',
+        default=os.environ.get('VISSIM_PROGID', DEFAULT_VISSIM_PROGID),
+        help=f'VISSIM COM ProgID. Default: env VISSIM_PROGID or '
+             f'{DEFAULT_VISSIM_PROGID}. Use VISSIM.Vissim.2600 for 2026.',
+    )
+    parser.add_argument(
+        '--driver-dll',
+        default=os.environ.get('FIXS_DRIVER_DLL', DEFAULT_DRIVER_DLL),
+        help=f'Which FIXS driver DLL to load. "int" (default, VISSIM 2021+ '
+             f'native ABI), "legacy" (VISSIM <=2020 long-API source), or an '
+             f'explicit .dll path.',
+    )
+    args = parser.parse_args()
+    progid = args.progid
+    DRIVER_DLL = resolve_driver_dll(args.driver_dll)
+
     if not NET.is_file():
         sys.exit(f"ERROR: VISSIM network not found at {NET}")
+    if not DRIVER_DLL.is_file():
+        sys.exit(f"ERROR: driver DLL not found at {DRIVER_DLL}")
 
-    print(f"[start_vissim] Dispatching {VISSIM_PROGID} ...", file=sys.stderr)
-    vissim = win32com.client.Dispatch(VISSIM_PROGID)
+    print(f"[start_vissim] Dispatching {progid} (driver_dll={args.driver_dll})...",
+          file=sys.stderr)
+    # On Windows 11 build 26100+ (ucrtbase 10.0.26100.8328) VISSIM 2022 and
+    # 2026 crash in their COM -Embedding init with STATUS_STACK_BUFFER_OVERRUN
+    # when launched in pywin32's default multi-threaded apartment. Force STA
+    # + LOCAL_SERVER so the dispatch survives. See FIXS#152.
+    import pythoncom
+    pythoncom.CoInitializeEx(pythoncom.COINIT_APARTMENTTHREADED)
+    vissim = win32com.client.Dispatch(progid, clsctx=pythoncom.CLSCTX_LOCAL_SERVER)
 
     print(f"[start_vissim] Loading {NET}", file=sys.stderr)
     vissim.LoadNet(str(NET))
