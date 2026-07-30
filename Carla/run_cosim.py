@@ -894,7 +894,8 @@ def ensure_runtime(cfg):
     print("[cosim] saved config has no usable python env (carla not importable); "
           "resolving it now (CARLA paths kept) ...")
     cfg["python"] = env.resolve_python()
-    wheel = env.ensure_carla(cfg["python"], cfg["mode"], cfg["carla_root"])
+    # .get: 'client' mode has no carla_root by design (CARLA is on another host).
+    wheel = env.ensure_carla(cfg["python"], cfg["mode"], cfg.get("carla_root"))
     if wheel:
         cfg["carla_wheel"] = wheel
     env.save_config(cfg)
@@ -1840,6 +1841,15 @@ def main():
     if cfg is not None:
         cfg = ensure_runtime(cfg)  # repair stale configs that lack a python env
         maybe_reexec(cfg)          # may not return (re-execs under the env python)
+        if cfg.get("mode") == "client" and not args.no_launch:
+            # There is no CARLA here to launch, cook into, or place actors in -
+            # that is what the mode means. Decided HERE, before anything reads
+            # carla_root, so the rest of the run takes the path a remote host
+            # already takes. (The cook/place preflights are additionally gated
+            # on mode == "source", so they stay skipped either way.)
+            print("[cosim] carla.json says client mode (no CARLA on this machine); "
+                  "implying --no-launch.")
+            args.no_launch = True
     elif args.no_launch:
         print("[cosim] no CARLA env configured; running under the current python. "
               "If 'import carla' fails, run setup_carla first.")
@@ -2148,6 +2158,18 @@ def main():
               f"so every component dials the same CARLA.")
         set_yaml_scalar(config_yaml, "CarlaSetup", "CarlaServerIP", wire)
         set_yaml_scalar(config_yaml, "CarlaSetup", "CarlaServerPort", args.carla_port)
+
+    # Client mode means "no CARLA on this machine", so an endpoint pointing back
+    # at this machine cannot be satisfied by anything. Caught here rather than at
+    # connect time because the failure would otherwise surface as a bare RPC
+    # timeout, which reads as "CARLA is down" instead of "nothing was ever there".
+    if cfg is not None and cfg.get("mode") == "client" and _is_local_host(args.carla_host):
+        sys.exit(
+            f"[cosim] carla.json is 'client' mode (no CARLA on this machine), but "
+            f"{os.path.basename(config_yaml)} points CarlaSetup.CarlaServerIP at "
+            f"{args.carla_host}, which IS this machine.\n"
+            f"        Set it to the host running CARLA (or pass --carla-host), else "
+            f"re-run setup_carla and pick a local CARLA.")
 
     # Catches the case the early peek could not see: --config picked a different
     # yaml, or the file only existed after generation. Same rule as above - a CARLA
