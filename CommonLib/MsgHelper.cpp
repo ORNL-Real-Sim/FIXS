@@ -339,7 +339,7 @@ template <typename T> void MsgHelper::bufferToNumericVehData(char* buffer, int* 
 	}
 }
 
-void MsgHelper::packVehData(VehFullData_t VehData, char* buffer, int* iByte) {
+void MsgHelper::packVehData(const VehFullData_t& VehData, char* buffer, int* iByte) {
 
 	uint8_t tempUint8;
 	uint16_t tempUint16;
@@ -457,7 +457,7 @@ void MsgHelper::depackVehData(char* buffer, VehFullData_t& VehData) {
 
 }
 
-void MsgHelper::packTrafficLightData(TrafficLightData_t TrafficLightData, char* buffer, int* iByte) {
+void MsgHelper::packTrafficLightData(const TrafficLightData_t& TrafficLightData, char* buffer, int* iByte) {
 	/*
 	MESSAGE STRUCTURE:
 
@@ -567,7 +567,7 @@ void MsgHelper::depackTrafficLightData(char* buffer, TrafficLightData_t* Traffic
 	iByte += tempUint8;
 }
 
-void MsgHelper::packDetectorData(TlsDetector_t DetectorData, char* buffer, int* iByte) {
+void MsgHelper::packDetectorData(const TlsDetector_t& DetectorData, char* buffer, int* iByte) {
 	/*
 	MESSAGE STRUCTURE:
 

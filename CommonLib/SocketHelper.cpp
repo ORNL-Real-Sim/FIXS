@@ -960,6 +960,11 @@ int SocketHelper::recvData(int sock, int* simState, float* simTime, MsgHelper& M
 		// Guard on <= 0, not just SOCKET_ERROR: a clean close here is mid-message, so
 		// recvExact returns 0 and treating that as success would depack an uninitialised
 		// buffer. bodySize == 0 is legitimate (header-only record) and must not trip it.
+		//
+		// recvSize is assigned unconditionally first: with the short-circuit below a
+		// zero-body record would otherwise leave it holding the PREVIOUS record's value,
+		// which depackDetectorData consumes as a length.
+		recvSize = 0;
 		if (bodySize > 0 && (recvSize = recvExact(sock, recvEachDataBuf, bodySize)) <= 0) {
 #ifdef WIN32
 			if (WSAGetLastError() == WSAEFAULT) {
@@ -1043,10 +1048,14 @@ int SocketHelper::sendData(int sock, int iClient, float simTimeSend, uint8_t sim
 	// that after a flush there is always room for one.
 	//
 	// The reservation is the record's ACTUAL size, not a presumed maximum. A detector
-	// record carries a whole vector<DetectorData_t> (TlsDetector_t), so its size grows
-	// with the detector count at that intersection and is bounded only by the uint16
-	// size field (65535) -- not by MAX_RECORD_SIZE, which is the *vehicle* worst case.
-	// Reserving MAX_RECORD_SIZE here would let a large detector record run past txBuf.
+	// record carries a whole vector<DetectorData_t> (TlsDetector_t), so unlike a vehicle
+	// record it has no natural ceiling -- its size grows with the detector count at that
+	// intersection. Reserving a fixed guess per record would let a large one run past
+	// txBuf, so each is measured.
+	//
+	// MAX_RECORD_SIZE is the wire contract, not a buffer detail: a record above it is
+	// refused here rather than emitted, because a receiver would refuse it too. Both
+	// ends enforce the same number so neither sends what the other cannot accept.
 	#define FIXS_TX_FLUSH_IF_NEEDED(recBytes)                                            \
 		if ((recBytes) > MAX_RECORD_SIZE) {                                              \
 			fprintf(stderr, "FIXS #87: record of %d B exceeds MAX_RECORD_SIZE %d -- not" \

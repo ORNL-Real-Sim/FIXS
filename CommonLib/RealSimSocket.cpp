@@ -99,6 +99,10 @@ int nonblockFlag = 0;
 // this buffer will be held until new data is received
 int gRecvSizeHold = 0;
 
+// #87: latch so the delivery-budget overflow is reported once per run rather than
+// once per timestep (see mdlUpdate). Reset alongside gRecvSizeHold in mdlStart.
+int gOverflowWarned = 0;
+
 
 double simTime = 0.0;
 double simTimePrev = 0.0;
@@ -385,9 +389,10 @@ static void mdlStart(SimStruct* S)
     serverConnected = 0;
     nonblockFlag = 0;
     simTime = 0.0;
-    simTimePrev = 0.0;   
+    simTimePrev = 0.0;
     gRecvSizeHold = (int) 0;
-    
+    gOverflowWarned = 0;   // #87: re-arm the once-per-run overflow warning
+
     
     // #87: DWork 0 is SS_INT8 x RECVBUFFERSIZE -> size in bytes is RECVBUFFERSIZE.
     // sizeof(recvDataHold) is the POINTER size (8 B), so this cleared 8 bytes.
@@ -765,10 +770,20 @@ static void mdlUpdate(SimStruct* S, int_T tid)
                 // that follows -- which is exactly what the old 1024-byte read did.
                 int overflow = bodySize - deliverBody;
                 if (overflow > 0) {
-                    printf("FIXS #87: message %u B exceeds the %d B delivery budget; "
-                           "%d B dropped this step. Narrow the subscription (radius/id) "
-                           "or raise RECVBUFFERSIZE.\n",
-                           (unsigned)totalMsgSize, RECVBUFFERSIZE, overflow);
+                    // Warn ONCE, not per step. With the budget at 1024 B an 'all'
+                    // subscription overflows on every step, and an unconditional printf
+                    // in mdlUpdate is a per-step console write on the RT target -- the
+                    // same class of stall the TCP_NODELAY fix in this file removes.
+                    // enabledebug below still reports every step when asked.
+                    if (!gOverflowWarned) {
+                        gOverflowWarned = 1;
+                        printf("FIXS #87: message %u B exceeds the %d B delivery budget; "
+                               "%d B dropped this step. Narrow the subscription "
+                               "(radius/id) or raise RECVBUFFERSIZE (note: that changes "
+                               "the S-function port width and existing models must be "
+                               "re-wired). Further overflows are not reported.\n",
+                               (unsigned)totalMsgSize, RECVBUFFERSIZE, overflow);
+                    }
                     if (recvDiscardMex(serverSock, overflow) != 0) {
                         serverConnected = 0;
                         socketShutdown();
