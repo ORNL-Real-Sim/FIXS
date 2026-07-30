@@ -1520,6 +1520,11 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 
 			vector <int> sigSubscribeList = { libsumo::TL_RED_YELLOW_GREEN_STATE };
 
+			printf("[signal-sub] subAllSignalFlag=%d  namedIds=%zu  tlsInNetwork=%zu\n",
+				(int)Config_c->SubscriptionSignalList.subAllSignalFlag,
+				Config_c->SubscriptionSignalList.signalId_v.size(),
+				sigAllId_v.size());
+
 			if (!Config_c->SubscriptionSignalList.subAllSignalFlag) {
 				for (auto it : Config_c->SubscriptionSignalList.signalId_v) {
 					SUMO_TRACI_NAMESPACE::TrafficLight::subscribe(it.c_str(), sigSubscribeList, 0, tSimuEnd);

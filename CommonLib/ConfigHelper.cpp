@@ -879,7 +879,11 @@ void ConfigHelper::parserSubscription(YAML::Node rootnode, std::string name, Sub
 				break;
 
 			case intersection:
-				if (att.compare("id") == 0 || att.compare("name") == 0) {
+				// `all` accepted alongside id/name, matching the `ego` case above.
+				// Without it the attribute was dropped here before reaching attMap,
+				// so getSigSubscriptionList() could never see it -- and because the
+				// error box below is commented out, the drop was silent.
+				if (att.compare("id") == 0 || att.compare("name") == 0 || att.compare("all") == 0) {
 					extractSubscriptionAttributes(attnode, type, att, attMap);
 				}
 				else {
