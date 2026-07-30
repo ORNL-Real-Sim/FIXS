@@ -848,10 +848,45 @@ def _prompt(msg):
                  "--map / --package to run without prompting.")
 
 
-def choose_map(repo, tag_prefix="", carla_root=None, catalog=None):
-    """Interactive chooser. Lists ONLINE maps (repo's releases from the
-    Digital-Twin-Library) and, when carla_root is given, LOCAL maps already cooked
-    into that CARLA - clearly separated - plus a hand-picked local .zip/folder.
+def _app_map_choice(name, catalog, cooked):
+    """How an app-declared map name resolves, as (kind, label, flag, tag), or None
+    if it resolves to nothing:
+      'release' -> the name matches a Digital-Twin-Library entry (by location,
+                   cooked map_name or release tag - see catalog_entry)
+      'cooked'  -> not in the library, but already cooked into this CARLA
+    A name that is neither costs the app its shortcut and nothing else: the picker
+    then behaves exactly as it would with no application selected. That is
+    deliberate - a map that has not been published yet must not be able to block a
+    run, and an app manifest is data, so a typo in it should not be fatal."""
+    ent = catalog_entry(catalog, name)
+    if ent:
+        flag = "  (Digital-Twin-Library)"
+        if (ent.get("map_name") or "") in cooked:
+            flag += "  (already imported)"
+        return "release", (ent.get("map_name") or name), flag, ent.get("release")
+    if name in cooked:
+        return "cooked", name, "  (already imported)", None
+    return None
+
+
+def choose_map(repo, tag_prefix="", carla_root=None, catalog=None,
+               preferred=None, app_label=None):
+    """Interactive chooser. Two sections plus `L` for a hand-picked .zip / folder:
+      1. ONLINE - Digital-Twin-Library releases in `repo`. When an application is
+                  selected and the library HAS its map(s), this section is narrowed
+                  to those: an app pinned to Roosevelt should not be offered
+                  Atlanta as if the two were interchangeable. If the app's map is
+                  not in the library (not published yet, or cooked by hand), there
+                  is nothing to narrow to and the full library is listed instead.
+      2. LOCAL  - every map already cooked into `carla_root`. NEVER filtered: what
+                  is cooked into this CARLA is a property of the machine, not of
+                  the application, so an app can never hide a map you could
+                  actually run. App maps are marked here, not promoted.
+    To browse the whole library while a narrowing app is selected, pick "none" at
+    the application prompt.
+
+    Enter takes the app's map wherever it landed (library or cooked), else item 1.
+
     Returns (name, tag, local_path):
       online release -> (name, tag,  None)
       local cooked   -> (name, None, None)   # already imported: run as-is
@@ -859,11 +894,20 @@ def choose_map(repo, tag_prefix="", carla_root=None, catalog=None):
     Exits if the session is non-interactive."""
     releases = list_map_releases(repo, tag_prefix)
     cooked = list_imported_maps(carla_root) if carla_root else []
+    preferred = preferred or []
+
+    resolved_app = [r for r in (_app_map_choice(n, catalog, cooked) for n in preferred) if r]
+    app_tags = {tag for _k, _l, _f, tag in resolved_app if tag}
+    app_names = {label for _k, label, _f, _t in resolved_app}
+    if app_tags:
+        releases = [r for r in releases if r["tag"] in app_tags]
 
     print("\n[import] Pick a map to run:")
-    menu = []  # menu number -> ("release", release) | ("cooked", name)
+    menu = []          # menu number -> ("release", release) | ("cooked", name)
+    default_idx = 1    # menu number Enter selects; the app's map when there is one
     if releases:
-        print("  Online (Digital-Twin-Library):")
+        who = f" for {app_label}" if app_tags and app_label else ""
+        print(f"  Online (Digital-Twin-Library){who}:")
         for r in releases:
             menu.append(("release", r))
             pkg = _package_from_tag(r["tag"], tag_prefix)
@@ -883,7 +927,14 @@ def choose_map(repo, tag_prefix="", carla_root=None, catalog=None):
         print("  Local (already imported into CARLA):")
         for name in cooked:
             menu.append(("cooked", name))
-            print(f"   {len(menu):>2}) {name}")
+            mark = ""
+            if name in app_names:
+                mark = "  (app map)"
+                # An app map the library does not carry still gets to be the
+                # default - it just lives in this section instead of the one above.
+                if not app_tags:
+                    default_idx = len(menu)
+            print(f"   {len(menu):>2}) {name}{mark}")
     if not menu:
         print("   (no online releases or imported maps found)")
     print("   L) select a local .zip / folder instead")
@@ -893,11 +944,10 @@ def choose_map(repo, tag_prefix="", carla_root=None, catalog=None):
                  "(+ --package-url/--package-dir) to choose non-interactively.")
     while True:
         hint = f"[1-{len(menu)} / L]" if menu else "[L]"
-        default = ", Enter = 1" if releases else ""
+        default = f", Enter = {default_idx}" if menu else ""
         ans = _prompt(f"[import] Which? {hint}{default}: ").strip().lower()
-        if ans == "" and releases:
-            r = releases[0]
-            return _package_from_tag(r["tag"], tag_prefix), r["tag"], None
+        if ans == "" and menu:
+            ans = str(default_idx)
         if ans == "l":
             path = _select_package("map", None)  # native file picker / typed path
             name = _infer_package_name(path)
@@ -970,19 +1020,18 @@ def _map_cache_dir(name=None):
     `name`, the per-map subfolder ~/.fixs/maps/<name>/ - named by the cooked map
     name so it matches CARLA's Content/<name>/; it holds that map's bundle zip,
     extracted carla/ + sumo/, and generated tl_table.csv. Kept outside FIXS/ so
-    `initialize` (which wipes FIXS/) never deletes it."""
+    `initialize` (which wipes FIXS/) never deletes it.
+
+    Everything under here is RE-CREATABLE: downloaded, extracted, or derived from
+    what was extracted. Nothing a user hand-edits lives here - scenario yamls are
+    app-bounded and live under ~/.fixs/apps/ (see app_catalog.scenario_dir), so
+    deleting this tree to reclaim disk can never destroy someone's config. It is
+    also shared: one 700MB bundle serves every app that runs that map."""
     d = os.environ.get("FIXS_MAP_CACHE") or os.path.join(os.path.dirname(env.CONFIG_PATH), "maps")
     if name:
         d = os.path.join(d, name)
     os.makedirs(d, exist_ok=True)
     return d
-
-
-def map_config_path(name):
-    """The per-map VirCarlaEnv scenario yaml: ~/.fixs/maps/<name>/config.yaml. Sits
-    beside that map's bundle/carla/sumo/tl_table; like tl_table.csv it is a generated,
-    machine-local artifact (never committed). Consumed only by run_cosim's cpp engine."""
-    return os.path.join(_map_cache_dir(name), "config.yaml")
 
 
 def map_sumo_dir(name):
