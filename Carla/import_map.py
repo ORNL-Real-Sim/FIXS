@@ -447,9 +447,12 @@ def open_bundle(src, cache_name=None):
             carla = os.path.join(unpacked, "carla")
             # Compare the zip against the extracted carla/ (not `unpacked`, which may
             # also hold the downloaded bundle.zip in a per-map cache), and clear only
-            # carla/+sumo/ on re-extract so a sibling bundle.zip is preserved.
+            # the bundle's own subdirs on re-extract so a sibling bundle.zip is
+            # preserved. props/ is in that list because a prop left behind by an older
+            # bundle would otherwise be installed forever - the same "stale content
+            # nobody notices" failure this whole ticket is about (FIXS#223).
             if not os.path.isdir(carla) or os.path.getmtime(src) > os.path.getmtime(carla):
-                for sub in ("carla", "sumo"):
+                for sub in ("carla", "sumo", "props"):
                     shutil.rmtree(os.path.join(unpacked, sub), ignore_errors=True)
                 os.makedirs(unpacked, exist_ok=True)
                 z.extractall(unpacked)
@@ -1032,6 +1035,12 @@ def _map_cache_dir(name=None):
         d = os.path.join(d, name)
     os.makedirs(d, exist_ok=True)
     return d
+
+
+def map_cache_dir(name):
+    """The per-map cache dir ~/.fixs/maps/<name>/ - where this map's bundle was
+    extracted, and so where its placement.yaml is if it ships one."""
+    return _map_cache_dir(name)
 
 
 def map_sumo_dir(name):
