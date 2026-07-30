@@ -112,7 +112,9 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DFIXS_SUMO_HOME="$HOME/sumo-traci"
           cmake --build build -j "$(nproc)"
-          file build/TrafficLayer
+          # ls, not file(1): the minimal ubuntu:* images do not ship file, and
+          # a missing diagnostic tool must not fail an otherwise-green build.
+          ls -lh build/TrafficLayer
 
       - name: Smoke - starts and prints usage
         run: |
