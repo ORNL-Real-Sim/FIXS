@@ -135,6 +135,32 @@ def tl_settings(manifest, manifest_path):
     }
 
 
+def assets_declared(manifest):
+    """The asset basenames this manifest expects to be installed.
+
+    Derived from the blueprint paths that live under `install_root`: one under it
+    ships with the pack, one under /Game/Carla is stock CARLA content and must not
+    be fetched or installed. So the manifest IS the index - there is no separate
+    file list in the catalog, and so nothing that can drift out of sync with it.
+
+    That also means this needs no directory listing, which matters for where this is
+    going: once the map library is public these files come from
+    raw.githubusercontent.com, which serves files but cannot enumerate a folder.
+    """
+    root = (manifest.get("install_root") or "").rstrip("/")
+    if not root:
+        return []
+    names = set()
+    for block in manifest.values():
+        if not isinstance(block, dict):
+            continue
+        for key, value in block.items():
+            if (key.endswith("blueprint") and isinstance(value, str)
+                    and value.startswith(root + "/")):
+                names.add(value.rsplit("/", 1)[-1])
+    return sorted(names)
+
+
 def legacy_settings():
     """The pre-manifest numbers, for bundles that ship no placement.yaml.
 
@@ -303,15 +329,44 @@ def digests(props_dir):
                   for name in os.listdir(props_dir) if name.lower().endswith(".uasset"))
 
 
-def bundle_fingerprint(*dirs):
-    """Fingerprint of the manifest + props a bundle ships, or None if it ships no
-    manifest. Lets a caller ask "would placing give the same result as last time?"
-    without installing anything or launching the editor."""
+def resolve_assets_dir(manifest_path, manifest, explicit=None, shared=None):
+    """Where this manifest's .uasset files actually are.
+
+    Three cases, in order: an explicit --props-dir; assets sitting beside the
+    manifest (or in a props/ under it); otherwise the shared props cache.
+
+    The third case is the one that is easy to miss. A map bundle may ship a
+    placement.yaml purely to OVERRIDE a number - say flip_yaw_180 for a table whose
+    headings run the other way - without shipping the assets, because the assets are
+    shared. Resolving that manifest against the shared cache is what lets a map
+    override the numbers without duplicating the prop.
+    """
+    if explicit:
+        return explicit if os.path.isdir(explicit) else None
+    beside = find_props_dir(manifest_path)
+    if beside:
+        return beside
+    if shared and os.path.isdir(shared) and any(
+            os.path.isfile(os.path.join(shared, name + ".uasset"))
+            for name in assets_declared(manifest)):
+        return shared
+    return None
+
+
+def bundle_fingerprint(*dirs, shared=None):
+    """Fingerprint of the manifest + props in play, or None if there is no manifest.
+
+    Lets a caller ask "would placing give the same result as last time?" without
+    installing anything or launching the editor. `shared` must be the same props
+    cache the placer will use, or this and place_tls would fingerprint different
+    asset sets and the map would re-place on every single run."""
     manifest_path = find_manifest(*dirs)
     if not manifest_path:
         return None
-    settings = tl_settings(load(manifest_path), manifest_path)
-    return fingerprint(settings, digests(find_props_dir(manifest_path)))
+    manifest = load(manifest_path)
+    settings = tl_settings(manifest, manifest_path)
+    assets = resolve_assets_dir(manifest_path, manifest, shared=shared)
+    return fingerprint(settings, digests(assets))
 
 
 def fingerprint(settings, installed):

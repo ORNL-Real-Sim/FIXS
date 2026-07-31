@@ -2193,9 +2193,21 @@ def main():
             # the same map placed from DIFFERENT numbers is not placed. Without this a
             # corrected z_offset_cm never takes effect on a machine that placed once,
             # because the marker only ever recorded that placement happened.
-            bundle_dirs = [import_map.map_cache_dir(target_map)]
+            # Props are SHARED across maps - they install to one map-independent
+            # content path - so they are fetched once into ~/.fixs/props rather
+            # than shipped inside each bundle, where the last map imported would
+            # silently decide which prop every other map places.
+            #
+            # The map's own dir comes FIRST: find_manifest takes the first hit, so a
+            # bundle that ships its own placement.yaml overrides the shared numbers
+            # (a map whose TL table uses the opposite heading convention needs its
+            # own flip_yaw_180), and otherwise the library's defaults apply.
+            props_cache = import_map.fetch_props(repo)
+            bundle_dirs = [d for d in (import_map.map_cache_dir(target_map),
+                                       props_cache) if d]
             try:
-                tl_fingerprint = props_mod.bundle_fingerprint(*bundle_dirs)
+                tl_fingerprint = props_mod.bundle_fingerprint(
+                    *bundle_dirs, shared=import_map.props_cache_dir())
             except props_mod.ManifestError as exc:
                 sys.exit(f"[props] {exc}")
 

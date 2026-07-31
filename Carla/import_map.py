@@ -1043,6 +1043,147 @@ def map_cache_dir(name):
     return _map_cache_dir(name)
 
 
+def props_cache_dir():
+    """Shared props cache ~/.fixs/props/ - ONE copy, for every map.
+
+    Props install to a map-independent content path (/Game/FIXS/Props), so a copy
+    shipped inside each map bundle would mean the last map imported silently decides
+    which prop every other map places. Fetching one shared copy removes that.
+
+    Sits beside maps/ rather than under it for the same reason, and is equally
+    re-creatable: everything here is downloaded, never hand-edited."""
+    d = os.environ.get("FIXS_PROPS_CACHE") or os.path.join(
+        os.path.dirname(env.CONFIG_PATH), "props")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def repo_file(repo, path, ref="main"):
+    """Raw bytes of a file in `repo` at `ref`, or None if it cannot be fetched.
+
+    The one place that knows HOW bytes come out of the map library.
+
+    Note the media type: `application/vnd.github.raw`, NOT the `+json` variant
+    fetch_catalog uses. On a binary payload the `+json` form fails with
+    "transform: short source buffer" because gh tries to transform it as JSON, and
+    the caller gets an empty file that then fails md5 verification for a reason
+    that has nothing to do with the file. Output is captured as BYTES for the same
+    reason - text=True would corrupt a .uasset.
+
+    TODO(no-gh): Digital-Twin-Library is private today, so this needs gh's auth.
+    Once it is public this becomes a plain stdlib GET of
+        https://raw.githubusercontent.com/{repo}/{ref}/{path}
+    with no external binary and no auth, and this function is the only thing that
+    changes. FIXS's own repo is already public, so its release downloads can move
+    first. Keep new callers going through here rather than shelling to gh directly.
+    """
+    gh = shutil.which("gh")
+    if not gh:
+        return None
+    try:
+        out = subprocess.run(
+            [gh, "api", f"repos/{repo}/contents/{path}?ref={ref}",
+             "-H", "Accept: application/vnd.github.raw"],
+            capture_output=True, timeout=120)     # bytes: no text=True
+        if out.returncode == 0 and out.stdout:
+            return out.stdout
+    except Exception:
+        pass
+    return None
+
+
+def props_source(repo):
+    """(subdir, ref) for the shared props, from the cached catalog's `props` block.
+
+    Defaults to ("props", "main") so a catalog that predates the block still works.
+    Keeping this in the catalog means the ref can be pinned to a tag or sha later
+    without a schema change - the catalog IS the pin."""
+    import json
+    cache = os.path.join(os.path.dirname(env.CONFIG_PATH), "catalog.json")
+    block = {}
+    if os.path.isfile(cache):
+        try:
+            with open(cache, encoding="utf-8") as f:
+                block = json.load(f).get("props") or {}
+        except (OSError, ValueError):
+            block = {}
+    return block.get("path", "props"), block.get("ref", "main")
+
+
+def fetch_props(repo, subdir=None, ref=None):
+    """Fetch the map library's shared props into ~/.fixs/props. Returns that dir,
+    or None if nothing could be fetched and nothing was cached.
+
+    Self-describing, by design: placement.yaml declares install_root and the
+    blueprints under it, so the asset list comes from the manifest itself
+    (props.assets_declared) rather than a directory listing or a second list in the
+    catalog. No listing is needed, which is what lets this move to
+    raw.githubusercontent.com unchanged, and no second list means nothing to drift.
+
+    Each .uasset is verified against provenance.json's md5 before it is kept, so a
+    truncated or transformed download fails here rather than as a broken asset in
+    the editor later. Falls back to whatever is already cached when offline."""
+    import props as props_mod
+
+    dest = props_cache_dir()
+    want_subdir, want_ref = props_source(repo)
+    subdir = subdir or want_subdir
+    ref = ref or want_ref
+
+    def cached_ok():
+        return os.path.isfile(os.path.join(dest, props_mod.MANIFEST_NAME))
+
+    manifest_bytes = repo_file(repo, f"{subdir}/{props_mod.MANIFEST_NAME}", ref)
+    prov_bytes = repo_file(repo, f"{subdir}/provenance.json", ref)
+    if not manifest_bytes or not prov_bytes:
+        if cached_ok():
+            print("[props] could not reach the map library; using the cached props.")
+            return dest
+        print(f"[props] could not fetch props from {repo}:{subdir}@{ref} "
+              f"(and nothing is cached).")
+        return None
+
+    with open(os.path.join(dest, props_mod.MANIFEST_NAME), "wb") as fh:
+        fh.write(manifest_bytes)
+    with open(os.path.join(dest, "provenance.json"), "wb") as fh:
+        fh.write(prov_bytes)
+
+    import json
+    try:
+        declared_md5 = (json.loads(prov_bytes).get("exported") or {}).get("md5")
+    except ValueError:
+        declared_md5 = None
+
+    try:
+        manifest = props_mod.load(os.path.join(dest, props_mod.MANIFEST_NAME))
+        names = props_mod.assets_declared(manifest)
+    except props_mod.ManifestError as exc:
+        print(f"[props] fetched manifest is unreadable: {exc}")
+        return dest if cached_ok() else None
+
+    for name in names:
+        target = os.path.join(dest, name + ".uasset")
+        if os.path.isfile(target) and declared_md5 \
+                and props_mod.md5_of(target) == declared_md5:
+            continue                                  # already current
+        blob = repo_file(repo, f"{subdir}/{name}.uasset", ref)
+        if not blob:
+            print(f"[props] could not fetch {name}.uasset from {repo}")
+            if not os.path.isfile(target):
+                return None
+            continue
+        with open(target, "wb") as fh:
+            fh.write(blob)
+        got = props_mod.md5_of(target)
+        if declared_md5 and got != declared_md5:
+            os.remove(target)
+            print(f"[props] {name}.uasset failed verification "
+                  f"({got} != {declared_md5}); discarded.")
+            return None
+        print(f"[props] fetched {name}.uasset ({len(blob)} bytes)")
+    return dest
+
+
 def map_sumo_dir(name):
     """The cached SUMO scenario dir for an already-imported map: the folder under
     ~/.fixs/maps/<name>/sumo that directly holds a .sumocfg (where a bundle's sumo/

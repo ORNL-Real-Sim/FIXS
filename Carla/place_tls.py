@@ -104,8 +104,11 @@ def resolve_props(carla_root, ue4_root, bundle_dirs=(), props_dir=None):
 
     manifest = props.load(manifest_path)
     settings = props.tl_settings(manifest, manifest_path)
-    installed = props.install(carla_root, props.find_props_dir(manifest_path, props_dir),
-                              manifest, manifest_path, ue4_root=ue4_root)
+    shared = import_map.props_cache_dir()
+    assets_dir = props.resolve_assets_dir(manifest_path, manifest,
+                                          explicit=props_dir, shared=shared)
+    installed = props.install(carla_root, assets_dir, manifest, manifest_path,
+                              ue4_root=ue4_root)
     print(props.describe(settings, manifest_path))
     return settings, manifest_path, props.fingerprint(settings, installed)
 
@@ -206,8 +209,14 @@ def main():
         name = import_map.choose_imported_map(carla_root)
 
     # Where to look for placement.yaml: an explicit --bundle, else the map's own
-    # cache dir, which is where run_cosim unpacks the bundle it imported.
-    bundle_dirs = [args.bundle] if args.bundle else [import_map.map_cache_dir(name)]
+    # cache dir (where run_cosim unpacks the bundle) and then the shared props
+    # cache. Map first, so a bundle shipping its own manifest overrides the
+    # library's shared defaults; find_manifest takes the first hit.
+    if args.bundle:
+        bundle_dirs = [args.bundle]
+    else:
+        bundle_dirs = [d for d in (import_map.map_cache_dir(name),
+                                   import_map.props_cache_dir()) if d]
 
     return place_tls(name, args.tl_table, args.carla_root, args.ue4_root, args.force,
                      bundle_dirs=bundle_dirs, props_dir=args.props_dir)
