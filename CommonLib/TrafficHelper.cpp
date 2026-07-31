@@ -111,6 +111,26 @@ void TrafficHelper::connectionSetup(string trafficIp, int trafficPort, int nClie
 		//                   which never happens in-process -> TrafficLayer hangs.
 		// Ordering (setOrder) is likewise a multi-client concept and is rejected by
 		// libsumo at runtime - see the guard below.
+		//
+		// Those two settings are user-facing YAML keys (SumoSetup.NumClients,
+		// SumoSetup.ExecutionOrder). Dropping them silently would let a config ask
+		// for something the build cannot do and still appear to run, so report it.
+		if (Config_c->SumoSetup.NumClients != 1) {
+			printf("ERROR: SumoSetup.NumClients = %d, but this build embeds SUMO via libsumo.\n",
+				Config_c->SumoSetup.NumClients);
+			printf("       libsumo runs SUMO in-process with no TraCI server, so there is exactly\n");
+			printf("       one client and additional clients could never connect.\n");
+			printf("       Use a libtraci build (comment out ENABLE_LIBSUMO) for multi-client runs,\n");
+			printf("       or set NumClients: 1.\n");
+			throw std::runtime_error("SumoSetup.NumClients > 1 is not supported by a libsumo build "
+				"(no TraCI server; use libtraci or set NumClients: 1)");
+		}
+		if (order != 1) {
+			// Not fatal: with a single in-process client the ordering is simply moot.
+			printf("WARNING: SumoSetup.ExecutionOrder = %d is ignored in libsumo mode.\n", order);
+			printf("         Client ordering is a multi-client TraCI concept and libsumo rejects\n");
+			printf("         setOrder(). The in-process simulation is the only client.\n");
+		}
 		libsumoPreflight();
 		try {
 			std::vector<std::string> cmd = {"sumo", "-c", Config_c->SumoSetup.SumoConfigFile, "--start",
@@ -120,8 +140,7 @@ void TrafficHelper::connectionSetup(string trafficIp, int trafficPort, int nClie
 			libsumo::Simulation::start(cmd);
 			// NOTE: no setOrder() here. libsumo throws "Multi client support
 			// (including connection switching) is not implemented in libsumo."
-			// The in-process simulation is the only client, so ordering is moot.
-			(void)order;
+			// A non-default ExecutionOrder was already reported above.
 			printf("SUMO launched successfully via libsumo (in-process, headless)\n");
 		}
 		catch (const std::exception& e) {
