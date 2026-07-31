@@ -122,7 +122,16 @@ def _require(manifest, section, key, manifest_path):
 
 
 def tl_settings(manifest, manifest_path):
-    """The traffic-light numbers the placer needs, all of them required."""
+    """The traffic-light numbers the placer needs, all of them required.
+
+    Deliberately no `table` key, though the draft manifest in
+    Digital-Twin-Library#2 had one. Where each head goes comes from a
+    traffic_light_table.csv committed beside the sumocfg, which resolve_tl_table
+    already prefers over generating one -- so a bundle that ships the table in
+    its sumo/ is picked up with nothing declared here and no code below. Letting
+    the manifest name the path as well would put the same fact in two places,
+    free to drift apart, which is the failure this manifest exists to prevent.
+    """
     return {
         "blueprint": str(_require(manifest, "traffic_lights", "blueprint", manifest_path)),
         "group_blueprint": str(_require(manifest, "traffic_lights", "group_blueprint",
@@ -131,7 +140,6 @@ def tl_settings(manifest, manifest_path):
                                       manifest_path)),
         "flip_yaw_180": bool(_require(manifest, "traffic_lights", "flip_yaw_180",
                                       manifest_path)),
-        "table": manifest.get("traffic_lights", {}).get("table"),
     }
 
 
@@ -180,7 +188,6 @@ def legacy_settings():
         "z_offset_cm": LEGACY_TL_Z_OFFSET_CM,
         "flip_yaw_180": os.environ.get("FLIP_SIGNAL_HEADS_180", "").strip().lower()
         in {"1", "true", "yes", "on"},
-        "table": None,
     }
 
 
