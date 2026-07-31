@@ -1773,7 +1773,12 @@ def configure_run(args, cfg, repo, tag_prefix, catalog):
     Returns (app, setup_name, staged_configs, rec, cfg, ctx)."""
 
     apps = [] if args.no_app else app_catalog.load_catalog()
-    interactive = sys.stdin.isatty()
+    # --serve has a terminal but no decisions to make: the traffic machine already
+    # chose, and await_peer put its answers on args. Prompting here would ask the
+    # wrong human - two people picking independently is exactly how the two ends
+    # come to disagree about the map, and that failure lands minutes later inside
+    # a cook. So a serving host runs the same code path a non-tty run takes.
+    interactive = sys.stdin.isatty() and not args.serve
     doc = run_profile.load_doc()
     ctx = {"app": None, "staged": [], "picked_local": None, "picked_now": False}
 
@@ -1827,8 +1832,14 @@ def configure_run(args, cfg, repo, tag_prefix, catalog):
             # Re-read the yaml-owned settings on every redraw, so a yaml edited by
             # hand (or by the editors above) is what the summary shows.
             derived = derived_from_yaml(rec.get("config"), ctx.get("staged"), args)
-            action = run_profile.ask(name or "(unsaved)", rec, cfg, interactive,
-                                     can_switch=bool(doc["setups"]), derived=derived)
+            action = run_profile.ask(
+                name or "(unsaved)", rec, cfg, interactive,
+                can_switch=bool(doc["setups"]), derived=derived,
+                why=(f"--serve: running what the peer asked for "
+                     f"(map '{rec.get('map')}'); this host chooses nothing"
+                     if args.serve else
+                     "non-interactive: running this setup as-is "
+                     "(pass flags to override, --fresh to start over)"))
             if action == run_profile.QUIT:
                 sys.exit("[cosim] cancelled.")
             if action == run_profile.RUN:

@@ -379,7 +379,9 @@ def cascade(rec, changed):
 RUN, QUIT, SWITCH, NEW = "run", "quit", "switch", "new"
 
 
-def ask(name, rec, carla_cfg=None, interactive=True, can_switch=True, derived=None):
+def ask(name, rec, carla_cfg=None, interactive=True, can_switch=True, derived=None,
+        why="non-interactive: running this setup as-is "
+            "(pass flags to override, --fresh to start over)"):
     """Show a setup and ask what to do with it.
 
     Returns RUN / QUIT / SWITCH / NEW, or a set of slot keys to edit. A
@@ -387,8 +389,7 @@ def ask(name, rec, carla_cfg=None, interactive=True, can_switch=True, derived=No
     scripted runs reuse a setup verbatim, and CLI flags are how they deviate."""
     if not interactive:
         show(name, rec, carla_cfg, derived)
-        print("[cosim] non-interactive: running this setup as-is "
-              "(pass flags to override, --fresh to start over).")
+        print(f"[cosim] {why}.")
         return RUN
     while True:
         show(name, rec, carla_cfg, derived)
