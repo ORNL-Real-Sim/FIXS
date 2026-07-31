@@ -1185,10 +1185,32 @@ def _kill_pid_tree(pid):
             subprocess.call(["taskkill", "/F", "/T", "/PID", str(pid)],
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         else:
+            # SIGTERM first, but do NOT assume it lands: UE4Editor frequently
+            # ignores it (or takes tens of seconds over its own shutdown), which
+            # leaves the window up and the RPC port held - so the next run finds
+            # a "stale CARLA" it has to kill anyway. Escalate to SIGKILL once the
+            # polite request has clearly been declined.
             try:
-                os.killpg(os.getpgid(pid), signal.SIGTERM)
+                pgid = os.getpgid(pid)
             except Exception:
-                os.kill(pid, signal.SIGTERM)
+                pgid = None
+            def _signal(sig):
+                if pgid is not None:
+                    os.killpg(pgid, sig)
+                else:
+                    os.kill(pid, sig)
+            _signal(signal.SIGTERM)
+            for _ in range(20):                      # up to 10 s to go quietly
+                time.sleep(0.5)
+                try:
+                    os.kill(pid, 0)                  # still there?
+                except OSError:
+                    return
+            print(f"[cosim] PID {pid} ignored SIGTERM; sending SIGKILL.")
+            try:
+                _signal(signal.SIGKILL)
+            except Exception:
+                pass
     except Exception:
         pass
 
@@ -1629,12 +1651,25 @@ def ask_peer_to_serve(args, target_map):
                      "quality_level": args.quality_level,
                      "render_offscreen": bool(args.render_offscreen)})
     print(f"[peer] asked {args.carla_host} to serve '{target_map}'; waiting ...")
+    waited = 0.0
     while True:
         try:
-            msg = r.read(args.prep_timeout)
-        except peer.PeerError as e:
-            sock.close()
-            sys.exit(f"[peer] {e} while waiting for CARLA to come up.")
+            # Short slices rather than one long block, so silence can be reported
+            # as elapsed time. Launching CARLA and loading a map is a couple of
+            # minutes of legitimate quiet, and a first cook is far longer - with
+            # no output at all that is indistinguishable from a hang, which is
+            # exactly how it looked the first time this ran for real.
+            msg = r.read(5.0)
+        except peer.PeerError:
+            waited += 5.0
+            if waited >= args.prep_timeout:
+                sock.close()
+                sys.exit(f"[peer] no word from {args.carla_host} for "
+                         f"{args.prep_timeout:g}s; giving up.")
+            if waited % 15 < 5:
+                print(f"[peer] still waiting on {args.carla_host} ({waited:.0f}s) - "
+                      f"it is launching CARLA and loading the map.")
+            continue
         if msg is None:
             sock.close()
             sys.exit("[peer] the CARLA host disconnected before serving.")
@@ -2698,5 +2733,29 @@ def main():
             kill_carla(carla_proc)
 
 
+def serve_forever():
+    """--serve is a service, not a single run.
+
+    await_peer() stops listening once a peer connects, because one CARLA cannot
+    serve two co-sims at a time. But the process used to EXIT when that run
+    ended, so the second run from the traffic machine found nothing listening,
+    spent --peer-wait retrying, and then silently fell back to 'assume CARLA was
+    started by hand' - which appeared to work, because the previous run had left
+    CARLA up. That is the worst kind of working: right answer, wrong reason, and
+    the peer protocol quietly not in use.
+
+    So loop: serve one run, tear its CARLA down, listen again."""
+    n = 0
+    while True:
+        n += 1
+        rc = main()
+        if rc != 0:
+            return rc
+        print(f"\n[serve] run {n} finished; listening again "
+              f"(Ctrl+C to stop serving).\n")
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    # Parsed here only to decide whether this is a one-shot run or a service;
+    # main() does the real argument handling.
+    sys.exit(serve_forever() if "--serve" in sys.argv else main())
