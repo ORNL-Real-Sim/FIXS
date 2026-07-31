@@ -474,6 +474,15 @@ int ConfigHelper::getConfig(string configName) {
 		SumoSetup.ExecutionOrder = 1;
 		if (!SuppressDefaultMessages) printf("\nSumo Execution Order not specified! Will use 1 as default!\n");
 	}
+	// How far ahead to look for a preceding vehicle (metres). Default 1000 keeps
+	// the previously hard-coded behaviour; lower it to narrow the car-following
+	// horizon an application sees.
+	if (node["PrecedingVehicleLookahead"]) {
+		SumoSetup.PrecedingVehicleLookahead = parserDouble(node, "PrecedingVehicleLookahead");
+	}
+	else {
+		SumoSetup.PrecedingVehicleLookahead = 1000.0;
+	}
 	if (node["EnableAutoLaunch"]) {
 		SumoSetup.EnableAutoLaunch = parserFlag(node, "EnableAutoLaunch");
 	}

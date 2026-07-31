@@ -1680,7 +1680,8 @@ void TrafficHelper::parserSumoSubscription(libsumo::TraCIResults VehDataSubscrib
 	CurVehData.hasPrecedingVehicle = 0;
 	CurVehData.precedingVehicleSpeed = -1.0;
 	if (NEED_PRECEDING_VEH) {
-		pair<string, double> leaderIdNSpeed = SUMO_TRACI_NAMESPACE::Vehicle::getLeader(vehId, 1000);
+		pair<string, double> leaderIdNSpeed = SUMO_TRACI_NAMESPACE::Vehicle::getLeader(
+			vehId, Config_c->SumoSetup.PrecedingVehicleLookahead);
 		CurVehData.precedingVehicleId = get<0>(leaderIdNSpeed);
 		CurVehData.precedingVehicleDistance = get<1>(leaderIdNSpeed);
 		if (CurVehData.precedingVehicleId.compare("") != 0) {
