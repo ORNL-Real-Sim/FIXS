@@ -1136,11 +1136,16 @@ def fetch_props(repo, subdir=None, ref=None):
     manifest_bytes = repo_file(repo, f"{subdir}/{props_mod.MANIFEST_NAME}", ref)
     prov_bytes = repo_file(repo, f"{subdir}/provenance.json", ref)
     if not manifest_bytes or not prov_bytes:
+        # Name the source. "could not reach" alone is a guess: an unreachable network
+        # and a subdir that does not exist at that ref look identical from here, and
+        # they need opposite fixes.
+        where = f"{repo}:{subdir}@{ref}"
         if cached_ok():
-            print("[props] could not reach the map library; using the cached props.")
+            print(f"[props] no props at {where} (or the library is unreachable); "
+                  f"using the cached props in {dest}.")
             return dest
-        print(f"[props] could not fetch props from {repo}:{subdir}@{ref} "
-              f"(and nothing is cached).")
+        print(f"[props] no props at {where} (or the library is unreachable), "
+              f"and nothing is cached.")
         return None
 
     with open(os.path.join(dest, props_mod.MANIFEST_NAME), "wb") as fh:
