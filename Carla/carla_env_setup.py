@@ -5,6 +5,14 @@ Prompts for the CARLA flavour and folder(s), validates them, and saves the choic
 to ~/.fixs/carla.json. run_cosim.py reads that config and launches seamlessly; if
 no config exists, run_cosim.py invokes this on the first run.
 
+Three flavours:
+  packaged  a released build (CarlaUE4.exe / .sh) - stock maps
+  source    an Unreal source build - the only one that can cook a custom map
+  client    no CARLA on this machine at all; it runs on another host and is
+            reached over the network. The traffic stack (SUMO, TrafficLayer,
+            VirCarlaEnv) still runs here, so this machine needs the carla PYTHON
+            client but no install, no Unreal, and no GPU.
+
 Run this any time to switch CARLA (packaged <-> source build, or a different
 install/version):
 
@@ -43,7 +51,12 @@ def load_config():
             cfg = json.load(f)
     except (OSError, ValueError):
         return None
-    return cfg if cfg.get("mode") in ("packaged", "source") and cfg.get("carla_root") else None
+    mode = cfg.get("mode")
+    # 'client' has no local CARLA to point at - that is the whole point of it - so
+    # it is the one mode that is complete without a carla_root.
+    if mode == "client":
+        return cfg
+    return cfg if mode in ("packaged", "source") and cfg.get("carla_root") else None
 
 
 def save_config(cfg):
@@ -288,12 +301,20 @@ def _carla_version(py_exe):
         return "?"
 
 
-def ensure_carla(py_exe, mode, carla_root):
+def ensure_carla(py_exe, mode, carla_root=None):
     """Make `import carla` work under py_exe, with the client matched to the
-    chosen CARLA: PyPI wheel for packaged, the source build's wheel for source."""
+    chosen CARLA: PyPI wheel for packaged and client, the source build's wheel
+    for source.
+
+    'client' takes the PyPI wheel because there is no local build to take one
+    from. run_cosim still needs `import carla` on this machine - it is what
+    drives load_world, the readiness check and the spectator against the remote
+    server - so the wheel is required even though nothing here ever launches
+    CARLA. If that remote server is a source build with a patched PythonAPI,
+    the version handshake is what catches the mismatch, not this."""
     has_carla = _python_can_import(py_exe, ("carla",))
 
-    if mode == "packaged":
+    if mode in ("packaged", "client"):
         if has_carla:
             print(f"[setup] carla {_carla_version(py_exe)} already importable.")
             return
@@ -372,18 +393,26 @@ def run_setup(allow_packaged_windows=False):
     # Windows therefore need a source build. We skip the packaged option here to
     # avoid a dead end; pass allow_packaged_windows=True (--allow-packaged-windows)
     # if you only need stock maps (Town01, ...) from a packaged build.
+    #
+    # [3] client is offered EVERYWHERE, Windows included: the reasoning above is
+    # about importing a map, and a client machine never imports one - the host
+    # running CARLA does. It is how a workstation with no CARLA at all drives a
+    # remote one.
     offer_packaged = platform.system() != "Windows" or allow_packaged_windows
+    print("Which CARLA do you want to use?")
     if offer_packaged:
-        print("Which CARLA do you want to use?")
         print("  [1] Packaged CARLA  (a released build with CarlaUE4.exe / CarlaUE4.sh)")
-        print("  [2] Source build    (run through the Unreal editor: UE4Editor -game)")
-        choice = input("Enter 1 or 2: ").strip()
-    else:
-        print("On Windows, custom-map import requires a SOURCE build (packaged-map")
-        print("import is Linux+Docker only in CARLA). Using source build.")
-        print("(Only need stock maps from a packaged build? re-run:")
-        print("   carla_env_setup.py --allow-packaged-windows )")
-        choice = "2"
+    print("  [2] Source build    (run through the Unreal editor: UE4Editor -game)")
+    print("  [3] None on this machine - CARLA runs on another host")
+    print("      (SUMO + TrafficLayer + VirCarlaEnv run here; CARLA is reached over")
+    print("       the network at CarlaSetup.CarlaServerIP)")
+    if not offer_packaged:
+        print("  (packaged is not offered on Windows: custom-map import is Linux+Docker")
+        print("   only in CARLA. Only need stock maps? re-run with --allow-packaged-windows)")
+    valid = ("1", "2", "3") if offer_packaged else ("2", "3")
+    choice = input(f"Enter {' or '.join(valid)}: ").strip()
+    if choice not in valid:
+        sys.exit(f"[setup] invalid choice (expected {' or '.join(valid)}).")
 
     if choice == "1":
         root = _pick_dir("Select your PACKAGED CARLA folder (contains CarlaUE4.exe / .sh)")
@@ -415,20 +444,30 @@ def run_setup(allow_packaged_windows=False):
             sys.exit(f"[setup] no UE4Editor at {editor} (is this the engine root?).")
         cfg = {"mode": "source", "carla_root": root, "ue4_root": ue4}
 
-    else:
-        sys.exit("[setup] invalid choice (expected 1 or 2).")
+    else:   # choice == "3"
+        # No carla_root and no ue4_root on purpose: there is no local install to
+        # validate, and inventing one would only give the cook/launch paths
+        # something to half-succeed against. The server address is NOT stored
+        # here either - it lives in the scenario yaml (CarlaSetup.CarlaServerIP),
+        # which is already the one place every component reads it from.
+        print("[setup] client mode: no CARLA on this machine. run_cosim will not")
+        print("        launch or cook anything here; point CarlaSetup.CarlaServerIP")
+        print("        at the host running CARLA, which must already have the map")
+        print("        cooked with traffic lights and signs placed.")
+        cfg = {"mode": "client"}
 
     # Resolve the interpreter (carla + SUMO) and match the carla client to the
     # chosen CARLA. Stored in the config so run_cosim re-execs under it on any
     # machine, regardless of the env's name.
     print("\n--- resolving the python env (carla + SUMO client) ---")
     cfg["python"] = resolve_python()
-    wheel = ensure_carla(cfg["python"], cfg["mode"], cfg["carla_root"])
+    wheel = ensure_carla(cfg["python"], cfg["mode"], cfg.get("carla_root"))
     if wheel:
         cfg["carla_wheel"] = wheel
 
     save_config(cfg)
-    print(f"\n[setup] done: {cfg['mode']} CARLA @ {cfg['carla_root']}")
+    where = cfg.get("carla_root") or "on another host (see CarlaSetup.CarlaServerIP)"
+    print(f"\n[setup] done: {cfg['mode']} CARLA @ {where}")
     print(f"[setup] python: {cfg['python']}")
     return cfg
 
