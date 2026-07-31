@@ -13,6 +13,7 @@ dependencies:
   - protobuf
   - pytest
   - pyyaml
+  - shapely
   - vs2015_runtime
   - vc14_runtime
   - pip
