@@ -1200,13 +1200,23 @@ def _kill_pid_tree(pid):
                 else:
                     os.kill(pid, sig)
             _signal(signal.SIGTERM)
-            for _ in range(20):                      # up to 10 s to go quietly
+            grace = float(os.environ.get("FIXS_SHUTDOWN_GRACE", "20"))
+            waited = 0.0
+            while waited < grace:
                 time.sleep(0.5)
+                waited += 0.5
                 try:
                     os.kill(pid, 0)                  # still there?
                 except OSError:
-                    return
-            print(f"[cosim] PID {pid} ignored SIGTERM; sending SIGKILL.")
+                    return                           # went quietly
+            # Deliberately NOT "ignored SIGTERM": UE4 logs RequestExit and then
+            # spends real time tearing down a loaded map with hundreds of spawned
+            # actors, so it is usually mid-shutdown rather than unresponsive. We
+            # stop waiting because the RPC port must be free before the next run,
+            # not because the process misbehaved.
+            print(f"[cosim] PID {pid} still shutting down after {grace:g}s; "
+                  f"sending SIGKILL to free the port "
+                  f"(FIXS_SHUTDOWN_GRACE to change the wait).")
             try:
                 _signal(signal.SIGKILL)
             except Exception:
