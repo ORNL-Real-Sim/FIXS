@@ -1882,6 +1882,17 @@ def configure_run(args, cfg, repo, tag_prefix, catalog):
             # A new setup has no answer for these three, and no default worth
             # guessing; the other three come from the yaml / carla.json / built-ins.
             pending = {s for s in MUST_ANSWER if not rec.get(s)}
+            if args.serve:
+                # The render host makes exactly one decision - which map - and the
+                # peer already made it. An APPLICATION is a traffic-side concept:
+                # it supplies SUMO arguments, subscriptions and the choice of
+                # bridge, none of which run here. Leaving it in MUST_ANSWER meant
+                # a fresh render host (no saved setups) stopped to ask a human
+                # sitting at the wrong machine for an answer nothing would read.
+                # ('none' is a legitimate answer, but `not rec.get("app")` cannot
+                # tell "chose none" from "not asked yet", so it is set here.)
+                rec["app"] = None
+                pending -= {"app"}
             dirty = True
         else:
             _apply_cli(rec, args)
