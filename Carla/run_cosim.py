@@ -1574,6 +1574,97 @@ def _apply_cli(rec, args):
     # file stays the single source of truth for what the engines read.
 
 
+def _disable_quickedit():
+    """Turn off the Windows console's QuickEdit mode for this run.
+
+    With QuickEdit on (the default), clicking anywhere in the window starts a text
+    selection - and while a selection is active the console BLOCKS every write to
+    stdout. That does not merely pause the log: the process is stopped in
+    WriteFile, so a co-sim stalls mid-run and resumes only when someone presses
+    Enter, at which point all the buffered output arrives at once. It reads
+    exactly like a hang, and an accidental click is enough to cause it.
+
+    ENABLE_EXTENDED_FLAGS must be set for the QuickEdit bit to take effect."""
+    if platform.system() != "Windows":
+        return
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.GetStdHandle(-10)          # STD_INPUT_HANDLE
+        mode = ctypes.c_uint32()
+        if not kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            return                                   # not a console (piped/redirected)
+        ENABLE_QUICK_EDIT, ENABLE_EXTENDED_FLAGS = 0x0040, 0x0080
+        if not mode.value & ENABLE_QUICK_EDIT:
+            return
+        kernel32.SetConsoleMode(
+            handle, (mode.value & ~ENABLE_QUICK_EDIT) | ENABLE_EXTENDED_FLAGS)
+        print("[cosim] console QuickEdit disabled for this run - a stray click "
+              "would otherwise block stdout and stall the co-sim until Enter.\n"
+              "        To copy text: right-click -> Mark, select, Enter. Or use "
+              "--log and read the file.\n"
+              "        (Windows Terminal does not have this problem; there, "
+              "--no-quickedit-fix is the better setting.)")
+    except Exception:
+        pass                                         # never fail a run over this
+
+
+class _Tee:
+    """Write to the console and to a log file at once.
+
+    Line-buffered and flushed per write: a co-sim that dies takes its log with it
+    otherwise, and the interesting part is always the last few lines."""
+
+    def __init__(self, stream, fh):
+        self._stream, self._fh = stream, fh
+
+    def write(self, data):
+        # FILE FIRST, console second. On Windows a console selection (QuickEdit)
+        # blocks writes to the console - so writing there first would block the
+        # log too, and the log would stop exactly when something interesting was
+        # happening. This way the file is complete and current even while the
+        # window is frozen, which is usually what you wanted to copy anyway.
+        try:
+            self._fh.write(data)
+            self._fh.flush()
+        except Exception:
+            pass
+        self._stream.write(data)
+        return len(data)
+
+    def flush(self):
+        self._stream.flush()
+        try:
+            self._fh.flush()
+        except Exception:
+            pass
+
+    def isatty(self):
+        # Must follow the CONSOLE, not the file - run_cosim decides whether to
+        # prompt from this, and answering False would silently turn an interactive
+        # run into a non-interactive one just because logging was on.
+        return self._stream.isatty()
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+
+def start_log(path=None):
+    """Tee stdout/stderr into RealSim_tmp/run_cosim_<host>_<stamp>.log."""
+    if path is None:
+        out = os.path.join(os.getcwd(), "RealSim_tmp")
+        os.makedirs(out, exist_ok=True)
+        stamp = time.strftime("%Y%m%d_%H%M%S")
+        path = os.path.join(out, f"run_cosim_{socket.gethostname()}_{stamp}.log")
+    fh = open(path, "w", encoding="utf-8", errors="replace")
+    fh.write(f"# run_cosim {' '.join(sys.argv[1:])}\n"
+             f"# host {socket.gethostname()}  {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+    sys.stdout = _Tee(sys.stdout, fh)
+    sys.stderr = _Tee(sys.stderr, fh)
+    print(f"[cosim] logging this run to {path}")
+    return path
+
+
 def _yaml_exists(path):
     return bool(path) and os.path.isfile(path)
 
@@ -1996,7 +2087,16 @@ def edit_config(staged, app_title, map_name, setup_app_id):
     who = f"{app_title} on '{map_name}'" if app_title else f"'{map_name}'"
     app_paths = {c["path"] for c in staged}
     if len(options) == 1:
-        return options[0][0], ("app" if options[0][0] in app_paths else "map")
+        # Say so. Picking this slot and getting no menu, no message and no change
+        # is indistinguishable from the editor being broken - which is how it was
+        # reported. There is nothing to choose between, and that is worth stating.
+        only = options[0][0]
+        print(f"[cosim] scenario config for {who}: only one exists, so there is "
+              f"nothing to choose -\n"
+              f"        {only}\n"
+              f"        (drop another .yaml beside it, or in this app's folder, to "
+              f"get a choice here.)")
+        return only, ("app" if only in app_paths else "map")
     picked = _menu(f"Scenario config for {who}:", options)
     print(f"[cosim] scenario config: {picked}")
     return picked, ("app" if picked in app_paths else "map")
@@ -2098,6 +2198,16 @@ def main():
     ap.add_argument("--prep-only", action="store_true",
                     help="import the map + place traffic lights and signs, then stop "
                          "(do not launch CARLA or run the co-sim)")
+    ap.add_argument("--log", action="store_true",
+                    help="tee this run's console output to "
+                         "RealSim_tmp/run_cosim_<host>_<stamp>.log. Run it on BOTH "
+                         "machines to get the two halves of a distributed run.")
+    ap.add_argument("--log-file", default=None,
+                    help="log to this path instead of the default (implies --log)")
+    ap.add_argument("--no-quickedit-fix", action="store_true",
+                    help="do not disable the Windows console's QuickEdit mode "
+                         "(QuickEdit lets a stray click block stdout and stall the "
+                         "run until Enter is pressed)")
     ap.add_argument("--serve", action="store_true",
                     help="CARLA host: wait for the traffic machine, serve the map it "
                          "asks for, and hold CARLA until it disconnects. Like "
@@ -2145,6 +2255,13 @@ def main():
                     help="[cpp] launch sumo-gui but omit --start, so it opens loaded "
                          "and waits for you to press Play (overrides SumoSetup.AutoStart)")
     args = ap.parse_args()
+
+    # Before anything prints: a stray click in a Windows console blocks stdout and
+    # stalls the whole run, which is indistinguishable from a hang.
+    if not args.no_quickedit_fix:
+        _disable_quickedit()
+    if args.log or args.log_file:
+        start_log(args.log_file)
 
     # --carla-only holds a CARLA this machine launched, so the flags that mean
     # "launch nothing" contradict it outright. Caught here rather than later
