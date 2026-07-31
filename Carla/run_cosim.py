@@ -629,7 +629,8 @@ CarlaSetup:
     return path
 
 
-def run_native_stack(config_yaml, sumocfg, tl_table, cfg, args, app=None):
+def run_native_stack(config_yaml, sumocfg, tl_table, cfg, args, app=None,
+                     ctl_sock=None):
     """FIXS-native bridge: launch SUMO (TraCI server) + TrafficLayer (-f config) +
     VirCarlaEnv (-f config -t tl_table). CARLA is already up and the map loaded by
     run_cosim's preflight. Ports mirror tests/Sumo/Probes/TrafficLayer_SUMO_Carla:
@@ -765,7 +766,16 @@ def run_native_stack(config_yaml, sumocfg, tl_table, cfg, args, app=None):
 
         # Supervise: block on VirCarlaEnv (the front-end) but surface it if any other
         # component dies first - otherwise a dead TrafficLayer just looks like a freeze.
+        import peer
         while _alive(vce):
+            # The control socket is a component like any other: if the CARLA host
+            # hangs up - its Ctrl+C, its CARLA dying, the network going - the feed
+            # is over. Without this the first symptom is VirCarlaEnv dying seconds
+            # later, which reports the wrong culprit.
+            if peer.gone(ctl_sock):
+                print("[cosim] the CARLA host disconnected; the feed has stopped. "
+                      "Shutting the stack down.")
+                break
             dead = [n for n, p in procs if n != "VirCarlaEnv" and not _alive(p)]
             if dead:
                 print(f"[cosim] {', '.join(dead)} exited while the co-sim was running; "
@@ -1684,13 +1694,22 @@ def hold_carla(carla_proc, target_map, args, sock=None):
                     print("[serve] peer disconnected; stopping CARLA.")
                     return 0
                 if msg.get("t") == "BYE":
-                    print("[serve] peer finished; stopping CARLA.")
+                    print(f"[serve] peer finished"
+                          f"{': ' + msg['why'] if msg.get('why') else ''}; "
+                          f"stopping CARLA.")
                     return 0
             else:
                 time.sleep(1.0)
+        # CARLA died under us. Tell the peer WHY before the socket closes,
+        # otherwise it sees a bare disconnection and reports the wrong cause -
+        # the traffic side would blame the network or its own bridge.
         print("[cosim] CARLA exited on its own; nothing left to serve.")
+        if sock is not None:
+            peer.bye(sock, "CARLA exited on the render host")
     except KeyboardInterrupt:
         print("\n[cosim] stopping CARLA ...")
+        if sock is not None:
+            peer.bye(sock, "stopped from the render host (Ctrl+C)")
     return 0
 
 
@@ -2660,12 +2679,20 @@ def main():
         # (default) = the standalone run_synchronization.py bridge below.
         if backend == "cpp":
             print(f"[cosim] engine=cpp (FIXS-native); config {config_yaml}")
-            return run_native_stack(config_yaml, sumocfg, tl_table, cfg, args, app)
+            return run_native_stack(config_yaml, sumocfg, tl_table, cfg, args, app,
+                                    ctl_sock=ctl_sock)
 
         print("[cosim] engine=py (run_synchronization.py)")
         return run_python_bridge(config_yaml, sumocfg, tl_table, tls_manager,
                                  no_net_offset, args, app)
     finally:
+        # Say goodbye BEFORE tearing down locally: the peer is blocked on this
+        # socket, and a clean BYE lets it report "the peer finished" rather than a
+        # bare disconnection. This runs on every exit path, Ctrl+C included, so a
+        # CARLA host never keeps a server alive for a run that has ended.
+        if ctl_sock is not None and not args.serve:
+            import peer
+            peer.bye(ctl_sock, "traffic side finished")
         if carla_proc is not None:
             print("[CARLA] terminating server")
             kill_carla(carla_proc)

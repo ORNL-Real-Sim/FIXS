@@ -141,6 +141,40 @@ def listen(port, backlog=1):
     return srv
 
 
+def gone(sock):
+    """True once the peer has hung up. Non-blocking, so it can be polled from a
+    supervision loop next to the process checks.
+
+    MSG_PEEK rather than recv: a BYE sitting in the buffer must still be readable
+    afterwards, and either way the answer is the same - the run is over."""
+    if sock is None:
+        return False
+    try:
+        import select
+        r, _, _ = select.select([sock], [], [], 0)
+        if not r:
+            return False
+        return sock.recv(1, socket.MSG_PEEK) == b""
+    except OSError:
+        return True
+
+
+def bye(sock, why=""):
+    """Tell the peer we are done, then close. Best effort - the close itself is
+    the contract, this only lets the other end say WHY rather than reporting a
+    bare disconnection."""
+    if sock is None:
+        return
+    try:
+        send(sock, {"t": "BYE", "why": why})
+    except OSError:
+        pass
+    try:
+        sock.close()
+    except OSError:
+        pass
+
+
 def progress(sock, stage, msg):
     """Push a line to the waiting traffic machine. Best effort - a cook must not
     die because the peer stopped reading."""
