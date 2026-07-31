@@ -53,7 +53,10 @@ class MsgHelper:
             # #174 EgoDriver command channel (L2/L4), serialized at the END
             'steerAngleDesired': False,
             'acceleratorPedalDesired': False,
-            'brakePedalDesired': False
+            'brakePedalDesired': False,
+            # Appended after the EgoDriver block so the existing wire layout is
+            # untouched for configs that do not request it.
+            'speedFreeFlow': False
         }
         self.traffic_light_msg_field_valid = {
             'id': False,
@@ -229,6 +232,8 @@ class MsgHelper:
             veh_data.acceleratorPedalDesired, byte_index = MsgHelper.unpack_float(byte_data, byte_index)
         if self.vehicle_msg_field_valid.get('brakePedalDesired'):
             veh_data.brakePedalDesired, byte_index = MsgHelper.unpack_float(byte_data, byte_index)
+        if self.vehicle_msg_field_valid.get('speedFreeFlow'):
+            veh_data.speedFreeFlow, byte_index = MsgHelper.unpack_float(byte_data, byte_index)
 
         return  veh_data
 
@@ -272,6 +277,7 @@ class MsgHelper:
                   + self.vehicle_msg_field_valid.get('steerAngleDesired', 0) * 4  # steerAngleDesired
                   + self.vehicle_msg_field_valid.get('acceleratorPedalDesired', 0) * 4  # acceleratorPedalDesired
                   + self.vehicle_msg_field_valid.get('brakePedalDesired', 0) * 4  # brakePedalDesired
+                  + self.vehicle_msg_field_valid.get('speedFreeFlow', 0) * 4  # speedFreeFlow
             )
         )
         veh_msg_size = round(msg_size) + self.msg_each_header_size
@@ -415,6 +421,9 @@ class MsgHelper:
             byte_index += 4
         if self.vehicle_msg_field_valid.get('brakePedalDesired'):
             byte_data[byte_index:byte_index+4] = struct.pack('f', veh_data.brakePedalDesired)
+            byte_index += 4
+        if self.vehicle_msg_field_valid.get('speedFreeFlow'):
+            byte_data[byte_index:byte_index+4] = struct.pack('f', veh_data.speedFreeFlow)
             byte_index += 4
 
         # Return the FULL record size (header + body), matching the size written into the

@@ -1789,6 +1789,11 @@ void TrafficHelper::parserSumoSubscription(libsumo::TraCIResults VehDataSubscrib
 	tempDoublePtr = static_pointer_cast<libsumo::TraCIDouble> (VehDataSubscribeTraciResults[libsumo::VAR_ALLOWED_SPEED]);
 	tempDoublePtr2 = static_pointer_cast<libsumo::TraCIDouble> (VehDataSubscribeTraciResults[libsumo::VAR_SPEED_FACTOR]);
 	CurVehData.speedLimit = tempDoublePtr->value / tempDoublePtr2->value;
+	// VAR_ALLOWED_SPEED is "max speed on the current lane AND speed factor", i.e.
+	// what this particular vehicle will cruise at. Reported as-is so consumers do
+	// not have to reconstruct it (a speedLimit * speedFactor product would also
+	// miss the vType maxSpeed cap that SUMO already applies here).
+	CurVehData.speedFreeFlow = tempDoublePtr->value;
 
 	// retrieve next speed limit
 	vector <string> edgeRouteList = VehicleId2EdgeList_um[vehId];
