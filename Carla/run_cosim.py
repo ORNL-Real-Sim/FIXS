@@ -205,6 +205,19 @@ def _read_scenario_config(config_yaml):
         ch = ConfigHelper.ConfigHelper()
         ch.getConfig(config_yaml)
         return ch
+    except ImportError as e:
+        # A MISSING PARSER is not a missing file. Falling back to defaults here
+        # invents an answer and then drives real decisions with it: without
+        # pyyaml, CarlaSetup.CarlaServerIP reads as localhost, which is enough to
+        # make a correctly configured distributed run refuse to start while
+        # blaming a yaml that was right all along. Fail where the cause is.
+        sys.exit(
+            f"[cosim] cannot parse scenario yamls: {e}\n"
+            f"        CommonLib/ConfigHelper.py needs PyYAML. Install it into the "
+            f"interpreter run_cosim uses (the 'python' entry in {env.CONFIG_PATH}):\n"
+            f"            \"{sys.executable}\" -m pip install pyyaml\n"
+            f"        Continuing without it would silently substitute defaults for "
+            f"every setting in {os.path.basename(config_yaml)}.")
     except Exception as e:
         print(f"[cosim] could not read {config_yaml} ({e}); using defaults.")
         return None
@@ -1095,10 +1108,27 @@ def _is_local_host(host):
     if h in ("", "localhost", "127.0.0.1", "::1", "0.0.0.0"):
         return True
     try:
-        return socket.gethostbyname(h) in ("127.0.0.1", "::1") \
-            or h == socket.gethostname().lower()
+        if socket.gethostbyname(h) in ("127.0.0.1", "::1") \
+                or h == socket.gethostname().lower():
+            return True
+        # Also match this machine's own LAN addresses. Without this, pointing
+        # CarlaSetup.CarlaServerIP at your own 192.168.x.x looked like a perfectly
+        # ordinary remote host: run_cosim implied --no-launch, waited out the full
+        # connect timeout against itself, and reported nothing useful.
+        return socket.gethostbyname(h) in _own_addresses()
     except OSError:
         return False
+
+
+def _own_addresses():
+    """Every IPv4 address this machine answers on, best effort."""
+    addrs = {"127.0.0.1"}
+    try:
+        host = socket.gethostname()
+        addrs.update(ai[4][0] for ai in socket.getaddrinfo(host, None, socket.AF_INET))
+    except OSError:
+        pass
+    return addrs
 
 
 def _pid_on_port(port):
@@ -1341,7 +1371,7 @@ def set_yaml_scalar(path, section, key, value, comment=None):
     return True
 
 
-def derived_from_yaml(config_yaml, staged):
+def derived_from_yaml(config_yaml, staged, args=None):
     """The settings the SCENARIO YAML owns: which bridge, and which CARLA.
 
     Read fresh every time the summary is drawn, so editing the yaml by hand shows
@@ -1350,9 +1380,18 @@ def derived_from_yaml(config_yaml, staged):
     ConfigHelper defaults EnablePythonBackend to true, so a hand-written
     native-stack yaml that omits it would otherwise read as the python bridge."""
     if not config_yaml or not os.path.isfile(config_yaml):
-        return {"engine": declared_engine(staged, config_yaml) or "py",
-                "carla_host": None, "carla_port": None,
-                "carla_tick": None, "realtime": None}
+        # No yaml yet - it is generated on the first run. What WILL be written is
+        # the pending state on `args`: the CLI flags, and any edit made in this
+        # session (the editors below park their result there when there is no file
+        # to write to). Reporting the built-in defaults instead is what made a menu
+        # change look like it had been ignored - you set engine=cpp, the write was
+        # skipped because the file did not exist, and the summary redrew "py".
+        return {"engine": (getattr(args, "engine", None)
+                           or declared_engine(staged, config_yaml) or "py"),
+                "carla_host": getattr(args, "carla_host", None),
+                "carla_port": getattr(args, "carla_port", None),
+                "carla_tick": getattr(args, "carla_tick", None),
+                "realtime": None}
     host, port = read_carla_endpoint(config_yaml)
     return {"engine": declared_engine(staged, config_yaml) or read_backend(config_yaml),
             "carla_host": host, "carla_port": port,
@@ -1369,10 +1408,17 @@ def edit_engine(config_yaml, current):
                    [("py", "py    standalone run_synchronization.py bridge"),
                     ("cpp", "cpp   FIXS-native stack (TrafficLayer + VirCarlaEnv)")],
                    current)
-    if picked != current and config_yaml and os.path.isfile(config_yaml):
-        if set_yaml_scalar(config_yaml, "CarlaSetup", "EnablePythonBackend",
-                           "true" if picked == "py" else "false"):
-            print(f"[cosim] {os.path.basename(config_yaml)}: engine -> {picked}")
+    if picked != current:
+        if config_yaml and os.path.isfile(config_yaml):
+            if set_yaml_scalar(config_yaml, "CarlaSetup", "EnablePythonBackend",
+                               "true" if picked == "py" else "false"):
+                print(f"[cosim] {os.path.basename(config_yaml)}: engine -> {picked}")
+        else:
+            # The yaml is generated on the first run, so there is nothing to write
+            # to yet. Say so and let the caller carry it to generation, rather than
+            # dropping the choice on the floor in silence.
+            print(f"[cosim] engine -> {picked} (pending: written when the scenario "
+                  f"yaml is generated on the first run)")
     return picked
 
 
@@ -1428,12 +1474,18 @@ def edit_carla(cfg, config_yaml, host, port):
                 port = int(ans)
                 break
             print("[cosim] enter a port number.")
+    # The C++ side takes a literal address, not a resolvable hostname.
+    wire = "127.0.0.1" if host in ("localhost", "") else host
     if config_yaml and os.path.isfile(config_yaml):
-        # The C++ side takes a literal address, not a resolvable hostname.
-        wire = "127.0.0.1" if host in ("localhost", "") else host
         set_yaml_scalar(config_yaml, "CarlaSetup", "CarlaServerIP", wire)
         set_yaml_scalar(config_yaml, "CarlaSetup", "CarlaServerPort", port)
         print(f"[cosim] {os.path.basename(config_yaml)}: CARLA -> {wire}:{port}")
+    else:
+        # Same as the engine editor: no file yet, so this is pending until the
+        # scenario yaml is generated. Silence here sent people to inspect a yaml
+        # that had never been written.
+        print(f"[cosim] CARLA -> {wire}:{port} (pending: written when the scenario "
+              f"yaml is generated on the first run)")
     return cfg, host, port
 
 
@@ -1475,7 +1527,11 @@ def _apply_cli(rec, args):
     # file stays the single source of truth for what the engines read.
 
 
-def _edit_slots(slots, rec, ctx, cfg, apps, catalog, repo, tag_prefix):
+def _yaml_exists(path):
+    return bool(path) and os.path.isfile(path)
+
+
+def _edit_slots(slots, rec, ctx, cfg, apps, catalog, repo, tag_prefix, args=None):
     """Run the editor for each requested slot. Always in SLOT_KEYS order, so a
     dependency is settled before the thing that depends on it (pick the app, then
     its map, then the scenario for that pairing). Returns the CARLA config, which
@@ -1522,14 +1578,21 @@ def _edit_slots(slots, rec, ctx, cfg, apps, catalog, repo, tag_prefix):
         elif slot == "engine":
             # Derived from the yaml, not from the record: the yaml owns it, so the
             # value being edited must be the one currently in the file.
-            now = derived_from_yaml(rec.get("config"), ctx.get("staged"))
-            edit_engine(rec.get("config"), now["engine"])
+            now = derived_from_yaml(rec.get("config"), ctx.get("staged"), args)
+            picked = edit_engine(rec.get("config"), now["engine"])
+            # No yaml to write to yet? Park it on args, which is where the CLI
+            # flags live and what generate_config_yaml reads - so a menu choice
+            # and --engine take the identical path instead of one being dropped.
+            if args is not None and not _yaml_exists(rec.get("config")):
+                args.engine = picked
         elif slot == "carla":
-            now = derived_from_yaml(rec.get("config"), ctx.get("staged"))
-            cfg, _host, _port = edit_carla(cfg, rec.get("config"),
-                                           now["carla_host"], now["carla_port"])
+            now = derived_from_yaml(rec.get("config"), ctx.get("staged"), args)
+            cfg, host, port = edit_carla(cfg, rec.get("config"),
+                                         now["carla_host"], now["carla_port"])
+            if args is not None and not _yaml_exists(rec.get("config")):
+                args.carla_host, args.carla_port = host, port
         elif slot == "sumo":
-            now = derived_from_yaml(rec.get("config"), ctx.get("staged"))
+            now = derived_from_yaml(rec.get("config"), ctx.get("staged"), args)
             rec["sumo_gui"] = edit_sumo(rec.get("config"), rec.get("sumo_gui", True),
                                         now["carla_tick"] or FIXS_FEED_S)
     return cfg
@@ -1595,12 +1658,12 @@ def configure_run(args, cfg, repo, tag_prefix, catalog):
 
         while True:
             if pending:
-                cfg = _edit_slots(pending, rec, ctx, cfg, apps, catalog, repo, tag_prefix)
+                cfg = _edit_slots(pending, rec, ctx, cfg, apps, catalog, repo, tag_prefix, args)
                 dirty = True
                 pending = set()
             # Re-read the yaml-owned settings on every redraw, so a yaml edited by
             # hand (or by the editors above) is what the summary shows.
-            derived = derived_from_yaml(rec.get("config"), ctx.get("staged"))
+            derived = derived_from_yaml(rec.get("config"), ctx.get("staged"), args)
             action = run_profile.ask(name or "(unsaved)", rec, cfg, interactive,
                                      can_switch=bool(doc["setups"]), derived=derived)
             if action == run_profile.QUIT:
@@ -1775,6 +1838,10 @@ def main():
     ap.add_argument("--carla-timeout", type=float, default=10.0,
                     help="CARLA client connect timeout in seconds (default: 10; "
                          "raise for heavy source-build maps)")
+    ap.add_argument("--connect-timeout", type=float, default=15.0,
+                    help="seconds to wait for the CARLA RPC handshake (default 15). "
+                         "Separate from --load-timeout: reaching a server is fast or "
+                         "not happening, while loading a freshly cooked map is slow.")
     ap.add_argument("--load-timeout", type=float, default=300.0,
                     help="client timeout (s) for load_world; the first load of a freshly "
                          "imported map compiles shaders and can take minutes (default 300)")
@@ -2285,7 +2352,22 @@ def main():
                 sys.exit("CARLA RPC port did not open in time.")
 
         import carla
+        # Announce it BEFORE blocking. get_world() below waits the full timeout on
+        # an unreachable server, with the last line on screen being whatever ran
+        # before it - which reads as a freeze rather than as a connection attempt.
+        print(f"[CARLA] connecting to {args.carla_host}:{args.carla_port} "
+              f"(timeout {args.connect_timeout:g}s) ...")
         client = carla.Client(args.carla_host, args.carla_port)
+        client.set_timeout(args.connect_timeout)
+        try:
+            client.get_server_version()
+        except Exception as exc:
+            sys.exit(f"[cosim] no CARLA at {args.carla_host}:{args.carla_port} ({exc}).\n"
+                     f"        Start it on that host (run_cosim --carla-only there), "
+                     f"check the address is not this machine, and open ports "
+                     f"{args.carla_port}-{args.carla_port + 2} on it.")
+        # Past the handshake: raise the ceiling for the map load, which genuinely
+        # takes minutes when a freshly cooked map compiles its shaders.
         client.set_timeout(args.load_timeout)
         # Load by full /Game/... path when we have one: a bare name makes CARLA
         # pick the first .umap of that name it happens to find, which is the wrong
