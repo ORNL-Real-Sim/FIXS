@@ -1390,11 +1390,16 @@ def derived_from_yaml(config_yaml, staged, args=None):
                            or declared_engine(staged, config_yaml) or "py"),
                 "carla_host": getattr(args, "carla_host", None),
                 "carla_port": getattr(args, "carla_port", None),
+                # None (not False) when there is no endpoint yet: an unset host is not
+                # "this machine", and saying so would be a third wrong answer.
+                "carla_local": (_is_local_host(getattr(args, "carla_host", None))
+                                if getattr(args, "carla_host", None) else None),
                 "carla_tick": getattr(args, "carla_tick", None),
                 "realtime": None}
     host, port = read_carla_endpoint(config_yaml)
     return {"engine": declared_engine(staged, config_yaml) or read_backend(config_yaml),
             "carla_host": host, "carla_port": port,
+            "carla_local": _is_local_host(host) if host else None,
             # The cadence and the pacing live here too, so the summary shows what
             # will actually run instead of a number the setup remembered.
             "carla_tick": _yaml_float(config_yaml, "CarlaSetup", "CarlaTimeStep", 0.0)

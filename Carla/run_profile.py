@@ -233,10 +233,24 @@ def _fmt(slot, rec, carla_cfg, derived=None):
         how = "run_synchronization.py" if eng == "py" else "TrafficLayer + VirCarlaEnv"
         return f"{eng:<26}({how}, from the yaml)"
     if slot == "carla":
-        mode = (carla_cfg or {}).get("mode") or "?"
-        root = (carla_cfg or {}).get("carla_root") or "?"
-        return f"{mode}  {root}  ->  {derived.get('carla_host') or '127.0.0.1'}:" \
-               f"{derived.get('carla_port') or 2000}"
+        # Two different things on one line, so label them: the INSTALL comes from
+        # ~/.fixs/carla.json, the ENDPOINT from the scenario yaml. A bare "?" for
+        # the install path appeared whenever there was no carla_root - which is
+        # exactly what 'client' mode means, so it read as "unknown or broken"
+        # rather than as the point of the mode.
+        mode = (carla_cfg or {}).get("mode") or "not configured"
+        root = (carla_cfg or {}).get("carla_root")
+        where = root or ("none on this machine" if mode == "client" else "path unset")
+        host = derived.get("carla_host")
+        port = derived.get("carla_port")
+        # Say whose machine that address is: pointing the endpoint at this
+        # machine's own LAN address looks identical to a remote host right up
+        # until it times out talking to itself.
+        local = derived.get("carla_local")
+        whose = "" if local is None else ("  [this machine]" if local else "  [remote]")
+        pending = "" if host else "  (default; written when the yaml is generated)"
+        return (f"{mode} ({where})  ->  {host or '127.0.0.1'}:"
+                f"{port or 2000}{whose}{pending}")
     if slot == "sumo":
         # No SUMO timestep here: it is the FIXS exchange period, fixed by the
         # protocol. The tick and the pacing come from the yaml via `derived`, so this

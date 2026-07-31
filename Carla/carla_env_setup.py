@@ -240,6 +240,14 @@ def resolve_python():
                 if py:
                     print(f"[setup] created '{name}': {py}")
                     return py
+            else:
+                # Say it failed HERE, where the cause is. Left to fall through in
+                # silence, the next steps pick some other interpreter and the
+                # first evidence of the failure is a co-sim behaving oddly hours
+                # later - which is exactly how a box ended up running without
+                # pyyaml and blaming a scenario yaml that was correct.
+                print(f"[setup] 'conda env create -f {ENV_YML}' FAILED. Its output "
+                      f"is above; a solve failure usually names the conflict.")
             print("[setup] env creation did not produce a usable interpreter; "
                   "falling back to detection.")
     elif not conda:
@@ -262,10 +270,61 @@ def resolve_python():
         return ranked[int(sel)] if sel.isdigit() and int(sel) < len(ranked) else ranked[0]
 
     print("[setup] no conda env with the co-sim deps found automatically.")
-    py = _pick_file(f"Select the python.exe of your '{name}' env (has carla + SUMO)")
-    if not py or not os.path.isfile(py):
-        sys.exit("[setup] no python interpreter selected.")
-    return py
+    return _no_env_fallback(name)
+
+
+# Imported by run_cosim/ConfigHelper and the TL-table generator. Missing any of
+# them does not stop the run, it degrades it in ways that name something else:
+# no yaml parser makes every scenario setting read as its default (including
+# CarlaServerIP -> localhost), and no pandas/shapely turns traffic-light sync off.
+RUNTIME_MODULES = ("yaml", "pandas", "shapely", "traci", "sumolib")
+
+
+def missing_runtime(py_exe):
+    """Which of RUNTIME_MODULES `py_exe` cannot import."""
+    return [m for m in RUNTIME_MODULES if not _python_can_import(py_exe, (m,))]
+
+
+def _no_env_fallback(name):
+    """Nothing suitable was found. Ask rather than pick something broken.
+
+    Silently continuing under whatever interpreter happened to be current is how
+    a machine ends up running the co-sim without pyyaml: everything starts, and
+    the first symptom is a scenario setting quietly reading as its default."""
+    print(f"[setup] the '{name}' env could not be created or found. The co-sim "
+          f"needs: {', '.join(RUNTIME_MODULES)} (+ carla).")
+    here = sys.executable
+    lacks = missing_runtime(here)
+    print(f"   [1] use this interpreter and pip-install what it lacks\n"
+          f"       {here}\n"
+          f"       missing: {', '.join(lacks) if lacks else 'nothing'}")
+    print( "   [2] select a python.exe yourself")
+    print( "   [3] quit and fix conda first")
+    ans = (input("Enter 1, 2 or 3 (default 3): ").strip() or "3")
+    if ans == "1":
+        if lacks:
+            # environment.yml is a conda spec, so there is no conda-free way to
+            # replay it; these are its importable dependencies. NB it does not
+            # list shapely at all, though the TL-table generator needs it (#221).
+            if not _pip_install(here, ["pyyaml", "pandas", "shapely",
+                                       "eclipse-sumo", "traci", "sumolib"]):
+                sys.exit("[setup] pip install failed; fix the environment by hand.")
+            still = missing_runtime(here)
+            if still:
+                sys.exit(f"[setup] still missing after install: {', '.join(still)}")
+        return here
+    if ans == "2":
+        py = _pick_file(f"Select the python.exe of your '{name}' env (carla + SUMO)")
+        if not py or not os.path.isfile(py):
+            sys.exit("[setup] no python interpreter selected.")
+        lacks = missing_runtime(py)
+        if lacks:
+            print(f"[setup] warning: {py} cannot import {', '.join(lacks)}; the "
+                  f"co-sim will misbehave until that is fixed.")
+        return py
+    sys.exit(f"[setup] stopped. Create the env with:\n"
+             f"            conda env create -f {ENV_YML}\n"
+             f"        then re-run this setup.")
 
 
 def find_source_wheel(carla_root, py_exe=None):

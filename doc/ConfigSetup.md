@@ -110,8 +110,8 @@ When the application layer is disabled but XIL is enabled, the interface automat
 | UseVehicleTypeAsBlueprint | bool | false | Interpret SUMO vehicle types as CARLA blueprints. |
 | CarlaServerIP | string | `"127.0.0.1"` | CARLA server endpoint IP. |
 | CarlaServerPort | int | 2000 | CARLA server endpoint port. |
-| CarlaClientIP | string | inferred or `"127.0.0.1"` | Client binding IP for CARLA streaming. Inferred from subscription if single vehicle. |
-| CarlaClientPort | int | inferred or 2001 | Client binding port for CARLA streaming. Inferred from subscription if single vehicle. |
+| CarlaClientIP | string | `"127.0.0.1"` | **Not CARLA.** Where VirCarlaEnv reaches **TrafficLayer** — `mainVirCarla` assigns it to `core.trafficLayerIP_`. Keep it local even when the CARLA server is on another machine: TrafficLayer runs beside VirCarlaEnv, not beside CARLA. |
+| CarlaClientPort | int | 430 | TrafficLayer's bridge port for this client (`core.vehDataPort_`); pair it with `ApplicationSetup.VehicleSubscription[].port`. Nothing to do with CARLA's streaming port. |
 | CarlaMapName | string | `"Town01"` | Desired CARLA map name. |
 | CenteredViewId | string | `"ego"` | Actor id used for camera centering. |
 | CarlaTimeStep | double | 0 (= the FIXS feed) | CARLA world step, i.e. `fixed_delta_seconds`. Must be the FIXS feed period or an exact divisor of it (0.1 / 0.05 / 0.025 / 0.02 / 0.01): the exchange boundary is tested on the feed grid, so a tick that does not divide it never lands on one and the bridge would exchange nothing. Finer than the feed makes the bridge interpolate traffic — position **and** heading — across the sub-steps, exactly as the CarMaker host does at 0.001 s. |
