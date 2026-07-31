@@ -23,6 +23,7 @@ import argparse
 import json
 import os
 import platform
+import shutil
 import signal
 import socket
 import subprocess
@@ -1729,6 +1730,111 @@ def ask_peer_to_serve(args, target_map):
             sys.exit(f"[peer] the CARLA host could not serve it: {msg.get('why')}")
 
 
+class _Tee:
+    """Write to the console and to a log file at once."""
+
+    def __init__(self, stream, fh):
+        self._stream, self._fh = stream, fh
+
+    def write(self, data):
+        # FILE FIRST, console second. On Windows a console selection (QuickEdit)
+        # blocks writes to the console, so console-first would let a stall take
+        # the log with it - and the log would stop exactly when something
+        # interesting was happening.
+        try:
+            self._fh.write(data)
+            self._fh.flush()
+        except Exception:
+            pass
+        self._stream.write(data)
+        return len(data)
+
+    def flush(self):
+        self._stream.flush()
+        try:
+            self._fh.flush()
+        except Exception:
+            pass
+
+    def isatty(self):
+        # Follows the CONSOLE, not the file. run_cosim decides whether to prompt
+        # from this, so returning the file's False would quietly turn an
+        # interactive run non-interactive just because logging was on.
+        return self._stream.isatty()
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+
+def start_log(path=None):
+    """Tee stdout/stderr into RealSim_tmp/run_cosim_<host>_<stamp>.log."""
+    if path is None:
+        out = os.path.join(os.getcwd(), "RealSim_tmp")
+        os.makedirs(out, exist_ok=True)
+        path = os.path.join(out, f"run_cosim_{socket.gethostname()}_"
+                                 f"{time.strftime('%Y%m%d_%H%M%S')}.log")
+    fh = open(path, "w", encoding="utf-8", errors="replace")
+    fh.write(f"# run_cosim {' '.join(sys.argv[1:])}\n"
+             f"# {socket.gethostname()}  {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+    sys.stdout, sys.stderr = _Tee(sys.stdout, fh), _Tee(sys.stderr, fh)
+    print(f"[cosim] logging this run to {path}")
+    return path
+
+
+def _tell_peer(sock, stage, msg):
+    """Report a milestone to the waiting traffic machine, if there is one.
+
+    Cooking a map is minutes of legitimate silence on the other end. A heartbeat
+    proves the process is alive; this says WHAT it is doing, which is the
+    difference between "still waiting (300s)" and "cooking roosevelt_full"."""
+    if sock is None:
+        return
+    import peer
+    peer.progress(sock, stage, msg)
+
+
+def _peek_any_endpoint():
+    """Best-effort (host, port) from the most recently used setup's yaml, so
+    --doctor and --version can check the CARLA you actually talk to without
+    being told. Returns (None, None) when there is nothing to read."""
+    try:
+        doc = run_profile.load_doc()
+        name = doc.get("last")
+        rec = (doc.get("setups") or {}).get(name) or {}
+        path = rec.get("config")
+        if path and os.path.isfile(path):
+            return read_carla_endpoint(path)
+    except Exception:
+        pass
+    return None, None
+
+
+def print_fingerprint(cfg, host, port):
+    """One block identifying what is installed here. The first thing to paste
+    into a bug report, and the quickest way to see two machines disagree."""
+    py = (cfg or {}).get("python") or sys.executable
+    print(f"[cosim] run fingerprint - {socket.gethostname()} ({platform.system()})")
+    print(f"  FIXS       {_fixs_version()}")
+    build = os.path.join(FIXS_ROOT, "BUILD_INFO.txt")
+    if os.path.isfile(build):
+        with open(build, encoding="utf-8-sig", errors="replace") as f:
+            for line in f:
+                if line.strip().startswith("Git Commit:"):
+                    print(f"  commit     {line.split(':', 1)[1].strip()}")
+                    break
+    print(f"  python     {py}")
+    for mod in ("carla", "traci", "yaml", "pandas", "shapely"):
+        rc = subprocess.call([py, "-c", f"import {mod}"],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        print(f"    {mod:<8} {'present' if rc == 0 else 'MISSING'}")
+    sumo = shutil.which("sumo") or shutil.which("sumo-gui")
+    print(f"  SUMO       {sumo or 'not on PATH'}")
+    print(f"  CARLA      mode {(cfg or {}).get('mode', 'not configured')}, "
+          f"endpoint {host}:{port}"
+          f"{'  [this machine]' if _is_local_host(host) else '  [remote]'}")
+    return 0
+
+
 def _fixs_version():
     try:
         with open(os.path.join(FIXS_ROOT, "FIXS_VERSION.txt"), encoding="utf-8") as f:
@@ -2142,6 +2248,19 @@ def main():
     ap.add_argument("--prep-only", action="store_true",
                     help="import the map + place traffic lights and signs, then stop "
                          "(do not launch CARLA or run the co-sim)")
+    ap.add_argument("--doctor", action="store_true",
+                    help="check this machine can run a co-sim (python deps, SUMO, "
+                         "FIXS binaries, CARLA, peer, maps, gh auth) and exit; "
+                         "non-zero exit if anything is broken")
+    ap.add_argument("--version", action="store_true",
+                    help="print the run fingerprint (FIXS, CARLA, SUMO, python) and "
+                         "exit - what to paste into a bug report")
+    ap.add_argument("--log", action="store_true",
+                    help="tee this run's console output to "
+                         "RealSim_tmp/run_cosim_<host>_<stamp>.log. Run it on BOTH "
+                         "machines to get the two halves of a distributed run.")
+    ap.add_argument("--log-file", default=None,
+                    help="log to this path instead of the default (implies --log)")
     ap.add_argument("--no-quickedit-fix", action="store_true",
                     help="do not disable the Windows console's QuickEdit mode "
                          "(QuickEdit lets a stray click block stdout and stall the "
@@ -2198,6 +2317,28 @@ def main():
     # stalls the whole run, which is indistinguishable from a hang.
     if not args.no_quickedit_fix:
         _disable_quickedit()
+    if args.log or args.log_file:
+        start_log(args.log_file)
+
+    # --doctor and --version answer a question and stop. Neither touches a map, a
+    # setup or a server, so they are safe to run at any time - including while a
+    # co-sim is going, which is exactly when someone wants them.
+    if args.doctor or args.version:
+        cfg = env.load_config()
+        host, port = args.carla_host, args.carla_port
+        if host is None or port is None:
+            peek_host, peek_port = _peek_any_endpoint()
+            host = host or peek_host or DEFAULT_CARLA_HOST
+            port = port or peek_port or DEFAULT_CARLA_PORT
+        if args.version:
+            return print_fingerprint(cfg, host, port)
+        import doctor
+        import peer
+        return doctor.run(cfg, env, FIXS_ROOT,
+                          os.path.join(os.path.dirname(env.CONFIG_PATH), "maps"),
+                          host, port, _fixs_version(),
+                          peer_port=args.peer_port or peer.peer_port(port),
+                          role="carla" if (args.serve or args.carla_only) else "traffic")
 
     # --carla-only holds a CARLA this machine launched, so the flags that mean
     # "launch nothing" contradict it outright. Caught here rather than later
@@ -2399,6 +2540,8 @@ def main():
                 real = import_map.map_name_in(carla_src) or target_map
                 verb = "re-importing" if args.reimport else "importing"
                 print(f"[cosim] {verb} '{real}' before launch ...")
+                _tell_peer(ctl_sock, "cook", f"importing and cooking '{real}' - "
+                           f"this is the slow one (Unreal + shaders)")
                 import_map.ensure_map(real, carla_root=cfg["carla_root"],
                                       ue4_root=cfg.get("ue4_root"),
                                       package_dir=carla_src, force=args.reimport)
@@ -2409,6 +2552,8 @@ def main():
                     url = url or import_map.read_map_config(args.map_config).get("url")
                 verb = "re-importing" if args.reimport else "importing"
                 print(f"[cosim] {verb} map '{target_map}' before launch ...")
+                _tell_peer(ctl_sock, "cook", f"importing and cooking "
+                           f"'{target_map}' - this is the slow one (Unreal + shaders)")
                 import_map.ensure_map(target_map, carla_root=cfg["carla_root"],
                                       ue4_root=cfg.get("ue4_root"),
                                       package_url=url, force=args.reimport)
@@ -2665,6 +2810,8 @@ def main():
                 # the saved .umap baked in.
                 if imported_now or not placed:
                     print(f"[cosim] placing traffic lights for '{target_map}' before launch ...")
+                    _tell_peer(ctl_sock, "place_tls",
+                               f"placing traffic lights for '{target_map}'")
                     place_tls.place_tls(target_map, tl_table, carla_root=cfg["carla_root"],
                                         ue4_root=cfg.get("ue4_root"), force=args.reimport,
                                         bundle_dirs=bundle_dirs)
@@ -2675,6 +2822,8 @@ def main():
         if (not place_signs.signs_placed(cfg["carla_root"], target_map)) or args.reimport:
             if imported_now:
                 print(f"[cosim] placing road signs for '{target_map}' before launch ...")
+                _tell_peer(ctl_sock, "place_signs",
+                           f"placing road signs for '{target_map}'")
                 place_signs.place_signs(target_map, carla_root=cfg["carla_root"],
                                         ue4_root=cfg.get("ue4_root"), force=args.reimport)
 
@@ -2709,6 +2858,7 @@ def main():
                     sys.exit(
                         f"[cosim] port {args.carla_port} is in use by a non-CARLA process "
                         f"({name or 'unknown'}); free it or pass --no-launch to use what's running.")
+            _tell_peer(ctl_sock, "launch", "starting the CARLA server")
             carla_proc = launch_carla(cfg, args.carla_port, args.render_offscreen,
                                       args.quality_level, target_level)
             if not wait_for_port(args.carla_host, args.carla_port):
@@ -2777,6 +2927,8 @@ def main():
             client.load_world(load_arg)
         # Don't trust load_world's return alone on a heavy source map: confirm the
         # world IS this map and is ticking before we start SUMO.
+        _tell_peer(ctl_sock, "load", f"loading '{target_map}' into CARLA "
+                   f"(a freshly cooked map compiles shaders here)")
         print(f"[CARLA] confirming '{target_map}' is loaded and ready ...")
         loaded = confirm_world_ready(client, target_map, args.load_timeout)
         if loaded is None:
