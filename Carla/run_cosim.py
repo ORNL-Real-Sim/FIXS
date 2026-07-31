@@ -2233,11 +2233,50 @@ def main():
                         or args.auto_import or args.reimport)
         if tl_table:
             import place_tls
-            if (not place_tls.tls_placed(cfg["carla_root"], target_map)) or args.reimport:
-                if imported_now:
+            import props as props_mod
+            # The bundle's placement.yaml is part of "are the lights already placed?":
+            # the same map placed from DIFFERENT numbers is not placed. Without this a
+            # corrected z_offset_cm never takes effect on a machine that placed once,
+            # because the marker only ever recorded that placement happened.
+            # Props are SHARED across maps - they install to one map-independent
+            # content path - so they are fetched once into ~/.fixs/props rather
+            # than shipped inside each bundle, where the last map imported would
+            # silently decide which prop every other map places.
+            #
+            # The map's own dir comes FIRST: find_manifest takes the first hit, so a
+            # bundle that ships its own placement.yaml overrides the shared numbers
+            # (a map whose TL table uses the opposite heading convention needs its
+            # own flip_yaw_180), and otherwise the library's defaults apply.
+            props_cache = import_map.fetch_props(repo)
+            bundle_dirs = [d for d in (import_map.map_cache_dir(target_map),
+                                       props_cache) if d]
+            try:
+                tl_fingerprint = props_mod.bundle_fingerprint(
+                    *bundle_dirs, shared=import_map.props_cache_dir())
+            except props_mod.ManifestError as exc:
+                sys.exit(f"[props] {exc}")
+
+            # A map placed FROM a manifest, whose manifest is now gone, would
+            # otherwise sail through as "already placed" with nothing printed - the
+            # silent fallback this ticket exists to remove. Say so instead.
+            prior = place_tls.marker_fields(cfg["carla_root"], target_map)
+            if tl_fingerprint is None and prior.get("manifest"):
+                print(f"[props] warning: '{target_map}' was placed from "
+                      f"{prior['manifest']} (blueprint={prior.get('blueprint')}, "
+                      f"z_offset_cm={prior.get('z_offset_cm')}), but its bundle ships "
+                      f"no placement.yaml now. Keeping the lights already in the map; "
+                      f"restore the manifest to change them.")
+
+            placed = place_tls.tls_placed(cfg["carla_root"], target_map, tl_fingerprint)
+            if (not placed) or args.reimport:
+                # A manifest change re-places on its own: unlike a fresh import, it
+                # needs no --reimport, since the numbers it carries are exactly what
+                # the saved .umap baked in.
+                if imported_now or not placed:
                     print(f"[cosim] placing traffic lights for '{target_map}' before launch ...")
                     place_tls.place_tls(target_map, tl_table, carla_root=cfg["carla_root"],
-                                        ue4_root=cfg.get("ue4_root"), force=args.reimport)
+                                        ue4_root=cfg.get("ue4_root"), force=args.reimport,
+                                        bundle_dirs=bundle_dirs)
                 else:
                     print(f"[cosim] note: traffic lights not placed for '{target_map}'. Run "
                           f"place_tls (or --reimport) to add them, else no TL sync.")
