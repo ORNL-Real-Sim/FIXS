@@ -50,12 +50,20 @@ Real-Sim FIXS uses a modular script-based build system with automated tool detec
 - **dependencies.yaml** - Central configuration file defining tool versions and paths
 - Optional: MATLAB 2024a, CarMaker 13.1.3/11.1.2, dSPACE ConfigurationDesk 2024-A
 
-The external library (yaml-cpp) is automatically built by the dispatch system or can be built manually:
+### First-run setup
+
+After cloning, initialize the checkout. `dispatch.bat` also runs this as its step 1, so a fresh clone can go straight to `dispatch.bat`:
+```
+powershell -ExecutionPolicy Bypass -File scripts\initialize_fixs.ps1
+```
+It is idempotent and does: ProprietaryFiles submodule (optional) -> native deps -> yaml-cpp, then prints a per-step summary. Not to be confused with `scripts/fetch_fixs.ps1`, which is consumer-side (downloads a published release zip).
+
+**Native deps are not in git** (#109, #238). `CommonLib/libsumo` and `CommonLib/libcarla` are gitignored and fetched as SHA-256-verified, version-named zips from the public rolling release `fixs-native-deps`. libsumo is **required** (TrafficLayer links `libsumocpp.lib` directly, so a missing fetch is a hard error); libcarla is optional (VirCarlaEnv only). Bumping the SUMO version in `dependencies.yaml` requires publishing a matching asset first — `scripts\dispatch\pack_native_deps.ps1 -Component sumo -Publish` — or every clone breaks. Both fetch and pack load-test `libsumo/bin` (`libsumo_verify.ps1`) because the old vendored copy silently lacked `geos_c.dll`/`geos.dll` for months (#70).
+
+yaml-cpp can also be built alone; it uses CMake with the Visual Studio 17 2022 generator and builds both Release and Debug:
 ```
 scripts\dispatch\1_external_libraries.bat
 ```
-
-yaml-cpp uses CMake with Visual Studio 17 2022 generator and builds both Release and Debug configurations.
 
 ### Building Components
 
@@ -65,7 +73,7 @@ dispatch.bat
 ```
 
 Automatically builds all components and copies to `build/` directory:
-1. External libraries (yaml-cpp)
+1. Clone initialization (submodules, native deps, yaml-cpp) via `scripts/initialize_fixs.ps1`
 2. TrafficLayer.exe, CoordMerge.exe, VirtualEnvironment.lib
 3. DriverModel_RealSim.dll (default, int API, VISSIM 2021+) and DriverModel_RealSim_legacy.dll (frozen, long API, VISSIM ≤ 2020)
 4. CarMaker executables for all versions in dependencies.yaml (CM11, CM13)

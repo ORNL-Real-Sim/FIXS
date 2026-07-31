@@ -137,6 +137,25 @@ Central configuration file tracking external simulator and library versions used
 
 This file serves as the single source of truth for external dependency versions.
 
+### `initialize_fixs.ps1`
+Brings a fresh clone to a buildable state — the one command to run after `git clone`:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\initialize_fixs.ps1
+```
+
+It initializes the `ProprietaryFiles` submodule (optional — private repo), acquires the native deps, and builds yaml-cpp, then prints a per-step summary. Idempotent, so re-running is cheap. `dispatch.bat` calls it as step 1, so `dispatch.bat` on its own also works on a fresh clone.
+
+`scripts/fetch_fixs.ps1` is a different thing: it is the **consumer-side** script for downloading a published FIXS release zip, not for setting up a developer checkout.
+
+### Native dependencies (`CommonLib/libsumo`, `CommonLib/libcarla`)
+Neither is committed to git. Both are gitignored and fetched at setup time from the public rolling release `fixs-native-deps` as version-named, SHA-256-verified assets (`libsumo-<ver>.zip`, `libcarla-<ver>.zip`); versions come from `dependencies.yaml`.
+
+- **libsumo is required** — `TrafficLayer.vcxproj` links `CommonLib\libsumo\bin\libsumocpp.lib` directly, so nothing core builds without it. A failed fetch is a hard error.
+- **libcarla is optional** — only `VirCarlaEnv` needs it; a failed or unconfigured fetch just skips that component.
+
+libsumo was vendored in git until #238 (105 files, ~430 MB). It was dropped because unverified binaries in git hide defects: the committed copy was missing `geos_c.dll` + `geos.dll` for months (#70), which made `libsumocpp.dll` unloadable, and TrafficLayer's delay-load meant it only failed at the first libsumo call. Both `fetch_native_deps.ps1` and `pack_native_deps.ps1` now load-test `libsumo/bin` via `libsumo_verify.ps1`.
+
 ### `build_libsumo.ps1`
 PowerShell script to build libsumo and libtraci libraries from SUMO source code.
 
@@ -177,6 +196,14 @@ CommonLib/libsumo/
 ```
 
 **Note:** The script preserves the SUMO source clone in `tmp/sumo_build/` for faster rebuilds. Delete this directory to force a clean clone on the next build.
+
+**After rebuilding:** `CommonLib/libsumo/` is gitignored (#238), so the result is local-only until it is published. Bump `dependencies.yaml` and publish the matching asset, or every other clone will fail to fetch:
+
+```powershell
+powershell -File scripts\dispatch\pack_native_deps.ps1 -Component sumo -Publish
+```
+
+The packer refuses to publish a `bin/` whose DLLs do not load, so an incomplete rebuild fails here rather than in someone else's build.
 
 ---
 

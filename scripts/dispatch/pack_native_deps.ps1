@@ -36,6 +36,8 @@ function Get-DepVersion([string]$block) {
     if ($c -match "(?ms)^\s*${block}:\s.*?^\s*version:\s*[`"']?([0-9][0-9.]*)") { return $Matches[1] }
     throw "could not parse $block version from dependencies.yaml"
 }
+. (Join-Path $PSScriptRoot 'libsumo_verify.ps1')
+
 function New-Zip([string]$stageDir, [string]$zipName) {
     $zipPath = Join-Path $OutDir $zipName
     if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
@@ -72,6 +74,10 @@ if ($Component -in 'both', 'carla') {
 if ($Component -in 'both', 'sumo') {
     $libsumo = Join-Path $CommonLib 'libsumo'
     if (Test-Path $libsumo) {
+        # Refuse to publish an unloadable bin/: since #238 this zip is the only
+        # source of the SUMO runtime, so a silent gap here breaks every clone.
+        Test-LibsumoLoadable -BinDir (Join-Path $libsumo 'bin') `
+            -Context 'Repair CommonLib/libsumo/bin from the official SUMO Windows distribution before packing.'
         $sver  = Get-DepVersion 'sumo'
         $stage = Join-Path ([System.IO.Path]::GetTempPath()) "nd-sumo-$(Get-Random)"
         $ss    = Join-Path $stage 'libsumo'

@@ -88,19 +88,20 @@ if %ERRORLEVEL% neq 0 (
 )
 echo.
 
-REM ====================================
-REM Step 1: Compile External Libraries
-REM ====================================
-echo [1/9] Checking external libraries...
-if not exist "%SOURCE_PATH%\CommonLib\yaml-cpp\build" (
-    echo External libraries not found. Compiling...
-    call "%~dp0\1_external_libraries.bat"
-    if %ERRORLEVEL% neq 0 (
-        echo ERROR: Failed to compile external libraries!
-        goto :failed
-    )
-) else (
-    echo External libraries already compiled.
+REM ============================================================
+REM Step 1: Initialize the clone (submodules, native deps, yaml-cpp)
+REM   Idempotent - each sub-step short-circuits when already done.
+REM   This is what makes `dispatch.bat` work on a FRESH CLONE: since
+REM   #238 CommonLib\libsumo is no longer committed to git, and
+REM   TrafficLayer links libsumocpp.lib directly, so step 2 cannot
+REM   build until it has been fetched. Required deps failing here is
+REM   fatal; optional ones (ProprietaryFiles, libcarla) only warn.
+REM ============================================================
+echo [1/9] Initializing clone (submodules, native deps, yaml-cpp)...
+call powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%..\initialize_fixs.ps1" -RepoRoot "%SOURCE_PATH%"
+if %ERRORLEVEL% neq 0 (
+    echo ERROR: Clone initialization failed - a required dependency is missing!
+    goto :failed
 )
 echo.
 
