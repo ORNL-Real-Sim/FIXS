@@ -1782,6 +1782,10 @@ def main():
     ap.add_argument("--prep-only", action="store_true",
                     help="import the map + place traffic lights and signs, then stop "
                          "(do not launch CARLA or run the co-sim)")
+    ap.add_argument("--carla-only", action="store_true",
+                    help="launch CARLA, load the map and HOLD it open, running no "
+                         "bridge here - the CARLA half of a two-machine run, driven "
+                         "by run_cosim on the traffic machine. Ctrl+C stops it.")
     ap.add_argument("--reconfigure", action="store_true",
                     help="re-run CARLA env setup before launching (pick a different CARLA)")
     ap.add_argument("--render-offscreen", action="store_true", help="headless CARLA")
@@ -1812,6 +1816,16 @@ def main():
                          "and waits for you to press Play (overrides SumoSetup.AutoStart)")
     args = ap.parse_args()
 
+    # --carla-only holds a CARLA this machine launched, so the flags that mean
+    # "launch nothing" contradict it outright. Caught here rather than later
+    # because --prep-only returns before the launch, which would look like
+    # --carla-only silently doing nothing.
+    if args.carla_only:
+        for flag, on in (("--no-launch", args.no_launch), ("--prep-only", args.prep_only)):
+            if on:
+                sys.exit(f"[cosim] --carla-only launches and holds CARLA here; "
+                         f"{flag} means the opposite. Pick one.")
+
     # --step-length used to be the SHARED timestep, handed to SUMO and to CARLA at
     # once. SUMO's is now the FIXS exchange period (a constant), so the only thing
     # left to choose is CARLA's: accept the old flag as the tick rather than breaking
@@ -1841,6 +1855,10 @@ def main():
     if cfg is not None:
         cfg = ensure_runtime(cfg)  # repair stale configs that lack a python env
         maybe_reexec(cfg)          # may not return (re-execs under the env python)
+        if cfg.get("mode") == "client" and args.carla_only:
+            sys.exit("[cosim] --carla-only serves a CARLA on THIS machine, but "
+                     "carla.json is 'client' mode (no CARLA here). Run it on the "
+                     "machine that has CARLA, or re-run setup_carla and pick one.")
         if cfg.get("mode") == "client" and not args.no_launch:
             # There is no CARLA here to launch, cook into, or place actors in -
             # that is what the mode means. Decided HERE, before anything reads
@@ -1938,6 +1956,11 @@ def main():
             peek_host, _peek_port = read_carla_endpoint(peek)
             if peek_host and not _is_local_host(peek_host):
                 args.carla_host = peek_host
+    if args.carla_only and args.carla_host and not _is_local_host(args.carla_host):
+        sys.exit(f"[cosim] --carla-only serves CARLA from THIS machine, but the "
+                 f"scenario yaml points CarlaSetup.CarlaServerIP at "
+                 f"{args.carla_host}. Run --carla-only on that host, or clear the "
+                 f"setting so this machine serves.")
     if args.carla_host and not _is_local_host(args.carla_host) and not args.no_launch:
         print(f"[cosim] CARLA host is {args.carla_host} (not this machine); "
               f"implying --no-launch. NOTE: importing/cooking the map and placing "
@@ -2336,6 +2359,29 @@ def main():
         # keeps it inspectable/editable BEFORE a cpp run - and makes its
         # CarlaSetup.Backend a real switch, since a missing file would otherwise
         # always read as 'py' and could never generate itself.
+        # --carla-only: the CARLA half of a two-machine run. Everything above has
+        # happened (cook check, stale-server kill, launch, load_world, readiness,
+        # spectator) - we simply do NOT dispatch a bridge, and hold the server open
+        # for the machine that will. Stopping here rather than in a separate
+        # launcher is what makes the level path, the readiness check and the
+        # teardown identical to a local run instead of a second implementation.
+        # The `finally` below kills CARLA when this returns.
+        if args.carla_only:
+            print(f"\n[cosim] --carla-only: CARLA is up on {args.carla_host}:"
+                  f"{args.carla_port} serving '{target_map}'.\n"
+                  f"[cosim] Drive it from the traffic machine: set CarlaSetup."
+                  f"CarlaServerIP to this host in its scenario yaml and run run_cosim "
+                  f"there.\n[cosim] Ctrl+C here to stop CARLA.\n")
+            try:
+                # poll() rather than run_native_stack's _alive, which is nested in
+                # that function. Same test: None means still running.
+                while carla_proc is None or carla_proc.poll() is None:
+                    time.sleep(1.0)
+                print("[cosim] CARLA exited on its own; nothing left to serve.")
+            except KeyboardInterrupt:
+                print("\n[cosim] stopping CARLA ...")
+            return 0
+
         # Engine dispatch: CarlaSetup.Backend in that yaml picks the bridge
         # (--engine overrides). cpp = FIXS-native (TrafficLayer + VirCarlaEnv); py
         # (default) = the standalone run_synchronization.py bridge below.
