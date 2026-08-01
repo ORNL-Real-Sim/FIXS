@@ -1324,6 +1324,162 @@ def _ask(prompt, default=None):
         return default or ""
 
 
+def _config_menu(who, options, app_paths):
+    """The scenario row: pick a yaml, or edit the current one in place.
+
+    Picking a file was the only thing this offered, and with a single generated
+    yaml - the normal case - that meant selecting the row did nothing visible at
+    all. What people want here is usually to change a value, not to switch files,
+    so 'e' is on the same list as the files."""
+    current = options[0][0]
+    while True:
+        print(f"\n[cosim] Scenario config for {who}:")
+        for i, (path, label) in enumerate(options, 1):
+            mark = "  (current)" if path == current else ""
+            print(f"   {i}) {label}{mark}")
+        print("   ---")
+        print("   e) edit the current one in your editor")
+        if not sys.stdin.isatty():
+            return current
+        ans = _ask(f"[cosim] Which? [1-{len(options)} / e], Enter = keep "
+                   f"{os.path.basename(current)}: ").strip().lower()
+        if ans == "":
+            return current
+        if ans == "e":
+            edit_yaml_in_editor(current)
+            continue                       # redraw: the file may now say something else
+        if ans.isdigit() and 1 <= int(ans) <= len(options):
+            current = options[int(ans) - 1][0]
+            print(f"[cosim] scenario config: {current}")
+            return current
+        print("[cosim] enter a number from the list, or e to edit.")
+
+
+def _open_in_editor(path):
+    """Open `path` in whatever editor this machine has. True if something started.
+
+    Order matters. $VISUAL / $EDITOR first: they are set deliberately and they
+    work with no display - which is the render host over SSH, exactly where
+    someone is most likely to be poking at a config with no GUI. Then the
+    platform default, and a terminal editor last so a headless box is never left
+    with nothing."""
+    env_editor = os.environ.get("VISUAL") or os.environ.get("EDITOR")
+    if env_editor:
+        try:
+            subprocess.Popen([env_editor, path])
+            return True
+        except Exception:
+            pass
+    try:
+        if platform.system() == "Windows":
+            try:
+                os.startfile(path)                  # the file association
+                return True
+            except Exception:
+                subprocess.Popen(["notepad", path])
+                return True
+        if platform.system() == "Darwin":
+            subprocess.Popen(["open", path])
+            return True
+        if os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"):
+            subprocess.Popen(["xdg-open", path])
+            return True
+        for term in ("nano", "vi"):
+            if shutil.which(term):
+                subprocess.call([term, path])       # blocks, and should
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _yaml_snapshot(path):
+    """Every scalar in the scenario yaml as {Block.Key: text}, for diffing an edit.
+
+    Deliberately dumb - two-level indent is what this file is - because the point
+    is to SHOW what changed, not to re-implement a parser."""
+    snap, block = {}, ""
+    try:
+        with open(path, encoding="utf-8-sig") as f:
+            for line in f:
+                raw = line.rstrip("\n")
+                if not raw.strip() or raw.lstrip().startswith("#"):
+                    continue
+                if not raw.startswith((" ", "\t")) and raw.rstrip().endswith(":"):
+                    block = raw.strip().rstrip(":")
+                elif ":" in raw and raw.startswith((" ", "\t")):
+                    k, v = raw.split(":", 1)
+                    v = v.split("#", 1)[0].strip()
+                    if v:
+                        snap[f"{block}.{k.strip()}"] = v
+    except OSError:
+        pass
+    return snap
+
+
+def _yaml_problems(path):
+    """Validation that would otherwise only bite at runtime."""
+    out = []
+    tick = _yaml_float(path, "CarlaSetup", "CarlaTimeStep", 0.0)
+    if tick:
+        slots = FIXS_FEED_S / tick
+        if tick > FIXS_FEED_S + 1e-9 or abs(slots - round(slots)) > 1e-6:
+            out.append(f"CarlaSetup.CarlaTimeStep = {tick:g} - must be the FIXS feed "
+                       f"({FIXS_FEED_S:g} s) or an exact divisor of it "
+                       f"({', '.join(str(c) for c in CARLA_TICK_CHOICES)}), else no "
+                       f"CARLA tick lands on an exchange boundary and the bridge "
+                       f"trades nothing.")
+    return out
+
+
+def edit_yaml_in_editor(path):
+    """Open the scenario yaml, wait for the user, then re-read and report.
+
+    Do NOT wait on the editor process: notepad blocks, `code` returns instantly,
+    vi blocks in the terminal. The Enter prompt covers all three, and it is also
+    what lets someone keep the editor open while fixing a validation failure.
+
+    The yaml is written to be READ - every block carries comments saying what a
+    key means and what breaks if it is wrong - so handing the whole file to an
+    editor beats prompting key by key, which shows a bare value and throws the
+    explanation away."""
+    before = _yaml_snapshot(path)
+    print(f"\n[cosim] opening {os.path.basename(path)} in your editor ...\n"
+          f"        {path}\n"
+          f"        View it, change it, save it. You can leave the editor open.")
+    if not _open_in_editor(path):
+        print("[cosim] could not launch an editor - open the path above yourself.")
+    while True:
+        ans = _ask("[cosim] Press Enter when you have saved  (Q = leave it): ").lower()
+        if ans.startswith("q"):
+            return
+        after = _yaml_snapshot(path)
+        changed = [(k, before.get(k), after[k]) for k in sorted(after)
+                   if before.get(k) != after[k]]
+        gone = [k for k in sorted(before) if k not in after]
+        if changed or gone:
+            print(f"[cosim] {os.path.basename(path)} re-read:")
+            for k, was, now in changed:
+                print(f"          {k:<36} {was if was is not None else '(new)'}  ->  {now}")
+            for k in gone:
+                print(f"          {k:<36} removed")
+        else:
+            print(f"[cosim] {os.path.basename(path)} is unchanged.")
+        # Validate HERE, not at runtime in C++. mainVirCarla already refuses a tick
+        # that does not divide the feed - but only once a run has started, by which
+        # point the editor is closed and the reason is a wall away.
+        bad = _yaml_problems(path)
+        if _read_scenario_config(path) is None:
+            bad.append(f"{os.path.basename(path)} could not be parsed - check the "
+                       f"indentation of what you just edited.")
+        if not bad:
+            before = after
+            return
+        for msg in bad:
+            print(f"[cosim] FAIL {msg}")
+        print("[cosim] Fix it and press Enter to re-check, or Q to leave it as is.")
+
+
 def _menu(title, options, current=None):
     """Numbered single-choice menu. `options` is [(value, label)]. Enter keeps
     `current` when it is one of the values, else takes the first. Returns a value."""
@@ -2153,18 +2309,9 @@ def edit_config(staged, app_title, map_name, setup_app_id):
 
     who = f"{app_title} on '{map_name}'" if app_title else f"'{map_name}'"
     app_paths = {c["path"] for c in staged}
-    if len(options) == 1:
-        # Say so. Picking this slot and getting no menu, no message and no change
-        # is indistinguishable from the editor being broken - which is how it was
-        # reported. There is nothing to choose between, and that is worth stating.
-        only = options[0][0]
-        print(f"[cosim] scenario config for {who}: only one exists, so there is "
-              f"nothing to choose -\n"
-              f"        {only}\n"
-              f"        (drop another .yaml beside it, or in this app's folder, to "
-              f"get a choice here.)")
-        return only, ("app" if only in app_paths else "map")
-    picked = _menu(f"Scenario config for {who}:", options)
+    # WHICH yaml is only half of it: mostly there is one, and what people actually
+    # want is to change what is IN it. So the list always offers the file itself.
+    picked = _config_menu(who, options, app_paths)
     print(f"[cosim] scenario config: {picked}")
     return picked, ("app" if picked in app_paths else "map")
 
