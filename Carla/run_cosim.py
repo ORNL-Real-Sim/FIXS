@@ -1012,6 +1012,57 @@ def launch_carla(cfg, port=2000, render_offscreen=False, quality_level=None, lev
     return subprocess.Popen(cmd, preexec_fn=os.setsid)
 
 
+def report_traffic_lights(world, tls_manager, cfg, target_map):
+    """Say whether the running CARLA actually exposes traffic lights to drive.
+
+    This is the check that otherwise fails silently and late. SUMO's light sync
+    drives `traffic.traffic_light` actors; if the world has none, the co-sim comes
+    up healthy, runs to completion, and the signals simply never change. Nothing
+    errors, so it reads as a SUMO problem or as "the lights look fine to me".
+
+    Zero actors means one of two things, and both are worth naming because the fix
+    differs:
+
+      * the map was never prepped - no placement has run against it
+      * a prop was placed whose parent class is not ATrafficLightBase, so CARLA
+        renders the heads but never exposes them as traffic lights
+
+    It matters most in client mode. There the CARLA is on another machine, so the
+    cook/place preflights here are deliberately skipped, and this connection is the
+    FIRST point at which this machine can observe whether that machine was ever
+    prepared.
+    """
+    if tls_manager != "sumo":
+        return None
+    try:
+        count = len(world.get_actors().filter("traffic.traffic_light*"))
+    except Exception as exc:  # noqa: BLE001 - diagnostics must not break the run
+        print(f"[cosim] could not query traffic lights ({exc}); continuing.")
+        return None
+
+    if count:
+        print(f"[cosim] CARLA exposes {count} traffic.traffic_light actor(s) for the "
+              f"SUMO sync.")
+        return count
+
+    mode = (cfg or {}).get("mode")
+    print(f"[cosim] WARNING: '{target_map}' is loaded but CARLA exposes NO "
+          f"traffic.traffic_light actors, so the SUMO light sync has nothing to "
+          f"drive - the run will look healthy and the signals will never change.")
+    if mode == "client":
+        print(f"[cosim]          CARLA is on another machine, so placement had to "
+              f"happen there. On the CARLA host run:")
+        print(f"[cosim]              python run_cosim.py --map {target_map} --prep-only")
+        print(f"[cosim]          (that machine needs carla.json in 'source' mode - a "
+              f"cook and a level save need the editor and the content tree.)")
+    else:
+        print(f"[cosim]          Run:  python place_tls.py --map {target_map} "
+              f"--tl-table <table> --force")
+    print("[cosim]          If placement HAS run, the prop's parent class is not "
+          "ATrafficLightBase - CARLA never exposes such an actor as a traffic light.")
+    return 0
+
+
 def _frame_from_actors(world):
     """Centroid + span (m) of the placed traffic-light actors, in CARLA coords."""
     tls = world.get_actors().filter("traffic.traffic_light*")
@@ -2678,6 +2729,19 @@ def main():
                 place_signs.place_signs(target_map, carla_root=cfg["carla_root"],
                                         ue4_root=cfg.get("ue4_root"), force=args.reimport)
 
+    elif cfg is not None and cfg.get("mode") == "client":
+        # Cooking a map and placing actors both write into a CARLA content tree and
+        # save a .umap, so they can only happen where CARLA lives. In client mode
+        # that is another machine, and this is the only place that says so - the
+        # preflights above are simply skipped, which on its own looks like nothing
+        # needed doing. The check after the world loads reports whether it actually
+        # was done; this says who has to do it.
+        print("[cosim] client mode: the map cook, prop install and traffic-light "
+              "placement all happen on the machine running CARLA.")
+        print(f"[cosim]   there:  python run_cosim.py --map {target_map} --prep-only")
+        print("[cosim]   (that machine needs carla.json in 'source' mode; the Linux "
+              "and Windows paths are the same command.)")
+
     if args.prep_only:
         print(f"[cosim] --prep-only: '{target_map}' imported + prepped (TLs/signs); not launching.")
         return 0
@@ -2789,6 +2853,11 @@ def main():
                      f"(current world: '{current}'); aborting before SUMO.")
         print(f"[CARLA] map ready: {loaded}")
         world = client.get_world()
+
+        # First point at which this machine can observe whether the CARLA it is
+        # talking to was ever prepped - which, in client mode, happened on a
+        # different machine or not at all.
+        report_traffic_lights(world, tls_manager, cfg, target_map)
 
         if not args.no_spectator:
             # Default: zoom to one intersection from the TL table so the signal
