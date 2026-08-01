@@ -1793,6 +1793,14 @@ def _tell_peer(sock, stage, msg):
     peer.progress(sock, stage, msg)
 
 
+def _who_has_port(port):
+    """(pid, process name) LISTENING on `port`, or None. Handed to doctor so it can
+    name what is squatting on the CARLA port instead of only noting that something
+    is."""
+    pid = _pid_on_port(port)
+    return (pid, _process_name(pid) or "unknown") if pid else None
+
+
 def _doctor_role(doctor, cfg, args):
     """role= and why= for doctor.run(). An explicit --role wins and reports no
     inference, because there is nothing inferred to explain."""
@@ -2356,6 +2364,7 @@ def main():
                           os.path.join(os.path.dirname(env.CONFIG_PATH), "maps"),
                           host, port, _fixs_version(),
                           peer_port=args.peer_port or peer.peer_port(port),
+                          who_has_port=_who_has_port,
                           **_doctor_role(doctor, cfg, args))
 
     # --carla-only holds a CARLA this machine launched, so the flags that mean

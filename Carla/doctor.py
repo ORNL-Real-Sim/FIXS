@@ -187,7 +187,7 @@ def _check_sumo(rep, role="traffic"):
     rep.add("SUMO", "version", OK, ver.strip())
 
 
-def _check_carla(rep, cfg, py, host, port, timeout=5.0):
+def _check_carla(rep, cfg, py, host, port, timeout=5.0, who_has_port=None):
     mode = (cfg or {}).get("mode") or "not configured"
     root = (cfg or {}).get("carla_root")
     rep.add("CARLA", "mode", OK if cfg else FAIL,
@@ -213,7 +213,19 @@ def _check_carla(rep, cfg, py, host, port, timeout=5.0):
                     "print(c.get_client_version(),'|',c.get_server_version())",
                     str(host), str(port)], timeout=20)
     if rc != 0:
-        rep.add("CARLA", "rpc", FAIL, "port open but no CARLA answered")
+        # Name the culprit. "port open but no CARLA answered" is true and useless;
+        # the usual cause is an ORPHANED CARLA from a run whose parent was killed
+        # hard (terminal closed), so its cleanup never ran. Knowing the PID turns
+        # this from a symptom into an instruction.
+        who = who_has_port(port) if who_has_port else None
+        if who:
+            pid, name = who
+            rep.add("CARLA", "rpc", FAIL,
+                    f"port held by PID {pid} ({name}) which does not answer as "
+                    f"CARLA - likely an orphan from an earlier run. run_cosim will "
+                    f"reclaim it on the next launch, or: kill {pid}")
+        else:
+            rep.add("CARLA", "rpc", FAIL, "port open but no CARLA answered")
         return
     line = out.strip().splitlines()[-1]
     client, server = [s.strip() for s in line.split("|", 1)]
@@ -279,7 +291,7 @@ def _check_dtl(rep):
 
 
 def run(cfg, env_mod, fixs_root, maps_root, host, port, fixs_version,
-        peer_port=None, role=None, why=None):
+        peer_port=None, role=None, why=None, who_has_port=None):
     """Run every applicable check. Returns a shell exit code."""
     # Say WHY. A misread role quietly skews which checks run, so the inference has
     # to be visible rather than something to discover from a confusing report.
@@ -290,7 +302,7 @@ def run(cfg, env_mod, fixs_root, maps_root, host, port, fixs_version,
     _check_fixs(rep, fixs_root, role)
     py = _check_python(rep, cfg, env_mod)
     _check_sumo(rep, role)
-    _check_carla(rep, cfg, py, host, port)
+    _check_carla(rep, cfg, py, host, port, who_has_port=who_has_port)
     if peer_port and role != "render":  # a render host dials nobody
         _check_peer(rep, host, peer_port, fixs_version)
     _check_maps(rep, maps_root)
