@@ -2274,10 +2274,12 @@ def main():
                          "machines to get the two halves of a distributed run.")
     ap.add_argument("--log-file", default=None,
                     help="log to this path instead of the default (implies --log)")
-    ap.add_argument("--no-quickedit-fix", action="store_true",
-                    help="do not disable the Windows console's QuickEdit mode "
-                         "(QuickEdit lets a stray click block stdout and stall the "
-                         "run until Enter is pressed)")
+    ap.add_argument("--no-quickedit", action="store_true",
+                    help="Windows: turn off the console's QuickEdit mode for this "
+                         "run. QuickEdit is what lets you select text with the mouse, "
+                         "but a stray click then blocks stdout and stalls the co-sim "
+                         "until you press Enter. Worth it for a long unattended run; "
+                         "costs you mouse copy/paste.")
     ap.add_argument("--serve", action="store_true",
                     help="CARLA host: wait for the traffic machine, serve the map it "
                          "asks for, and hold CARLA until it disconnects. Like "
@@ -2326,9 +2328,12 @@ def main():
                          "and waits for you to press Play (overrides SumoSetup.AutoStart)")
     args = ap.parse_args()
 
-    # Before anything prints: a stray click in a Windows console blocks stdout and
-    # stalls the whole run, which is indistinguishable from a hang.
-    if not args.no_quickedit_fix:
+    # OFF by default. Disabling QuickEdit costs mouse selection in cmd, and losing
+    # copy/paste on every run is a worse trade than an occasional freeze that Enter
+    # clears - the freeze is at least recoverable, and the title bar says "Select"
+    # while it is happening. --no-quickedit for unattended runs, where nobody is
+    # there to press Enter.
+    if args.no_quickedit:
         _disable_quickedit()
     if args.log or args.log_file:
         start_log(args.log_file)

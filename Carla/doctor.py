@@ -93,7 +93,13 @@ def detect_role(cfg, fixs_root):
     if has_bridge:
         return "traffic", "the FIXS bridge binaries are here"
     if (cfg or {}).get("carla_root"):
-        return "render", "a local CARLA, and no FIXS bridge binaries"
+        # AMBIGUOUS, and it cannot be resolved from installed files: this is either
+        # a render host for a remote traffic machine, or a self-contained
+        # engine=py co-sim (SUMO + run_synchronization.py + CARLA, all local).
+        # The second needs SUMO; the first does not. So say so instead of guessing.
+        return "render-or-local", ("a local CARLA and no FIXS bridge binaries - "
+                                   "either a render host, or a self-contained "
+                                   "engine=py co-sim")
     return "traffic", "no local CARLA configured"
 
 
@@ -112,10 +118,12 @@ def _check_fixs(rep, fixs_root, role):
         p = os.path.join(fixs_root, name + exe)
         if os.path.isfile(p):
             rep.add("FIXS", name, OK, p)
-        elif role == "render":
-            # Expected: the release ships Windows binaries only, and a render host
-            # runs neither - the traffic machine drives the co-sim.
-            rep.add("FIXS", name, OK, "not needed on a render host")
+        elif role in ("render", "render-or-local"):
+            # The release ships Windows binaries only. On Linux their absence is
+            # not a finding: such a machine either serves CARLA for a remote
+            # traffic host, or runs engine=py locally - neither uses these.
+            rep.add("FIXS", name, OK,
+                    "no Linux build exists; not used by --serve or engine=py")
         else:
             rep.add("FIXS", name, WARN, "not present (needed for engine=cpp)")
 
@@ -158,10 +166,20 @@ def _check_python(rep, cfg, env_mod):
     return py
 
 
-def _check_sumo(rep):
+def _check_sumo(rep, role="traffic"):
     exe = shutil.which("sumo") or shutil.which("sumo-gui")
     if not exe:
-        rep.add("SUMO", "on PATH", FAIL, "sumo / sumo-gui not found")
+        # Only a machine that RUNS the co-sim needs SUMO. A pure render host does
+        # not - but we cannot always tell which this is, so on an ambiguous machine
+        # this is a warning with the condition spelled out, never a silent skip.
+        if role == "render":
+            rep.add("SUMO", "on PATH", OK, "not needed on a render host")
+        elif role == "render-or-local":
+            rep.add("SUMO", "on PATH", WARN,
+                    "not found - needed only if you run the co-sim HERE "
+                    "(engine=py); not needed if this machine only serves CARLA")
+        else:
+            rep.add("SUMO", "on PATH", FAIL, "sumo / sumo-gui not found")
         return
     rc, out = _run([exe, "--version"])
     ver = next((l for l in out.splitlines() if "SUMO" in l), out.strip().splitlines()[0] if out.strip() else "?")
@@ -271,10 +289,9 @@ def run(cfg, env_mod, fixs_root, maps_root, host, port, fixs_version,
     rep = Report()
     _check_fixs(rep, fixs_root, role)
     py = _check_python(rep, cfg, env_mod)
-    if role != "render":
-        _check_sumo(rep)
+    _check_sumo(rep, role)
     _check_carla(rep, cfg, py, host, port)
-    if peer_port and role != "render":
+    if peer_port and role != "render":  # a render host dials nobody
         _check_peer(rep, host, peer_port, fixs_version)
     _check_maps(rep, maps_root)
     _check_dtl(rep)
