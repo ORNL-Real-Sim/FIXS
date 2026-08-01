@@ -1793,6 +1793,15 @@ def _tell_peer(sock, stage, msg):
     peer.progress(sock, stage, msg)
 
 
+def _doctor_role(doctor, cfg, args):
+    """role= and why= for doctor.run(). An explicit --role wins and reports no
+    inference, because there is nothing inferred to explain."""
+    if args.role:
+        return {"role": args.role, "why": None}
+    role, why = doctor.detect_role(cfg, FIXS_ROOT)
+    return {"role": role, "why": why}
+
+
 def _peek_any_endpoint():
     """Best-effort (host, port) from the most recently used setup's yaml, so
     --doctor and --version can check the CARLA you actually talk to without
@@ -2252,6 +2261,10 @@ def main():
                     help="check this machine can run a co-sim (python deps, SUMO, "
                          "FIXS binaries, CARLA, peer, maps, gh auth) and exit; "
                          "non-zero exit if anything is broken")
+    ap.add_argument("--role", choices=["traffic", "render"], default=None,
+                    help="which half of a distributed co-sim this machine is; "
+                         "--doctor infers it from what is installed here, and this "
+                         "overrides that")
     ap.add_argument("--version", action="store_true",
                     help="print the run fingerprint (FIXS, CARLA, SUMO, python) and "
                          "exit - what to paste into a bug report")
@@ -2338,7 +2351,7 @@ def main():
                           os.path.join(os.path.dirname(env.CONFIG_PATH), "maps"),
                           host, port, _fixs_version(),
                           peer_port=args.peer_port or peer.peer_port(port),
-                          role="carla" if (args.serve or args.carla_only) else "traffic")
+                          **_doctor_role(doctor, cfg, args))
 
     # --carla-only holds a CARLA this machine launched, so the flags that mean
     # "launch nothing" contradict it outright. Caught here rather than later

@@ -73,7 +73,31 @@ def _run(cmd, timeout=10):
         return 1, str(e)
 
 
-def _check_fixs(rep, fixs_root):
+def detect_role(cfg, fixs_root):
+    """Which half of a distributed co-sim this machine is, from what is ON it.
+
+    Inferring it from the flags of the doctor invocation was wrong: nobody passes
+    --serve to --doctor, so a render host reported itself as a traffic host and
+    was then told off for lacking SUMO and the FIXS bridge binaries - which on
+    Linux is simply correct, there being no Linux build of them yet.
+
+    The evidence that actually distinguishes them:
+      * client mode means no local CARLA at all -> traffic, definitively
+      * the bridge binaries are what drive a co-sim FROM here -> traffic
+      * a local CARLA and no bridge binaries -> this machine renders"""
+    if (cfg or {}).get("mode") == "client":
+        return "traffic", "carla.json is client mode - no CARLA on this machine"
+    exe = ".exe" if platform.system() == "Windows" else ""
+    has_bridge = all(os.path.isfile(os.path.join(fixs_root, n + exe))
+                     for n in ("TrafficLayer", "VirCarlaEnv"))
+    if has_bridge:
+        return "traffic", "the FIXS bridge binaries are here"
+    if (cfg or {}).get("carla_root"):
+        return "render", "a local CARLA, and no FIXS bridge binaries"
+    return "traffic", "no local CARLA configured"
+
+
+def _check_fixs(rep, fixs_root, role):
     ver = "unknown"
     vf = os.path.join(fixs_root, "FIXS_VERSION.txt")
     if os.path.isfile(vf):
@@ -86,8 +110,14 @@ def _check_fixs(rep, fixs_root):
     exe = ".exe" if platform.system() == "Windows" else ""
     for name in ("TrafficLayer", "VirCarlaEnv"):
         p = os.path.join(fixs_root, name + exe)
-        rep.add("FIXS", name, OK if os.path.isfile(p) else WARN,
-                p if os.path.isfile(p) else "not present (needed for engine=cpp)")
+        if os.path.isfile(p):
+            rep.add("FIXS", name, OK, p)
+        elif role == "render":
+            # Expected: the release ships Windows binaries only, and a render host
+            # runs neither - the traffic machine drives the co-sim.
+            rep.add("FIXS", name, OK, "not needed on a render host")
+        else:
+            rep.add("FIXS", name, WARN, "not present (needed for engine=cpp)")
 
     # TrafficLayer loads libsumo at startup; the headers ship in the build but the
     # runtime comes from a separate release asset, and its absence is only visible
@@ -231,17 +261,20 @@ def _check_dtl(rep):
 
 
 def run(cfg, env_mod, fixs_root, maps_root, host, port, fixs_version,
-        peer_port=None, role=None):
+        peer_port=None, role=None, why=None):
     """Run every applicable check. Returns a shell exit code."""
-    print(f"[doctor] {socket.gethostname()} ({platform.system()}) - "
-          f"role: {role or 'traffic'}")
+    # Say WHY. A misread role quietly skews which checks run, so the inference has
+    # to be visible rather than something to discover from a confusing report.
+    print(f"[doctor] {socket.gethostname()} ({platform.system()}) - role: {role}"
+          f"{'  (' + why + ')' if why else ''}"
+          f"{'' if why is None else '  [--role to override]'}")
     rep = Report()
-    _check_fixs(rep, fixs_root)
+    _check_fixs(rep, fixs_root, role)
     py = _check_python(rep, cfg, env_mod)
-    if role != "carla":
+    if role != "render":
         _check_sumo(rep)
     _check_carla(rep, cfg, py, host, port)
-    if peer_port and role != "carla":
+    if peer_port and role != "render":
         _check_peer(rep, host, peer_port, fixs_version)
     _check_maps(rep, maps_root)
     _check_dtl(rep)
