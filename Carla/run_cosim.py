@@ -788,6 +788,12 @@ def run_native_stack(config_yaml, sumocfg, tl_table, cfg, args, app=None,
         # the first exchange until every declared subscriber has connected - so
         # starting it after the bridge would have the two waiting on each other.
         app_argv, app_cwd = app_catalog.launch_command(app) if app else (None, None)
+        if app and app.get("launch") and not app_argv:
+            # Same reasoning as the sumocfg above: an app that declares a controller
+            # and does not get one is not "the stack minus a component", it is a
+            # different experiment. Better to say so than to render traffic nobody
+            # is controlling and let it look like the run that was asked for.
+            return 1
         if app_argv:
             print(f"[APP]  {app['launch']}")
             app_proc = subprocess.Popen(app_argv, cwd=app_cwd)
@@ -2774,7 +2780,16 @@ def main():
     # Settled here, before anything reaches for a map bundle: an app that ships its
     # own scenario needs no sumo/ half at all, and asking for one would prompt over a
     # ~380MB archive whose SUMO content is about to be thrown away.
+    #
+    # DECLARED-but-missing is fatal, unlike not declared at all. Falling back to the
+    # bundle would run a different scenario than the app asked for - different demand,
+    # possibly no ego - and produce a plausible-looking run that answers a question
+    # nobody posed. app_catalog says which by returning None with a warning; deciding
+    # what that means is this layer's job, not the data layer's.
     app_sumocfg = app_catalog.app_sumocfg(app) if app else None
+    if app and app.get("sumocfg") and app_sumocfg is None:
+        sys.exit(f"[cosim] '{app['id']}' declares sumocfg '{app['sumocfg']}' but it "
+                 f"is not there; not falling back to the map bundle's scenario.")
 
     def cached_sumo_dir(name):
         """An already-extracted ~/.fixs/maps/<name>/sumo, or None.
