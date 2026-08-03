@@ -115,12 +115,22 @@ and extract it into $OutputDir\CommonLib\.
 
     # --- Version marker ---
     $stamp = if ($Version -eq 'latest') { "latest ($($release.published_at))" } else { $Version }
-    @"
+    $versionText = @"
 $stamp
 Fetched: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
 Source: $Repo
 Zip: $($asset.name)
-"@ | Out-File -FilePath $VersionFile -Encoding UTF8
+"@
+    # NOT `Out-File -Encoding UTF8`: under Windows PowerShell 5.1 - which is what
+    # runs this, via `powershell` from the app repo's wrapper - that switch writes
+    # UTF-8 *with* a BOM, and 'utf8NoBOM' only exists on PowerShell 6+. The readers
+    # of this file are Python, where a BOM is a character rather than metadata, so
+    # it rode into the parsed tag and silently disabled run_cosim's freshness check.
+    # Get-Content strips a BOM on the way back in, so this script's own re-read
+    # (above) looked correct and the problem stayed invisible from the PowerShell side.
+    [System.IO.File]::WriteAllText(
+        $VersionFile, $versionText + [Environment]::NewLine,
+        (New-Object System.Text.UTF8Encoding($false)))
 
     Write-Host ""
     Write-Host "FIXS build fetched successfully."

@@ -86,7 +86,10 @@ CARLA_TICK_CHOICES = (0.1, 0.05, 0.025, 0.02, 0.01)
 def _first_group(path, pattern):
     import re
     try:
-        with open(path, encoding="utf-8", errors="ignore") as f:
+        # utf-8-sig: these are the same PowerShell-written files as above. A leading
+        # BOM would not break the searches used here, but reading one member of a
+        # pair BOM-tolerantly and the other not is exactly how that bug survived.
+        with open(path, encoding="utf-8-sig", errors="ignore") as f:
             m = re.search(pattern, f.read())
         return m.group(1) if m else None
     except OSError:
@@ -102,7 +105,13 @@ def _fixs_tag_repo():
     """(tag, repo) from FIXS_VERSION.txt: line 1 is the tag; a 'Source:' line the repo."""
     tag, repo = None, "ORNL-Real-Sim/FIXS"
     try:
-        with open(os.path.join(FIXS_ROOT, "FIXS_VERSION.txt"), encoding="utf-8") as f:
+        # utf-8-SIG: this file is written by fetch_fixs.ps1, and under Windows
+        # PowerShell 5.1 `Out-File -Encoding UTF8` means UTF-8 *with* a BOM. Read as
+        # plain utf-8 the BOM survives as ﻿ on line 1 - and str.strip() does not
+        # remove it, because it is not whitespace - so the tag came out as
+        # '﻿v0.9.0-alpha', the releases API call built from it failed, and the
+        # freshness check below disabled itself silently on every Windows install.
+        with open(os.path.join(FIXS_ROOT, "FIXS_VERSION.txt"), encoding="utf-8-sig") as f:
             lines = [ln.strip() for ln in f if ln.strip()]
         if lines:
             # Line 1 is the tag, but initialize.sh stamps the rolling versions as
@@ -2088,7 +2097,10 @@ def print_fingerprint(cfg, host, port):
 
 def _fixs_version():
     try:
-        with open(os.path.join(FIXS_ROOT, "FIXS_VERSION.txt"), encoding="utf-8") as f:
+        # utf-8-sig for the same reason as _fixs_tag_repo: a BOM left on line 1 rides
+        # into the returned string, and printing that to a cp1252 console raises
+        # UnicodeEncodeError - which is how --version crashed on Windows.
+        with open(os.path.join(FIXS_ROOT, "FIXS_VERSION.txt"), encoding="utf-8-sig") as f:
             return f.readline().strip()
     except OSError:
         return "unknown"
