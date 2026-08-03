@@ -131,19 +131,30 @@ def _remote_fixs_commit(repo, tag, timeout=4.0):
 
 
 def _run_initialize(tag):
-    """Re-fetch the FIXS bundle for <tag> via the app's initialize script (the tag is
-    passed as its argument, so it runs non-interactively). True on success."""
+    """Re-fetch the FIXS bundle for <tag> via the app's fetch script (the tag is
+    passed as its argument, so it runs non-interactively). True on success.
+
+    Two locations, newest first: the app repo moved this out of the root and into
+    scripts/ when run_cosim absorbed it (FIXS_Applications#13), and the engine is
+    fetched from a release rather than pinned to an app checkout - so a bundle
+    this new can sit in a clone laid out either way. Looking for only one of them
+    is how a self-update came to report "initialize.sh not found" on a repo that
+    had simply renamed it."""
     if platform.system() == "Windows":
-        script = os.path.join(APP_ROOT, "initialize.ps1")
-        cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, tag]
+        names = [os.path.join(APP_ROOT, "scripts", "update_fixs.ps1"),
+                 os.path.join(APP_ROOT, "initialize.ps1")]
+        runner = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]
     else:
-        script = os.path.join(APP_ROOT, "initialize.sh")
-        cmd = ["bash", script, tag]
-    if not os.path.isfile(script):
-        print(f"[cosim] cannot self-update: {script} not found.")
+        names = [os.path.join(APP_ROOT, "scripts", "update_fixs.sh"),
+                 os.path.join(APP_ROOT, "initialize.sh")]
+        runner = ["bash"]
+    script = next((p for p in names if os.path.isfile(p)), None)
+    if script is None:
+        print(f"[cosim] cannot self-update: none of these exist -\n        "
+              + "\n        ".join(names))
         return False
     print(f"[cosim] updating FIXS -> {tag} via {os.path.basename(script)} ...")
-    return subprocess.call(cmd) == 0
+    return subprocess.call(runner + [script, tag]) == 0
 
 
 def maybe_update_fixs(no_check=False):
