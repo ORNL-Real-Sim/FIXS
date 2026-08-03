@@ -660,8 +660,68 @@ CarlaSetup:
     return path
 
 
+HANDOFF_TIMEOUT_S = 60
+
+
+def start_app(app, timeout=HANDOFF_TIMEOUT_S):
+    """Start the app's `launch` command and collect the scenario it reports.
+
+    Returns (proc, sumocfg-or-None). ONE process spans both moments a controller
+    cares about: it builds its scenario before SUMO exists, and it subscribes to
+    TrafficLayer once that exists. So this starts it, waits for its answer, and hands
+    the still-running process back to be supervised with the rest of the stack.
+
+    It answers by writing json to FIXS_HANDOFF - a file, not stdout, because attaching
+    a pipe means having to drain it for the whole run or the child blocks on a full
+    buffer. Polling for the file is why the app must write it atomically (tmp +
+    os.replace); at 4 Hz a non-atomic write WILL eventually be read half-finished.
+
+    Not answering is allowed: an app happy with the bundle's scenario reports {} (or
+    nothing at all, and waits out the timeout), so `launch` is usable by an app that
+    never learns this protocol exists. Dying before answering is not - that is a crash,
+    and continuing would run a stack whose controller is already gone."""
+    argv, cwd = app_catalog.launch_command(app)
+    if not argv:
+        sys.exit(f"[cosim] '{app['id']}' declares launch '{app['launch']}' but it is "
+                 f"not there; not running the stack without its controller.")
+    # RealSim_tmp, not %TEMP%: it is gitignored, and it is already where the
+    # TrafficLayer logs go, so a run that goes wrong has everything in one place.
+    handoff_dir = os.path.join(app_catalog.app_root(), "RealSim_tmp")
+    os.makedirs(handoff_dir, exist_ok=True)
+    handoff = os.path.join(handoff_dir, f"handoff_{app['id']}_{os.getpid()}.json")
+    if os.path.isfile(handoff):
+        os.remove(handoff)      # a crashed run's leftover is not this run's answer
+    print(f"[APP]  {app['launch']}")
+    proc = subprocess.Popen(argv, cwd=cwd, env=dict(os.environ, FIXS_HANDOFF=handoff))
+    deadline = time.time() + timeout
+    while not os.path.isfile(handoff):
+        if proc.poll() is not None:
+            sys.exit(f"[cosim] '{app['id']}' exited ({proc.returncode}) before "
+                     f"reporting its scenario; not starting the stack.")
+        if time.time() > deadline:
+            print(f"[cosim]   ->   '{app['id']}' reported no scenario within "
+                  f"{timeout}s; using the map's own.")
+            return proc, None
+        time.sleep(0.25)
+    try:
+        with open(handoff, encoding="utf-8") as f:
+            reported = (json.load(f) or {}).get("sumocfg")
+    except (OSError, ValueError) as exc:
+        _kill_pid_tree(proc.pid)
+        sys.exit(f"[cosim] '{app['id']}' wrote an unreadable handoff ({exc}); "
+                 f"see {handoff}.")
+    os.remove(handoff)
+    if reported and not os.path.isfile(reported):
+        _kill_pid_tree(proc.pid)
+        sys.exit(f"[cosim] '{app['id']}' reported a scenario that is not there: "
+                 f"{reported}")
+    if reported:
+        print(f"[cosim] SUMO scenario: '{app['id']}' generated {reported}")
+    return proc, reported
+
+
 def run_native_stack(config_yaml, sumocfg, tl_table, cfg, args, app=None,
-                     ctl_sock=None, app_owns_scenario=False):
+                     ctl_sock=None, app_owns_scenario=False, app_proc=None):
     """FIXS-native bridge: launch SUMO (TraCI server) + TrafficLayer (-f config) +
     VirCarlaEnv (-f config -t tl_table), plus the app's own `launch` command if it
     declares one. CARLA is already up and the map loaded by run_cosim's preflight.
@@ -716,6 +776,12 @@ def run_native_stack(config_yaml, sumocfg, tl_table, cfg, args, app=None,
                      f"{name} window and re-run.")
 
     procs = []          # [(label, Popen)] in start order
+    if app_proc is not None:
+        # Already running: start_app launched it before SUMO so it could report
+        # its scenario, and it is now waiting for TrafficLayer. Adopting it here
+        # is the whole integration - supervision and teardown are the ones every
+        # other component gets.
+        procs.append((app["id"], app_proc))
 
     def _alive(p):
         return p.poll() is None
@@ -783,26 +849,6 @@ def run_native_stack(config_yaml, sumocfg, tl_table, cfg, args, app=None,
         else:
             print(f"[cosim]   OK   TrafficLayer serving the bridge on {bridge_port}")
 
-        # The app's own component (controller / XIL host), started BEFORE the bridge.
-        # It subscribes to TrafficLayer like VirCarlaEnv does, and TrafficLayer holds
-        # the first exchange until every declared subscriber has connected - so
-        # starting it after the bridge would have the two waiting on each other.
-        app_argv, app_cwd = app_catalog.launch_command(app) if app else (None, None)
-        if app and app.get("launch") and not app_argv:
-            # Same reasoning as the sumocfg above: an app that declares a controller
-            # and does not get one is not "the stack minus a component", it is a
-            # different experiment. Better to say so than to render traffic nobody
-            # is controlling and let it look like the run that was asked for.
-            return 1
-        if app_argv:
-            print(f"[APP]  {app['launch']}")
-            app_proc = subprocess.Popen(app_argv, cwd=app_cwd)
-            procs.append((app["id"], app_proc))
-            time.sleep(2)
-            if not _check(app["id"], app_proc,
-                          f"run it on its own to see why: {' '.join(app_argv)}"):
-                return 1
-
         vce_cmd = [vce_exe, "-f", config_yaml] + (["-t", tl_table] if tl_table else [])
         print(f"[VCE]  {os.path.basename(vce_exe)} -f {config_yaml}"
               + (f" -t {tl_table}" if tl_table else ""))
@@ -815,7 +861,7 @@ def run_native_stack(config_yaml, sumocfg, tl_table, cfg, args, app=None,
             return 1
 
         print("\n[cosim] native stack up: SUMO + TrafficLayer + VirCarlaEnv"
-              + (f" + {app['id']}" if app_argv else "") + ".\n"
+              + (f" + {app['id']}" if app_proc is not None else "") + ".\n"
               "[cosim] vehicles should now appear in the CARLA window. Ctrl+C here, or "
               "close VirCarlaEnv, to stop.\n")
 
@@ -880,7 +926,7 @@ def run_native_stack(config_yaml, sumocfg, tl_table, cfg, args, app=None,
 
 
 def run_python_bridge(config_yaml, sumocfg, tl_table, tls_manager, no_net_offset,
-                      args, app=None, app_owns_scenario=False):
+                      args, app=None, app_owns_scenario=False, app_proc=None):
     """Standalone bridge: launch SUMO (TraCI server) + run_synchronization.py.
 
     run_cosim launches SUMO here rather than letting the bridge start its own, for
@@ -2777,19 +2823,16 @@ def main():
             sys.exit(f"[cosim] '{app['id']}' is missing its declared dependencies; "
                      f"not starting the run.")
 
-    # Settled here, before anything reaches for a map bundle: an app that ships its
-    # own scenario needs no sumo/ half at all, and asking for one would prompt over a
-    # ~380MB archive whose SUMO content is about to be thrown away.
-    #
-    # DECLARED-but-missing is fatal, unlike not declared at all. Falling back to the
-    # bundle would run a different scenario than the app asked for - different demand,
-    # possibly no ego - and produce a plausible-looking run that answers a question
-    # nobody posed. app_catalog says which by returning None with a warning; deciding
-    # what that means is this layer's job, not the data layer's.
-    app_sumocfg = app_catalog.app_sumocfg(app) if app else None
-    if app and app.get("sumocfg") and app_sumocfg is None:
-        sys.exit(f"[cosim] '{app['id']}' declares sumocfg '{app['sumocfg']}' but it "
-                 f"is not there; not falling back to the map bundle's scenario.")
+    # The application starts HERE, before anything reaches for a map bundle, because
+    # it may be the one that says which scenario to run - and an app that generates
+    # its own needs no sumo/ half at all, so asking for one would prompt over a ~380MB
+    # archive whose SUMO content is about to be thrown away. It keeps running from
+    # this point: it is the controller, and it waits for TrafficLayer while the map is
+    # cooked and CARLA comes up. A first cook is minutes, so its wait for the bridge
+    # has to be patient - run_cosim stops it if anything below fails.
+    app_proc, app_sumocfg = (None, None)
+    if app and app.get("launch"):
+        app_proc, app_sumocfg = start_app(app)
 
     def cached_sumo_dir(name):
         """An already-extracted ~/.fixs/maps/<name>/sumo, or None.
@@ -2800,7 +2843,7 @@ def main():
         sumo/ already extracted would immediately throw away. There is more than
         one such site - the source-build preflight, and the SUMO slot below that
         also runs for --no-launch / packaged builds - and fixing only one of them
-        just moves the prompt. --sumocfg, an app-declared sumocfg and --reimport
+        just moves the prompt. --sumocfg, an app-reported scenario and --reimport
         deliberately bypass it: the first two supply the scenario outright, the
         last means "refresh from the bundle"."""
         if args.sumocfg is not None or app_sumocfg is not None or args.reimport:
@@ -2953,21 +2996,23 @@ def main():
         if note:
             print(note)
 
-    # SUMO slot: --sumocfg wins; else the app's own declared scenario; else an
+    # SUMO slot: --sumocfg wins; else the scenario the app reported; else an
     # already-extracted sumo/, else the chosen bundle's. This also runs for the paths
     # that skip the source-build preflight above (--no-launch, packaged builds), so
     # the cache is checked here too - the bundle is the LAST resort, not the first.
     #
     # The app sits above the bundle because a bundle ships ONE app-independent
-    # scenario: an app whose run needs its own (mlk_eco_driving's ego is declared in
-    # its route file) would otherwise be a --sumocfg the user has to remember every
-    # time, on top of an entry point whose whole point is that they do not.
+    # scenario, and an application's may not exist until the run starts: a run
+    # directory, its own demand, output paths written into the config. That cannot be
+    # a path anyone declares in advance, which is why the app reports it instead.
     sumocfg = args.sumocfg
-    app_owns_scenario = False
-    if sumocfg is None and app_sumocfg:
+    # An app that REPORTED a scenario owns it, and owning it is what turns the SUMO
+    # convention off. Declaring `launch` is not enough: an app whose controller is
+    # happy with the map's own scenario reports nothing, claims nothing, and keeps
+    # the convention - which is what a roosevelt-shaped app with a controller wants.
+    app_owns_scenario = sumocfg is None and app_sumocfg is not None
+    if app_owns_scenario:
         sumocfg = app_sumocfg
-        app_owns_scenario = True
-        print(f"[cosim] SUMO scenario: '{app['id']}' declares {app['sumocfg']}")
     if sumocfg is None:
         if sumo_dir is None:
             sumo_dir = cached_sumo_dir(target_map)
@@ -3385,12 +3430,14 @@ def main():
             print(f"[cosim] engine=cpp (FIXS-native); config {config_yaml}")
             return run_native_stack(config_yaml, sumocfg, tl_table, cfg, args, app,
                                     ctl_sock=ctl_sock,
-                                    app_owns_scenario=app_owns_scenario)
+                                    app_owns_scenario=app_owns_scenario,
+                                    app_proc=app_proc)
 
         print("[cosim] engine=py (run_synchronization.py)")
         return run_python_bridge(config_yaml, sumocfg, tl_table, tls_manager,
                                  no_net_offset, args, app,
-                                 app_owns_scenario=app_owns_scenario)
+                                 app_owns_scenario=app_owns_scenario,
+                                 app_proc=app_proc)
     finally:
         # Say goodbye BEFORE tearing down locally: the peer is blocked on this
         # socket, and a clean BYE lets it report "the peer finished" rather than a
