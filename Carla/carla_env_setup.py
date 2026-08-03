@@ -216,8 +216,15 @@ def _find_conda():
     return None
 
 
-def _conda_create_env(conda_exe, yml_path):
-    cmd = [conda_exe, "env", "create", "-f", yml_path]
+def _conda_create_env(conda_exe, yml_path, name):
+    """Create the env from the spec, named `name`.
+
+    -n is required, not cosmetic: it overrides the spec's own `name:`, which is how
+    the same environment.yml can build the engine's env and an application repo's
+    without either restating python=, the channels or channel_priority. Without it
+    a caller that set FIXS_ENV_NAME got an env called 'realsim' created, then failed
+    to find the name it asked for, and fell through to binding something else."""
+    cmd = [conda_exe, "env", "create", "-n", name, "-f", yml_path]
     print(f"[setup] {' '.join(cmd)}")
     print("[setup] creating the env can take several minutes ...")
     return subprocess.call(cmd) == 0
@@ -255,7 +262,7 @@ def _resolve_python():
         print(f"[setup] the '{name}' env is not installed (conda found: {conda}).")
         ans = input(f"        create it now from {ENV_YML}? [Y/n]: ").strip().lower()
         if ans in ("", "y", "yes"):
-            if _conda_create_env(conda, ENV_YML):
+            if _conda_create_env(conda, ENV_YML, name):
                 py = _named_env_python(name)
                 if py:
                     print(f"[setup] created '{name}': {py}")
