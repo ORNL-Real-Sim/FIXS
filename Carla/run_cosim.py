@@ -854,10 +854,19 @@ def run_native_stack(config_yaml, sumocfg, tl_table, cfg, args, app=None,
                     p.terminate()
                 except Exception:
                     pass
-        for _name, p in reversed(procs):
+        for name, p in reversed(procs):
             try:
                 p.wait(timeout=5)
             except Exception:
+                # The app's launch command is a SCRIPT: on Windows terminate()/kill()
+                # reach cmd.exe and leave the interpreter it started running, holding
+                # the application port against the next run. Everything else here is
+                # an exe with no children, so the tree kill is only needed for this
+                # one - but for this one a plain kill is not a teardown.
+                try:
+                    _kill_pid_tree(p.pid)
+                except Exception:
+                    pass
                 try:
                     p.kill()
                 except Exception:
