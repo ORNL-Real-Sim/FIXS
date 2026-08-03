@@ -452,16 +452,25 @@ SUMO_CONVENTION = {
 }
 
 
-def resolve_sumo_args(app):
+def resolve_sumo_args(app, app_owns_scenario=False):
     """[(flag, value, origin)] for this run: contract over app over convention.
 
     An app deviates through apps.json `sumo_args` - tracked, reviewed next to the app
     declaration, and valid on every map that app runs against. A null value drops a
     convention flag. A contract flag cannot be overridden: an app that tries is told
-    so rather than silently getting a broken clock."""
+    so rather than silently getting a broken clock.
+
+    `app_owns_scenario` drops the CONVENTION entirely. The convention exists because a
+    Digital-Twin-Library .sumocfg is a SHARED artifact that must not carry one
+    consumer's co-sim requirement - so run_cosim adds it on the command line instead.
+    An app running its own declared sumocfg has no shared artifact and no such
+    problem, and injecting sublane lane-changing into a scenario its author
+    calibrated without it changes results silently. The CONTRACT still applies:
+    --step-length is the FIXS feed, and a scenario cannot opt out of the protocol."""
     args = {}
-    for flag, (value, why) in SUMO_CONVENTION.items():
-        args[flag] = (value, f"convention: {why}")
+    if not app_owns_scenario:
+        for flag, (value, why) in SUMO_CONVENTION.items():
+            args[flag] = (value, f"convention: {why}")
     for flag, value in ((app or {}).get("sumo_args") or {}).items():
         if flag in SUMO_CONTRACT:
             print(f"[cosim] app '{app.get('id')}' sets {flag} in sumo_args; ignoring "
@@ -483,7 +492,8 @@ def print_sumo_args(origins):
         print(f"[cosim]   ->   {flag} {value}".ljust(52) + f"[{origin}]")
 
 
-def sumo_launch_cmd(sumocfg, traci_port, num_clients, gui, autostart, app=None):
+def sumo_launch_cmd(sumocfg, traci_port, num_clients, gui, autostart, app=None,
+                    app_owns_scenario=False):
     """The SUMO command line - ONE builder, used by BOTH bridges.
 
     Three kinds of argument, and that is the whole story:
@@ -503,7 +513,7 @@ def sumo_launch_cmd(sumocfg, traci_port, num_clients, gui, autostart, app=None):
            "--remote-port", str(traci_port),
            "--num-clients", str(num_clients)]
     origins = []
-    for flag, value, origin in resolve_sumo_args(app):
+    for flag, value, origin in resolve_sumo_args(app, app_owns_scenario):
         cmd += [flag, value]
         origins.append((flag, value, origin))
     if gui:
@@ -651,14 +661,16 @@ CarlaSetup:
 
 
 def run_native_stack(config_yaml, sumocfg, tl_table, cfg, args, app=None,
-                     ctl_sock=None):
+                     ctl_sock=None, app_owns_scenario=False):
     """FIXS-native bridge: launch SUMO (TraCI server) + TrafficLayer (-f config) +
-    VirCarlaEnv (-f config -t tl_table). CARLA is already up and the map loaded by
-    run_cosim's preflight. Ports mirror tests/Sumo/Probes/TrafficLayer_SUMO_Carla:
-    both ports come from the yaml (SimulationSetup.TrafficSimulatorPort and
-    CarlaSetup.CarlaClientPort). TrafficLayer is the sole TraCI client,
-    so it steps SUMO (no external controller needed). Blocks on VirCarlaEnv - the
-    co-sim front-end - and tears the others down on exit."""
+    VirCarlaEnv (-f config -t tl_table), plus the app's own `launch` command if it
+    declares one. CARLA is already up and the map loaded by run_cosim's preflight.
+    Ports mirror tests/Sumo/Probes/TrafficLayer_SUMO_Carla: both ports come from the
+    yaml (SimulationSetup.TrafficSimulatorPort and CarlaSetup.CarlaClientPort).
+    TrafficLayer is the sole TraCI client, so it steps SUMO (an app controller
+    subscribes to TrafficLayer on the application port, it does not drive SUMO).
+    Blocks on VirCarlaEnv - the co-sim front-end - and tears the others down on
+    exit."""
     import shutil
     tl_exe, vce_exe = _native_binaries()
     missing = [p for p in (tl_exe, vce_exe) if not os.path.isfile(p)]
@@ -721,7 +733,8 @@ def run_native_stack(config_yaml, sumocfg, tl_table, cfg, args, app=None,
         # Same builder the python bridge's SUMO gets, so the two engines cannot
         # drift apart in what they hand SUMO (they did: see sumo_launch_cmd).
         sumo_cmd, sumo_origins = sumo_launch_cmd(sumocfg, traci_port, num_clients,
-                                                 args.sumo_gui, sumo_autostart, app)
+                                                 args.sumo_gui, sumo_autostart, app,
+                                                 app_owns_scenario)
         # SUMO blocks until ALL num_clients TraCI clients have connected and called
         # setOrder. TrafficLayer is one of them; anything above 1 means you are
         # attaching your own second client, so say so rather than looking hung.
@@ -770,6 +783,20 @@ def run_native_stack(config_yaml, sumocfg, tl_table, cfg, args, app=None,
         else:
             print(f"[cosim]   OK   TrafficLayer serving the bridge on {bridge_port}")
 
+        # The app's own component (controller / XIL host), started BEFORE the bridge.
+        # It subscribes to TrafficLayer like VirCarlaEnv does, and TrafficLayer holds
+        # the first exchange until every declared subscriber has connected - so
+        # starting it after the bridge would have the two waiting on each other.
+        app_argv, app_cwd = app_catalog.launch_command(app) if app else (None, None)
+        if app_argv:
+            print(f"[APP]  {app['launch']}")
+            app_proc = subprocess.Popen(app_argv, cwd=app_cwd)
+            procs.append((app["id"], app_proc))
+            time.sleep(2)
+            if not _check(app["id"], app_proc,
+                          f"run it on its own to see why: {' '.join(app_argv)}"):
+                return 1
+
         vce_cmd = [vce_exe, "-f", config_yaml] + (["-t", tl_table] if tl_table else [])
         print(f"[VCE]  {os.path.basename(vce_exe)} -f {config_yaml}"
               + (f" -t {tl_table}" if tl_table else ""))
@@ -781,7 +808,8 @@ def run_native_stack(config_yaml, sumocfg, tl_table, cfg, args, app=None,
                       f"and see CarlaClient.log in {os.getcwd()}."):
             return 1
 
-        print("\n[cosim] native stack up: SUMO + TrafficLayer + VirCarlaEnv.\n"
+        print("\n[cosim] native stack up: SUMO + TrafficLayer + VirCarlaEnv"
+              + (f" + {app['id']}" if app_argv else "") + ".\n"
               "[cosim] vehicles should now appear in the CARLA window. Ctrl+C here, or "
               "close VirCarlaEnv, to stop.\n")
 
@@ -797,10 +825,19 @@ def run_native_stack(config_yaml, sumocfg, tl_table, cfg, args, app=None,
                 print("[cosim] the CARLA host disconnected; the feed has stopped. "
                       "Shutting the stack down.")
                 break
-            dead = [n for n, p in procs if n != "VirCarlaEnv" and not _alive(p)]
+            dead = [(n, p.returncode) for n, p in procs
+                    if n != "VirCarlaEnv" and not _alive(p)]
             if dead:
-                print(f"[cosim] {', '.join(dead)} exited while the co-sim was running; "
-                      f"the feed has stopped. Shutting the stack down.")
+                # An app component that ran to its own end is a FINISHED run, not a
+                # failure - saying "the feed has stopped" for a clean exit sends
+                # people looking for a crash that did not happen.
+                if all(rc == 0 for _n, rc in dead):
+                    print(f"[cosim] {', '.join(n for n, _ in dead)} finished; "
+                          f"stopping the stack.")
+                else:
+                    broke = ", ".join(f"{n} ({rc})" for n, rc in dead if rc != 0)
+                    print(f"[cosim] {broke} exited while the co-sim was running; "
+                          f"the feed has stopped. Shutting the stack down.")
                 break
             time.sleep(1.0)
         rc = vce.poll()
@@ -828,7 +865,7 @@ def run_native_stack(config_yaml, sumocfg, tl_table, cfg, args, app=None,
 
 
 def run_python_bridge(config_yaml, sumocfg, tl_table, tls_manager, no_net_offset,
-                      args, app=None):
+                      args, app=None, app_owns_scenario=False):
     """Standalone bridge: launch SUMO (TraCI server) + run_synchronization.py.
 
     run_cosim launches SUMO here rather than letting the bridge start its own, for
@@ -868,7 +905,8 @@ def run_python_bridge(config_yaml, sumocfg, tl_table, tls_manager, no_net_offset
             time.sleep(0.5)
 
     sumo_cmd, sumo_origins = sumo_launch_cmd(sumocfg, traci_port, num_clients,
-                                             args.sumo_gui, sumo_autostart, app)
+                                             args.sumo_gui, sumo_autostart, app,
+                                             app_owns_scenario)
     print(f"[SUMO] {' '.join(sumo_cmd)}")
     print_sumo_args(sumo_origins)
     sumo = subprocess.Popen(sumo_cmd)
@@ -1790,7 +1828,25 @@ def _bind_app(rec, apps, ctx):
               f"{app_catalog.catalog_path()}; continuing without it.")
     ctx["app"] = app
     ctx["staged"] = app_catalog.stage_configs(app) if app else []
+    _scope_config(rec, ctx)
     return app
+
+
+def _scope_config(rec, ctx):
+    """Mark rec['config'] 'app' when it is one of this app's own staged yamls.
+
+    Both kinds live in ~/.fixs/apps/<id>/ - the app's AUTHORED yamls and the ones
+    generated per map - and only the scope tells them apart. --config records 'map'
+    because it cannot know; here the app is bound, so it can. Getting this wrong is
+    not cosmetic: the generator writes over a 'map'-scoped path that does not exist
+    yet, which for an app yaml means replacing the file the app shipped with a
+    probe-shaped one, and the run then quietly does something else."""
+    chosen = rec.get("config")
+    if not chosen:
+        return
+    staged = {os.path.normcase(os.path.abspath(s["path"])) for s in ctx.get("staged") or []}
+    if os.path.normcase(os.path.abspath(chosen)) in staged:
+        rec["config_scope"] = "app"
 
 
 def _apply_cli(rec, args):
@@ -1804,7 +1860,11 @@ def _apply_cli(rec, args):
     if args.map is not None:
         rec["map"], rec["map_origin"], rec["map_local"] = args.map, None, None
     if args.config is not None:
-        rec["config"], rec["config_scope"] = args.config, "map"
+        rec["config"] = args.config
+        # Scope is corrected against the app's staged yamls once the app is bound
+        # (_bind_app -> _scope_config): 'map' here is only the default for a path
+        # that turns out not to be one of the app's own.
+        rec["config_scope"] = "map"
     if args.engine is not None:
         rec["engine"] = args.engine
     if args.carla_host is not None:
@@ -2434,9 +2494,10 @@ def main():
     ap.add_argument("--fresh", action="store_true",
                     help="ignore the saved run profile and ask every question again")
     ap.add_argument("--sumocfg", default=None,
-                    help="SUMO .sumocfg. Optional: if omitted it comes from the chosen "
-                         "map bundle's sumo/ (a DT-Library map ships its scenario). Pass "
-                         "it to override with your own demand on a shared map.")
+                    help="SUMO .sumocfg. Optional: if omitted it comes from the "
+                         "application's apps.json 'sumocfg' if it declares one, else "
+                         "the chosen map bundle's sumo/ (a DT-Library map ships its "
+                         "scenario). Pass it to override with your own demand.")
     ap.add_argument("--map", default=None,
                     help="Map to run: a Digital-Twin-Library location (e.g. 'roosevelt'), "
                          "or an already-cooked map name. If omitted, pick from the catalog "
@@ -2701,6 +2762,11 @@ def main():
             sys.exit(f"[cosim] '{app['id']}' is missing its declared dependencies; "
                      f"not starting the run.")
 
+    # Settled here, before anything reaches for a map bundle: an app that ships its
+    # own scenario needs no sumo/ half at all, and asking for one would prompt over a
+    # ~380MB archive whose SUMO content is about to be thrown away.
+    app_sumocfg = app_catalog.app_sumocfg(app) if app else None
+
     def cached_sumo_dir(name):
         """An already-extracted ~/.fixs/maps/<name>/sumo, or None.
 
@@ -2710,10 +2776,10 @@ def main():
         sumo/ already extracted would immediately throw away. There is more than
         one such site - the source-build preflight, and the SUMO slot below that
         also runs for --no-launch / packaged builds - and fixing only one of them
-        just moves the prompt. --sumocfg and --reimport deliberately bypass it:
-        one supplies the scenario outright, the other means "refresh from the
-        bundle"."""
-        if args.sumocfg is not None or args.reimport:
+        just moves the prompt. --sumocfg, an app-declared sumocfg and --reimport
+        deliberately bypass it: the first two supply the scenario outright, the
+        last means "refresh from the bundle"."""
+        if args.sumocfg is not None or app_sumocfg is not None or args.reimport:
             return None
         found = import_map.map_sumo_dir(name)
         if found:
@@ -2810,7 +2876,9 @@ def main():
         # download_release_zip caches under ~/.fixs/maps; open_bundle splits it.
         carla_src = None
         need_bundle = (resolved is None                          # must cook the map
-                       or (args.sumocfg is None and sumo_dir is None))   # need its sumo/
+                       or (args.sumocfg is None                  # need its sumo/
+                           and app_sumocfg is None
+                           and sumo_dir is None))
         if need_bundle and (picked_local or picked_tag):
             zip_path = picked_local or import_map.download_release_zip(
                 repo, picked_tag, force_redownload=args.reimport, cache_name=target_map)
@@ -2861,11 +2929,21 @@ def main():
         if note:
             print(note)
 
-    # SUMO slot: --sumocfg wins; else an already-extracted sumo/, else the chosen
-    # bundle's. This also runs for the paths that skip the source-build preflight
-    # above (--no-launch, packaged builds), so the cache is checked here too - the
-    # bundle is the LAST resort, not the first.
+    # SUMO slot: --sumocfg wins; else the app's own declared scenario; else an
+    # already-extracted sumo/, else the chosen bundle's. This also runs for the paths
+    # that skip the source-build preflight above (--no-launch, packaged builds), so
+    # the cache is checked here too - the bundle is the LAST resort, not the first.
+    #
+    # The app sits above the bundle because a bundle ships ONE app-independent
+    # scenario: an app whose run needs its own (mlk_eco_driving's ego is declared in
+    # its route file) would otherwise be a --sumocfg the user has to remember every
+    # time, on top of an entry point whose whole point is that they do not.
     sumocfg = args.sumocfg
+    app_owns_scenario = False
+    if sumocfg is None and app_sumocfg:
+        sumocfg = app_sumocfg
+        app_owns_scenario = True
+        print(f"[cosim] SUMO scenario: '{app['id']}' declares {app['sumocfg']}")
     if sumocfg is None:
         if sumo_dir is None:
             sumo_dir = cached_sumo_dir(target_map)
@@ -3282,11 +3360,13 @@ def main():
         if backend == "cpp":
             print(f"[cosim] engine=cpp (FIXS-native); config {config_yaml}")
             return run_native_stack(config_yaml, sumocfg, tl_table, cfg, args, app,
-                                    ctl_sock=ctl_sock)
+                                    ctl_sock=ctl_sock,
+                                    app_owns_scenario=app_owns_scenario)
 
         print("[cosim] engine=py (run_synchronization.py)")
         return run_python_bridge(config_yaml, sumocfg, tl_table, tls_manager,
-                                 no_net_offset, args, app)
+                                 no_net_offset, args, app,
+                                 app_owns_scenario=app_owns_scenario)
     finally:
         # Say goodbye BEFORE tearing down locally: the peer is blocked on this
         # socket, and a clean BYE lets it report "the peer finished" rather than a
