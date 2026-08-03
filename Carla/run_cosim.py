@@ -23,6 +23,7 @@ import argparse
 import json
 import os
 import platform
+import shutil
 import signal
 import socket
 import subprocess
@@ -1374,6 +1375,178 @@ def _ask(prompt, default=None):
         return default or ""
 
 
+def _config_menu(who, options, app_paths):
+    """The scenario row: pick a yaml, or edit the current one in place.
+
+    Picking a file was the only thing this offered, and with a single generated
+    yaml - the normal case - that meant selecting the row did nothing visible at
+    all. What people want here is usually to change a value, not to switch files,
+    so 'e' is on the same list as the files."""
+    current = options[0][0]
+    while True:
+        print(f"\n[cosim] Scenario config for {who}:")
+        for i, (path, label) in enumerate(options, 1):
+            mark = "  (current)" if path == current else ""
+            print(f"   {i}) {label}{mark}")
+        print("   ---")
+        print("   e) edit the current one in your editor")
+        if not sys.stdin.isatty():
+            return current
+        ans = _ask(f"[cosim] Which? [1-{len(options)} / e], Enter = keep "
+                   f"{os.path.basename(current)}: ").strip().lower()
+        if ans == "":
+            return current
+        if ans == "e":
+            edit_yaml_in_editor(current)
+            continue                       # redraw: the file may now say something else
+        if ans.isdigit() and 1 <= int(ans) <= len(options):
+            current = options[int(ans) - 1][0]
+            print(f"[cosim] scenario config: {current}")
+            return current
+        print("[cosim] enter a number from the list, or e to edit.")
+
+
+class _Parser(argparse.ArgumentParser):
+    """argparse, minus the wall of text on a mistake.
+
+    The default error() prints the whole usage line first - here, 47 options
+    wrapping over twelve lines - and then one sentence saying what was actually
+    wrong. Forgetting a value for --sumocfg should not answer with every flag the
+    engine has; it buries the one line that matters and it is the same dump the
+    wrapper's --help exists to avoid. Say what is wrong, then where to look."""
+
+    def error(self, message):
+        sys.stderr.write(f"\n[cosim] {message}\n\n"
+                         f"        run_cosim --help          the common options\n"
+                         f"        run_cosim.py --help       every engine option\n")
+        sys.exit(2)
+
+
+def _open_in_editor(path):
+    """Open `path` in whatever editor this machine has. True if something started.
+
+    Order matters. $VISUAL / $EDITOR first: they are set deliberately and they
+    work with no display - which is the render host over SSH, exactly where
+    someone is most likely to be poking at a config with no GUI. Then the
+    platform default, and a terminal editor last so a headless box is never left
+    with nothing."""
+    env_editor = os.environ.get("VISUAL") or os.environ.get("EDITOR")
+    if env_editor:
+        try:
+            subprocess.Popen([env_editor, path])
+            return True
+        except Exception:
+            pass
+    try:
+        if platform.system() == "Windows":
+            try:
+                os.startfile(path)                  # the file association
+                return True
+            except Exception:
+                subprocess.Popen(["notepad", path])
+                return True
+        if platform.system() == "Darwin":
+            subprocess.Popen(["open", path])
+            return True
+        if os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"):
+            subprocess.Popen(["xdg-open", path])
+            return True
+        for term in ("nano", "vi"):
+            if shutil.which(term):
+                subprocess.call([term, path])       # blocks, and should
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _yaml_snapshot(path):
+    """Every scalar in the scenario yaml as {Block.Key: text}, for diffing an edit.
+
+    Deliberately dumb - two-level indent is what this file is - because the point
+    is to SHOW what changed, not to re-implement a parser."""
+    snap, block = {}, ""
+    try:
+        with open(path, encoding="utf-8-sig") as f:
+            for line in f:
+                raw = line.rstrip("\n")
+                if not raw.strip() or raw.lstrip().startswith("#"):
+                    continue
+                if not raw.startswith((" ", "\t")) and raw.rstrip().endswith(":"):
+                    block = raw.strip().rstrip(":")
+                elif ":" in raw and raw.startswith((" ", "\t")):
+                    k, v = raw.split(":", 1)
+                    v = v.split("#", 1)[0].strip()
+                    if v:
+                        snap[f"{block}.{k.strip()}"] = v
+    except OSError:
+        pass
+    return snap
+
+
+def _yaml_problems(path):
+    """Validation that would otherwise only bite at runtime."""
+    out = []
+    tick = _yaml_float(path, "CarlaSetup", "CarlaTimeStep", 0.0)
+    if tick:
+        slots = FIXS_FEED_S / tick
+        if tick > FIXS_FEED_S + 1e-9 or abs(slots - round(slots)) > 1e-6:
+            out.append(f"CarlaSetup.CarlaTimeStep = {tick:g} - must be the FIXS feed "
+                       f"({FIXS_FEED_S:g} s) or an exact divisor of it "
+                       f"({', '.join(str(c) for c in CARLA_TICK_CHOICES)}), else no "
+                       f"CARLA tick lands on an exchange boundary and the bridge "
+                       f"trades nothing.")
+    return out
+
+
+def edit_yaml_in_editor(path):
+    """Open the scenario yaml, wait for the user, then re-read and report.
+
+    Do NOT wait on the editor process: notepad blocks, `code` returns instantly,
+    vi blocks in the terminal. The Enter prompt covers all three, and it is also
+    what lets someone keep the editor open while fixing a validation failure.
+
+    The yaml is written to be READ - every block carries comments saying what a
+    key means and what breaks if it is wrong - so handing the whole file to an
+    editor beats prompting key by key, which shows a bare value and throws the
+    explanation away."""
+    before = _yaml_snapshot(path)
+    print(f"\n[cosim] opening {os.path.basename(path)} in your editor ...\n"
+          f"        {path}\n"
+          f"        View it, change it, save it. You can leave the editor open.")
+    if not _open_in_editor(path):
+        print("[cosim] could not launch an editor - open the path above yourself.")
+    while True:
+        ans = _ask("[cosim] Press Enter when you have saved  (Q = leave it): ").lower()
+        if ans.startswith("q"):
+            return
+        after = _yaml_snapshot(path)
+        changed = [(k, before.get(k), after[k]) for k in sorted(after)
+                   if before.get(k) != after[k]]
+        gone = [k for k in sorted(before) if k not in after]
+        if changed or gone:
+            print(f"[cosim] {os.path.basename(path)} re-read:")
+            for k, was, now in changed:
+                print(f"          {k:<36} {was if was is not None else '(new)'}  ->  {now}")
+            for k in gone:
+                print(f"          {k:<36} removed")
+        else:
+            print(f"[cosim] {os.path.basename(path)} is unchanged.")
+        # Validate HERE, not at runtime in C++. mainVirCarla already refuses a tick
+        # that does not divide the feed - but only once a run has started, by which
+        # point the editor is closed and the reason is a wall away.
+        bad = _yaml_problems(path)
+        if _read_scenario_config(path) is None:
+            bad.append(f"{os.path.basename(path)} could not be parsed - check the "
+                       f"indentation of what you just edited.")
+        if not bad:
+            before = after
+            return
+        for msg in bad:
+            print(f"[cosim] FAIL {msg}")
+        print("[cosim] Fix it and press Enter to re-check, or Q to leave it as is.")
+
+
 def _menu(title, options, current=None):
     """Numbered single-choice menu. `options` is [(value, label)]. Enter keeps
     `current` when it is one of the values, else takes the first. Returns a value."""
@@ -1780,6 +1953,128 @@ def ask_peer_to_serve(args, target_map):
             sys.exit(f"[peer] the CARLA host could not serve it: {msg.get('why')}")
 
 
+class _Tee:
+    """Write to the console and to a log file at once."""
+
+    def __init__(self, stream, fh):
+        self._stream, self._fh = stream, fh
+
+    def write(self, data):
+        # FILE FIRST, console second. On Windows a console selection (QuickEdit)
+        # blocks writes to the console, so console-first would let a stall take
+        # the log with it - and the log would stop exactly when something
+        # interesting was happening.
+        try:
+            self._fh.write(data)
+            self._fh.flush()
+        except Exception:
+            pass
+        self._stream.write(data)
+        return len(data)
+
+    def flush(self):
+        self._stream.flush()
+        try:
+            self._fh.flush()
+        except Exception:
+            pass
+
+    def isatty(self):
+        # Follows the CONSOLE, not the file. run_cosim decides whether to prompt
+        # from this, so returning the file's False would quietly turn an
+        # interactive run non-interactive just because logging was on.
+        return self._stream.isatty()
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+
+def start_log(path=None):
+    """Tee stdout/stderr into RealSim_tmp/run_cosim_<host>_<stamp>.log."""
+    if path is None:
+        out = os.path.join(os.getcwd(), "RealSim_tmp")
+        os.makedirs(out, exist_ok=True)
+        path = os.path.join(out, f"run_cosim_{socket.gethostname()}_"
+                                 f"{time.strftime('%Y%m%d_%H%M%S')}.log")
+    fh = open(path, "w", encoding="utf-8", errors="replace")
+    fh.write(f"# run_cosim {' '.join(sys.argv[1:])}\n"
+             f"# {socket.gethostname()}  {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+    sys.stdout, sys.stderr = _Tee(sys.stdout, fh), _Tee(sys.stderr, fh)
+    print(f"[cosim] logging this run to {path}")
+    return path
+
+
+def _tell_peer(sock, stage, msg):
+    """Report a milestone to the waiting traffic machine, if there is one.
+
+    Cooking a map is minutes of legitimate silence on the other end. A heartbeat
+    proves the process is alive; this says WHAT it is doing, which is the
+    difference between "still waiting (300s)" and "cooking roosevelt_full"."""
+    if sock is None:
+        return
+    import peer
+    peer.progress(sock, stage, msg)
+
+
+def _who_has_port(port):
+    """(pid, process name) LISTENING on `port`, or None. Handed to doctor so it can
+    name what is squatting on the CARLA port instead of only noting that something
+    is."""
+    pid = _pid_on_port(port)
+    return (pid, _process_name(pid) or "unknown") if pid else None
+
+
+def _doctor_role(doctor, cfg, args):
+    """role= and why= for doctor.run(). An explicit --role wins and reports no
+    inference, because there is nothing inferred to explain."""
+    if args.role:
+        return {"role": args.role, "why": None}
+    role, why = doctor.detect_role(cfg, FIXS_ROOT)
+    return {"role": role, "why": why}
+
+
+def _peek_any_endpoint():
+    """Best-effort (host, port) from the most recently used setup's yaml, so
+    --doctor and --version can check the CARLA you actually talk to without
+    being told. Returns (None, None) when there is nothing to read."""
+    try:
+        doc = run_profile.load_doc()
+        name = doc.get("last")
+        rec = (doc.get("setups") or {}).get(name) or {}
+        path = rec.get("config")
+        if path and os.path.isfile(path):
+            return read_carla_endpoint(path)
+    except Exception:
+        pass
+    return None, None
+
+
+def print_fingerprint(cfg, host, port):
+    """One block identifying what is installed here. The first thing to paste
+    into a bug report, and the quickest way to see two machines disagree."""
+    py = (cfg or {}).get("python") or sys.executable
+    print(f"[cosim] run fingerprint - {socket.gethostname()} ({platform.system()})")
+    print(f"  FIXS       {_fixs_version()}")
+    build = os.path.join(FIXS_ROOT, "BUILD_INFO.txt")
+    if os.path.isfile(build):
+        with open(build, encoding="utf-8-sig", errors="replace") as f:
+            for line in f:
+                if line.strip().startswith("Git Commit:"):
+                    print(f"  commit     {line.split(':', 1)[1].strip()}")
+                    break
+    print(f"  python     {py}")
+    for mod in ("carla", "traci", "yaml", "pandas", "shapely"):
+        rc = subprocess.call([py, "-c", f"import {mod}"],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        print(f"    {mod:<8} {'present' if rc == 0 else 'MISSING'}")
+    sumo = shutil.which("sumo") or shutil.which("sumo-gui")
+    print(f"  SUMO       {sumo or 'not on PATH'}")
+    print(f"  CARLA      mode {(cfg or {}).get('mode', 'not configured')}, "
+          f"endpoint {host}:{port}"
+          f"{'  [this machine]' if _is_local_host(host) else '  [remote]'}")
+    return 0
+
+
 def _fixs_version():
     try:
         with open(os.path.join(FIXS_ROOT, "FIXS_VERSION.txt"), encoding="utf-8") as f:
@@ -2081,18 +2376,9 @@ def edit_config(staged, app_title, map_name, setup_app_id):
 
     who = f"{app_title} on '{map_name}'" if app_title else f"'{map_name}'"
     app_paths = {c["path"] for c in staged}
-    if len(options) == 1:
-        # Say so. Picking this slot and getting no menu, no message and no change
-        # is indistinguishable from the editor being broken - which is how it was
-        # reported. There is nothing to choose between, and that is worth stating.
-        only = options[0][0]
-        print(f"[cosim] scenario config for {who}: only one exists, so there is "
-              f"nothing to choose -\n"
-              f"        {only}\n"
-              f"        (drop another .yaml beside it, or in this app's folder, to "
-              f"get a choice here.)")
-        return only, ("app" if only in app_paths else "map")
-    picked = _menu(f"Scenario config for {who}:", options)
+    # WHICH yaml is only half of it: mostly there is one, and what people actually
+    # want is to change what is IN it. So the list always offers the file itself.
+    picked = _config_menu(who, options, app_paths)
     print(f"[cosim] scenario config: {picked}")
     return picked, ("app" if picked in app_paths else "map")
 
@@ -2111,8 +2397,8 @@ def declared_engine(staged, config_yaml):
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = _Parser(description=__doc__,
+                 formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--app", default=None,
                     help="application to run, by id, from the app repo's apps/apps.json. "
                          "Omit it and you pick from the declared apps; the choice "
@@ -2193,10 +2479,29 @@ def main():
     ap.add_argument("--prep-only", action="store_true",
                     help="import the map + place traffic lights and signs, then stop "
                          "(do not launch CARLA or run the co-sim)")
-    ap.add_argument("--no-quickedit-fix", action="store_true",
-                    help="do not disable the Windows console's QuickEdit mode "
-                         "(QuickEdit lets a stray click block stdout and stall the "
-                         "run until Enter is pressed)")
+    ap.add_argument("--doctor", action="store_true",
+                    help="check this machine can run a co-sim (python deps, SUMO, "
+                         "FIXS binaries, CARLA, peer, maps, gh auth) and exit; "
+                         "non-zero exit if anything is broken")
+    ap.add_argument("--role", choices=["traffic", "render"], default=None,
+                    help="which half of a distributed co-sim this machine is; "
+                         "--doctor infers it from what is installed here, and this "
+                         "overrides that")
+    ap.add_argument("--version", action="store_true",
+                    help="print the run fingerprint (FIXS, CARLA, SUMO, python) and "
+                         "exit - what to paste into a bug report")
+    ap.add_argument("--log", action="store_true",
+                    help="tee this run's console output to "
+                         "RealSim_tmp/run_cosim_<host>_<stamp>.log. Run it on BOTH "
+                         "machines to get the two halves of a distributed run.")
+    ap.add_argument("--log-file", default=None,
+                    help="log to this path instead of the default (implies --log)")
+    ap.add_argument("--no-quickedit", action="store_true",
+                    help="Windows: turn off the console's QuickEdit mode for this "
+                         "run. QuickEdit is what lets you select text with the mouse, "
+                         "but a stray click then blocks stdout and stalls the co-sim "
+                         "until you press Enter. Worth it for a long unattended run; "
+                         "costs you mouse copy/paste.")
     ap.add_argument("--serve", action="store_true",
                     help="CARLA host: wait for the traffic machine, serve the map it "
                          "asks for, and hold CARLA until it disconnects. Like "
@@ -2245,10 +2550,36 @@ def main():
                          "and waits for you to press Play (overrides SumoSetup.AutoStart)")
     args = ap.parse_args()
 
-    # Before anything prints: a stray click in a Windows console blocks stdout and
-    # stalls the whole run, which is indistinguishable from a hang.
-    if not args.no_quickedit_fix:
+    # OFF by default. Disabling QuickEdit costs mouse selection in cmd, and losing
+    # copy/paste on every run is a worse trade than an occasional freeze that Enter
+    # clears - the freeze is at least recoverable, and the title bar says "Select"
+    # while it is happening. --no-quickedit for unattended runs, where nobody is
+    # there to press Enter.
+    if args.no_quickedit:
         _disable_quickedit()
+    if args.log or args.log_file:
+        start_log(args.log_file)
+
+    # --doctor and --version answer a question and stop. Neither touches a map, a
+    # setup or a server, so they are safe to run at any time - including while a
+    # co-sim is going, which is exactly when someone wants them.
+    if args.doctor or args.version:
+        cfg = env.load_config()
+        host, port = args.carla_host, args.carla_port
+        if host is None or port is None:
+            peek_host, peek_port = _peek_any_endpoint()
+            host = host or peek_host or DEFAULT_CARLA_HOST
+            port = port or peek_port or DEFAULT_CARLA_PORT
+        if args.version:
+            return print_fingerprint(cfg, host, port)
+        import doctor
+        import peer
+        return doctor.run(cfg, env, FIXS_ROOT,
+                          os.path.join(os.path.dirname(env.CONFIG_PATH), "maps"),
+                          host, port, _fixs_version(),
+                          peer_port=args.peer_port or peer.peer_port(port),
+                          who_has_port=_who_has_port,
+                          **_doctor_role(doctor, cfg, args))
 
     # --carla-only holds a CARLA this machine launched, so the flags that mean
     # "launch nothing" contradict it outright. Caught here rather than later
@@ -2450,6 +2781,8 @@ def main():
                 real = import_map.map_name_in(carla_src) or target_map
                 verb = "re-importing" if args.reimport else "importing"
                 print(f"[cosim] {verb} '{real}' before launch ...")
+                _tell_peer(ctl_sock, "cook", f"importing and cooking '{real}' - "
+                           f"this is the slow one (Unreal + shaders)")
                 import_map.ensure_map(real, carla_root=cfg["carla_root"],
                                       ue4_root=cfg.get("ue4_root"),
                                       package_dir=carla_src, force=args.reimport)
@@ -2460,6 +2793,8 @@ def main():
                     url = url or import_map.read_map_config(args.map_config).get("url")
                 verb = "re-importing" if args.reimport else "importing"
                 print(f"[cosim] {verb} map '{target_map}' before launch ...")
+                _tell_peer(ctl_sock, "cook", f"importing and cooking "
+                           f"'{target_map}' - this is the slow one (Unreal + shaders)")
                 import_map.ensure_map(target_map, carla_root=cfg["carla_root"],
                                       ue4_root=cfg.get("ue4_root"),
                                       package_url=url, force=args.reimport)
@@ -2716,6 +3051,8 @@ def main():
                 # the saved .umap baked in.
                 if imported_now or not placed:
                     print(f"[cosim] placing traffic lights for '{target_map}' before launch ...")
+                    _tell_peer(ctl_sock, "place_tls",
+                               f"placing traffic lights for '{target_map}'")
                     place_tls.place_tls(target_map, tl_table, carla_root=cfg["carla_root"],
                                         ue4_root=cfg.get("ue4_root"), force=args.reimport,
                                         bundle_dirs=bundle_dirs)
@@ -2726,6 +3063,8 @@ def main():
         if (not place_signs.signs_placed(cfg["carla_root"], target_map)) or args.reimport:
             if imported_now:
                 print(f"[cosim] placing road signs for '{target_map}' before launch ...")
+                _tell_peer(ctl_sock, "place_signs",
+                           f"placing road signs for '{target_map}'")
                 place_signs.place_signs(target_map, carla_root=cfg["carla_root"],
                                         ue4_root=cfg.get("ue4_root"), force=args.reimport)
 
@@ -2773,6 +3112,7 @@ def main():
                     sys.exit(
                         f"[cosim] port {args.carla_port} is in use by a non-CARLA process "
                         f"({name or 'unknown'}); free it or pass --no-launch to use what's running.")
+            _tell_peer(ctl_sock, "launch", "starting the CARLA server")
             carla_proc = launch_carla(cfg, args.carla_port, args.render_offscreen,
                                       args.quality_level, target_level)
             if not wait_for_port(args.carla_host, args.carla_port):
@@ -2841,6 +3181,8 @@ def main():
             client.load_world(load_arg)
         # Don't trust load_world's return alone on a heavy source map: confirm the
         # world IS this map and is ticking before we start SUMO.
+        _tell_peer(ctl_sock, "load", f"loading '{target_map}' into CARLA "
+                   f"(a freshly cooked map compiles shaders here)")
         print(f"[CARLA] confirming '{target_map}' is loaded and ready ...")
         loaded = confirm_world_ready(client, target_map, args.load_timeout)
         if loaded is None:
