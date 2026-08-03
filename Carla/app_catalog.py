@@ -27,6 +27,12 @@ Schema (schema: 1)
       "note":   "...",                  # optional, printed when the app is picked
       "maps":   ["roosevelt", ...],     # optional, DEFAULT ["<id>"]; first = default pick
       "configs":[ <config>, ... ],      # optional app-owned scenario yamls
+      "sumocfg": "Scenario/x.sumocfg",  # optional: this app's OWN SUMO scenario,
+                                        #   relative to the app folder. Absent -> the
+                                        #   map bundle's, exactly as before.
+      "launch": "run_my_app --attach",  # optional: a command run alongside the stack
+                                        #   (the app's controller / XIL host). See
+                                        #   below - run_cosim does not read its args.
       "defaults": {                     # optional per-app run defaults (CLI wins)
         "engine": "py"|"cpp", "sumo_gui": true
       },                                # no timestep: the scenario yaml owns the
@@ -45,9 +51,31 @@ ships ONE app-independent scenario, and a co-sim requirement does not belong in 
 shared artifact - otherwise every new map needs the same edit before it works. So
 run_cosim injects the convention on the SUMO command line (printed, with each flag's
 origin) and an app deviates HERE, tracked and reviewed next to its declaration,
-valid on every map that app runs against. An app that needs different DEMAND does not
-belong here either: that is a different scenario, and it ships as files in the app
-folder (see mlk_eco_driving) chosen with --sumocfg.
+valid on every map that app runs against.
+
+An app that needs different DEMAND declares `sumocfg`: a scenario it ships in its own
+folder, used instead of the bundle's. That also switches the SUMO convention OFF - the
+convention exists because a SHARED artifact must not carry one consumer's co-sim
+requirement, and an app that authored the file has no such problem, so imposing
+sublane and junction collision checks on it would be changing a scenario behind its
+author's back. The CONTRACT (--step-length: one SUMO step per FIXS exchange) still
+applies - that is the protocol, not a preference - and `sumo_args` still adds
+whatever else the app wants, so what SUMO got is still one printed list.
+
+Not to be confused with the map catalog's own `sumocfg` (catalog.json): that names a
+file INSIDE a bundle's sumo/, this one is a path relative to the app folder. When both
+exist the app's wins, because the app is the more specific declaration.
+
+`launch` is how an application gets to run under the one entry point. run_cosim starts
+SUMO, TrafficLayer and the bridge; an app that also has a controller to attach names
+it here, and the user keeps typing `run_cosim` and nothing else. Deliberately opaque:
+run_cosim resolves the command in the app folder (extensionless -> .bat on Windows,
+.sh elsewhere, the convention run_cosim / import_map / place_tls already use), starts
+it once TrafficLayer is serving, and supervises it like any other component. It never
+parses the arguments, so what the command needs is the app's business and adding an
+app costs no engine change. The command must start ONLY the controller: SUMO and
+TrafficLayer are already running, and a second copy would fight for the TraCI and
+bridge ports.
 
 A map is just a NAME - the word the picker matches against what already exists:
 a Digital-Twin-Library location / cooked map name / release tag (catalog_entry
@@ -138,6 +166,48 @@ def apps_home(app_id=None):
 def app_dir(app, root=None):
     """Absolute path of the app's folder under apps/ (entry['dir'], else its id)."""
     return os.path.join(root or app_root(), "apps", app.get("dir") or app["id"])
+
+
+def app_sumocfg(app, root=None):
+    """Absolute path of the app's declared `sumocfg`, or None if it declares none.
+
+    None is the normal case and means "use the map bundle's", so a caller can ask
+    unconditionally. A declared path that does not exist is NOT silently ignored:
+    falling back to the bundle would run a different scenario than the app asked
+    for, which is exactly the kind of substitution that reads as a physics bug."""
+    if not app or not app.get("sumocfg"):
+        return None
+    path = os.path.join(app_dir(app, root), app["sumocfg"])
+    if not os.path.isfile(path):
+        _warn(f"app '{app['id']}': sumocfg '{app['sumocfg']}' not found at {path}.")
+        return None
+    return path
+
+
+def launch_command(app, root=None):
+    """(argv, cwd) for the app's `launch` command, or (None, None) if it declares none.
+
+    The first token is resolved in the app folder and given the platform's script
+    extension when it has none - `run_mlk_eco_driving` -> run_mlk_eco_driving.bat on
+    Windows, .sh elsewhere - which is the convention run_cosim / import_map /
+    place_tls already ship both halves of. Everything after the first token is passed
+    through verbatim and never interpreted: the app owns its own arguments."""
+    if not app or not app.get("launch"):
+        return None, None
+    import shlex
+    parts = shlex.split(app["launch"], posix=(os.name != "nt"))
+    if not parts:
+        return None, None
+    here = app_dir(app, root)
+    exe = parts[0]
+    if not os.path.splitext(exe)[1]:
+        exe += ".bat" if os.name == "nt" else ".sh"
+    path = exe if os.path.isabs(exe) else os.path.join(here, exe)
+    if not os.path.isfile(path):
+        _warn(f"app '{app['id']}': launch command '{app['launch']}' not found "
+              f"at {path}; nothing will be started for it.")
+        return None, None
+    return [path] + parts[1:], here
 
 
 def scenario_dir(app_id, map_name=None):
@@ -298,6 +368,16 @@ def _normalize_app(raw):
     # upstream would put every FIXS consumer's env at the mercy of one application.
     # Absent -> the app declares none, and nothing is installed for it.
     requirements = (raw.get("requirements") or "").strip() or None
+    # This app's own SUMO scenario, relative to the app folder. A bundle ships ONE
+    # app-independent scenario; an app whose run needs a different one (a statically
+    # declared ego, its own demand) says so here rather than making every user type
+    # --sumocfg. Absent -> the bundle's, exactly as before.
+    sumocfg = (raw.get("sumocfg") or "").strip() or None
+    # A command run alongside the co-sim stack - the app's controller, XIL host, or
+    # whatever else attaches to TrafficLayer. Kept as one opaque string: run_cosim
+    # resolves it in the app folder and never reads its arguments, so what an app
+    # needs to pass itself costs no change here.
+    launch = (raw.get("launch") or "").strip() or None
     return {"id": app_id,
             "title": (raw.get("title") or "").strip() or app_id,
             "dir": (raw.get("dir") or "").strip() or app_id,
@@ -306,7 +386,9 @@ def _normalize_app(raw):
             "configs": configs,
             "defaults": defaults,
             "sumo_args": sumo_args,
-            "requirements": requirements}
+            "requirements": requirements,
+            "sumocfg": sumocfg,
+            "launch": launch}
 
 
 def load_catalog(root=None):
