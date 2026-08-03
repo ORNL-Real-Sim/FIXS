@@ -534,7 +534,7 @@ def _tl_junction_ids(tl_table):
 
 
 def generate_config_yaml(path, tl_table, carla_host, carla_port, realtime=True,
-                         carla_tick=FIXS_FEED_S, backend="py",
+                         carla_tick=FIXS_FEED_S, backend="cpp",
                          traci_port=DEFAULT_TRACI_PORT, bridge_port=DEFAULT_BRIDGE_PORT):
     """Write a probe-shaped VirCarlaEnv scenario config: mirror EVERY SUMO vehicle
     (#176 all:['true']) into CARLA and sync the tl_table's junctions. Visualization-
@@ -1664,7 +1664,7 @@ def derived_from_yaml(config_yaml, staged, args=None):
         # change look like it had been ignored - you set engine=cpp, the write was
         # skipped because the file did not exist, and the summary redrew "py".
         return {"engine": (getattr(args, "engine", None)
-                           or declared_engine(staged, config_yaml) or "py"),
+                           or declared_engine(staged, config_yaml) or "cpp"),
                 "carla_host": getattr(args, "carla_host", None),
                 "carla_port": getattr(args, "carla_port", None),
                 # None (not False) when there is no endpoint yet: an unset host is not
@@ -2548,9 +2548,10 @@ def main():
     ap.add_argument("--no-sumo-gui", dest="sumo_gui", action="store_false",
                     help="run SUMO headless")
     ap.add_argument("--engine", choices=["py", "cpp"], default=None,
-                    help="co-sim bridge: py=run_synchronization.py (default), "
-                         "cpp=TrafficLayer+VirCarlaEnv (FIXS-native). Overrides the "
-                         "scenario yaml's CarlaSetup.Backend.")
+                    help="co-sim bridge: cpp=TrafficLayer+VirCarlaEnv (FIXS-native, "
+                         "the default for a newly generated yaml), "
+                         "py=run_synchronization.py. Overrides the scenario yaml's "
+                         "CarlaSetup.Backend.")
     ap.add_argument("--config", default=None,
                     help="[cpp] scenario yaml for the native bridge (default: "
                          "~/.fixs/maps/<cooked>/config.yaml, generated if missing).")
@@ -2888,7 +2889,7 @@ def main():
                              args.carla_port or DEFAULT_CARLA_PORT,
                              realtime=not args.fast,
                              carla_tick=args.carla_tick or FIXS_FEED_S,
-                             backend=args.engine or prior or "py")
+                             backend=args.engine or prior or "cpp")
 
     # --carla-tick / --fast are scenario settings, so they are written THROUGH to the
     # yaml instead of living for one process: both bridges then read the same file,
@@ -3245,8 +3246,9 @@ def main():
             return hold_carla(carla_proc, target_map, args, sock=ctl_sock)
 
         # Engine dispatch: CarlaSetup.Backend in that yaml picks the bridge
-        # (--engine overrides). cpp = FIXS-native (TrafficLayer + VirCarlaEnv); py
-        # (default) = the standalone run_synchronization.py bridge below.
+        # (--engine overrides). cpp = FIXS-native (TrafficLayer + VirCarlaEnv), and
+        # what a newly generated yaml declares; py = the standalone
+        # run_synchronization.py bridge below, which an existing yaml may still ask for.
         if backend == "cpp":
             print(f"[cosim] engine=cpp (FIXS-native); config {config_yaml}")
             return run_native_stack(config_yaml, sumocfg, tl_table, cfg, args, app,
