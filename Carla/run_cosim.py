@@ -1355,6 +1355,22 @@ def _config_menu(who, options, app_paths):
         print("[cosim] enter a number from the list, or e to edit.")
 
 
+class _Parser(argparse.ArgumentParser):
+    """argparse, minus the wall of text on a mistake.
+
+    The default error() prints the whole usage line first - here, 47 options
+    wrapping over twelve lines - and then one sentence saying what was actually
+    wrong. Forgetting a value for --sumocfg should not answer with every flag the
+    engine has; it buries the one line that matters and it is the same dump the
+    wrapper's --help exists to avoid. Say what is wrong, then where to look."""
+
+    def error(self, message):
+        sys.stderr.write(f"\n[cosim] {message}\n\n"
+                         f"        run_cosim --help          the common options\n"
+                         f"        run_cosim.py --help       every engine option\n")
+        sys.exit(2)
+
+
 def _open_in_editor(path):
     """Open `path` in whatever editor this machine has. True if something started.
 
@@ -2330,8 +2346,8 @@ def declared_engine(staged, config_yaml):
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = _Parser(description=__doc__,
+                 formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--app", default=None,
                     help="application to run, by id, from the app repo's apps/apps.json. "
                          "Omit it and you pick from the declared apps; the choice "
