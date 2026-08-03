@@ -2554,6 +2554,11 @@ def main():
     ap.add_argument("--config", default=None,
                     help="[cpp] scenario yaml for the native bridge (default: "
                          "~/.fixs/maps/<cooked>/config.yaml, generated if missing).")
+    ap.add_argument("--refresh-deps", action="store_true",
+                    help="re-apply the selected application's 'requirements' into "
+                         "the configured interpreter even if they were already "
+                         "applied. Normally they are installed once and skipped "
+                         "while the file is unchanged.")
     ap.add_argument("--no-update-check", action="store_true",
                     help="skip the FIXS-bundle freshness check against the release")
     ap.add_argument("--sumo-no-start", action="store_true",
@@ -2669,6 +2674,19 @@ def main():
 
     app, setup_name, staged_configs, setup, cfg, ctx = configure_run(
         args, cfg, repo, tag_prefix, catalog)
+
+    # The app is settled and we are already running under the configured interpreter
+    # (maybe_reexec above), so this is the first point where "what does THIS app
+    # need" is answerable. Deliberately here rather than later: it is still before
+    # any download, cook or load, so a missing package is reported while nothing
+    # slow has happened yet - instead of as an ImportError minutes into a run.
+    if app and app.get("requirements"):
+        if not env.ensure_app_deps(sys.executable, app["id"],
+                                   os.path.join(app_catalog.app_dir(app),
+                                                app["requirements"]),
+                                   refresh=args.refresh_deps):
+            sys.exit(f"[cosim] '{app['id']}' is missing its declared dependencies; "
+                     f"not starting the run.")
 
     def cached_sumo_dir(name):
         """An already-extracted ~/.fixs/maps/<name>/sumo, or None.
