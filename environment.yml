@@ -17,5 +17,10 @@ dependencies:
   - vs2015_runtime
   - vc14_runtime
   - pip
-  - pip:
-      - ./Carla/carla-0.9.15-cp310-cp310-win_amd64.whl
+  # No carla here on purpose. The release zip strips *.whl from Carla/
+  # (scripts/dispatch/8_create_zip.ps1), so a wheel path in this spec makes
+  # `conda env create -f environment.yml` fail on every machine that consumes a
+  # release - including carla_env_setup's own offer to create the env.
+  # carla_env_setup.ensure_carla() installs the client after the env exists, and
+  # picks the right one for the mode: the PyPI wheel (carla==0.9.15) for packaged
+  # and client, the source build's own wheel for a source build.

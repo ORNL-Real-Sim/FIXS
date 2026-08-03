@@ -292,6 +292,12 @@ def _normalize_app(raw):
     if not maps:
         maps = [app_id]
     configs = [c for c in (_normalize_config(c, app_id) for c in raw.get("configs") or []) if c]
+    # Extra python packages this app needs on top of the engine's own env, as a path
+    # relative to the app folder. The engine owns environment.yml and nothing else;
+    # an app's plotting or analysis stack is the app's business, and pushing it
+    # upstream would put every FIXS consumer's env at the mercy of one application.
+    # Absent -> the app declares none, and nothing is installed for it.
+    requirements = (raw.get("requirements") or "").strip() or None
     return {"id": app_id,
             "title": (raw.get("title") or "").strip() or app_id,
             "dir": (raw.get("dir") or "").strip() or app_id,
@@ -299,7 +305,8 @@ def _normalize_app(raw):
             "maps": maps,
             "configs": configs,
             "defaults": defaults,
-            "sumo_args": sumo_args}
+            "sumo_args": sumo_args,
+            "requirements": requirements}
 
 
 def load_catalog(root=None):
