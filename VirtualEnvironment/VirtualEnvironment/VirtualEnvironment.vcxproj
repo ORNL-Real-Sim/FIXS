@@ -22,17 +22,19 @@
     <ClCompile Include="..\..\CommonLib\ConfigHelper.cpp" />
     <ClCompile Include="..\..\CommonLib\MsgHelper.cpp" />
     <ClCompile Include="..\..\CommonLib\SocketHelper.cpp" />
-    <ClCompile Include="..\..\CommonLib\VirEnvHelper.cpp" />
-    <ClCompile Include="..\..\CommonLib\VirEnv_Wrapper.cpp" />
+    <ClCompile Include="..\..\CommonLib\VirEnvCore.cpp" />
+    <!-- #174: CarMaker-bound TUs (CarMakerBackend / VirEnvHelper / VirEnv_Wrapper)
+         are compiled into the CarMaker exe projects (CM11/CM13 CarMaker.vcxproj),
+         NOT archived here, so VirtualEnvironment.lib stays SDK-free (CI bucket). -->
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\CommonLib\ConfigHelper.h" />
+    <ClInclude Include="..\..\CommonLib\IVirEnvBackend.h" />
     <ClInclude Include="..\..\CommonLib\MsgHelper.h" />
     <ClInclude Include="..\..\CommonLib\PerformanceTimer.h" />
     <ClInclude Include="..\..\CommonLib\SocketHelper.h" />
     <ClInclude Include="..\..\CommonLib\VehDataMsgDefs.h" />
-    <ClInclude Include="..\..\CommonLib\VirEnvHelper.h" />
-    <ClInclude Include="..\..\CommonLib\VirEnv_Wrapper.h" />
+    <ClInclude Include="..\..\CommonLib\VirEnvCore.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>16.0</VCProjectVersion>

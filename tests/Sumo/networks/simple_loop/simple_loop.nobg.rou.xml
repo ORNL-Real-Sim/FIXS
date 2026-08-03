@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A/B observation aid: NO background traffic. Only the CM-injected egoCm runs.
+     With this, the SUMO-CM demo ego completes all 1000s cleanly (proves the ego/
+     road/speed are fine; the abort needs the SUMO background-traffic pattern). -->
+<routes xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/routes_file.xsd">
+    <vType id="car" vClass="passenger" length="5.0" minGap="2.5" maxSpeed="20.0" accel="2.6" decel="4.5" sigma="0.5" color="1,1,0"/>
+</routes>

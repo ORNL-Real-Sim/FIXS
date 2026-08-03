@@ -185,7 +185,6 @@ CommonLib/libsumo/
 ### `compileExternalLibraries.bat`
 Compiles required external dependencies:
 - **yaml-cpp** - YAML configuration parser library (builds both Release and Debug versions)
-- ~~libevent~~ (commented out - not currently used)
 
 **Requirements:** CMake, Visual Studio 2022
 

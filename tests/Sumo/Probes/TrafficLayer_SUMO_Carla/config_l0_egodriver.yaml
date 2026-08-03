@@ -1,0 +1,115 @@
+# =============================================================================
+# FIXS #174 -- SUMO <-> Carla co-simulation, EgoMode 1 "CarlaDriver" (L0).
+#
+# The L0 counterpart of the SUMO-CM office demo: background traffic is
+# SUMO-driven (teleported into Carla), but the EGO is a REAL Carla vehicle --
+# full PhysX dynamics (tire contact, powertrain). This file uses EgoL0Driver: Pursuit
+# -- the SDK-free EgoDriver module (pure pursuit + speed hold) drives the ego
+# through full PhysX. Map-agnostic: it ignores Carla's road graph, so it works
+# even where TM cannot route. For the native TM autopilot, see config_l0_tm.yaml.
+#
+# Data flow (note the ego direction is REVERSED vs the teleport demo):
+#
+#   SUMO --[bg traffic]--> TrafficLayer --[port 440]--> VirCarlaEnv --> Carla (teleport bg)
+#   Carla ego (EgoDriver)    --[VirCarlaEnv readback]--> TrafficLayer --moveToXY--> SUMO 'ego'
+#
+# EgoMode ladder (CarlaSetup.EgoMode):
+#   0 = SumoDriver  : SUMO drives the ego, Carla teleports it (config.yaml)
+#   1 = CarlaDriver : L0 -- this file
+#   2 = Advisory    : L2 -- + external desired-speed advisory via FIXS   [reserved]
+#   3 = Control     : L4 -- + external throttle/brake/steer via FIXS     [reserved]
+#
+# Run: run_sumo_carla_l0_egodriver.bat (one click). SUMO side runs the BACKGROUND-ONLY
+# scenario (simple_loop.sumocfg) -- the ego is injected by TrafficLayer from the
+# Carla readback (same mechanism as the CM office demo's egoCm).
+# =============================================================================
+
+SimulationSetup:
+    EnableRealSim: true
+    EnableVerboseLog: false
+
+    SelectedTrafficSimulator: 'SUMO'
+
+    SimulationEndTime: 1000
+
+    VehicleMessageField: [id, type, vehicleClass, speed, speedDesired, positionX, positionY, positionZ, heading, grade, length, width, height, color, linkId, laneId]
+
+    TrafficSimulatorIP: '127.0.0.1'
+    TrafficSimulatorPort: 1337
+
+SumoSetup:
+    SpeedMode: 32
+
+# Carla connects to the FIXS Application publish endpoint (ip/port[0] below).
+ApplicationSetup:
+    EnableApplicationLayer: true
+    VehicleSubscription:
+    -   type: ego
+        # Context subscription centered on the (TL-injected) ego -- same
+        # subscribe-before-exist pattern as the CM demo's egoCm. radius 500
+        # covers the whole SimpleLoop, so all bg vehicles reach Carla.
+        attribute: { id: ['ego'], radius: [500] }
+        ip: ['127.0.0.1']
+        port: [440]
+
+XilSetup:
+    EnableXil: false
+
+CarlaSetup:
+    EnableVerboseLog: true
+    EnableCosimulation: true
+
+    # true => TrafficLayer takes the ego state Carla publishes and injects it
+    # into SUMO (addEgoVehicleFromXY + moveToXY + setSpeed). Required for L0+.
+    EnableExternalControl: true
+
+    # ---- EgoMode 1: Carla drives the ego (L0) -------------------------------
+    EgoMode: 1
+    # L0 driver: "Pursuit" = SDK-free EgoDriver fallback module (map-agnostic).
+    # "TM" = native Carla Traffic Manager autopilot (config_l0_tm.yaml).
+    EgoL0Driver: Pursuit
+    EgoId: ego                          # FIXS/SUMO id of the injected ego
+    EgoSumoType: car                    # SUMO vType for injection (exists in simple_loop.rou.xml)
+    EgoBlueprint: vehicle.tesla.model3  # the Carla actor (physics ON)
+    EgoSpawnPose: [20.1, -3.0, 0.0, 90.0]   # [x, y, z, headingDeg] FIXS frame, on the loop
+    TrafficManagerPort: 8000   # reserved (TM unused by the built-in driver)
+
+    # Ego route (the CarMaker-Route analog) followed by the built-in driver.
+    # CLOSED loop: the driver wraps around it endlessly. These are the simple_loop
+    # 'loop' route lane-shape points INCLUDING the junction corner arcs (from
+    # simple_loop.net.xml; sharp chord-only corners make pure pursuit overshoot).
+    EgoRoutePoints: [[15.0, -3.0], [185.0, -3.0], [192.9, -1.9], [198.5, 1.5], [201.9, 7.1], [203.0, 15.0], [203.0, 185.0], [201.9, 192.9], [198.5, 198.5], [192.9, 201.9], [185.0, 203.0], [15.0, 203.0], [7.1, 201.9], [1.5, 198.5], [-1.9, 192.9], [-3.0, 185.0], [-3.0, 15.0], [-1.9, 7.1], [1.5, 1.5], [7.1, -1.9]]
+    EgoRouteRepeat: 50     # reserved (closed-loop driver wraps by itself)
+    EgoTargetSpeed: 8.33   # built-in driver cruise speed (m/s, ~30 kmh)
+
+    UseVehicleTypeAsBlueprint: false
+
+    CarlaServerIP: 127.0.0.1
+    CarlaServerPort: 2000
+
+    CarlaClientIP: 127.0.0.1
+    CarlaClientPort: 440
+
+    TrafficRefreshRate: 0.1
+
+    # Carla render/physics sub-step; interpolates the bg teleports (the ego is
+    # real physics at every tick regardless). See config.yaml for tuning notes.
+    CarlaTimeStep: 0.05
+
+    InterestedIds: ['ego']
+
+    # BEV camera follows the Carla-driven ego.
+    EnableSpectatorFollow: true
+    CenteredViewId: ego
+    SpectatorHeight: 50
+    SpectatorAlignYaw: false
+
+# Generic FIXS data logging (infrastructure -- CommonLib/DataLogger). Records the
+# ego's reported state in the SUMO/VISSIM wire convention, so the two L0 drivers
+# (EgoDriver here; native TM in config_l0_tm.yaml) compare directly via
+# tests/Sumo/Probes/TrafficLayer_SUMO_Carla/plot_l0_compare.py.
+DataLogSetup:
+    EnableDataLog: true
+    DataLogPath: '_datalog/l0_egodriver.csv'
+    DataLogWho: ['ego']
+    DataLogFields: [positionX, positionY, positionZ, heading, speed, speedDesired]

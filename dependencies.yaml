@@ -24,10 +24,6 @@ simulators:
     notes: "Proprietary - multiple versions in use (CM9, CM10, CM11, CM13)"
 
 libraries:
-  libevent:
-    location: "CommonLib/libevent"
-    notes: "Not currently used"
-
   yaml-cpp:
     location: "CommonLib/yaml-cpp"
     notes: "YAML configuration parser"

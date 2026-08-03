@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!-- Ego OVERLAY for the shared SimpleLoop scenario (FIXS #174).
+
+     Loaded ON TOP of the background simple_loop.rou.xml by simple_loop_ego.sumocfg,
+     for backends whose ego is SUMO-driven and must pre-exist in the network:
+       - SUMO-Carla:       Carla visualizes / centers its spectator on this 'ego'.
+       - SimpleEchoClient: the Python subscriber echoes this 'ego'.
+
+     NOT loaded for SUMO-CM; there CarMaker injects its own 'egoCm' and any
+     SUMO-side ego would reach CarMaker as a phantom on top of its real ego.
+
+     Self-contained: it defines its OWN vType + route ids (egoCar / egoLoop) so it
+     can never collide with the background file regardless of route-file load
+     order. The vehicle id stays 'ego' so it matches the ego subscription id in
+     the SUMO-Carla / SimpleEchoClient configs (radius/InterestedIds/CenteredViewId).
+
+     A real FIXS-injected Carla ego (so the demand stays ego-free for Carla too)
+     is deferred to the #174 PR4/5 backend work; this overlay is the interim. -->
+<routes xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/routes_file.xsd">
+
+    <!-- Ego vehicle type: RED, otherwise identical to the background 'car'. -->
+    <vType id="egoCar" vClass="passenger" length="5.0" minGap="2.5" maxSpeed="20.0" accel="2.6" decel="4.5" sigma="0.5" color="1,0,0"/>
+
+    <!-- Same geometry/edges as the background 'loop' route, distinct id.
+         repeat=1000 (not 100000): `repeat` expands the edge list literally, and a
+         400k-edge route made per-veh getNextTLS O(route) ~2.5 ms/veh (#177). 1000
+         laps still circulate well past any sim end. -->
+    <route id="egoLoop" edges="-1 -2 -3 -4" repeat="1000"/>
+
+    <!-- Single ego vehicle: RED, circulates endlessly. -->
+    <vehicle id="ego" type="egoCar" route="egoLoop" depart="0" color="1,0,0"/>
+
+</routes>

@@ -1,0 +1,218 @@
+name: Release (public core)
+
+# Automated release pipeline for #191 / #57 - two rolling channels, one workflow:
+#
+#   push -> main          publishes the 'latest' prerelease   (current train)
+#   push -> dev_v0.9.0    publishes the 'alpha_v0.9.0' prerelease (0.9.0 train)
+#
+# On pull requests it builds + packages only (NO publish) as a build gate.
+#
+# The build runs the real dispatch flow with RS_FIXS_AUTOMATION, so the licensed
+# toolchain steps (VISSIM 3, CarMaker 5a, dSPACE 5b, MEX 6) are skipped. On the
+# 0.9.0 train VirtualEnvironment (step 4) is SDK-free (#174), so it builds on the
+# hosted runner and VirtualEnvironment.lib ships in alpha_v0.9.0; on main it is
+# still skipped (needs the CarMaker SDK) until the SDK-free refactor reaches that
+# train. The remaining proprietary binaries return via the pinned
+# ProprietaryBinaries bundle (also #191).
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish the built zip to this branch''s rolling prerelease'
+        type: boolean
+        default: false
+  pull_request:
+    branches: [dev, main, dev_v0.9.0]
+  push:
+    branches: [main, dev_v0.9.0]
+
+permissions:
+  contents: write   # create/update the rolling release + tag on publish
+
+jobs:
+  build-publish:
+    # windows-2022 = VS 2022 (v17), matching the generator dispatch derives from
+    # dependencies.yaml. windows-latest ships VS 2026 (v18), incompatible.
+    runs-on: windows-2022
+    steps:
+      - name: Checkout (full history for git describe; no private submodule)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: false
+
+      # Skip the heavy build on PRs that touch nothing build-relevant (docs / *.py /
+      # tests): the job still RUNS (so the required build-publish check reports green),
+      # but the expensive steps below are gated on this output. Pushes always build. #191.
+      - name: Detect build-relevant changes
+        id: detect
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "event=${{ github.event_name }} -> always build."
+            echo "should_build=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          files=$(git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD)
+          echo "Changed files:"; echo "$files"
+          # Build unless EVERY changed file is docs / *.py / tests (nothing compiled or packaged from source).
+          relevant=$(echo "$files" | grep -vE '\.(md|py)$|^doc/|^tests/' || true)
+          if [ -z "$relevant" ]; then
+            echo "No build-relevant changes -> skipping build (required check still passes)."
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Build-relevant changes:"; echo "$relevant"
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      # Speed: yaml-cpp is vendored and rebuilt (Release+Debug) from source every
+      # run, but it almost never changes. Cache CommonLib/yaml-cpp/build keyed on
+      # the yaml-cpp source hash - on a hit, dispatch.bat's existing
+      # "if not exist yaml-cpp\build" guard skips step 1 entirely.
+      - name: Cache yaml-cpp build
+        uses: actions/cache@v4
+        with:
+          path: CommonLib/yaml-cpp/build
+          key: yamlcpp-${{ runner.os }}-vs2022-${{ hashFiles('CommonLib/yaml-cpp/CMakeLists.txt', 'CommonLib/yaml-cpp/include/**', 'CommonLib/yaml-cpp/src/**') }}
+
+      # Place the v0.9.0-alpha tag at HEAD *locally* so this build's
+      # `git describe --match 'v[0-9]*'` stamps the 0.9.0 line (otherwise it
+      # finds v0.7.0, the nearest ancestor, and mislabels as v0.7.0). LOCAL only
+      # - the real, persistent v0.9.0-alpha tag is (re)created by the publish
+      # step as a prerelease Release anchored to this commit, so there's exactly
+      # ONE tag and it's never orphaned if the build fails. #191.
+      - name: Stamp v0.9.0-alpha for this build (local tag, for git describe)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/dev_v0.9.0'
+        shell: bash
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -fa v0.9.0-alpha -m "0.9.0 dev version at $(git rev-parse --short HEAD)"
+
+      # libcarla (~460 MB release subset) is gitignored and only needed to build
+      # the PUBLIC VirCarlaEnv exe. Fetch it from the public fixs-native-deps
+      # release (prebuilt, gh-free), cached by dependencies.yaml so it downloads
+      # at most once per deps version. On a cache hit fetch_native_deps skips;
+      # dispatch step 4c then builds VirCarlaEnv against it. OPTIONAL: if no deps
+      # release is published yet this soft-warns and VirCarlaEnv is simply absent
+      # from the zip - it never fails the build. #109.
+      - name: Cache libcarla (native deps)
+        if: steps.detect.outputs.should_build == 'true'
+        uses: actions/cache@v4
+        with:
+          path: CommonLib/libcarla
+          key: libcarla-${{ runner.os }}-${{ hashFiles('dependencies.yaml') }}
+      - name: Fetch libcarla (prebuilt) for the VirCarlaEnv build
+        if: steps.detect.outputs.should_build == 'true'
+        shell: pwsh
+        run: |
+          & scripts/dispatch/fetch_native_deps.ps1 -Mode prebuilt
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::warning::libcarla prebuilt fetch failed (no fixs-native-deps release yet?) - VirCarlaEnv will be skipped."
+            exit 0
+          }
+
+      - name: Build + package (proprietary steps skipped; VE.lib builds on 0.9.0)
+        if: steps.detect.outputs.should_build == 'true'
+        shell: cmd
+        run: |
+          set RS_BUILD_CONFIG=Release
+          set RS_FIXS_AUTOMATION=1
+          REM <nul so the trailing `pause` in dispatch.bat returns immediately.
+          call scripts\dispatch\dispatch.bat <nul
+
+      # Overlay the licensed-toolchain binaries (VISSIM/CarMaker/dSPACE/MEX) that
+      # the hosted runner cannot build, pulled from the Binaries-<key> release on
+      # THIS repo (native token). The key = ProprietaryFiles SHA (bundle_key.ps1),
+      # so the bundle is paired to the proprietary source it was built from. Then
+      # re-pack the complete zip.
+      # OPTIONAL for now: if no bundle is published for this key yet, ship
+      # public-core with a warning (bootstrap). Flip to a hard failure once the
+      # first bundle exists, so a "complete" release can never silently drop its
+      # binaries. The bundle-guard PR check makes the missing-bundle case
+      # unmergeable in the first place (#191).
+      - name: Overlay proprietary bundle (Binaries-<key>, if published)
+        if: steps.detect.outputs.should_build == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $key = (& scripts/dispatch/bundle_key.ps1).Trim()
+          $tag = "Binaries-$key"
+          Write-Host "Bundle key: $key  ->  release $tag"
+          $tmp = Join-Path $env:RUNNER_TEMP "fixs-bin"
+          New-Item -ItemType Directory -Path $tmp -Force | Out-Null
+          gh release download $tag --repo $env:GITHUB_REPOSITORY --pattern 'fixs-binaries-*.zip' --dir $tmp --clobber 2>$null
+          $bundle = Get-ChildItem $tmp -Filter 'fixs-binaries-*.zip' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $bundle) {
+            Write-Warning "No $tag release - shipping public-core only. Publish it via scripts/dispatch/pack_binaries.ps1 -Publish on a licensed box."
+            exit 0
+          }
+          $x = Join-Path $tmp 'unzipped'
+          Expand-Archive -Path $bundle.FullName -DestinationPath $x -Force
+          # Overlay into build/ (everything except the manifest), then re-pack.
+          # No wire-format check needed: the key encodes the contract hash, so a
+          # matching $tag is guaranteed compatible.
+          Get-ChildItem $x -Exclude 'manifest.json' | ForEach-Object {
+            Copy-Item $_.FullName -Destination build -Recurse -Force
+          }
+          $n = (Get-ChildItem $x -Recurse -File | Where-Object { $_.Name -ne 'manifest.json' }).Count
+          Write-Host "Overlaid $n proprietary files into build/; re-packing complete zip..."
+          & powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dispatch/8_create_zip.ps1 -RunMode inline
+
+      - name: Sanity-check the packaged zip
+        if: steps.detect.outputs.should_build == 'true'
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem build -Filter 'fixs-build-*.zip' -ErrorAction SilentlyContinue |
+                 Select-Object -First 1
+          if (-not $zip) { Write-Error "No fixs-build-*.zip produced (see build-logs)."; exit 1 }
+          Write-Host "Packaged: $($zip.Name) ($([math]::Round($zip.Length/1MB,1)) MB)"
+          $names = Get-ChildItem build -Recurse -File | ForEach-Object { $_.Name }
+          if ($names -notcontains 'TrafficLayer.exe') {
+            Write-Error "TrafficLayer.exe missing from build/ - public core did not build."
+            exit 1
+          }
+          if ($names -contains 'VirtualEnvironment.lib') {
+            Write-Host "VirtualEnvironment.lib present (SDK-free CI build - expected on the 0.9.0 train)."
+          } else {
+            Write-Host "VirtualEnvironment.lib absent (expected on the current/main train)."
+          }
+
+      - name: Upload packaged zip as a workflow artifact (inspect on PRs)
+        if: steps.detect.outputs.should_build == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: fixs-build-zip
+          path: build/fixs-build-*.zip
+          if-no-files-found: warn
+
+      # main -> latest ; dev_v0.9.0 -> v0.9.0-alpha (ONE tag: the release IS the
+      # version stamp). -Target $GITHUB_SHA anchors the release+tag to the exact
+      # commit built - without it gh defaults a new tag to the default branch
+      # (main), which had wrongly pinned the alpha release to main.
+      - name: Publish rolling prerelease (main -> latest, dev_v0.9.0 -> v0.9.0-alpha)
+        if: (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev_v0.9.0')) || (github.event_name == 'workflow_dispatch' && inputs.publish)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $sha = $env:GITHUB_SHA
+          switch ($env:GITHUB_REF) {
+            'refs/heads/main'       { & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dispatch\publish_release.ps1 -Tag latest -Target $sha }
+            'refs/heads/dev_v0.9.0' { & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dispatch\publish_release.ps1 -Tag v0.9.0-alpha -Rolling -Target $sha }
+            default { Write-Error "Refusing to publish from $($env:GITHUB_REF) - only main/dev_v0.9.0 have a rolling channel."; exit 1 }
+          }
+
+      - name: Upload build logs (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            scripts/dispatch/build.log
+            scripts/dispatch/build_summary.log
+          if-no-files-found: ignore

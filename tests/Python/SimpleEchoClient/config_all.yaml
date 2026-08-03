@@ -1,0 +1,37 @@
+# Subscription repro (issue #176) - variant C: all vehicles
+# Expected AFTER FIX: client sees every vehicle in the network (ego + all background).
+# Currently (bug): 'all' is a no-op on the SUMO path, so the count is 0 (nothing subscribed).
+# NOTE: EnableExternalDynamics MUST be true (see config_ego_only.yaml for why).
+
+SimulationSetup:
+    EnableRealSim: true
+    EnableVerboseLog: false
+    SelectedTrafficSimulator: 'SUMO'
+    TrafficSimulatorIP: "127.0.0.1"
+    TrafficSimulatorPort: 1337
+    VehicleMessageField: [id, type, vehicleClass, speed, acceleration, speedDesired]
+    EnableExternalDynamics: true
+
+SumoSetup:
+    # false: the comparison runner launches headless `sumo` itself (no GUI popup,
+    # deterministic teardown). TrafficLayer connects to that existing instance on 1337.
+    EnableAutoLaunch: false
+    SumoConfigFile: "./simple_loop_traffic.sumocfg"
+
+ApplicationSetup:
+    EnableApplicationLayer: true
+    VehicleSubscription:
+    -   type: ego
+        attribute: {all: ['true']}
+        ip: ['127.0.0.1']
+        port: [2444]
+
+XilSetup:
+    EnableXil: false
+    VehicleSubscription:
+
+# The `all` subscription carries no ego id, so (since #174) TrafficLayer cannot infer
+# CarMakerSetup.EgoId from the subscription and needs it stated explicitly. 'ego' is the
+# vehicle defined in simple_loop_traffic.rou.xml.
+CarMakerSetup:
+    EgoId: ego

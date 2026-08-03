@@ -1,3 +1,24 @@
+# ============================================================
+# build_libsumo.ps1 - Standalone Utility Script
+# ============================================================
+# PURPOSE: Build SUMO Release and Debug DLLs (libsumo) from source.
+#          Reads the SUMO version from dependencies.yaml, clones the SUMO
+#          repository, builds Release and Debug DLLs, and copies the
+#          resulting binaries and headers into CommonLib/libsumo/.
+#
+# NOTE: This script is NOT called by dispatch.bat. It is a one-time or
+#       on-demand utility used when you need to rebuild libsumo from source
+#       (e.g., after a SUMO version bump in dependencies.yaml, or when
+#       vendored DLLs are missing).
+#
+# USAGE:
+#   powershell -ExecutionPolicy Bypass -File scripts\build_libsumo.ps1
+#   powershell -ExecutionPolicy Bypass -File scripts\build_libsumo.ps1 -DryRun
+#   powershell -ExecutionPolicy Bypass -File scripts\build_libsumo.ps1 -KeepBuildDir
+#
+# PREREQUISITES: Visual Studio 2022 with C++ workload, CMake, vcpkg
+# ============================================================
+
 # Script to build SUMO Release and Debug DLLs from source
 # Reads version from dependencies.yaml, clones SUMO, builds Release and Debug DLLs, and copies them along with headers
 

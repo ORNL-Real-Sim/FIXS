@@ -33,16 +33,25 @@ CMPROJ = REPO / "ProprietaryFiles" / "CM13_proj"
 SRC_INPX = HERE / "simple_loop_ds.inpx"
 STAGE = HERE / "stage_network"
 RUNCFG = HERE / "config.runtime.yaml"
-TESTRUN = "SimpleLoop_VISSIM_rs"
+TESTRUN = os.environ.get("RS_TESTRUN", "SimpleLoop_rs")  # override to test a TestRun variant (e.g. CornerCutCoef)
 
 TL_CONNECT_TIMEOUT = 120    # s to wait for VISSIM_Connect OK
-RUN_TIMEOUT = 600           # s overall cap for the CarMaker run
+RUN_TIMEOUT = int(os.environ.get("RS_RUN_TIMEOUT", "600"))  # s overall wall cap (env-overridable for long/seed-sweep runs)
 
 
 def stage_and_config() -> None:
     STAGE.mkdir(exist_ok=True)
-    import shutil
+    import shutil, os, re
     shutil.copy2(SRC_INPX, STAGE / "simple_loop.inpx")
+    # RS_VISSIM_SEED varies the random realization WITHOUT changing the network
+    # (rewrites the SimRun randSeed in the staged inpx) -- for the seed-sweep test.
+    _vseed = os.environ.get("RS_VISSIM_SEED")
+    if _vseed:
+        _p = STAGE / "simple_loop.inpx"
+        _txt = _p.read_text(encoding="utf-8", errors="ignore")
+        _txt = re.sub(r'randSeed="\d+"', f'randSeed="{_vseed}"', _txt, count=1)
+        _p.write_text(_txt, encoding="utf-8")
+        print(f"[verify] VISSIM randSeed -> {_vseed}")
     lay = HERE / "simple_loop_ds.layx"
     if lay.exists():
         shutil.copy2(lay, STAGE / "simple_loop.layx")

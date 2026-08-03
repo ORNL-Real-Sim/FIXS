@@ -28,11 +28,11 @@ from derive_drvpath import derive_drvpath
 REPO = pathlib.Path(__file__).resolve().parents[4]
 CMPROJ = REPO / "ProprietaryFiles" / "CM13_proj"
 RD = CMPROJ / "Data" / "Road" / "simple_loop.rd5"
-TR_EGO = CMPROJ / "Data" / "TestRun" / "SimpleLoop_VISSIM"
-TR_DEMO = CMPROJ / "Data" / "TestRun" / "SimpleLoop_VISSIM_rs"
+TR_EGO = CMPROJ / "Data" / "TestRun" / "SimpleLoop"
+TR_DEMO = CMPROJ / "Data" / "TestRun" / "SimpleLoop_rs"
 # Ego is the CM-shipped McLaren MP4 race car (copied into the project Data/Vehicle):
 # CG 0.25 m -- cannot roll on the loop corners -- and the McLaren_MP4_2016.mobj visual
-# is already wired into the .car. Replaces the osc2cm-generated SimpleLoop_VISSIM_Ego
+# is already wired into the .car. Replaces the osc2cm-generated SimpleLoop_Ego
 # (which came out truck-tall at 1.30 m CG and rolled). Its tyres/brake/visual resolve
 # from the standard CarMaker install.
 EGO_VEHICLE = "Demo_McLaren_F1"

@@ -28,9 +28,31 @@ make LibCarla GENERATOR="Visual Studio 2019" TOOLSET="msvc-14.2"
 
 which will provide the necessary dependencies for the FIXS-CARLA
 
-Once the build is finished, copy the directory `${CARLA_Root}\PythonAPI\carla\dependencies\` into the `${FIXS_Root}\CommonLib\` and rename the directory as **libcarla**.
+### Providing libcarla to the build (automated — issue #109)
 
-Then you can build the **VirCarlaEnv**, note that only the Release version is supported.
+`VirCarlaEnv` links the Carla C++ client `CommonLib/libcarla` (~800 MB). It is
+**gitignored** and acquired automatically by `scripts/dispatch/fetch_native_deps.ps1`
+(dispatch step **4c**), driven by a per-machine `~/.fixs/carla.json`:
+
+- **`"mode": "prebuilt"`** *(recommended — no Carla source build needed):* downloads
+  the **public** rolling `fixs-native-deps` release's `libcarla-<carla_version>.zip` (Release subset),
+  verifies its SHA-256, and extracts it into `CommonLib/`. This is the exact artifact
+  the release CI uses.
+- **`"mode": "source"`** *(for developers who build Carla from source):* after
+  `make LibCarla`, copies `${carla_root}\PythonAPI\carla\dependencies\{lib,include}`
+  into `CommonLib\libcarla`. Set `carla_root` in `~/.fixs/carla.json`.
+
+Example `~/.fixs/carla.json`:
+
+    { "mode": "source", "carla_root": "C:/src_ext/Carla" }
+
+The dispatch then builds **VirCarlaEnv** — only the **Release** configuration is
+supported (the Carla deps ship no debug Boost, and `carla_client_debug.lib` is dropped
+from the hosted subset). To regenerate/republish the hosted deps after a Carla version
+bump, run `scripts/dispatch/pack_native_deps.ps1 -Publish` on a box that has the source deps.
+
+*(Manual fallback: copy `${CARLA_Root}\PythonAPI\carla\dependencies\` into
+`${FIXS_Root}\CommonLib\` and rename it **libcarla**.)*
 
 ## Simulation Setups
 
@@ -120,8 +142,16 @@ CarlaSetup:
     CarlaClientIP: 127.0.0.1
     CarlaClientPort: 440
 
-    # default Traffic Objects updates every 0.1 seconds
-    TrafficRefreshRate: 0.1
+    # The CARLA world step (fixed_delta_seconds). The FIXS feed is a fixed 0.1 s, so
+    # this must be 0.1 or an exact divisor of it (0.05 / 0.025 / 0.02 / 0.01). Finer
+    # than the feed makes the bridge interpolate traffic - position AND heading -
+    # across the sub-steps, the way the CarMaker host does at 0.001 s. 0/absent = 1:1.
+    CarlaTimeStep: 0.05
+
+    # How often traffic poses are RE-APPLIED - the same meaning this key has on the
+    # CarMaker side, NOT the feed period. Omit (or 0) for every tick; coarser than the
+    # tick trades smoothness for fewer ApplyBatch calls on a heavy scene.
+    # TrafficRefreshRate: 0.05
     
     # Interested ids should be a subset of the vehicleSubscription ids
     InterestedIds: ["ego"]

@@ -27,17 +27,25 @@ class MsgHelper
 public:
 	MsgHelper();
 
-	void packVehData(VehFullData_t VehFullData, char* buffer, int* iByte);
+	void packVehData(const VehFullData_t& VehFullData, char* buffer, int* iByte);
 	void depackVehData(char* buffer, VehFullData_t& VehFullData);
 	void packHeader(uint8_t simState, float simTime, uint32_t totalMsgSize, char* buffer, int* iByte);
 	void depackHeader(char* buffer, uint8_t* simState, float* simTime, uint32_t* totalMsgSize);
 	void depackMsgType(char* buffer, uint16_t* msgSize, uint8_t* msgType);
 	
 	void packString(std::string strData, char* buffer, int* iByte);
-	void packTrafficLightData(TrafficLightData_t TrafficLightData, char* buffer, int* iByte);
+	void packTrafficLightData(const TrafficLightData_t& TrafficLightData, char* buffer, int* iByte);
 	void depackTrafficLightData(char* buffer, TrafficLightData_t* TrafficLightData);
-	void packDetectorData(TlsDetector_t DetectorData, char* buffer, int* iByte);
+	void packDetectorData(const TlsDetector_t& DetectorData, char* buffer, int* iByte);
 	void depackDetectorData(char* buffer, int msgSize, TlsDetector_t* DetectorData);
+
+	// #87: record sizes for the send-side size pass, so total_msg_size can be written
+	// into the 9-byte header BEFORE the body is streamed out in chunks. Each runs the
+	// matching pack*() with a NULL buffer (measure, don't write) -- one traversal serves
+	// both sizing and packing, so the two cannot drift apart.
+	int vehRecordSize(const VehFullData_t& VehFullData);
+	int tlsRecordSize(const TrafficLightData_t& TrafficLightData);
+	int detRecordSize(const TlsDetector_t& DetectorData);
 
 	void clearRecvStorage();
 	void clearSendStorage();

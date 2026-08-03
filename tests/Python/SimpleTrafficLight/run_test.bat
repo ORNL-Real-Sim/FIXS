@@ -37,20 +37,21 @@ if exist "%RealSimPath%\TrafficLayer\x64\Release\TrafficLayer.exe" (
 echo Waiting for TrafficLayer to initialize...
 timeout /t 3 /nobreak
 
-REM Start Python Echo Client
+REM Start Python Echo Client. Resolve an env python directly (no `conda activate`,
+REM which is fragile); the client only needs PyYAML + repo CommonLib. Override with
+REM   set PYTHON=C:\full\path\python.exe
 echo Starting Python Echo Client...
-REM Initialize conda if not already initialized
-if exist "%USERPROFILE%\miniconda3\Scripts\activate.bat" (
-    call %USERPROFILE%\miniconda3\Scripts\activate.bat realsim
-) else if exist "%USERPROFILE%\anaconda3\Scripts\activate.bat" (
-    call %USERPROFILE%\anaconda3\Scripts\activate.bat realsim
-) else (
-    call conda activate realsim
+if not defined PYTHON (
+    for %%P in (
+        "%USERPROFILE%\miniconda3\envs\realsim_dev\python.exe"
+        "%USERPROFILE%\anaconda3\envs\realsim_dev\python.exe"
+        "%USERPROFILE%\miniconda3\envs\realsim\python.exe"
+        "%USERPROFILE%\anaconda3\envs\realsim\python.exe"
+    ) do if exist %%~P set "PYTHON=%%~P"
 )
-
-python %TestPath%\echo_client.py
-
-call conda deactivate
+if not defined PYTHON set "PYTHON=python"
+echo Using Python: %PYTHON%
+"%PYTHON%" %TestPath%\echo_client.py
 
 :end
 pause

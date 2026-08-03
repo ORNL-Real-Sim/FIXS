@@ -71,6 +71,19 @@ def main():
             # Print received vehicle data
             step_count += 1
 
+            # #177 verification: always print the ego's NEXT signal each step so you
+            # can eyeball it live against sumo-gui -- the id, the colour, the distance
+            # counting down, and the lane-specific head index. This is what Phase 2's
+            # cached/topology reconstruction must keep byte-identical to getNextTLS.
+            _COLOR = {-1: '(none)', 0: '?', 1: 'RED', 2: 'YELLOW', 3: 'GREEN',
+                      4: 'RED-YELLOW', 5: 'off-blink', 6: 'OFF', 7: 'stop'}
+            for vd in socket_helper.vehicle_data_receive_list:
+                if vd.id.strip() == 'egoCm123':
+                    print(f't={sim_time:7.2f}s  ego next TLS: {vd.signalLightId or "(none)":>10}'
+                          f'  {_COLOR.get(vd.signalLightColor, vd.signalLightColor):>10}'
+                          f'  dist={vd.signalLightDistance:8.2f} m  head={vd.signalLightHeadId}')
+                    break
+
             if verbose_log:
                 print(f'\n--- Step {step_count} | Time: {sim_time:.2f}s | State: {sim_state} ---')
                 print(f'Received {len(socket_helper.vehicle_data_receive_list)} vehicles:')

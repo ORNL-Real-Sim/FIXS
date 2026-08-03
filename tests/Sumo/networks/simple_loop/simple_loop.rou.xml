@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!-- Background demand for the shared SimpleLoop scenario (FIXS #174).
+
+     EGO-FREE BY DESIGN. The ego is supplied per-backend, never baked in here:
+       - SUMO-CM:           CarMaker injects 'egoCm' via the FIXS interface
+                            (CarMaker owns the ego; it is teleported into SUMO).
+       - SUMO-Carla /       load simple_loop.ego.rou.xml ON TOP of this file
+         SimpleEchoClient:  (see simple_loop_ego.sumocfg) to add a SUMO-driven
+                            'ego' for Carla to visualize / the echo client to read.
+
+     Keeping the background unified AND ego-free is what lets ONE network + demand
+     drive every backend through the same pipeline without a stray ego leaking
+     across backends (the SUMO 'ego' used to reach CarMaker as a phantom traffic
+     object co-located with its own ego and pushed IPGDriver off the road). -->
+<routes xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/routes_file.xsd">
+
+    <!-- Background vehicle type: YELLOW. -->
+    <vType id="car" vClass="passenger" length="5.0" minGap="2.5" maxSpeed="20.0" accel="2.6" decel="4.5" sigma="0.5" color="1,1,0"/>
+
+    <!-- Loop edge ids come from netconvert: simple_loop.net.xml is generated from
+         tests/Vissim/SimpleEcho/simple_loop.xodr so SUMO, the CarMaker road, and
+         the Carla world share ONE geometry. Loop is node 4->1->2->3->4, i.e.
+         edges -1 -> -2 -> -3 -> -4. repeat sizes the route to circulate well past
+         any sim end (1000 laps ~= 40000 s at 20 m/s); kept modest because `repeat`
+         literally EXPANDS the edge list (#177: repeat=100000 -> 400k-edge route made
+         per-veh getNextTLS O(route) ~2.5 ms/veh; 1000 -> ~0.03 ms). For a truly
+         unbounded run use a rerouter loop instead (SUMO "Driving in Circles"). -->
+    <route id="loop" edges="-1 -2 -3 -4" repeat="1000"/>
+
+    <!-- Background demand mimicking the VISSIM SimpleEcho counterpart: inject at
+         ~700 veh/h (simple_loop_ds.inpx vehicleInput volume="700") until 40
+         vehicles are on the loop, then stop injecting. Because the route repeats,
+         those 40 circulate persistently and never exit, so the population holds
+         at ~40 (VISSIM shows ~40 after ~240 s). 40 @ 700 veh/h fills in ~206 s. -->
+    <flow id="bg" type="car" route="loop" begin="0" number="40" vehsPerHour="700" departLane="best" departSpeed="max"/>
+
+</routes>

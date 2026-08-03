@@ -44,17 +44,31 @@ function Get-GitVersionInfo {
         throw "No .git directory present under $RepoRoot"
     }
 
-    $tagOutput = & git describe --tags --abbrev=0 2>&1
+    # Semver macros: match ONLY vX.Y.Z tags. The rolling release publishes
+    # lightweight tags on HEAD (latest, alpha_v0.9.0); a bare `git describe
+    # --tags` returns one of those, the semver regex below throws, and the
+    # version silently falls back to 0.0.0. Restricting to 'v[0-9]*' ignores the
+    # rolling tags (issue #191).
+    $semverTag = & git describe --tags --match 'v[0-9]*' --abbrev=0 2>&1
     if ($LASTEXITCODE -ne 0) {
-        throw "git describe failed: $tagOutput"
+        throw "git describe (semver tag) failed: $semverTag"
     }
 
-    if ($tagOutput -match '^v?(\d+)\.(\d+)\.(\d+)') {
+    if ($semverTag -match '^v?(\d+)\.(\d+)\.(\d+)') {
         $major = [int]$Matches[1]
         $minor = [int]$Matches[2]
         $patch = [int]$Matches[3]
     } else {
-        throw "Invalid tag format: $tagOutput (expected vX.Y.Z)"
+        throw "Invalid tag format: $semverTag (expected vX.Y.Z)"
+    }
+
+    # Traceability label -> REALSIM_GIT_TAG. Full describe (e.g.
+    # v0.8.0-120-gce90f3c0) so a rolling/dev build points at its exact commit;
+    # still semver-matched so a rolling tag never leaks in. --always degrades a
+    # tagless checkout to the short SHA rather than failing the build.
+    $describeLabel = & git describe --tags --match 'v[0-9]*' --always 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        $describeLabel = $semverTag
     }
 
     $commitOutput = & git rev-parse --short HEAD 2>&1
@@ -62,7 +76,7 @@ function Get-GitVersionInfo {
         throw "git rev-parse failed: $commitOutput"
     }
 
-    return New-VersionInfo -Major $major -Minor $minor -Patch $patch -Commit $commitOutput.Trim() -Tag $tagOutput.Trim() -Source "git"
+    return New-VersionInfo -Major $major -Minor $minor -Patch $patch -Commit $commitOutput.Trim() -Tag $describeLabel.Trim() -Source "git"
 }
 
 function Get-ExistingHeaderVersion {

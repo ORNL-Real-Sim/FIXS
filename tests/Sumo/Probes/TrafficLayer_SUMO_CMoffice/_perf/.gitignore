@@ -1,0 +1,4 @@
+# Generated benchmark outputs (#177) -- reproducible via bench_*.py / analyze_*.py.
+# Key results are captured in ../PERF_177_TRACI.md. Don't track the raw CSVs/logs.
+*
+!.gitignore

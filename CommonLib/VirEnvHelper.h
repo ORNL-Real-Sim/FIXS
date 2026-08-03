@@ -1,156 +1,59 @@
 #pragma once
+//============================================================================
+//  VirEnvHelper  (#174)  -- now a THIN CarMaker host-shim over VirEnvCore.
+//----------------------------------------------------------------------------
+//  Previously this class WAS the whole CarMaker-bound bridge (~1150 lines). The
+//  backend-agnostic orchestration moved to CommonLib/VirEnvCore (SDK-free) and
+//  the CarMaker verbs to CommonLib/CarMakerBackend. VirEnvHelper now just: owns
+//  a VirEnvCore + a CarMakerBackend, copies the CarMakerSetup config into the
+//  core, and delegates. The C wrapper (VirEnv_Wrapper.cpp -> User.c) is unchanged.
+//============================================================================
 
-#include <ctime>
-#include <chrono>
-#include <queue>
+#include <string>
+#include <vector>
 
-#ifdef RS_DSPACE
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h> 
-#endif
-
-#include "SocketHelper.h"
-#include <CarMaker.h>
-#include <Lights.h>
-
-//namespace RealSimVirEnv
-//{
-
-    class VirEnvHelper
-    {
-    public:
-        VirEnvHelper();
-
-        SocketHelper Sock_c;
-        MsgHelper Msg_c;
-
-        std::string CmErrorFile = "RealSimCarMaker.err";
-        std::string configPath = "config.yaml";
-
-        bool ENABLE_REALSIM = true;
-
-        int veryFirstStep = 1;
-
-        // if this flag is true, then ego send to simulink, traffic send to this c code
-        bool ENABLE_SEPARATE_EGO_TRAFFIC = false;
-
-        bool SYNCHRONIZE_TRAFFIC_SIGNAL = true;
-
-
-        // map vehicle id from traffic simulator to carmaker
-        std::unordered_map <std::string, int> TrafficSimulatorId2CarMakerId;
-
-        // queue to store currently available id of Cm traffic object
-        // separate different vehicle classes
-        std::queue <int> CmAvailableCarId_queue;
-        std::queue <int> CmAvailableTruckId_queue;
-        std::queue <int> CmAvailableBusId_queue;
-
-        // store id of vehicles that should be removed from CarMaker
-        std::unordered_set <std::string> TrafficSimulatorId2Remove;
-
-        typedef struct {
-
-            double positionX;
-            double positionY;
-            double positionZ;
-            //double heading; // heading in degree, north is 0 degree, then increasing clockwise. i.e., east is 90 degree.
-            double pitch; // radian, essentially negative of grade angle of RealSim convention
-            double yaw; // radian, rotation along z axis, east is 0, north is pi/2, south is -pi/2. counterclockwise is positive till west, then clockwise is negative till west
-
-            int lightIndicators;
-
-        }VehDataAuxiliary_t;
-
-        // these are for interpolation, so need (t, data) type 
-        std::unordered_map <std::string, std::pair<double, VehDataAuxiliary_t>> TrafficStatePrevious_um;
-        std::unordered_map <std::string, std::pair<double, VehDataAuxiliary_t>> TrafficStateNext_um;
-
-
-
-        std::vector <std::string> serverAddr = {};
-        std::vector <int> serverPort = {};
+#include "VirEnvCore.h"
+#include "CarMakerBackend.h"
 
 #ifndef RS_DSPACE
-        ConfigHelper Config_c;
-#else
-        typedef struct{
-            std::vector <std::string> VehicleMessageField_v;
-            bool EnableCosimulation;
-            bool EnableEgoSimulink;
-            std::string EgoId;
-            std::string EgoType;
-            std::string TrafficLayerIP;
-            int CarMakerPort;
-            double TrafficRefreshRate;
-            int TrafficSignalPort;
-            bool SynchronizeTrafficSignal;
-            std::string SignalTableFilename;
-        }Config_t;
-
-        Config_t Config_s;
-
+#include "ConfigHelper.h"
 #endif
 
-        std::string RealSimCarNamePattern = "RS_C";
-        std::string RealSimTruckNamePattern = "RS_T";
+class VirEnvHelper {
+public:
+    VirEnvHelper();
 
-		//
-        void shutdown();
+    int veryFirstStep = 1;
 
-//#ifndef RS_DSPACE
-        int initialization(const char** errorMsgChar, const char* configPathInput, const char* signalTablePathInput);
-//#else
-//        int initialization(const char** errorMsgChar, const char* signalTablePathInput);
-//#endif
+    int CM_Log(const char* MsgChar);
+    int CM_LogErrF(const char* MsgChar);
 
-        int runStep(double simTime, const char** errorMsgChar);
-		//
+    int  initialization(const char** errorMsg, const char* configPath, const char* signalTablePath);
+    int  runStep(double simTime, const char** errorMsg);
+    void shutdown();
 
-		int CM_Log(const char* MsgChar);
-		int CM_LogErrF(const char* MsgChar);
+#ifndef RS_DSPACE
+    ConfigHelper Config_c;
+#else
+    // dSPACE config struct -- still filled field-by-field by VirEnv_readConfig in
+    // the C wrapper, then copied into the core in initialization().
+    typedef struct {
+        std::vector<std::string> VehicleMessageField_v;
+        bool        EnableCosimulation;
+        bool        EnableEgoSimulink;
+        std::string EgoId;
+        std::string EgoType;
+        std::string TrafficLayerIP;
+        int         CarMakerPort;
+        double      TrafficRefreshRate;
+        int         TrafficSignalPort;
+        bool        SynchronizeTrafficSignal;
+        std::string SignalTableFilename;
+    } Config_t;
+    Config_t Config_s;
+#endif
 
-        enum InitializationError_enum {
-            ERROR_INIT_READ_CONFIG = -1,
-            ERROR_INIT_MSG_FIELD = -2,
-            ERROR_INIT_SOCKET = -3,
-            ERROR_INIT_TRAFFIC = -4,
-        };
-
-        enum RunStepError_enum {
-            ERROR_STEP_RECV_REALSIM = -1,
-            ERROR_STEP_MAP_ID = -2,
-            ERROR_STEP_REMOVE_ID = -3,
-            ERROR_STEP_UPDATE_STATE = -4,
-            ERROR_STEP_SEND_EGO = -5,
-            ERROR_STEP_REFRESH_TRAFFIC = -6,
-            ERROR_STEP_SYNC_TRAFFIC_SIGNAL = -7
-
-        };
-
-    private:
-        // signal controller map
-        // sumo controller id -> head id, trflight index
-        std::unordered_map <std::string, std::vector <std::pair<int, int>> > SignalController2HeadIdTrfLightIndex;
-
-        // charState is a single character from a SUMO TLS state string ('r'/'y'/'G' etc.);
-        // not a FIXS-canonical signal type. Revisit when #156 picks the VISSIM signal-routing path.
-        tTLState tlsChar2CmState(char charState);
-
-        int readSignalTable(const char* signalTablePathInput);
-
-        typedef struct  {
-            std::string signalControllerName;
-            int signalGroupId;
-            int signalHeadId;
-            int cmTrafficLightIndex;
-            std::string cmControllerId;
-        } SignalTable_t;
-
-    };
-
-
-    //VirEnvHelper VirEnv_c;
-
-//}
+private:
+    virenv::VirEnvCore       core_;
+    virenv::CarMakerBackend  backend_;
+};

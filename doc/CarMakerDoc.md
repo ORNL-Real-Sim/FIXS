@@ -524,7 +524,12 @@ CarMakerSetup:
     
     CarMakerPort: 7331
     
-    # refresh rate, default Traffic Objects updates every 0.001 seconds
+    # refresh rate, default Traffic Objects updates every 0.001 seconds.
+    # This is how often traffic poses are RE-APPLIED to CarMaker - NOT how often FIXS
+    # exchanges with TrafficLayer. That exchange is a fixed 0.1 s (fixs::kFeedPeriodS),
+    # and the core interpolates each sample across the sub-steps in between -
+    # position, heading and grade - so 0.001 here means smooth 1 kHz traffic motion
+    # off a 10 Hz feed, not a 1 kHz SUMO.
     TrafficRefreshRate: 0.001
     
     # ego settings

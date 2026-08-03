@@ -50,7 +50,14 @@ class MsgHelper:
             'width': False,
             'height': False,
             'speedAdvisory': False,
-            'activeLaneChange': False
+            'activeLaneChange': False,
+            # #174 EgoDriver command channel (L2/L4), serialized at the END
+            'steerAngleDesired': False,
+            'acceleratorPedalDesired': False,
+            'brakePedalDesired': False,
+            # #189 speedAdvisory (above) + #174 speedFreeFlow: appended to match
+            # the C++ wire order (speedAdvisory before the EgoDriver block).
+            'speedFreeFlow': False
         }
         self.traffic_light_msg_field_valid = {
             'id': False,
@@ -221,6 +228,15 @@ class MsgHelper:
 
         if self.vehicle_msg_field_valid.get('speedAdvisory'):
             veh_data.speedAdvisory, byte_index = MsgHelper.unpack_float(byte_data, byte_index)
+        # #174 EgoDriver command channel (serialized at the END, matching C++)
+        if self.vehicle_msg_field_valid.get('steerAngleDesired'):
+            veh_data.steerAngleDesired, byte_index = MsgHelper.unpack_float(byte_data, byte_index)
+        if self.vehicle_msg_field_valid.get('acceleratorPedalDesired'):
+            veh_data.acceleratorPedalDesired, byte_index = MsgHelper.unpack_float(byte_data, byte_index)
+        if self.vehicle_msg_field_valid.get('brakePedalDesired'):
+            veh_data.brakePedalDesired, byte_index = MsgHelper.unpack_float(byte_data, byte_index)
+        if self.vehicle_msg_field_valid.get('speedFreeFlow'):
+            veh_data.speedFreeFlow, byte_index = MsgHelper.unpack_float(byte_data, byte_index)
 
         return  veh_data
 
@@ -262,6 +278,10 @@ class MsgHelper:
                   + self.vehicle_msg_field_valid.get('width', 0) * 4  # width
                   + self.vehicle_msg_field_valid.get('height', 0) * 4  # height
                   + self.vehicle_msg_field_valid.get('speedAdvisory', 0) * 4  # speedAdvisory
+                  + self.vehicle_msg_field_valid.get('steerAngleDesired', 0) * 4  # steerAngleDesired
+                  + self.vehicle_msg_field_valid.get('acceleratorPedalDesired', 0) * 4  # acceleratorPedalDesired
+                  + self.vehicle_msg_field_valid.get('brakePedalDesired', 0) * 4  # brakePedalDesired
+                  + self.vehicle_msg_field_valid.get('speedFreeFlow', 0) * 4  # speedFreeFlow
             )
         )
         veh_msg_size = round(msg_size) + self.msg_each_header_size
@@ -399,8 +419,27 @@ class MsgHelper:
         if self.vehicle_msg_field_valid.get('speedAdvisory'):
             byte_data[byte_index:byte_index+4] = struct.pack('f', veh_data.speedAdvisory)
             byte_index += 4
+        # #174 EgoDriver command channel (serialized at the END, matching C++)
+        if self.vehicle_msg_field_valid.get('steerAngleDesired'):
+            byte_data[byte_index:byte_index+4] = struct.pack('f', veh_data.steerAngleDesired)
+            byte_index += 4
+        if self.vehicle_msg_field_valid.get('acceleratorPedalDesired'):
+            byte_data[byte_index:byte_index+4] = struct.pack('f', veh_data.acceleratorPedalDesired)
+            byte_index += 4
+        if self.vehicle_msg_field_valid.get('brakePedalDesired'):
+            byte_data[byte_index:byte_index+4] = struct.pack('f', veh_data.brakePedalDesired)
+            byte_index += 4
+        if self.vehicle_msg_field_valid.get('speedFreeFlow'):
+            byte_data[byte_index:byte_index+4] = struct.pack('f', veh_data.speedFreeFlow)
+            byte_index += 4
 
-        return byte_data, msg_size, byte_index
+        # Return the FULL record size (header + body), matching the size written into the
+        # per-record header and the bytes advanced in byte_index. Returning the body-only
+        # msg_size here made callers under-count total_msg_size by msg_each_header_size per
+        # record, so a message with >=2 records declared a header total shorter than the
+        # bytes actually sent -> the receiver stopped early and desynced the stream (#176).
+        return byte_data, veh_msg_size, byte_index
+
 
     def depack_traffic_light_data(self, byte_data: bytes) -> TrafficLightData:
         # Wire format must match CommonLib/MsgHelper.cpp::packTrafficLightData
@@ -460,7 +499,8 @@ class MsgHelper:
         if self.traffic_light_msg_field_valid.get('state'):
             byte_data, byte_index = MsgHelper.pack_string(byte_data, byte_index, traffic_light_data.state)
 
-        return byte_data, msg_size, byte_index
+        # Return the FULL record size (header + body); see pack_veh_data for why (#176).
+        return byte_data, traffic_light_msg_size, byte_index
     
     def pack_msg_header(self, byte_data: bytearray, simulation_state: int, t: float, total_msg_size: int):
         byte_index = 0
@@ -507,7 +547,8 @@ class MsgHelper:
             byte_data[byte_index] = detector_data.state
             byte_index += 1
 
-        return byte_data, msg_size, byte_index
+        # Return the FULL record size (header + body); see pack_veh_data for why (#176).
+        return byte_data, detector_msg_size, byte_index
     
     def depack_detector_data(self, byte_data: bytes)-> DetectorData:
         detector_data = DetectorData()

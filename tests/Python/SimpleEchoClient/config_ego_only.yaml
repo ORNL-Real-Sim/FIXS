@@ -1,0 +1,33 @@
+# Subscription repro (issue #176) - variant A: ego only, radius 0
+# Expected: client sees ~1 vehicle (ego only).
+# NOTE: EnableExternalDynamics MUST be true. The echo client echoes received speeds
+# back, and TrafficLayer pushes them to SUMO every step. With true -> setPreviousSpeed
+# (SUMO's car-following keeps driving). With false -> setSpeed(0) freezes the echoed
+# vehicle at the insertion point, blocking the single-lane loop.
+
+SimulationSetup:
+    EnableRealSim: true
+    EnableVerboseLog: false
+    SelectedTrafficSimulator: 'SUMO'
+    TrafficSimulatorIP: "127.0.0.1"
+    TrafficSimulatorPort: 1337
+    VehicleMessageField: [id, type, vehicleClass, speed, acceleration, speedDesired]
+    EnableExternalDynamics: true
+
+SumoSetup:
+    # false: the comparison runner launches headless `sumo` itself (no GUI popup,
+    # deterministic teardown). TrafficLayer connects to that existing instance on 1337.
+    EnableAutoLaunch: false
+    SumoConfigFile: "./simple_loop_traffic.sumocfg"
+
+ApplicationSetup:
+    EnableApplicationLayer: true
+    VehicleSubscription:
+    -   type: ego
+        attribute: {id: ['ego'], radius: [0]}
+        ip: ['127.0.0.1']
+        port: [2444]
+
+XilSetup:
+    EnableXil: false
+    VehicleSubscription:
