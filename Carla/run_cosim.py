@@ -663,7 +663,7 @@ CarlaSetup:
 HANDOFF_TIMEOUT_S = 60
 
 
-def start_app(app, timeout=HANDOFF_TIMEOUT_S):
+def start_app(app, config_yaml=None, timeout=HANDOFF_TIMEOUT_S):
     """Start the app's `launch` command and collect the scenario it reports.
 
     Returns (proc, sumocfg-or-None). ONE process spans both moments a controller
@@ -691,8 +691,19 @@ def start_app(app, timeout=HANDOFF_TIMEOUT_S):
     handoff = os.path.join(handoff_dir, f"handoff_{app['id']}_{os.getpid()}.json")
     if os.path.isfile(handoff):
         os.remove(handoff)      # a crashed run's leftover is not this run's answer
+    # Three variables, and only three. FIXS_PYTHON because a launch command is a
+    # script and a script cannot pick an interpreter - while THIS one is the one we
+    # re-exec'd into and applied the app's requirements.txt to, so an app that went
+    # looking for its own could find a different env that never received them.
+    # FIXS_CONFIG_YAML because the app must read the same yaml TrafficLayer gets -
+    # the wire format is SimulationSetup.VehicleMessageField, so two yamls that
+    # disagree decode the same bytes differently - and which one it is depends on
+    # what was chosen from the config menu, so it cannot be a hardcoded basename.
+    env = dict(os.environ, FIXS_HANDOFF=handoff, FIXS_PYTHON=sys.executable)
+    if config_yaml:
+        env["FIXS_CONFIG_YAML"] = config_yaml
     print(f"[APP]  {app['launch']}")
-    proc = subprocess.Popen(argv, cwd=cwd, env=dict(os.environ, FIXS_HANDOFF=handoff))
+    proc = subprocess.Popen(argv, cwd=cwd, env=env)
     deadline = time.time() + timeout
     while not os.path.isfile(handoff):
         if proc.poll() is not None:
@@ -2832,7 +2843,10 @@ def main():
     # has to be patient - run_cosim stops it if anything below fails.
     app_proc, app_sumocfg = (None, None)
     if app and app.get("launch"):
-        app_proc, app_sumocfg = start_app(app)
+        # The yaml this run will hand TrafficLayer. Known already for a config that
+        # was chosen (--config, or the one the profile remembers); a first run that
+        # GENERATES a per-map config has none yet, and the app falls back to its own.
+        app_proc, app_sumocfg = start_app(app, args.config or setup.get("config"))
 
     def cached_sumo_dir(name):
         """An already-extracted ~/.fixs/maps/<name>/sumo, or None.
