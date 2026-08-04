@@ -10,7 +10,7 @@ SimulationSetup:
     EnableVerboseLog: false
     SelectedTrafficSimulator: 'SUMO'
     TrafficSimulatorIP: "127.0.0.1"
-    TrafficSimulatorPort: 1337
+    TrafficSimulatorPort: 1357
     VehicleMessageField: [id, type, vehicleClass, speed, positionX, positionY, positionZ, heading, speedDesired, laneId, length, width, height, signalLightId, signalLightColor, signalLightDistance]
     EnableExternalDynamics: false
 
@@ -25,7 +25,7 @@ ApplicationSetup:
     -   type: ego
         attribute: {id: ['ego'], radius: [400]}
         ip: ['127.0.0.1']
-        port: [2444]
+        port: [2464]
 
 XilSetup:
     EnableXil: false
@@ -41,4 +41,4 @@ WorldModelSetup:
     NetFile: './simple_traffic_light.net.xml'
     Device: cpu                   # JAX CUDA is unavailable on native Windows
     ip: ['127.0.0.1']
-    port: [2444]
+    port: [2464]

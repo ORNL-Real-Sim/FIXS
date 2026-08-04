@@ -9,7 +9,7 @@ SimulationSetup:
     EnableVerboseLog: false
     SelectedTrafficSimulator: 'SUMO'
     TrafficSimulatorIP: "127.0.0.1"
-    TrafficSimulatorPort: 1337
+    TrafficSimulatorPort: 1347
     VehicleMessageField: [id, type, vehicleClass, speed, positionX, positionY, positionZ, heading, speedDesired, laneId, length, width, height, signalLightId, signalLightColor, signalLightDistance, speedAdvisory]
     EnableExternalDynamics: false
 
@@ -24,7 +24,7 @@ ApplicationSetup:
     -   type: ego
         attribute: {id: ['ego'], radius: [400]}
         ip: ['127.0.0.1']
-        port: [2444]
+        port: [2454]
 
 XilSetup:
     EnableXil: false
@@ -49,4 +49,4 @@ WorldModelSetup:
     TokenDir: 'C:/src_git/WM_AlpaSim/data/trafficsim-models/tokens'
     Device: cuda
     ip: ['127.0.0.1']
-    port: [2444]
+    port: [2454]

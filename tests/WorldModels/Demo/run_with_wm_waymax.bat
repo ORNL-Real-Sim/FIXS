@@ -16,7 +16,7 @@ set configFilename=config_waymax.yaml
 set WAYMAX_PY=C:\src_git\WM_Waymax\.venv-waymax\Scripts\python.exe
 
 echo [waymax] Starting TrafficLayer.exe (auto-launches sumo-gui)...
-start "TrafficLayer" cmd /c %RealSimPath%\TrafficLayer\x64\Release\TrafficLayer.exe -f %configFilename%
+start "TL-waymax(1357)" cmd /c %RealSimPath%\TrafficLayer\x64\Release\TrafficLayer.exe -f %configFilename%
 
 echo [waymax] Waiting for TrafficLayer + SUMO to initialize...
 timeout /t 4 /nobreak >nul

@@ -17,7 +17,7 @@ set CATK_PY=C:\src_git\WM_AlpaSim\.venv-catk\Scripts\python.exe
 set ALPASIM_SRC=C:/src_git/WM_AlpaSim/src/trafficsim
 
 echo [alpasim] Starting TrafficLayer.exe (auto-launches sumo-gui)...
-start "TrafficLayer" cmd /c %RealSimPath%\TrafficLayer\x64\Release\TrafficLayer.exe -f %configFilename%
+start "TL-alpasim(1347)" cmd /c %RealSimPath%\TrafficLayer\x64\Release\TrafficLayer.exe -f %configFilename%
 
 echo [alpasim] Waiting for TrafficLayer + SUMO to initialize...
 timeout /t 4 /nobreak >nul

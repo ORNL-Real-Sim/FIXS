@@ -16,7 +16,7 @@ set RealSimPath=..\..\..
 set configFilename=config.yaml
 
 echo [WM] Starting TrafficLayer.exe (auto-launches sumo-gui)...
-start "TrafficLayer" cmd /c %RealSimPath%\TrafficLayer\x64\Release\TrafficLayer.exe -f %configFilename%
+start "TL-constvel(1337)" cmd /c %RealSimPath%\TrafficLayer\x64\Release\TrafficLayer.exe -f %configFilename%
 
 echo [WM] Waiting for TrafficLayer + SUMO to initialize...
 timeout /t 4 /nobreak >nul
