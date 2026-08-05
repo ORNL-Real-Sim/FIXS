@@ -170,7 +170,13 @@ def maybe_update_fixs(no_check=False):
     """Detect a local FIXS bundle that diverges from the published rolling release
     and, when interactive, offer to update + relaunch. Advisory only: every failure
     is swallowed so a run is never blocked by the check."""
-    if no_check or os.environ.get("FIXS_NO_FRESHNESS"):
+    # FIXS_REEXEC: maybe_reexec() relaunches us under the configured interpreter, and
+    # this runs before that - so without this guard the child asked the same question
+    # the parent had just answered, and a wrapper that starts a different python (any
+    # of them: run_cosim.bat finds its own) prompted twice on every run. One bundle,
+    # one question.
+    if (no_check or os.environ.get("FIXS_NO_FRESHNESS")
+            or os.environ.get("FIXS_REEXEC") == "1"):
         return
     try:
         local = _local_fixs_commit()
