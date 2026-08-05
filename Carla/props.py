@@ -125,12 +125,11 @@ def tl_settings(manifest, manifest_path):
     """The traffic-light numbers the placer needs, all of them required.
 
     Deliberately no `table` key, though the draft manifest in
-    Digital-Twin-Library#2 had one. Where each head goes comes from a
-    traffic_light_table.csv committed beside the sumocfg, which resolve_tl_table
-    already prefers over generating one -- so a bundle that ships the table in
-    its sumo/ is picked up with nothing declared here and no code below. Letting
-    the manifest name the path as well would put the same fact in two places,
-    free to drift apart, which is the failure this manifest exists to prevent.
+    Digital-Twin-Library#2 had one. Where each head goes is derived from the map's
+    SUMO net by resolve_tl_table, which reads no committed table at all -- so there
+    is no path for a manifest to name. Letting it name one would put the same fact
+    in two places, free to drift apart, which is the failure this manifest exists
+    to prevent.
     """
     return {
         "blueprint": str(_require(manifest, "traffic_lights", "blueprint", manifest_path)),

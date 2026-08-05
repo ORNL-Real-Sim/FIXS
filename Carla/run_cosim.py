@@ -1424,17 +1424,21 @@ def _net_from_sumocfg(sumocfg):
 
 
 def resolve_tl_table(sumocfg, force=False, cache_name=None):
-    """Find this scenario's traffic-light table: a traffic_light_table.csv committed
-    next to the sumocfg, else one generated from the SUMO net. It is cached in the
-    map's per-map folder ~/.fixs/maps/<cache_name>/tl_table.csv (cache_name = the
+    """Generate this scenario's traffic-light table from the SUMO net. It is cached in
+    the map's per-map folder ~/.fixs/maps/<cache_name>/tl_table.csv (cache_name = the
     cooked map name), else the shared ~/.fixs/tables/<net>_tls.csv. `force`
     regenerates even if a cache exists (used on --reimport). Returns a path, or None
-    if neither is possible. Generation needs pandas/shapely but not SUMO installed."""
-    scen = os.path.dirname(os.path.abspath(sumocfg))
-    committed = os.path.join(scen, "traffic_light_table.csv")
-    if os.path.isfile(committed):
-        print(f"[cosim] TL table: committed {committed}")
-        return committed
+    if there is no net to generate from. Generation needs pandas/shapely but not SUMO
+    installed.
+
+    A traffic_light_table.csv sitting beside the sumocfg is deliberately NOT read. It
+    used to win over generation, which tied head positions to whichever file happened
+    to be next to the scenario rather than to the net: an app-owned scenario folder
+    copied into the map cache brought its own table along, and mlk_untextured was
+    baked from that stale copy - heads fanned across the full lane width - while the
+    generator was producing the current layout into tl_table.csv, unused. The table is
+    derived from the net, so the net is the only thing it should depend on.
+    """
     net = _net_from_sumocfg(sumocfg)
     if not net or not os.path.isfile(net):
         print("[cosim] no TL table and no net to generate one from; TL sync off.")
