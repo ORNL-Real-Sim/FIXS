@@ -43,6 +43,10 @@ WorldModelSetup:
     MinControlSpeed: 2.0
     SamplingTopK: 1        # 1 = greedy (deterministic)
     InferenceStride: 3     # infer every 3 steps, replay the token sub-steps
+    MapResampleInterval: 1.0  # lane point spacing (m); CATK map tokens are 3
+                              # consecutive points, so this is the token scale
+                              # (matches CATK's own 1.0 m default). Junction lanes
+                              # are now included so there IS a path through int_*.
     NetFile: './simple_traffic_light.net.xml'
     # CATK checkpoint + tokens (absolute; live outside the repo)
     ModelDir: 'C:/src_git/WM_AlpaSim/data/trafficsim-models/catk_v120'

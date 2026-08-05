@@ -26,17 +26,23 @@ class VectorMap:
 
     # ------------------------------------------------------------------ #
     @classmethod
-    def from_sumo_net(cls, net_file: str) -> "VectorMap":
+    def from_sumo_net(cls, net_file: str, include_internal: bool = True) -> "VectorMap":
         """Parse lane-centre geometry from a SUMO ``.net.xml``.
 
-        Reads every non-internal ``<lane shape="x,y x,y ...">``. Internal
-        (junction) lanes -- edges whose id starts with ':' -- are skipped.
+        Reads every ``<lane shape="x,y x,y ...">``. Internal (junction) lanes --
+        edges with ``function="internal"`` / id starting ':' -- carry the
+        THROUGH- and turn-paths across each intersection. They are included by
+        default (``include_internal=True``): without them the map has a gap at
+        every junction, so a model that follows lane geometry (CATK/SMART) has
+        nothing to track through the intersection and improvises. Set False to
+        get only the named road edges.
         """
         tree = ET.parse(net_file)
         root = tree.getroot()
         lanes: list[np.ndarray] = []
         for edge in root.findall("edge"):
-            if edge.get("function") == "internal" or (edge.get("id", "").startswith(":")):
+            is_internal = edge.get("function") == "internal" or edge.get("id", "").startswith(":")
+            if is_internal and not include_internal:
                 continue
             for lane in edge.findall("lane"):
                 shape = lane.get("shape")

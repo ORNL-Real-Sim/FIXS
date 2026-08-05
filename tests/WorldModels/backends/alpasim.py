@@ -80,6 +80,20 @@ class AlpaSimBackend:
         # sub-steps (0..N-1) in between (N<=EgoFutureHorizon). Cuts re-sampling
         # jitter + cost; N=1 = infer every step (fully reactive).
         self.stride = max(1, int(cfg.get("InferenceStride", 1)))
+        # Map resample spacing (m). CATK map tokens are 3 consecutive lane points,
+        # so this sets the token scale; matches CATK's own 1.0 m default.
+        self.map_interval = float(cfg.get("MapResampleInterval", 1.0))
+        # Crop the (dense 1 m) map to points within this radius of ANY bubble
+        # agent (ego + others), mirroring CATK's v_to_ego_and_obs filter. Without
+        # it a 200 m ego bubble at 1 m spacing feeds ~5k triplets/step (slow) while
+        # most cover empty road. ~30 m keeps each agent's local lanes.
+        self.map_crop_r = float(cfg.get("MapCropRadius", 30.0))
+        # Physical speed ceiling (m/s) for the WM write-back. CATK occasionally
+        # emits a garbage token (seen: 85-130 m/s) that moveToXY would apply as a
+        # multi-metre teleport, stranding a car mid-junction. Clamp per-substep
+        # displacement to vmax*dt and speed to vmax; well above lane speed so
+        # normal motion is untouched.
+        self.vmax = float(cfg.get("MaxSpeed", 25.0))
         self._istep = 0
         self._cache = {}
         self.vector_map = vector_map
@@ -114,37 +128,67 @@ class AlpaSimBackend:
         self._fallback.reset(cfg)
 
     # ------------------------------------------------------------------ #
-    def _full_map_layers(self, ox: float, oy: float, k: int = 20) -> dict:
-        """All lane polylines as a single CATK 'lane_centers' layer.
+    def _full_map_layers(self, ox: float, oy: float, agent_xy_c=None) -> dict:
+        """Lane polylines near the bubble agents as a CATK 'lane_centers' layer.
 
-        CATK's filter_map + triplet extraction need FIXED-LENGTH, NaN-free
-        polylines (NaN padding corrupts the per-polyline distance filter and the
-        3-vertex-window validity check -> empty map). So each lane is resampled
-        to ``k`` points by arc length. create_model_input(filter_map_by_ego=True)
-        then crops by ego distance, so we hand it the whole (parsed-once) map.
+        CATK builds map tokens as 3 CONSECUTIVE points via unfold(size=3,step=1)
+        (env_data_adapter.extract_map_data), so the point SPACING *is* the token
+        scale. CATK's own scene_adapter resamples maps to ``map_resample_interval_m
+        = 1.0`` m; a coarse spacing makes every token span many metres and the
+        model can't localise a lane. So we resample each lane by a fixed arc-length
+        interval (``self.map_interval``, ~1 m) -- NOT a fixed point count, which
+        stretched a 385 m corridor lane to ~20 m spacing.
+
+        We then crop to points within ``self.map_crop_r`` of ANY bubble agent
+        (``agent_xy_c``, ego-centered; ego is the origin) -- CATK's
+        v_to_ego_and_obs filter. This is both correctness (each agent keeps its
+        local lanes, incl. junction lanes) and speed (a 200 m bubble at 1 m
+        otherwise feeds ~5k triplets/step of mostly-empty road). Contiguous kept
+        runs of >=3 points become sub-polylines; variable lengths are NaN-padded,
+        and extract_map_data drops NaN triplets (valid_mask), so padding is safe.
         """
         if self.vector_map is None or not self.vector_map.lanes:
             return {}
         import numpy as np
 
-        def resample(pts, kk):
+        def resample_by_interval(pts, step_m):
             pts = np.asarray(pts, dtype=np.float64)
             seg = np.r_[0.0, np.cumsum(np.linalg.norm(np.diff(pts, axis=0), axis=1))]
             if seg[-1] == 0:
-                return np.repeat(pts[:1], kk, axis=0)
-            t = np.linspace(0.0, seg[-1], kk)
+                return pts[:1]
+            n = max(2, int(np.ceil(seg[-1] / step_m)) + 1)   # >=2 pts; >=3 needed to yield a triplet
+            t = np.linspace(0.0, seg[-1], n)
             return np.column_stack([np.interp(t, seg, pts[:, 0]),
                                     np.interp(t, seg, pts[:, 1])])
 
-        polys = self.vector_map.lanes
-        arr = np.zeros((len(polys), k, 3), dtype=np.float64)
-        for i, p in enumerate(polys):
-            rp = resample(p, k)
-            rp[:, 0] -= ox                  # ego-center the map too
-            rp[:, 1] -= oy
-            arr[i, :, 0:2] = rp
+        # ego-centered anchors: the ego (origin) plus every other bubble agent
+        anchors = np.zeros((1, 2), dtype=np.float64)
+        if agent_xy_c is not None and len(agent_xy_c):
+            anchors = np.vstack([anchors, np.asarray(agent_xy_c, dtype=np.float64)])
+        r2 = self.map_crop_r * self.map_crop_r
+
+        subpolys = []
+        for p in self.vector_map.lanes:
+            rp = resample_by_interval(p, self.map_interval)
+            rp = rp - np.array([ox, oy])                       # ego-center
+            d2 = ((rp[:, None, :] - anchors[None, :, :]) ** 2).sum(-1).min(1)
+            m = d2 < r2
+            if not m.any():
+                continue
+            keep = np.where(m)[0]
+            for run in np.split(keep, np.where(np.diff(keep) > 1)[0] + 1):
+                if len(run) >= 3:                              # >=3 pts -> >=1 triplet
+                    subpolys.append(rp[run])
+
+        if not subpolys:
+            return {}
+        vmax = max(len(s) for s in subpolys)
+        arr = np.full((len(subpolys), vmax, 3), np.nan, dtype=np.float64)   # NaN pad -> dropped downstream
+        for i, s in enumerate(subpolys):
+            arr[i, :len(s), 0:2] = s
+            arr[i, :len(s), 2] = 0.0
         return {"lane_centers": {"polylines": self._torch.tensor(arr, dtype=self._torch.float32),
-                                 "label": [5] * len(polys)}}
+                                 "label": [5] * len(subpolys)}}
 
     def _inject_light_type(self, result, bev, ox: float = 0.0, oy: float = 0.0) -> None:
         """Tag CATK map triplets near a red/yellow stop-line with light_type=STOP.
@@ -231,6 +275,7 @@ class AlpaSimBackend:
                 "traj": [[round(float(x), 1), round(float(y), 1)] for x, y in win[i, :, 0:2]],
                 "yaw": round(float(win[i, -1, 2]), 3),
                 "speed": round(float(win[i, -1, 3]), 2),
+                "lwh": [round(float(bev.lwh[i, 0]), 1), round(float(bev.lwh[i, 1]), 1)],  # length,width
             } for i in idx],
             "lanes": lanes,
             "stops": stops,
@@ -312,7 +357,7 @@ class AlpaSimBackend:
             "agents": {"xyz": ag_xyz, "heading": ag_head, "valid_mask": ag_valid,
                        "lwh": ag_lwh, "track_ids": torch.arange(A),
                        "class_ids": torch.zeros(A, dtype=torch.long), "num_obstacles": A},
-            "map": self._full_map_layers(ox, oy),
+            "map": self._full_map_layers(ox, oy, win[:, T - 1, 0:2]),
             "env": {"curr_t": T - 1},
             "metadata": {"frame_rate": 10, **self._meta},
         }
@@ -337,14 +382,24 @@ class AlpaSimBackend:
         out: dict[str, AgentPose] = {}
         for k, i in enumerate(idx):
             aid = bev.ids[i]
+            cx, cy = float(bev.xy[i, 0]), float(bev.xy[i, 1])   # current global pose
             subs = []
             for s in range(nsub):
-                yaw = float(fh[k, s])
+                tx = float(fx[k, s, 0]) + ox                    # shift back to global SUMO frame
+                ty = float(fx[k, s, 1]) + oy
+                # clamp a garbage token from teleporting the car: cap displacement
+                # from the CURRENT pose to vmax*dt per sub-step (+slack), and speed.
+                dx, dy = tx - cx, ty - cy
+                dist = float(np.hypot(dx, dy))
+                maxd = self.vmax * self.dt * (s + 1) * 1.5
+                if dist > maxd > 0.0:
+                    f = maxd / dist
+                    tx, ty = cx + dx * f, cy + dy * f
+                spd = min(float(np.hypot(fv[k, s, 0], fv[k, s, 1])), self.vmax)
                 subs.append(AgentPose(
-                    x=float(fx[k, s, 0]) + ox,       # shift back to global SUMO frame
-                    y=float(fx[k, s, 1]) + oy,
-                    heading_deg=math_rad_to_sumo_deg(yaw),
-                    speed=float(np.hypot(fv[k, s, 0], fv[k, s, 1])),
+                    x=tx, y=ty,
+                    heading_deg=math_rad_to_sumo_deg(float(fh[k, s])),
+                    speed=spd,
                 ))
             self._cache[aid] = subs
             out[aid] = subs[0]

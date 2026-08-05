@@ -1,0 +1,9 @@
+# Diagnostic / scratch artifacts from WM co-sim debugging (not source)
+Demo/fcd_*.xml
+Demo/bev_*.jsonl
+Demo/*.csv
+Demo/*.html
+Demo/*.log
+Demo/diag_*.sumocfg
+Demo/config_*_diag.yaml
+Demo/config_fcd.yaml
