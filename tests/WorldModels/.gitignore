@@ -7,3 +7,7 @@ Demo/*.log
 Demo/diag_*.sumocfg
 Demo/config_*_diag.yaml
 Demo/config_fcd.yaml
+# sandbox scratch outputs (the tool is tracked, its outputs are not)
+tools/sandbox*.html
+tools/sandbox*.npz
+tools/*.html
