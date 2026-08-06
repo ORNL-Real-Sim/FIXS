@@ -1515,18 +1515,28 @@ def _ask(prompt, default=None):
         return default or ""
 
 
-def _config_menu(who, options, app_paths):
+def _config_menu(who, options, current=None):
     """The scenario row: pick a yaml, or edit the current one in place.
 
     Picking a file was the only thing this offered, and with a single generated
     yaml - the normal case - that meant selecting the row did nothing visible at
     all. What people want here is usually to change a value, not to switch files,
-    so 'e' is on the same list as the files."""
-    current = options[0][0]
+    so 'e' is on the same list as the files.
+
+    `current` is the yaml the SETUP is running, and it has to be passed in: taking
+    the first row instead put "(current)" on a file the setup was not using, so
+    Enter ("keep") silently switched the scenario, and 'e' opened the wrong file.
+    The caller has already matched it against the list, so a plain `in` holds."""
+    paths = [p for p, _ in options]
+    # A new setup, or one whose scenario was just invalidated, is running nothing
+    # yet. The first row is still what Enter takes, but calling that "(current)"
+    # would be inventing a state the setup does not have.
+    known = current in paths
+    current = current if known else options[0][0]
     while True:
         print(f"\n[cosim] Scenario config for {who}:")
         for i, (path, label) in enumerate(options, 1):
-            mark = "  (current)" if path == current else ""
+            mark = ("  (current)" if known else "  (default)") if path == current else ""
             print(f"   {i}) {label}{mark}")
         print("   ---")
         print("   e) edit the current one in your editor")
@@ -2310,11 +2320,17 @@ def _edit_slots(slots, rec, ctx, cfg, apps, catalog, repo, tag_prefix, args=None
     its map, then the scenario for that pairing). Returns the CARLA config, which
     the CARLA editor may have replaced."""
     import import_map
+    # Each editor marks what the setup is currently using, so Enter keeps it. That
+    # only holds while the value is still THIS app's / THIS map's: when an earlier
+    # slot in the same pass has just changed, what the record still remembers
+    # belongs to what we left, and offering it as current would be the same lie.
+    # Which one survives what is cascade()'s rule, applied here to the values.
+    was = {"app": rec.get("app"), "map": rec.get("map")}
     for slot in run_profile.SLOT_KEYS:
         if slot not in slots:
             continue
         if slot == "app":
-            app = app_catalog.choose_app(apps) if apps else None
+            app = app_catalog.choose_app(apps, current=rec.get("app")) if apps else None
             rec["app"] = app["id"] if app else None
             _bind_app(rec, apps, ctx)
             if app:
@@ -2328,10 +2344,12 @@ def _edit_slots(slots, rec, ctx, cfg, apps, catalog, repo, tag_prefix, args=None
                         rec[key] = app["defaults"][key]
         elif slot == "map":
             app = ctx.get("app")
+            if rec.get("app") != was["app"]:
+                rec["map"] = None          # belonged to the app we just left
             target, tag, local = import_map.choose_map(
                 repo, tag_prefix, cfg.get("carla_root") if cfg else None,
                 catalog=catalog, preferred=(app or {}).get("maps"),
-                app_label=(app or {}).get("title"))
+                app_label=(app or {}).get("title"), current=rec.get("map"))
             ent = import_map.catalog_entry(catalog, target)
             rec["map"] = ent["map_name"] if ent else target
             rec["map_origin"] = ("Digital-Twin-Library" if tag else
@@ -2345,9 +2363,15 @@ def _edit_slots(slots, rec, ctx, cfg, apps, catalog, repo, tag_prefix, args=None
         elif slot == "config":
             if not rec.get("map"):
                 continue                      # nothing to scope a scenario to yet
+            # An app-owned yaml is written against the app, so it survives a map
+            # change; a per-map one does not. Neither survives an app change.
+            keep = rec.get("app") == was["app"] and (
+                rec.get("map") == was["map"]
+                or (rec.get("config_scope") or "map") == "app")
             rec["config"], rec["config_scope"] = edit_config(
                 ctx.get("staged"), (ctx.get("app") or {}).get("title"),
-                rec["map"], rec.get("app") or run_profile.GENERIC)
+                rec["map"], rec.get("app") or run_profile.GENERIC,
+                rec.get("config") if keep else None)
         elif slot == "engine":
             # Derived from the yaml, not from the record: the yaml owns it, so the
             # value being edited must be the one currently in the file.
@@ -2495,7 +2519,7 @@ def _rec_to_args(rec, args):
     args.sumo_gui = bool(rec.get("sumo_gui", True))
 
 
-def edit_config(staged, app_title, map_name, setup_app_id):
+def edit_config(staged, app_title, map_name, setup_app_id, current=None):
     """Pick the scenario yaml, from every candidate that exists for this pairing.
 
     Two kinds are legitimate and both are listed together, because from where the
@@ -2505,6 +2529,12 @@ def edit_config(staged, app_title, map_name, setup_app_id):
                  whichever map it runs against
       per-map    ~/.fixs/apps/<app>/maps/<map>/*.yaml - generated for this app on
                  this map, plus any variant the user dropped beside it
+    `current` is the yaml the setup is already running, so the menu can mark it and
+    Enter can genuinely keep it. It is matched case-insensitively, because the path
+    makes a round trip through run_profiles.json between runs; the menu is then
+    handed the spelling from the list, which is what the app/per-map test below
+    compares against.
+
     Returns (path, scope). The scope matters downstream twice: an app-owned yaml is
     AUTHORED, so the generator must never overwrite it, and only a per-map one is
     invalidated when the map changes."""
@@ -2539,11 +2569,31 @@ def edit_config(staged, app_title, map_name, setup_app_id):
         options.append((generated, f"{os.path.basename(generated):<42} "
                                    f"auto-generate for this map"))
 
+    # The setup's own yaml has to be ON the list before it can be marked on it.
+    # Normally it is already there; the two ways it is not are both worth saying out
+    # loud rather than quietly falling back to another file, since the fallback is
+    # what the user would then run.
+    if current:
+        match = next((p for p, _ in options
+                      if os.path.normcase(p) == os.path.normcase(current)), None)
+        if match:
+            current = match
+        elif os.path.isfile(current):
+            # Authored elsewhere (a scratch yaml, a path passed as --config). It is
+            # what the setup runs, so it belongs on the list; listed last because it
+            # is not part of this app's folder.
+            options.append((current, f"{os.path.basename(current):<42} "
+                                     f"in use, outside this app's folder"))
+        else:
+            print(f"[cosim] note: this setup's scenario yaml is gone "
+                  f"({current}); pick one below.")
+            current = None
+
     who = f"{app_title} on '{map_name}'" if app_title else f"'{map_name}'"
     app_paths = {c["path"] for c in staged}
     # WHICH yaml is only half of it: mostly there is one, and what people actually
     # want is to change what is IN it. So the list always offers the file itself.
-    picked = _config_menu(who, options, app_paths)
+    picked = _config_menu(who, options, current)
     print(f"[cosim] scenario config: {picked}")
     return picked, ("app" if picked in app_paths else "map")
 
