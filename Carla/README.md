@@ -183,10 +183,23 @@ CARLA copies it to `<map>.xodr` during the cook — and `.geojson` / `.rrdata.xm
 stay untouched, so `Import/<name>/` still shows which export the map came from.
 The descriptor records it too, as `exported_as`.
 
-Anything genuinely ambiguous is asked, not guessed: several `.xodr` in one
-package, or `.fbx` files that don't describe a single map. Two copies of the same
-map, an `.xodr` with no geometry, or a package that is both single-source and
-tiled are refused outright.
+**One package holds one map** — a tiled map is still one map. That is assumed of
+a Digital-Twin-Library bundle and of a folder you pick by hand, and it is what
+lets the importer resolve a package without asking anything. A package that
+breaks the rule is reported, not guessed at:
+
+| in the package | result |
+|---|---|
+| `.fbx` named after the `.xodr` | imported |
+| one `.fbx` (or one tile set) named *differently* | imported, with a warning naming what it adopted |
+| several `.xodr` — two maps, or one staged twice | refused |
+| several unrelated `.fbx` (a layer-split export) | refused |
+| `.xodr` with no `.fbx`, or `.fbx` with no `.xodr` | refused |
+| both `<name>.fbx` **and** `<name>_Tile_*.fbx` | refused (a map is one or the other) |
+
+The warning case is deliberate rather than silent: a stem mismatch usually means
+the package was assembled by hand, and the lone `.fbx` staged might be scenery
+rather than the road network — which the cook would happily accept.
 
 An app declares its map in a small text file and points the **generic** importer
 at it, so the URL lives in one place (not hard-coded in wrappers):

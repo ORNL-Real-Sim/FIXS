@@ -176,15 +176,57 @@ def test_single_source_and_tiles_together_is_a_contradiction(tmp_path):
         import_map.stage_package(str(root), "m", package_dir=pkg)
 
 
-def test_two_maps_in_one_package_are_never_picked_silently(tmp_path):
-    """Legal in CARLA's schema, but we carry one target map - so it is asked.
-    With no answer available, that has to be an exit, not a default."""
+def test_two_maps_in_one_package_are_refused(tmp_path):
+    """One package holds one map - a tiled map is still one map. A second .xodr
+    is a packaging mistake, not a choice to offer: both would land on the same
+    /Game/<pkg>/Maps/<name> and overwrite each other."""
     pkg = make_package(tmp_path, "twomaps", {"one.xodr": "x", "one.fbx": "x",
                                              "two.xodr": "x", "two.fbx": "x"})
     root = tmp_path / "carla"
     root.mkdir()
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit, match="one package holds one map"):
         import_map.stage_package(str(root), "one_of_them", package_dir=pkg)
+
+
+def test_geometry_named_apart_from_the_road_network_is_warned_about(tmp_path):
+    """One map per package identifies it - a lone .fbx can only be this map's
+    geometry - but the mismatch is worth seeing: it usually means the package was
+    assembled by hand, and that .fbx might be scenery rather than the road."""
+    pkg = make_package(tmp_path, "apart", {"MLK.xodr": "x", "MLK_final.fbx": "x"})
+    entry = stage(tmp_path, pkg, "mlk_no_signal")["maps"][0]
+
+    assert entry["source"] == "mlk_no_signal/mlk_no_signal.fbx"
+    assert entry["xodr"] == "mlk_no_signal/MLK.xodr"
+
+
+def test_the_mismatch_warning_names_the_file_it_adopted(tmp_path, capsys):
+    pkg = make_package(tmp_path, "apart", {"MLK.xodr": "x", "MLK_final.fbx": "x"})
+    stage(tmp_path, pkg, "mlk_no_signal")
+
+    out = capsys.readouterr().out
+    assert "warning: MLK.xodr has no MLK.fbx" in out
+    assert "MLK_final.fbx" in out
+
+
+def test_a_lone_tile_set_named_apart_is_warned_about(tmp_path):
+    pkg = make_package(tmp_path, "apart_tiles", {
+        "Atl.xodr": "x", "Atl_R2024b_Tile_0_0.fbx": "x", "Atl_R2024b_Tile_0_1.fbx": "x"})
+    entry = stage(tmp_path, pkg, "atlanta_full")["maps"][0]
+
+    assert entry["tiles"] == ["atlanta_full/atlanta_full_Tile_0_0.fbx",
+                              "atlanta_full/atlanta_full_Tile_0_1.fbx"]
+
+
+def test_a_layer_split_export_is_refused(tmp_path):
+    """Nothing ties any of these to the .xodr, and cooking the wrong layer as the
+    map would only surface after the cook."""
+    pkg = make_package(tmp_path, "layers", {"Roosevelt.xodr": "x",
+                                            "Roosevelt_roads.fbx": "x",
+                                            "Roosevelt_buildings.fbx": "x"})
+    root = tmp_path / "carla"
+    root.mkdir()
+    with pytest.raises(SystemExit, match="several geometries could be it"):
+        import_map.stage_package(str(root), "roosevelt_full", package_dir=pkg)
 
 
 # ---------------------------------------------------- name inference helpers

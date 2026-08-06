@@ -298,24 +298,6 @@ def _tile_split(fbx_name):
     return (m.group(1), int(m.group(2)), int(m.group(3))) if m else None
 
 
-def _pick_one(question, options, render):
-    """Ask which of several candidates is meant, and return it.
-
-    Used where the staged files describe more than one thing and picking for the
-    user would silently cook the wrong map. A non-interactive session gets a loud
-    exit instead of a coin flip - `msg` says what to do without a prompt."""
-    for i, opt in enumerate(options, 1):
-        print(f"   {i:>2}) {render(opt)}")
-    if not sys.stdin.isatty():
-        sys.exit(f"[import] {question} - and this session cannot prompt. Stage one "
-                 f"map at a time, or pass --package/--map naming the one you want.")
-    while True:
-        ans = _prompt(f"[import] {question} [1-{len(options)}]: ").strip()
-        if ans.isdigit() and 1 <= int(ans) <= len(options):
-            return options[int(ans) - 1]
-        print("[import] invalid choice; enter one of the numbers listed.")
-
-
 def _find_export(scan_root, map_name):
     """(asset_dir, stem) of the RoadRunner export staged under `scan_root`, where
     `stem` is the name the export gave itself - the stem of its `.xodr`.
@@ -325,10 +307,12 @@ def _find_export(scan_root, map_name):
     is essentially never the name the map should be cooked under, so requiring
     `<map_name>.xodr` here just fails on every real export.
 
-    The same stem twice is a duplicate stage and still fails loudly: two copies
-    of one map would fight over a single `/Game/<pkg>/Maps/<name>` destination.
-    Two *different* maps in one package is legal, so that one is asked, not
-    guessed."""
+    One package holds one map. That is the rule for a Digital-Twin-Library bundle
+    and for a folder picked by hand, and a tiled map is still one map - so a
+    second .xodr is not a choice to offer, it is a packaging mistake to report.
+    Both shapes of it land on the same destination anyway: this import is headed
+    for a single `/Game/<pkg>/Maps/<map_name>`, which two maps would overwrite in
+    turn."""
     hits = []
     for root, _dirs, files in os.walk(scan_root):
         for f in sorted(files):
@@ -342,17 +326,12 @@ def _find_export(scan_root, map_name):
         return hits[0]
 
     rel = lambda h: os.path.relpath(os.path.join(h[0], h[1] + ".xodr"), scan_root)
-    dupes = [h for h in hits if h[1] == hits[0][1]]
-    if len(dupes) > 1:
-        where = "\n".join(f"             {rel(h)}" for h in sorted(dupes))
-        sys.exit(f"[import] cannot describe '{map_name}': {dupes[0][1]}.xodr is staged in "
-                 f"{len(dupes)} places (staged more than once?). Keep one so a single "
-                 f"descriptor maps to a single destination:\n{where}")
-    exact = [h for h in hits if h[1] == map_name]
-    if len(exact) == 1:
-        return exact[0]
-    print(f"[import] {len(hits)} maps are staged under {scan_root}:")
-    return _pick_one(f"which one should be cooked as '{map_name}'?", hits, rel)
+    what = (f"{hits[0][1]}.xodr is staged in {len(hits)} places (staged more than once?)"
+            if len({h[1] for h in hits}) == 1 else
+            f"{len(hits)} maps are staged here, and one package holds one map")
+    where = "\n".join(f"             {rel(h)}" for h in sorted(hits))
+    sys.exit(f"[import] cannot describe '{map_name}': {what}. Keep one, so a single "
+             f"descriptor maps to a single destination:\n{where}")
 
 
 def _export_fbx(asset_dir, stem):
@@ -360,11 +339,16 @@ def _export_fbx(asset_dir, stem):
     `asset_dir`. Exactly one of the two is populated: a map is single-source or
     tiled, never both.
 
-    Prefers the fbx named after the .xodr, which is what RoadRunner writes. Falls
-    back to whatever .fbx is actually there when an export named its road network
-    and its geometry apart, provided they still describe ONE map - a lone .fbx,
-    or one tile set sharing a prefix. Several unrelated .fbx is a question, not a
-    default: picking one would cook someone's layer export as the whole map."""
+    Normally the fbx is named after the .xodr - that is what RoadRunner writes.
+    When it is not, one-map-per-package (_find_export) still identifies it: a
+    lone .fbx, or a single tile set, can only be this map's geometry. It is taken
+    with a WARNING rather than silently, because a stem mismatch usually means
+    the package was assembled by hand, and the one .fbx staged might be scenery
+    rather than the road network - which the cook would not catch.
+
+    Several unrelated .fbx (a RoadRunner layer-split export) cannot be resolved
+    that way, so it is reported: cooking the wrong layer as the whole map only
+    shows up after the cook, and the fix belongs in the package."""
     fbx = sorted(f for f in os.listdir(asset_dir) if f.lower().endswith(".fbx"))
     single = stem + ".fbx" if stem + ".fbx" in fbx else None
     tiles = [f for f in fbx if (_tile_split(f) or (None,))[0] == stem]
@@ -374,26 +358,29 @@ def _export_fbx(asset_dir, stem):
                  f"not both.")
     if single or tiles:
         return single, tiles
-
-    # The .xodr and the .fbx were named apart. Resolve it from what is present.
-    plain = [f for f in fbx if _tile_split(f) is None]
-    prefixes = sorted({t[0] for t in (_tile_split(f) for f in fbx) if t})
     if not fbx:
         sys.exit(f"[import] cannot describe '{stem}': found {stem}.xodr but no .fbx "
                  f"beside it in {asset_dir}.")
+
+    # The .xodr and the .fbx were named apart.
+    plain = [f for f in fbx if _tile_split(f) is None]
+    prefixes = sorted({t[0] for t in (_tile_split(f) for f in fbx) if t})
     if len(prefixes) == 1 and not plain:
-        return None, [f for f in fbx if _tile_split(f)[0] == prefixes[0]]
+        chosen = [f for f in fbx if _tile_split(f)[0] == prefixes[0]]
+        print(f"[import] warning: {stem}.xodr has no {stem}_Tile_<x>_<y>.fbx. Taking "
+              f"the only tile set staged, {prefixes[0]}_Tile_*.fbx ({len(chosen)} "
+              f"tiles) - check that is this map's geometry.")
+        return None, chosen
     if len(plain) == 1 and not prefixes:
-        print(f"[import] note: {plain[0]} does not match {stem}.xodr, but it is the "
-              f"only geometry staged; taking it as this map's source.")
+        print(f"[import] warning: {stem}.xodr has no {stem}.fbx. Taking the only "
+              f"geometry staged, {plain[0]} - check that is this map's road network "
+              f"and not, say, scenery.")
         return plain[0], []
-    print(f"[import] {stem}.xodr has no {stem}.fbx, and {asset_dir} holds several "
-          f"unrelated geometries:")
-    chosen = _pick_one(f"which one is the road geometry for {stem}?",
-                       plain + prefixes, lambda o: o if o in plain else f"{o}_Tile_*.fbx")
-    if chosen in plain:
-        return chosen, []
-    return None, [f for f in fbx if (_tile_split(f) or (None,))[0] == chosen]
+    listed = "\n".join(f"             {f}" for f in fbx)
+    sys.exit(f"[import] cannot describe '{stem}': {stem}.xodr has no {stem}.fbx or "
+             f"{stem}_Tile_<x>_<y>.fbx, and several geometries could be it:\n{listed}\n"
+             f"         One package holds one map: name the .fbx after the .xodr, or "
+             f"stage only that map's geometry.")
 
 
 def _rename_export(asset_dir, stem, map_name, source, tiles):
@@ -473,8 +460,10 @@ def generate_descriptor(import_dir, map_name):
     CARLA map and orphan the run profiles, app manifests and catalog entries
     pointing at the old one - and would break the walker navmesh (_rename_export).
 
-    Resolve or ask, never guess: no .xodr at all, or the same map staged twice,
-    still exits loudly; genuinely ambiguous staging is put to the user."""
+    Resolve or report, never guess. One package holds one map (a tiled map is
+    still one map), so anything that breaks that rule - no .xodr, several .xodr,
+    geometry that cannot be tied to the road network - is a packaging mistake
+    named on the spot rather than a prompt or a coin flip."""
     import json
 
     subtree = os.path.join(import_dir, map_name)
