@@ -6,7 +6,7 @@ simulators:
     version: "1.22.0"
     source: "https://github.com/eclipse/sumo"
     location: "CommonLib/libsumo"
-    notes: "libsumo/libtraci headers and DLLs vendored from SUMO release"
+    notes: "libsumo/libtraci headers and DLLs. NOT committed to git (#238) - gitignored, and fetched as the checksum-verified libsumo-<version>.zip asset from the rolling 'fixs-native-deps' release by scripts/initialize_fixs.ps1. Bumping this version requires publishing a matching asset first: scripts/dispatch/pack_native_deps.ps1 -Component sumo -Publish"
 
   carla:
     version: "0.9.15"
