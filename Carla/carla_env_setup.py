@@ -364,26 +364,27 @@ def _pick_file(title):
 
 
 def run_setup(allow_packaged_windows=False):
-    """Interactive setup; writes and returns the config."""
+    """Interactive setup; writes and returns the config.
+
+    `allow_packaged_windows` no longer gates anything - packaged is offered
+    everywhere. Kept so the flag that scripts and docs already pass stays valid."""
     print("=== CARLA environment setup ===")
-    # On Windows, importing a *custom* map into a packaged CARLA is unsupported
-    # by CARLA itself (map ingestion is Linux + Docker only - see
-    # Util/ImportAssets.sh; there is no ImportAssets.bat). Custom-map apps on
-    # Windows therefore need a source build. We skip the packaged option here to
-    # avoid a dead end; pass allow_packaged_windows=True (--allow-packaged-windows)
-    # if you only need stock maps (Town01, ...) from a packaged build.
-    offer_packaged = platform.system() != "Windows" or allow_packaged_windows
-    if offer_packaged:
-        print("Which CARLA do you want to use?")
-        print("  [1] Packaged CARLA  (a released build with CarlaUE4.exe / CarlaUE4.sh)")
-        print("  [2] Source build    (run through the Unreal editor: UE4Editor -game)")
-        choice = input("Enter 1 or 2: ").strip()
-    else:
-        print("On Windows, custom-map import requires a SOURCE build (packaged-map")
-        print("import is Linux+Docker only in CARLA). Using source build.")
-        print("(Only need stock maps from a packaged build? re-run:")
-        print("   carla_env_setup.py --allow-packaged-windows )")
-        choice = "2"
+    # Packaged is offered on every OS. It used to be hidden on Windows because a
+    # custom map could only reach a package through CARLA's Util/ImportAssets.sh,
+    # which is bash-only and has no .bat counterpart. import_map.install_cooked
+    # replaces that script with the same plain extract in `tarfile`, so the route
+    # is now OS-independent; the equivalence was checked by installing the same
+    # mlk_no_signal_cooked.tar.gz both ways into two packaged CARLA 0.9.15 roots
+    # and diffing the resulting Content trees (identical, down to modes+mtimes).
+    #
+    # What stays true on both OSes is the *other* packaged limit: no editor, so
+    # nothing can be cooked or placed here. A packaged build runs only maps the
+    # library publishes precooked, exactly as they were cooked - run_cosim says so
+    # before it launches.
+    print("Which CARLA do you want to use?")
+    print("  [1] Packaged CARLA  (a released build with CarlaUE4.exe / CarlaUE4.sh)")
+    print("  [2] Source build    (run through the Unreal editor: UE4Editor -game)")
+    choice = input("Enter 1 or 2: ").strip()
 
     if choice == "1":
         root = _pick_dir("Select your PACKAGED CARLA folder (contains CarlaUE4.exe / .sh)")
@@ -437,8 +438,7 @@ def main():
     ap = argparse.ArgumentParser(description="Configure which CARLA run_cosim.py uses.")
     ap.add_argument("--show", action="store_true", help="print the current config and exit")
     ap.add_argument("--allow-packaged-windows", action="store_true",
-                    help="on Windows, also offer packaged CARLA (stock maps only; "
-                         "custom-map import is unsupported in Windows packages)")
+                    help=argparse.SUPPRESS)  # obsolete: packaged is offered on every OS
     args = ap.parse_args()
     if args.show:
         cfg = load_config()

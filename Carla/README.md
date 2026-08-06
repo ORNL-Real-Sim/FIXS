@@ -105,10 +105,15 @@ Setup asks **packaged** vs **source build**, then opens a native folder picker:
   used automatically when it points at a real engine; otherwise you're prompted.
   Launched through the editor as `UE4Editor <uproject> -game`.
 
-**Windows note:** importing a *custom* map into a packaged CARLA is unsupported by
-CARLA (map ingestion is Linux + Docker only &mdash; there is no `ImportAssets.bat`),
-so on Windows setup offers **source build only** for custom-map apps. Pass
-`--allow-packaged-windows` if you only need stock maps (Town01, ...) from a package.
+**What a packaged build cannot do:** cook or place anything &mdash; that needs the
+Unreal editor, which a package does not ship. So it runs a Digital-Twin-Library map
+only if the library publishes it *precooked* (`<map>_cooked.tar.gz`), exactly as it
+was cooked; traffic lights and signs are whatever the asset already contains.
+`run_cosim` installs that asset for you and says so before it launches, and names the
+missing asset up front for a map that has none. To cook a map yourself, use a source
+build. This applies equally on Windows and Linux &mdash; installing a precooked asset
+is a plain extract, done here in `tarfile` rather than through CARLA's bash-only
+`Util/ImportAssets.sh`.
 
 Setup also resolves the **python env** that runs the co-sim and stores it in the
 config, so the launcher works on any machine no matter what the env is named:
