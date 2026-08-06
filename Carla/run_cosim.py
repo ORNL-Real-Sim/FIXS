@@ -1940,7 +1940,7 @@ def main():
     # + cached, split into carla/ + sumo/) or a local pick - else fail clearly.
     if not args.no_launch and cfg is not None and cfg.get("mode") == "source":
         resolved = None if args.reimport else \
-            import_map.resolve_cooked_map(cfg["carla_root"], target_map)
+            import_map.resolve_cooked_map(cfg["carla_root"], target_map, mode="source")
 
         # Already imported? If this was a FRESH source pick (an online release or a
         # local .zip/folder), offer to reimport - re-cook + re-place TLs/signs +
@@ -1993,32 +1993,125 @@ def main():
                     f"[cosim] map '{target_map}' is not imported into {cfg['carla_root']}.\n"
                     f"        Pick a DT-Library map (--map <location>), a local bundle "
                     f"(--package-dir <zip/folder>), or --auto-import [--map-package-url <zip>].")
-            resolved = import_map.resolve_cooked_map(cfg["carla_root"], target_map)
+            resolved = import_map.resolve_cooked_map(cfg["carla_root"], target_map, mode="source")
 
         if resolved is None:
             print(f"[cosim] could not tell which cooked map '{target_map}' provides; "
                   f"pick the one to load:")
-            target_map = import_map.choose_imported_map(cfg["carla_root"])
-            target_level = import_map.choose_level_path(cfg["carla_root"], target_map)
+            target_map = import_map.choose_imported_map(cfg["carla_root"], mode="source")
+            target_level = import_map.choose_level_path(cfg["carla_root"], target_map,
+                                                       mode="source")
         else:
             if resolved[0] != target_map:
                 print(f"[cosim] package '{target_map}' provides map '{resolved[0]}'")
             target_map, target_level = resolved
 
-        note = import_map.duplicate_level_note(cfg["carla_root"], target_map, target_level)
+        note = import_map.duplicate_level_note(cfg["carla_root"], target_map,
+                                               target_level, mode="source")
         if note:
             print(note)
+
+    # Packaged-build preflight: the same job as above, by the only mechanism a
+    # packaged CARLA has. It cannot cook anything - cooking runs the Unreal editor,
+    # which a packaged build does not ship - so the map must arrive ALREADY cooked,
+    # as the DT-Library's precooked .tar.gz, and installing that is a plain extract
+    # into the package root (see import_map.install_cooked).
+    #
+    # Without this block a packaged run skipped the CARLA slot entirely: the SUMO
+    # slot below still filled, the run looked healthy, and the first sign of trouble
+    # was load_world failing on a map that was never there.
+    if not args.no_launch and cfg is not None and cfg.get("mode") == "packaged":
+        resolved = None if args.reimport else \
+            import_map.resolve_cooked_map(cfg["carla_root"], target_map, mode="packaged")
+
+        if resolved is None:
+            # A local pick is usable only if it IS the precooked package; a source
+            # bundle (carla/ with fbx+xodr) would have to be cooked, which is the
+            # one thing this flavour cannot do.
+            local_tar = picked_local if (picked_local or "").lower().endswith(".tar.gz") else None
+            if local_tar:
+                tar_path = local_tar
+            elif picked_local:
+                sys.exit(f"[cosim] '{picked_local}' is a source bundle and this CARLA is "
+                         f"PACKAGED, which cannot cook one. Point at the map's precooked "
+                         f"*_cooked.tar.gz, or configure a source build (run_cosim --setup).")
+            elif not picked_tag:
+                sys.exit(f"[cosim] map '{target_map}' is not installed in {cfg['carla_root']} "
+                         f"and is not a Digital-Twin-Library map, so there is no precooked "
+                         f"package to install. Pick a library map, or point --package-dir at "
+                         f"a precooked *_cooked.tar.gz.")
+            else:
+                asset = import_map.catalog_cooked_asset(ent)
+                # Say "not published" by NAME, before downloading anything. The
+                # alternative is a gh pattern-miss the user has to decode - and for
+                # a map whose release genuinely has no cooked asset (atlanta, at the
+                # time of writing) that is the expected, not the exceptional, path.
+                published = import_map.release_assets(repo, picked_tag)
+                if asset is None or (published is not None and asset not in published):
+                    have = ", ".join(published) if published else "unknown"
+                    sys.exit(
+                        f"[cosim] no precooked package published for '{target_map}' "
+                        f"(release '{picked_tag}' of {repo}).\n"
+                        f"        A PACKAGED CARLA can only run maps that ship one.\n"
+                        f"        expected asset: {asset or '(none named in the catalog)'}\n"
+                        f"        published:      {have}\n"
+                        f"        Use a source build (run_cosim --setup) to cook this map "
+                        f"yourself, or ask for a precooked build of it.")
+                tar_path = import_map.download_cooked_tar(
+                    repo, picked_tag, asset, force_redownload=args.reimport,
+                    cache_name=target_map)
+
+            real = import_map.install_cooked(cfg["carla_root"], tar_path,
+                                             force=args.reimport)
+            if real != target_map:
+                print(f"[cosim] precooked package provides map '{real}'")
+                target_map = real
+            resolved = import_map.resolve_cooked_map(cfg["carla_root"], target_map,
+                                                     mode="packaged")
+
+        if resolved is None:
+            print(f"[cosim] could not tell which installed map '{target_map}' provides; "
+                  f"pick the one to load:")
+            target_map = import_map.choose_imported_map(cfg["carla_root"], mode="packaged")
+            target_level = import_map.choose_level_path(cfg["carla_root"], target_map,
+                                                       mode="packaged")
+        else:
+            target_map, target_level = resolved
+
+        note = import_map.duplicate_level_note(cfg["carla_root"], target_map,
+                                               target_level, mode="packaged")
+        if note:
+            print(note)
+
+        # TLs and signs are placed through the UE4 editor, which a packaged build
+        # does not have - so whatever the asset was cooked with is what you get, for
+        # the whole run. Said out loud because the failure is silent: a map cooked
+        # without traffic lights runs fine and produces a co-sim with no TL sync,
+        # i.e. plausible numbers that are wrong.
+        print(f"[cosim] note: packaged CARLA - traffic lights and signs cannot be "
+              f"placed here (that needs a source build's editor). TL sync depends on "
+              f"what '{target_map}' was cooked with.")
 
     # SUMO slot: --sumocfg wins; else an already-extracted sumo/, else the chosen
     # bundle's. This also runs for the paths that skip the source-build preflight
     # above (--no-launch, packaged builds), so the cache is checked here too - the
     # bundle is the LAST resort, not the first.
+    #
+    # For a packaged build that last resort is expensive: the precooked .tar.gz is
+    # CARLA-only, so the scenario still comes from the source bundle and roosevelt
+    # costs 399MB cooked + 380MB bundle for a few hundred KB of SUMO files. Fixing
+    # that is a release-shape decision (cooked tarball carries sumo/, or a small
+    # <map>_sumo.zip) tracked in ORNL-Real-Sim/FIXS_Applications#27; when it lands,
+    # this is where the cheaper source gets preferred.
     sumocfg = args.sumocfg
     if sumocfg is None:
         if sumo_dir is None:
             sumo_dir = cached_sumo_dir(target_map)
-        if sumo_dir is None and (picked_local or picked_tag):
-            zip_path = picked_local or import_map.download_release_zip(
+        # A local pick that is a precooked .tar.gz holds no sumo/ - it is the CARLA
+        # half only - so it is not a bundle to open; fall through to the picker.
+        local_bundle = None if (picked_local or "").lower().endswith(".tar.gz") else picked_local
+        if sumo_dir is None and (local_bundle or picked_tag):
+            zip_path = local_bundle or import_map.download_release_zip(
                 repo, picked_tag, cache_name=target_map)
             _carla, sumo_dir = import_map.open_bundle(zip_path, cache_name=target_map)
         sumocfg = import_map.bundle_sumocfg(sumo_dir)
