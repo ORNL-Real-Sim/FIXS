@@ -55,7 +55,13 @@ CommonLib/libevent/build/*
 CommonLib/libevent/out/build/*
 CommonLib/yaml-cpp/build/*
 CommonLib/yaml-cpp/out/build/*
-CommonLib/libsumo/out/build/*
+# Native C++ deps - NOT committed (#109, #238). Acquired at setup time by
+# scripts/initialize_fixs.ps1 -> scripts/dispatch/fetch_native_deps.ps1, which
+# downloads checksum-verified zips from the rolling 'fixs-native-deps' release.
+# libsumo was ~430 MB of unverified binaries in git and was silently missing
+# geos_c.dll/geos.dll for months (#70) - a fetched, checksum-verified zip
+# produced by one reproducible path replaces it.
+CommonLib/libsumo/
 CommonLib/libcarla/*
 CommonLib/slprj/*
 

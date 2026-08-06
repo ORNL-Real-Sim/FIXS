@@ -148,10 +148,33 @@ jobs:
         if: steps.detect.outputs.should_build == 'true'
         shell: pwsh
         run: |
-          & scripts/dispatch/fetch_native_deps.ps1 -Mode prebuilt
+          & scripts/dispatch/fetch_native_deps.ps1 -Component carla -Mode prebuilt
           if ($LASTEXITCODE -ne 0) {
             Write-Host "::warning::libcarla prebuilt fetch failed (no fixs-native-deps release yet?) - VirCarlaEnv will be skipped."
             exit 0
+          }
+
+      # libsumo (~127 MB) is REQUIRED, not optional like libcarla: since #238 it
+      # is no longer committed to git, and TrafficLayer.vcxproj links
+      # CommonLib\libsumo\bin\libsumocpp.lib directly - so step 2 of dispatch
+      # cannot build without it. Fetched explicitly here (rather than leaving it
+      # to dispatch's initialize step) purely so a bad/absent release asset
+      # fails with a clear message instead of a link error 10 minutes later.
+      # Cached on dependencies.yaml so it downloads at most once per deps version.
+      - name: Cache libsumo (native deps)
+        if: steps.detect.outputs.should_build == 'true'
+        uses: actions/cache@v4
+        with:
+          path: CommonLib/libsumo
+          key: libsumo-${{ runner.os }}-${{ hashFiles('dependencies.yaml') }}
+      - name: Fetch libsumo (prebuilt, required)
+        if: steps.detect.outputs.should_build == 'true'
+        shell: pwsh
+        run: |
+          & scripts/dispatch/fetch_native_deps.ps1 -Component sumo
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::libsumo fetch failed - TrafficLayer cannot link without it. Check that libsumo-<ver>.zip is published on the fixs-native-deps release."
+            exit 1
           }
 
       - name: Build + package (proprietary steps skipped; VE.lib builds on 0.9.0)
