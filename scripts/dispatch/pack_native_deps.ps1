@@ -36,6 +36,45 @@ function Get-DepVersion([string]$block) {
     if ($c -match "(?ms)^\s*${block}:\s.*?^\s*version:\s*[`"']?([0-9][0-9.]*)") { return $Matches[1] }
     throw "could not parse $block version from dependencies.yaml"
 }
+function Assert-LibsumoSelfContained([string]$binDir) {
+    # #70: libsumocpp.dll pulls a long chain of bundled third-party DLLs
+    # (gdal -> geos_c -> geos, spatialite, proj, ...). One missing file makes it
+    # unloadable, and because TrafficLayer delay-loads it the breakage only shows
+    # up at runtime as a silent crash - which is exactly how a broken
+    # libsumo-<ver>.zip shipped once already. Verify the staged bin/ actually
+    # loads before we publish it.
+    $sig = @"
+using System;
+using System.Runtime.InteropServices;
+public class NdLoadProbe {
+    [DllImport("kernel32", SetLastError=true, CharSet=CharSet.Unicode)]
+    public static extern IntPtr LoadLibraryEx(string p, IntPtr h, uint f);
+    public static int Probe(string p) {
+        IntPtr h = LoadLibraryEx(p, IntPtr.Zero, 0x00000008); // ALTERED_SEARCH_PATH
+        return h == IntPtr.Zero ? Marshal.GetLastWin32Error() : 0;
+    }
+}
+"@
+    if (-not ('NdLoadProbe' -as [type])) { Add-Type -TypeDefinition $sig }
+
+    $saved = $env:PATH
+    $env:PATH = "$binDir;$env:PATH"
+    try {
+        foreach ($dll in @('libsumocpp.dll', 'libtracicpp.dll')) {
+            $full = Join-Path $binDir $dll
+            if (-not (Test-Path $full)) { throw "$dll missing from $binDir" }
+            $code = [NdLoadProbe]::Probe($full)
+            if ($code -ne 0) {
+                throw ("$dll in $binDir cannot be loaded (GetLastError=$code). " +
+                       "A bundled runtime dependency is missing - packing this would " +
+                       "publish a broken asset (see issue #70). Re-run scripts/build_libsumo.ps1 " +
+                       "or restore the missing DLL before packing.")
+            }
+        }
+    } finally { $env:PATH = $saved }
+    Write-Host "libsumo bin/ verified loadable (libsumocpp + libtracicpp)." -ForegroundColor Green
+}
+
 function New-Zip([string]$stageDir, [string]$zipName) {
     $zipPath = Join-Path $OutDir $zipName
     if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
@@ -79,6 +118,7 @@ if ($Component -in 'both', 'sumo') {
         Get-ChildItem $libsumo | Where-Object { $_.Name -ne 'out' } |
             ForEach-Object { Copy-Item $_.FullName -Destination $ss -Recurse -Force }
         Write-Host "libsumo ${sver}: staged (headers + bin/)"
+        Assert-LibsumoSelfContained (Join-Path $ss 'bin')
         $assets.Add((New-Zip $stage "libsumo-$sver.zip"))
         Remove-Item $stage -Recurse -Force
     } else { Write-Warning "CommonLib/libsumo not present - skipping libsumo." }
