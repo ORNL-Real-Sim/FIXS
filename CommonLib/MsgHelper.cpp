@@ -99,6 +99,9 @@ void MsgHelper::printVehData(VehFullData_t VehData) {
 	if (VehicleMessageField_set.find("signalLightColor") != VehicleMessageField_set.end()) {
 		printf("\t signalLightColor: %d\n", VehData.signalLightColor);
 	}
+	if (VehicleMessageField_set.find("speedFreeFlow") != VehicleMessageField_set.end()) {
+		printf("\t speedFreeFlow: %f\n", VehData.speedFreeFlow);
+	}
 	if (VehicleMessageField_set.find("speedLimit") != VehicleMessageField_set.end()) {
 		printf("\t speedLimit: %f\n", VehData.speedLimit);
 	}
@@ -208,6 +211,9 @@ void MsgHelper::printVehDataToFile(const std::string fileName, VehFullData_t Veh
 	}
 	if (VehicleMessageField_set.find("signalLightColor") != VehicleMessageField_set.end()) {
 		fprintf(f, "\t signalLightColor: %d\n", VehData.signalLightColor);
+	}
+	if (VehicleMessageField_set.find("speedFreeFlow") != VehicleMessageField_set.end()) {
+		fprintf(f, "\t speedFreeFlow: %f\n", VehData.speedFreeFlow);
 	}
 	if (VehicleMessageField_set.find("speedLimit") != VehicleMessageField_set.end()) {
 		fprintf(f, "\t speedLimit: %f\n", VehData.speedLimit);
@@ -392,6 +398,7 @@ void MsgHelper::packVehData(const VehFullData_t& VehData, char* buffer, int* iBy
 	numericVehDataToBuffer<float>(VehData.steerAngleDesired, "steerAngleDesired", buffer, iByte);
 	numericVehDataToBuffer<float>(VehData.acceleratorPedalDesired, "acceleratorPedalDesired", buffer, iByte);
 	numericVehDataToBuffer<float>(VehData.brakePedalDesired, "brakePedalDesired", buffer, iByte);
+	numericVehDataToBuffer<float>(VehData.speedFreeFlow, "speedFreeFlow", buffer, iByte);
 
 	// go back to the first byte location and parser message size
 	tempUint16 = (*iByte - initByte);
@@ -460,6 +467,7 @@ void MsgHelper::depackVehData(char* buffer, VehFullData_t& VehData) {
 	bufferToNumericVehData<float>(buffer, &iByte, "steerAngleDesired", tempFloat); VehData.steerAngleDesired = tempFloat;
 	bufferToNumericVehData<float>(buffer, &iByte, "acceleratorPedalDesired", tempFloat); VehData.acceleratorPedalDesired = tempFloat;
 	bufferToNumericVehData<float>(buffer, &iByte, "brakePedalDesired", tempFloat); VehData.brakePedalDesired = tempFloat;
+	bufferToNumericVehData<float>(buffer, &iByte, "speedFreeFlow", tempFloat); VehData.speedFreeFlow = tempFloat;
 
 }
 

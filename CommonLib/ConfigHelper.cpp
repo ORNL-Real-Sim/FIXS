@@ -426,7 +426,12 @@ int ConfigHelper::getConfig(string configName) {
 	else {
 		CarMakerSetup.SynchronizeTrafficSignal = false;
 	}
-	SubscriptionSignalList.subAllSignalFlag = CarMakerSetup.SynchronizeTrafficSignal;
+	// OR rather than assign: getSigSubscriptionList() runs earlier in getConfig() and
+	// may already have set this from the YAML `SignalSubscription` `all` attribute.
+	// A plain assignment here silently discarded that, which is why the YAML path
+	// could never work regardless of how it was parsed.
+	SubscriptionSignalList.subAllSignalFlag =
+		SubscriptionSignalList.subAllSignalFlag || CarMakerSetup.SynchronizeTrafficSignal;
 
 	if (node["TrafficSignalPort"]) {
 		CarMakerSetup.TrafficSignalPort = parserInteger(node, "TrafficSignalPort");
@@ -468,6 +473,15 @@ int ConfigHelper::getConfig(string configName) {
 	else {
 		SumoSetup.ExecutionOrder = 1;
 		if (!SuppressDefaultMessages) printf("\nSumo Execution Order not specified! Will use 1 as default!\n");
+	}
+	// How far ahead to look for a preceding vehicle (metres). Default 1000 keeps
+	// the previously hard-coded behaviour; lower it to narrow the car-following
+	// horizon an application sees.
+	if (node["PrecedingVehicleLookahead"]) {
+		SumoSetup.PrecedingVehicleLookahead = parserDouble(node, "PrecedingVehicleLookahead");
+	}
+	else {
+		SumoSetup.PrecedingVehicleLookahead = 1000.0;
 	}
 	if (node["EnableAutoLaunch"]) {
 		SumoSetup.EnableAutoLaunch = parserFlag(node, "EnableAutoLaunch");
@@ -874,7 +888,11 @@ void ConfigHelper::parserSubscription(YAML::Node rootnode, std::string name, Sub
 				break;
 
 			case intersection:
-				if (att.compare("id") == 0 || att.compare("name") == 0) {
+				// `all` accepted alongside id/name, matching the `ego` case above.
+				// Without it the attribute was dropped here before reaching attMap,
+				// so getSigSubscriptionList() could never see it -- and because the
+				// error box below is commented out, the drop was silent.
+				if (att.compare("id") == 0 || att.compare("name") == 0 || att.compare("all") == 0) {
 					extractSubscriptionAttributes(attnode, type, att, attMap);
 				}
 				else {
@@ -1145,6 +1163,22 @@ void ConfigHelper::getSigSubscriptionList(Subscription_t SigSub) {
 				}
 			}
 
+			// `all` subscription for signals, mirroring the vehicle `all` handling
+			// added for #176. `attribute: {all: ['true']}` subscribes every traffic
+			// light in the network instead of an explicit `name` list. Consumed in
+			// TrafficHelper::recvFromTrafficSimulator, which already branches on
+			// subAllSignalFlag to subscribe TrafficLight::getIDList().
+			bool subAllFlag = false;
+			if (att.find("all") != att.end() && !att["all"].empty()) {
+				subAllFlag = (att["all"][0].compare("true") == 0);
+			}
+			if (subAllFlag) {
+				SubscriptionSignalList.subAllSignalFlag = true;
+				if (!idlist.empty()) {
+					printf("\nWARNING: 'all' signal subscription is enabled; the configured 'name' list is ignored (all traffic lights in the network are sent).\n");
+				}
+			}
+
 			// get port map
 			vector <int> port_v;
 			port_v = get<3>(SigSub[iSub]);
@@ -1157,6 +1191,10 @@ void ConfigHelper::getSigSubscriptionList(Subscription_t SigSub) {
 				else {
 					SubscriptionAllList_t subAllList;
 					SocketPort2SubscriptionList_um[it] = subAllList;
+				}
+
+				if (subAllFlag) {
+					SocketPort2SubscriptionList_um[it].SignalList.subAllSignalFlag = true;
 				}
 
 				for (size_t i = 0; i < idlist.size(); i++) {
@@ -1175,13 +1213,9 @@ void ConfigHelper::getSigSubscriptionList(Subscription_t SigSub) {
 		
 	}
 
-	////if (CarMakerSetup.EnableCosimulation && CarMakerSetup.SynchronizeTrafficSignal){
-	//if (CarMakerSetup.SynchronizeTrafficSignal) {
-	//	SubscriptionSignalList.subAllSignalFlag = true;
-	//}
-	//else {
-	//	SubscriptionSignalList.subAllSignalFlag = false;
-	//}
+	// (The CarMaker SynchronizeTrafficSignal path that used to be sketched here now
+	// lives in getConfig(), where it ORs into subAllSignalFlag rather than
+	// overwriting whatever this function derived from the YAML.)
 }
 
 void ConfigHelper::getDetSubscriptionList(Subscription_t DetSub) {
