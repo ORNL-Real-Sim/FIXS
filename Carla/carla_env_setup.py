@@ -24,6 +24,7 @@ The config is stored per-machine outside any repo, so every FIXS app on this
 computer reuses it and it is never git-tracked.
 """
 import argparse
+import hashlib
 import json
 import os
 import platform
@@ -166,7 +167,18 @@ def _conda_candidates():
 
 
 def _canonical_env_name():
-    """The env name from the shipped environment.yml (defaults to 'realsim')."""
+    """The env to create and bind: $FIXS_ENV_NAME, else the name in the shipped
+    environment.yml (defaults to 'realsim').
+
+    The override exists so an application repo can put its OWN env in front - one
+    built from this same spec, plus whatever its apps need on top - without this
+    engine knowing that env exists. FIXS is told the name by its caller or uses its
+    own; it never learns an application's. Keeping the app extras out of 'realsim'
+    also keeps that env a faithful test of environment.yml, which is what a FIXS
+    developer needs it to be."""
+    override = (os.environ.get("FIXS_ENV_NAME") or "").strip()
+    if override:
+        return override
     try:
         with open(ENV_YML, encoding="utf-8") as f:
             for line in f:
@@ -204,18 +216,33 @@ def _find_conda():
     return None
 
 
-def _conda_create_env(conda_exe, yml_path):
-    cmd = [conda_exe, "env", "create", "-f", yml_path]
+def _conda_create_env(conda_exe, yml_path, name):
+    """Create the env from the spec, named `name`.
+
+    -n is required, not cosmetic: it overrides the spec's own `name:`, which is how
+    the same environment.yml can build the engine's env and an application repo's
+    without either restating python=, the channels or channel_priority. Without it
+    a caller that set FIXS_ENV_NAME got an env called 'realsim' created, then failed
+    to find the name it asked for, and fell through to binding something else."""
+    cmd = [conda_exe, "env", "create", "-n", name, "-f", yml_path]
     print(f"[setup] {' '.join(cmd)}")
     print("[setup] creating the env can take several minutes ...")
     return subprocess.call(cmd) == 0
 
 
 def resolve_python():
+    """Resolve the interpreter that runs the co-sim, then say so if it is not the
+    env that was asked for (see _warn_if_not_requested)."""
+    py = _resolve_python()
+    _warn_if_not_requested(py, _canonical_env_name())
+    return py
+
+
+def _resolve_python():
     """Resolve the interpreter that runs the co-sim.
 
     Order:
-      1. the canonical env named in environment.yml ('realsim') if it exists;
+      1. the canonical env (FIXS_ENV_NAME, else environment.yml's name) if it exists;
       2. else, if conda is available, offer to create it from environment.yml;
       3. else fall back to any conda env that already has the co-sim deps
          (carla + SUMO), then to a manual python picker.
@@ -235,11 +262,19 @@ def resolve_python():
         print(f"[setup] the '{name}' env is not installed (conda found: {conda}).")
         ans = input(f"        create it now from {ENV_YML}? [Y/n]: ").strip().lower()
         if ans in ("", "y", "yes"):
-            if _conda_create_env(conda, ENV_YML):
+            if _conda_create_env(conda, ENV_YML, name):
                 py = _named_env_python(name)
                 if py:
                     print(f"[setup] created '{name}': {py}")
                     return py
+            else:
+                # Say it failed HERE, where the cause is. Left to fall through in
+                # silence, the next steps pick some other interpreter and the
+                # first evidence of the failure is a co-sim behaving oddly hours
+                # later - which is exactly how a box ended up running without
+                # pyyaml and blaming a scenario yaml that was correct.
+                print(f"[setup] 'conda env create -f {ENV_YML}' FAILED. Its output "
+                      f"is above; a solve failure usually names the conflict.")
             print("[setup] env creation did not produce a usable interpreter; "
                   "falling back to detection.")
     elif not conda:
@@ -262,10 +297,157 @@ def resolve_python():
         return ranked[int(sel)] if sel.isdigit() and int(sel) < len(ranked) else ranked[0]
 
     print("[setup] no conda env with the co-sim deps found automatically.")
-    py = _pick_file(f"Select the python.exe of your '{name}' env (has carla + SUMO)")
-    if not py or not os.path.isfile(py):
-        sys.exit("[setup] no python interpreter selected.")
-    return py
+    return _no_env_fallback(name)
+
+
+def _warn_if_not_requested(py_exe, name):
+    """Say so when the interpreter bound is not the env that was asked for.
+
+    Only reachable when FIXS_ENV_NAME named an env that does not exist yet and the
+    fallbacks picked something else - typically the engine's own 'realsim', which
+    ranks first because it has carla and the SUMO clients. Left silent, an
+    application's extra packages would then be installed into the engine env, which
+    is the one thing the override exists to prevent."""
+    requested = (os.environ.get("FIXS_ENV_NAME") or "").strip()
+    if not requested or not py_exe:
+        return
+    if os.path.normcase(_env_root(py_exe)).endswith(os.path.normcase(requested)):
+        return
+    print(f"[setup] NOTE: '{requested}' was requested (FIXS_ENV_NAME) but is not what "
+          f"got bound:\n        {py_exe}\n"
+          f"        Anything an application installs will land there. Create "
+          f"'{requested}' with:\n"
+          f"            conda env create -n {requested} -f {ENV_YML}")
+
+
+# Imported by run_cosim/ConfigHelper and the TL-table generator. Missing any of
+# them does not stop the run, it degrades it in ways that name something else:
+# no yaml parser makes every scenario setting read as its default (including
+# CarlaServerIP -> localhost), and no pandas/shapely turns traffic-light sync off.
+RUNTIME_MODULES = ("yaml", "pandas", "shapely", "traci", "sumolib")
+
+
+def missing_runtime(py_exe):
+    """Which of RUNTIME_MODULES `py_exe` cannot import."""
+    return [m for m in RUNTIME_MODULES if not _python_can_import(py_exe, (m,))]
+
+
+# Where an application's applied-dependency stamp lives, relative to the env root.
+APP_DEPS_STAMP_DIR = ".fixs_app_deps"
+
+
+def _env_root(py_exe):
+    """The env directory holding py_exe (<env>\\python.exe, or <env>/bin/python)."""
+    d = os.path.dirname(os.path.abspath(py_exe))
+    if os.path.basename(d).lower() in ("bin", "scripts"):
+        d = os.path.dirname(d)
+    return d
+
+
+def ensure_app_deps(py_exe, app_id, req_path, refresh=False):
+    """Install an application's extra packages into the interpreter that will run it.
+
+    environment.yml deliberately does not carry them - they belong to the
+    application, not to FIXS, and pushing them upstream would put every consumer's
+    engine env at the mercy of one app's plotting stack. An app declares its own
+    with a 'requirements' path in apps.json; an app that declares none costs
+    nothing here.
+
+    The stamp is written INSIDE the env, not into ~/.fixs. That is the whole point:
+    recreating the env destroys the packages AND the stamp together, so the next run
+    reinstalls. A stamp kept outside would still match a hash it no longer describes,
+    and the deps would be skipped silently - which is the failure this is meant to
+    avoid, not cause.
+
+    Returns True when the interpreter has the app's declared deps."""
+    if not (py_exe and app_id and req_path):
+        return True
+    if not os.path.isfile(req_path):
+        print(f"[setup] app '{app_id}' declares requirements '{req_path}', "
+              f"which does not exist - skipping.")
+        return True
+    try:
+        with open(req_path, "rb") as f:
+            digest = hashlib.sha256(f.read()).hexdigest()
+    except OSError as e:
+        print(f"[setup] cannot read {req_path}: {e}")
+        return False
+
+    stamp = os.path.join(_env_root(py_exe), APP_DEPS_STAMP_DIR, app_id)
+    if not refresh:
+        try:
+            with open(stamp, encoding="utf-8") as f:
+                if f.read().strip() == digest:
+                    return True          # unchanged since the last apply
+        except OSError:
+            pass                          # no stamp, or unreadable -> apply
+
+    print(f"[setup] applying '{app_id}' dependencies "
+          f"({os.path.basename(req_path)}) to {py_exe} ...")
+    rc = subprocess.call([py_exe, "-m", "pip", "install", "-r", req_path])
+    if rc != 0:
+        # Loud and specific: the alternative is an ImportError minutes into a run,
+        # naming a module rather than the app whose requirements never applied.
+        print(f"[setup] FAILED to install '{app_id}' dependencies (pip exit {rc}).\n"
+              f"        Install them by hand, or re-run with --refresh-deps:\n"
+              f"            \"{py_exe}\" -m pip install -r \"{req_path}\"")
+        return False
+    try:
+        os.makedirs(os.path.dirname(stamp), exist_ok=True)
+        with open(stamp, "w", encoding="utf-8") as f:
+            f.write(digest + "\n")
+    except OSError as e:
+        # The install SUCCEEDED, so the run is fine - but say this out loud rather
+        # than swallow it. An unwritable env root (a system-wide python, a shared
+        # env) means the stamp never persists and pip is re-run on every single
+        # launch. Silently that reads as "this is just slow to start".
+        print(f"[setup] note: could not record the applied-deps stamp ({e}).\n"
+              f"        '{app_id}' deps are installed, but this check will re-run "
+              f"pip on every launch. A writable env - the one `--setup` creates - "
+              f"avoids it.")
+    return True
+
+
+def _no_env_fallback(name):
+    """Nothing suitable was found. Ask rather than pick something broken.
+
+    Silently continuing under whatever interpreter happened to be current is how
+    a machine ends up running the co-sim without pyyaml: everything starts, and
+    the first symptom is a scenario setting quietly reading as its default."""
+    print(f"[setup] the '{name}' env could not be created or found. The co-sim "
+          f"needs: {', '.join(RUNTIME_MODULES)} (+ carla).")
+    here = sys.executable
+    lacks = missing_runtime(here)
+    print(f"   [1] use this interpreter and pip-install what it lacks\n"
+          f"       {here}\n"
+          f"       missing: {', '.join(lacks) if lacks else 'nothing'}")
+    print( "   [2] select a python.exe yourself")
+    print( "   [3] quit and fix conda first")
+    ans = (input("Enter 1, 2 or 3 (default 3): ").strip() or "3")
+    if ans == "1":
+        if lacks:
+            # environment.yml is a conda spec, so there is no conda-free way to
+            # replay it; these are its importable dependencies. NB it does not
+            # list shapely at all, though the TL-table generator needs it (#221).
+            if not _pip_install(here, ["pyyaml", "pandas", "shapely",
+                                       "eclipse-sumo", "traci", "sumolib"]):
+                sys.exit("[setup] pip install failed; fix the environment by hand.")
+            still = missing_runtime(here)
+            if still:
+                sys.exit(f"[setup] still missing after install: {', '.join(still)}")
+        return here
+    if ans == "2":
+        py = _pick_file(f"Select the python.exe of your '{name}' env (carla + SUMO)")
+        if not py or not os.path.isfile(py):
+            sys.exit("[setup] no python interpreter selected.")
+        lacks = missing_runtime(py)
+        if lacks:
+            print(f"[setup] warning: {py} cannot import {', '.join(lacks)}; the "
+                  f"co-sim will misbehave until that is fixed.")
+        return py
+    sys.exit(f"[setup] stopped. Create the env with:\n"
+             f"            conda env create -f {ENV_YML}\n"
+             f"        then re-run this setup.")
 
 
 def find_source_wheel(carla_root, py_exe=None):

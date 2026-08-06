@@ -67,9 +67,14 @@ def tls_placed(carla_root, name, fingerprint=None):
     there looking applied. A fingerprint mismatch counts as not-placed, so a manifest
     edit re-places on the next run.
 
-    Markers written before this change hold just "placed". Those are taken at face
-    value rather than forcing a re-place of every existing map the first time it runs
-    under the new code.
+    A marker written before fingerprints existed holds just "placed" and says nothing
+    about what produced it. That is exactly the state the maps with the ORIGINAL bug
+    are in - placed with the stock pole blueprint and a +300 lift - so trusting it
+    would mean the fix never reaches the maps it was written for. It counts as stale:
+    one re-place per already-placed map, which IS the fix arriving.
+
+    Callers that pass no fingerprint (nothing to compare against) still take the
+    marker at face value.
     """
     marker = tls_marker(carla_root, name)
     if not os.path.isfile(marker):
@@ -82,7 +87,9 @@ def tls_placed(carla_root, name, fingerprint=None):
     except OSError:
         return True
     stamped = [ln.split("=", 1)[1].strip() for ln in lines if ln.startswith("fingerprint=")]
-    return not stamped or stamped[0] == fingerprint
+    if not stamped:
+        return False
+    return stamped[0] == fingerprint
 
 
 def resolve_props(carla_root, ue4_root, bundle_dirs=(), props_dir=None):

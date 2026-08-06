@@ -49,15 +49,27 @@ public static extern bool FreeLibrary(System.IntPtr h);
 '@
     }
 
+    # Also prepend BinDir to PATH: a few of SUMO's bundled DLLs are pulled in by
+    # dependencies rather than directly, and ALTERED_SEARCH_PATH only covers the
+    # directory of the DLL being loaded.
     $bad = @()
-    foreach ($dll in $script:LibsumoProbeDlls) {
-        $h = [Rs.LibsumoLoader]::LoadLibraryExW((Join-Path $BinDir $dll), [IntPtr]::Zero, 0x00000008)
-        if ($h -eq [IntPtr]::Zero) {
-            $err = [System.Runtime.InteropServices.Marshal]::GetLastWin32Error()
-            $bad += "$dll (win32 error $err)"
-        } else {
-            [void][Rs.LibsumoLoader]::FreeLibrary($h)
+    $savedPath = $env:PATH
+    $env:PATH = "$BinDir;$env:PATH"
+    try {
+        foreach ($dll in $script:LibsumoProbeDlls) {
+            $h = [Rs.LibsumoLoader]::LoadLibraryExW((Join-Path $BinDir $dll), [IntPtr]::Zero, 0x00000008)
+            if ($h -eq [IntPtr]::Zero) {
+                $err = [System.Runtime.InteropServices.Marshal]::GetLastWin32Error()
+                $bad += "$dll (win32 error $err)"
+            } else {
+                # FreeLibrary matters: the packer probes its staging directory and
+                # then deletes it. A leaked handle keeps the DLL mapped and the
+                # cleanup fails with a sharing violation.
+                [void][Rs.LibsumoLoader]::FreeLibrary($h)
+            }
         }
+    } finally {
+        $env:PATH = $savedPath
     }
     if ($bad) {
         throw ("libsumo bin/ is incomplete - these did not load: {0}. " -f ($bad -join '; ')) +
