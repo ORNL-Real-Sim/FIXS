@@ -1,0 +1,1 @@
+<configuration><input><net-file value="grid_tls.net.xml"/><route-files value="grid_tls.rou.xml"/></input><time><begin value="0"/><end value="100"/></time></configuration>
