@@ -72,6 +72,31 @@ powershell -File scripts\dispatch\pack_native_deps.ps1 -Component sumo -Publish
 
 > Removing libsumo from git only shrinks **shallow** clones. The blobs remain in repo history, so a full `git clone` still transfers them.
 
+### Recommended clone: skip the history blobs
+
+A plain `git clone` of this repo transfers roughly **1 GB packed**, because git sends every version of every file ever committed. Only a small fraction of that is content any build reads — the bulk is historical binaries that were committed and later deleted (`CM9_proj`/`CM10_proj`/`CM11_proj`, a committed `.venv/`, old `build/` outputs). Deleting a file from HEAD does not remove it from history, so the download cost stays (#255).
+
+Clone with a **blob filter** instead:
+
+```bash
+git clone --filter=blob:none https://github.com/ORNL-Real-Sim/FIXS.git
+```
+
+This is a *partial clone*: git fetches the full commit graph and directory trees, but no file contents up front. It then downloads each blob lazily, the first time something actually reads it. You get a complete, fully functional repository — `git log`, `git describe`, `git blame`, branch switching and `dispatch.bat` all behave normally — you just never pay for the ~2.5 GiB of file versions no build opens. The one tradeoff is that operations reaching into old history (checking out an ancient commit, `git log -p` over the whole repo) fetch on demand and so need network access.
+
+If you also do not need the test networks and docs locally, add a sparse checkout — `tests/` (197 MiB) and `doc/` (21 MiB) are 218 MiB of the 231 MiB present at HEAD, and neither is read by `scripts/dispatch/dispatch.bat`. Measured, this takes the working tree from 231 MiB to **13 MiB**:
+
+```powershell
+git clone --filter=blob:none --no-checkout https://github.com/ORNL-Real-Sim/FIXS.git
+cd FIXS
+git sparse-checkout set --no-cone '/*' '!/tests/' '!/doc/'
+git checkout
+```
+
+> **Run this in PowerShell or cmd, not Git Bash.** MSYS path conversion rewrites any argument starting with `/`, so in Git Bash `!/tests/` silently becomes `!C:/Program Files/Git/tests/` — the pattern then matches nothing and the exclusion appears to do nothing at all. If you must use Git Bash, prefix the command with `MSYS_NO_PATHCONV=1`.
+
+Verify it worked with `git sparse-checkout list` — the three patterns must come back exactly as typed. Undo the narrowing at any time with `git sparse-checkout disable`. The release CI uses this same pair of flags in [`.github/workflows/release.yml`](../.github/workflows/release.yml), where `actions/checkout` writes the patterns to a file directly and no shell mangling applies.
+
 ## Build System Overview
 
 The Real-Sim FIXS build system uses a modular script-based architecture that automatically detects installed tools and versions. Key features:
