@@ -129,6 +129,38 @@ public:
 
 	int initConnection(std::string errorLogName="");
 
+	// Warm-up support (#86). When set before initConnection(), the sockets are
+	// still created, bound and listen()ed -- so a client's connect() succeeds
+	// exactly as before and lands in the backlog -- but the blocking accept loop
+	// is NOT run. The host calls acceptClients() later, when its warm-up ends.
+	//
+	// The point is not the accept itself (a client that connects early simply
+	// blocks on its first recv either way); it is that TrafficLayer no longer
+	// waits for every client to exist before it starts warming up, so CarMaker's
+	// and CARLA's start-up overlaps the warm-up instead of queueing ahead of it.
+	//
+	// SCOPE: this defers the INBOUND half only -- accepting the clients that
+	// connect to us. It does NOT defer the OUTBOUND half, the ENABLE_SERVER block
+	// that connects to other servers, which still runs inside initConnection
+	// before this returns.
+	//
+	// That is enough today because TrafficLayer is only ever a listener: both of
+	// its socketSetup calls use the selfServerPort-only overload, which sets
+	// NSERVER = 0 / ENABLE_SERVER = 0, and every peer (application layer, XIL /
+	// CarMaker lib, VirCarlaEnv, VISSIM DriverModel) connects in to it. The
+	// outbound path is what those other components use to reach TrafficLayer, and
+	// none of them runs a warm-up.
+	//
+	// If a host ever needs BOTH roles and a warm-up, the outbound connects have to
+	// be deferred too -- otherwise it still blocks waiting for its own server to
+	// exist and the warm-up gains nothing on that half of its peers.
+	bool DeferAcceptClients = false;
+
+	// The blocking "wait for all clients" accept loop. Run automatically by
+	// initConnection() unless DeferAcceptClients is set; call it directly when it
+	// was deferred. Returns 0 on success, -1 on a socket error.
+	int acceptClients(std::string errorLogName="");
+
 	// RS_DEBUG master-log target. The host assigns it (TrafficLayer sets it to its
 	// RealSim_tmp/TrafficLayer_<timestamp>.log). When empty -- e.g. the VirtualEnvironment
 	// .lib running inside CarMaker -- RS_DEBUG breadcrumbs fall back to

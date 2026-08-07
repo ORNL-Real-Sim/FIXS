@@ -195,19 +195,19 @@ int ConfigHelper::getConfig(string configName) {
 		SimulationSetup.TrafficSimulatorPort = 1337;
 		if (!SuppressDefaultMessages) printf("\nTraffic Simulator Port not specified! Will use 1337 as default!\n");
 	}
-	if (node["SimulationMode"]) {
-		SimulationSetup.SimulationMode = parserInteger(node, "SimulationMode");
+	// Warm-up (#86). Replaced SimulationMode/SimulationModeParameter, which no
+	// config sets any more -- see doc/ConfigSetup.md for the mapping.
+	if (node["WarmUpUntilEgoEntry"]) {
+		SimulationSetup.WarmUpUntilEgoEntry = parserFlag(node, "WarmUpUntilEgoEntry");
 	}
 	else {
-		SimulationSetup.SimulationMode = 0;
-		if (!SuppressDefaultMessages) printf("\nSimulation mode not specified! Will use Mode 0 as default!\n");
+		SimulationSetup.WarmUpUntilEgoEntry = false;
 	}
-	if (node["SimulationModeParameter"]) {
-		SimulationSetup.SimulationModeParameter = parserDouble(node, "SimulationModeParameter");
+	if (node["WarmUpTime"]) {
+		SimulationSetup.WarmUpTime = parserDouble(node, "WarmUpTime");
 	}
 	else {
-		SimulationSetup.SimulationModeParameter = 0;
-		if (!SuppressDefaultMessages) printf("\nSimulation mode parameter not specified! Will use Parameter=0 as default!\n");
+		SimulationSetup.WarmUpTime = 0;
 	}
 	if (node["VehicleMessageField"]) {
 		parserStringVector(node, "VehicleMessageField", SimulationSetup.VehicleMessageField);
@@ -305,6 +305,69 @@ int ConfigHelper::getConfig(string configName) {
 		getVehSubscriptionList(ApplicationSetup.VehicleSubscription, SubscriptionVehicleList.edgeSubscribeId_v, SubscriptionVehicleList.vehicleSubscribeId_v, SubscriptionVehicleList.subscribeAllVehicle, SubscriptionVehicleList.pointSubscribeId_v, SubscriptionVehicleList.vehicleTypeSubscribedId_v);
 		getSigSubscriptionList(ApplicationSetup.SignalSubscription);
 		getDetSubscriptionList(ApplicationSetup.DetectorSubscription);
+	}
+
+	// ===========================================================================
+	// 			Warm-up ego list + validation (#86)
+	// ===========================================================================
+	// The union of the by-id vehicle subscriptions of BOTH layers -- see the
+	// WarmUpEgoIds comment in ConfigHelper.h for why this is not the either/or
+	// list built just above. Throwaway containers: only the ids are wanted.
+	WarmUpEgoIds.clear();
+	{
+		Subscription_t bothLayers = ApplicationSetup.VehicleSubscription;
+		bothLayers.insert(bothLayers.end(), XilSetup.VehicleSubscription.begin(),
+			XilSetup.VehicleSubscription.end());
+
+		unordered_set <string> edgeIgnored;
+		unordered_map <string, double> vehIds;
+		pair <bool, double> allIgnored = make_pair(false, 0.0);
+		unordered_map <string, tuple<double, double, double, double> > pointIgnored;
+		unordered_map <string, double> typeIgnored;
+		getVehSubscriptionList(bothLayers, edgeIgnored, vehIds, allIgnored, pointIgnored, typeIgnored);
+
+		for (auto& it : vehIds) {
+			WarmUpEgoIds.insert(it.first);
+		}
+	}
+
+	// Exclusive by construction: WarmUpTime is a single batch step, so it cannot
+	// also watch for an ego arriving part-way through. Ego entry wins because it
+	// is the one that can be wrong to overrun -- an ego on the road while the
+	// boundary is still closed is being driven by the traffic model, not its XIL.
+	if (SimulationSetup.WarmUpUntilEgoEntry && SimulationSetup.WarmUpTime > 0) {
+		printf("\nWARNING (#86): both WarmUpUntilEgoEntry and WarmUpTime are set; "
+			"using ego entry and ignoring WarmUpTime: %g\n", SimulationSetup.WarmUpTime);
+		SimulationSetup.WarmUpTime = 0;
+	}
+
+	if (SimulationSetup.WarmUpUntilEgoEntry && WarmUpEgoIds.empty()) {
+		printf("\nERROR (#86): 'WarmUpUntilEgoEntry: true' needs at least one vehicle "
+			"subscription by id.\n");
+		printf("\tNo by-id subscription was found in ApplicationSetup or XilSetup "
+			"(an 'all'/radius/edge subscription has no ego to wait for),\n");
+		printf("\tso the warm-up could never end. Subscribe the ego by id, or use "
+			"WarmUpTime instead.\n\n");
+		exit(-1);
+	}
+
+	if (SimulationSetup.WarmUpTime >= SimulationSetup.SimulationEndTime) {
+		printf("\nERROR (#86): WarmUpTime (%g) is at or past SimulationEndTime (%g); "
+			"the run would end before anything is exchanged.\n\n",
+			SimulationSetup.WarmUpTime, SimulationSetup.SimulationEndTime);
+		exit(-1);
+	}
+
+	// Warm-up is driven by TrafficLayer stepping the simulator, which it only does
+	// for SUMO -- for VISSIM the DriverModel DLL owns the clock. Say so instead of
+	// pretending: this is exactly where the old mode 4 silently did nothing and the
+	// old mode 1 hung forever.
+	if (SimulationSetup.SelectedTrafficSimulator.compare("VISSIM") == 0 &&
+		(SimulationSetup.WarmUpUntilEgoEntry || SimulationSetup.WarmUpTime > 0)) {
+		printf("\nERROR (#86): warm-up (WarmUpUntilEgoEntry / WarmUpTime) is SUMO-only "
+			"today; VISSIM parity is tracked separately.\n");
+		printf("\tRemove the key to run VISSIM without a warm-up.\n\n");
+		exit(-1);
 	}
 
 	// figure out TrafficLayer IP
