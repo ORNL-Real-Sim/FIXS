@@ -21,7 +21,17 @@ Requires: a Python with the carla 0.9.15 package.
 from __future__ import annotations
 import argparse
 import sys
-import carla
+
+import carla_env_setup as env
+
+# Get onto the interpreter carla.json names BEFORE importing carla. This script is
+# launched standalone (the demo .bat files, or by hand), so the python that started
+# it is whatever was on PATH - and on the wrong one the next line is a bare
+# ImportError naming a module, when the real answer is "you are in the wrong env".
+if __name__ == "__main__":
+    env.reexec_under_configured(__file__, tag="carla")
+
+import carla  # noqa: E402  (deliberately after the re-exec above)
 
 
 def main() -> int:
