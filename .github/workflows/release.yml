@@ -117,19 +117,35 @@ jobs:
           path: CommonLib/yaml-cpp/build
           key: yamlcpp-${{ runner.os }}-vs2022-${{ hashFiles('CommonLib/yaml-cpp/CMakeLists.txt', 'CommonLib/yaml-cpp/include/**', 'CommonLib/yaml-cpp/src/**') }}
 
-      # Place the v0.9.0-alpha tag at HEAD *locally* so this build's
-      # `git describe --match 'v[0-9]*'` stamps the 0.9.0 line (otherwise it
-      # finds v0.7.0, the nearest ancestor, and mislabels as v0.7.0). LOCAL only
-      # - the real, persistent v0.9.0-alpha tag is (re)created by the publish
-      # step as a prerelease Release anchored to this commit, so there's exactly
-      # ONE tag and it's never orphaned if the build fails. #191.
-      - name: Stamp v0.9.0-alpha for this build (local tag, for git describe)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/dev_v0.9.0'
+      # Which rolling channel does this branch publish to? One convention-driven
+      # script answers that (main -> latest, dev_vX.Y.Z -> vX.Y.Z-alpha), and
+      # every step below reads its answer: the zip name, the local describe tag,
+      # and the publish call. Adding the next train needs no edit here.
+      # On PRs it resolves to "no channel", so PR zips keep git-derived names
+      # and nothing publishes.
+      - name: Resolve release channel
+        id: channel
+        if: steps.detect.outputs.should_build == 'true'
+        shell: pwsh
+        run: '& scripts/dispatch/release_channel.ps1 -Ref "${{ github.ref }}"'
+
+      # Place the channel's version tag at HEAD *locally* so this build's
+      # `git describe --match 'v[0-9]*'` stamps the right line into
+      # RealSimVersion.h (otherwise the 0.9.0 train finds v0.7.0, the nearest
+      # ancestor, and the compiled version reads 0.7.0). LOCAL only - the real,
+      # persistent tag is (re)created by the publish step as a prerelease
+      # Release anchored to this commit, so there's exactly ONE tag and it's
+      # never orphaned if the build fails. #191.
+      # Only for semver-shaped channel tags: 'latest' is not a version.
+      - name: Stamp the channel version tag for this build (local, for git describe)
+        if: github.event_name == 'push' && steps.channel.outputs.semver == 'true'
         shell: bash
+        env:
+          CHANNEL_TAG: ${{ steps.channel.outputs.tag }}
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -fa v0.9.0-alpha -m "0.9.0 dev version at $(git rev-parse --short HEAD)"
+          git tag -fa "$CHANNEL_TAG" -m "$CHANNEL_TAG at $(git rev-parse --short HEAD)"
 
       # libcarla (~460 MB release subset) is gitignored and only needed to build
       # the PUBLIC VirCarlaEnv exe. Fetch it from the public fixs-native-deps
@@ -177,9 +193,15 @@ jobs:
             exit 1
           }
 
+      # RS_FIXS_VERSION_LABEL names the zip after the channel it will be
+      # published to (fixs-build-latest.zip, fixs-build-v0.9.0-alpha.zip), read
+      # by 8_create_zip.ps1 through dispatch step 8. Empty on PRs, where the
+      # script falls back to the commit-traceable git describe name.
       - name: Build + package (proprietary steps skipped; VE.lib builds on 0.9.0)
         if: steps.detect.outputs.should_build == 'true'
         shell: cmd
+        env:
+          RS_FIXS_VERSION_LABEL: ${{ steps.channel.outputs.tag }}
         run: |
           set RS_BUILD_CONFIG=Release
           set RS_FIXS_AUTOMATION=1
@@ -201,6 +223,10 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          # Same channel label as the first pack, so the re-pack overwrites the
+          # public-core zip in place instead of leaving two differently-named
+          # zips in build/ for publish_release.ps1 to choose between.
+          RS_FIXS_VERSION_LABEL: ${{ steps.channel.outputs.tag }}
         run: |
           $key = (& scripts/dispatch/bundle_key.ps1).Trim()
           $tag = "Binaries-$key"
@@ -252,22 +278,30 @@ jobs:
           path: build/fixs-build-*.zip
           if-no-files-found: warn
 
-      # main -> latest ; dev_v0.9.0 -> v0.9.0-alpha (ONE tag: the release IS the
+      # Publish to the channel resolved above (ONE tag: the release IS the
       # version stamp). -Target $GITHUB_SHA anchors the release+tag to the exact
       # commit built - without it gh defaults a new tag to the default branch
       # (main), which had wrongly pinned the alpha release to main.
-      - name: Publish rolling prerelease (main -> latest, dev_v0.9.0 -> v0.9.0-alpha)
-        if: (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev_v0.9.0')) || (github.event_name == 'workflow_dispatch' && inputs.publish)
+      # A branch with no channel simply doesn't reach this step.
+      - name: Publish rolling prerelease to the branch's channel
+        if: steps.channel.outputs.publish == 'true' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish))
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          CHANNEL_TAG: ${{ steps.channel.outputs.tag }}
+          CHANNEL_TITLE: ${{ steps.channel.outputs.title }}
         run: |
-          $sha = $env:GITHUB_SHA
-          switch ($env:GITHUB_REF) {
-            'refs/heads/main'       { & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dispatch\publish_release.ps1 -Tag latest -Target $sha }
-            'refs/heads/dev_v0.9.0' { & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dispatch\publish_release.ps1 -Tag v0.9.0-alpha -Rolling -Target $sha }
-            default { Write-Error "Refusing to publish from $($env:GITHUB_REF) - only main/dev_v0.9.0 have a rolling channel."; exit 1 }
-          }
+          & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dispatch\publish_release.ps1 `
+              -Tag $env:CHANNEL_TAG -Title $env:CHANNEL_TITLE -Rolling -Target $env:GITHUB_SHA
+
+      # Keep the old loud behaviour for a hand-dispatched publish from a branch
+      # that has no channel: skipping silently would look like a successful
+      # publish in the run summary.
+      - name: Warn - publish requested from a branch with no channel
+        if: github.event_name == 'workflow_dispatch' && inputs.publish && steps.channel.outputs.publish != 'true'
+        shell: bash
+        run: |
+          echo "::warning::${{ github.ref }} has no rolling channel (main -> latest, dev_vX.Y.Z -> vX.Y.Z-alpha). Nothing was published."
 
       - name: Upload build logs (always)
         if: always()

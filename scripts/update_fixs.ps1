@@ -89,12 +89,14 @@ function Get-Asset {
 }
 
 function Select-Release($releases) {
-    # Annotate every entry with what it actually resolves to. Bare tag names were
+    # Annotate every entry with what it actually resolves to. Bare tag names are
     # not enough to tell the rolling channels apart: 'latest' and 'v0.9.0-alpha'
-    # look identical in a menu, and 'latest' then unpacks a zip named after the
-    # nearest tag (fixs-build-v0.9.0-alpha-1-g65f2970d.zip), which reads as though
-    # the wrong release was installed. Commit + date make them distinguishable
-    # BEFORE the choice, not inferable from a filename afterwards.
+    # both move, so the tag alone says nothing about WHICH build is behind it.
+    # Commit + date make them distinguishable BEFORE the choice.
+    # (Asset names are now the channel name - fixs-build-latest.zip - so they no
+    # longer carry that information either; they used to carry a git-describe
+    # name that was traceable but named after whichever tag happened to be
+    # nearest, which was worse: it read as the wrong release entirely.)
     Write-Host "Available FIXS releases:"
     for ($i = 0; $i -lt $releases.Count; $i++) {
         $r = $releases[$i]
@@ -179,11 +181,10 @@ if ($Version) {
     }
 }
 
-# State the resolution in full. A rolling tag's asset is named after the nearest
-# ANNOTATED tag plus a git-describe suffix, so 'latest' unpacks a zip called
-# fixs-build-v0.9.0-alpha-1-g65f2970d.zip - which reads like the alpha was
-# installed instead of what was asked for. Printing tag + commit + asset together
-# is what makes the two distinguishable.
+# State the resolution in full. A rolling tag's asset is named after the CHANNEL
+# (fixs-build-latest.zip), which is stable and predictable but says nothing about
+# which commit is inside. Printing tag + commit + published-date together is what
+# pins down exactly what was installed.
 $sha7 = if ($release.target_commitish -match '^[0-9a-f]{40}$') { $release.target_commitish.Substring(0, 7) } else { $release.target_commitish }
 Write-Host "=== Fetching the FIXS build from $Repo (public, no auth) ==="
 Write-Host "  release:   $Version$(if ($release.prerelease) { '  (rolling prerelease - always re-fetched)' })"
