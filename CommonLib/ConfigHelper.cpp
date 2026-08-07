@@ -655,8 +655,29 @@ int ConfigHelper::getConfig(string configName) {
 		CarlaSetup.TrafficRefreshRate = parserDouble(node, "TrafficRefreshRate");
 	}
 	else {
-		CarlaSetup.TrafficRefreshRate = 0.1;
-		//printf("\nCarMaker Port not specified! Will use 7331 as default!\n");
+		// 0 == every Carla tick. This key is the pose RE-APPLY cadence, and absent it
+		// should not impose one: mainVirCarla resolves 0 to CarlaTimeStep, and
+		// Carla/run_cosim.py already tells the user "the default is every CARLA tick".
+		//
+		// The old default was 0.1 -- a leftover from before #219, when this key WAS
+		// the feed period. It silently pinned traffic to 10 Hz no matter how fine the
+		// world step: with CarlaTimeStep 0.025 the bridge printed "interpolated 4x"
+		// and then re-applied poses once per feed, so the interpolator was evaluated
+		// once per interval and every vehicle held a stale pose for 3 of every 4
+		// ticks, jumping a whole feed of travel on the 4th -- 4x the ticks for the
+		// motion of a 1x run. Measured on mlk_eco_driving: the world advanced on 540
+		// of 2160 rendered frames (25%), the gap between advances exactly 4 frames,
+		// 539 times out of 539.
+		//
+		// Not only a visual matter. A physics-driven ego (EgoMode >= 1) runs its
+		// collision checks, sensors and traffic-manager decisions against neighbours
+		// that stand still for 75 ms and then teleport 0.29 m. CarMakerSetup's
+		// counterpart above defaults to 0.001 -- its own solver step -- which is the
+		// same intent expressed for a 1 kHz host.
+		//
+		// Set this key explicitly only to re-apply LESS often than the tick, as a
+		// cost knob on a heavy scene. See #261.
+		CarlaSetup.TrafficRefreshRate = 0.0;
 	}
 
 	// Carla render sub-step (interpolate the feed for smoother motion). 0 -> 1:1.

@@ -28,7 +28,8 @@ on:
     branches: [main, dev_v0.9.0]
 
 permissions:
-  contents: write   # create/update the rolling release + tag on publish
+  contents: write        # create/update the rolling release + tag on publish
+  pull-requests: read    # the detect step lists the PR's changed files via the API
 
 jobs:
   build-publish:
@@ -36,27 +37,54 @@ jobs:
     # dependencies.yaml. windows-latest ships VS 2026 (v18), incompatible.
     runs-on: windows-2022
     steps:
-      - name: Checkout (full history for git describe; no private submodule)
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          submodules: false
-
-      # Skip the heavy build on PRs that touch nothing build-relevant (docs / *.py /
-      # tests): the job still RUNS (so the required build-publish check reports green),
-      # but the expensive steps below are gated on this output. Pushes always build. #191.
+      # Decide BEFORE checking out. This gate used to run AFTER a fetch-depth:0
+      # checkout, so a PR with nothing to build still paid the full ~1 GB clone
+      # first - measured at 1183 s (19.7 min) on run 31040679954, which then went
+      # on to skip the build. The PR's file list comes from the API instead, which
+      # needs no working tree, so a no-op PR now costs seconds.
+      #
+      # The job still RUNS either way (only its steps are gated), so the required
+      # build-publish check keeps reporting green without relying on branch
+      # protection treating a skipped job as a pass. Pushes always build. #191.
       - name: Detect build-relevant changes
         id: detect
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           if [ "${{ github.event_name }}" != "pull_request" ]; then
             echo "event=${{ github.event_name }} -> always build."
             echo "should_build=true" >> "$GITHUB_OUTPUT"; exit 0
           fi
-          files=$(git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD)
+          files=$(gh api "repos/$GITHUB_REPOSITORY/pulls/${{ github.event.pull_request.number }}/files" \
+                    --paginate --jq '.[].filename')
           echo "Changed files:"; echo "$files"
-          # Build unless EVERY changed file is docs / *.py / tests (nothing compiled or packaged from source).
-          relevant=$(echo "$files" | grep -vE '\.(md|py)$|^doc/|^tests/' || true)
+
+          # release.yml defines THIS build, so a change to it must still build -
+          # otherwise a change to the build pipeline would never test itself.
+          if echo "$files" | grep -qE '^\.github/workflows/release\.yml$'; then
+            echo "release.yml itself changed -> build to validate the pipeline."
+            echo "should_build=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+
+          # An ignore-list, NOT an allow-list: anything unrecognised builds, so a
+          # new source directory is covered by default. That is the safe direction
+          # for a required check - a missing ignore entry costs one ~3 min build,
+          # a missing allow entry silently skips validation and still shows green.
+          #   ^doc/ ^tests/          never read by dispatch.bat or 8_create_zip.ps1
+          #   ^.github/ ^.vscode/    CI + editor config (release.yml exempted above)
+          #   *.py                   Python is COPIED into build/ (dispatch.bat:244)
+          #                          and into the zip, never compiled or executed
+          #                          here - building validates nothing about it.
+          #                          pytest is the right gate for Python (#57).
+          #   environment.yml        copied into the zip only (8_create_zip.ps1:110);
+          #                          a real env check is #248, not a C++ compile
+          #   scripts/fetch_fixs.ps1 consumer-side download script - not a build
+          #                          input, and not packaged (8_create_zip.ps1:119)
+          # NOTE: ^scripts/ must NOT be ignored wholesale - scripts/dispatch/** IS
+          # the build system, and generate_version.ps1 stamps the version.
+          ignore='^doc/|^tests/|^\.github/|^\.vscode/|\.md$|\.py$|^LICENSE$|^\.gitignore$|^\.gitattributes$|^environment\.yml$|^scripts/fetch_fixs\.ps1$'
+          relevant=$(echo "$files" | grep -vE "$ignore" || true)
           if [ -z "$relevant" ]; then
             echo "No build-relevant changes -> skipping build (required check still passes)."
             echo "should_build=false" >> "$GITHUB_OUTPUT"
@@ -65,14 +93,25 @@ jobs:
             echo "should_build=true" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Checkout (full history for git describe; no private submodule)
+        if: steps.detect.outputs.should_build == 'true'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: false
+
       - name: Add MSBuild to PATH
+        if: steps.detect.outputs.should_build == 'true'
         uses: microsoft/setup-msbuild@v2
 
       # Speed: yaml-cpp is vendored and rebuilt (Release+Debug) from source every
       # run, but it almost never changes. Cache CommonLib/yaml-cpp/build keyed on
       # the yaml-cpp source hash - on a hit, dispatch.bat's existing
       # "if not exist yaml-cpp\build" guard skips step 1 entirely.
+      # Gated too: with the checkout skipped there is no working tree, so
+      # hashFiles() would resolve to an empty string and poison the cache key.
       - name: Cache yaml-cpp build
+        if: steps.detect.outputs.should_build == 'true'
         uses: actions/cache@v4
         with:
           path: CommonLib/yaml-cpp/build

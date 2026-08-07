@@ -424,29 +424,37 @@ def find_app(apps, ident):
 # --------------------------------------------------------------------------- #
 # Picking
 # --------------------------------------------------------------------------- #
-def choose_app(apps, root=None):
+def choose_app(apps, root=None, current=None):
     """Numbered menu of the declared applications; returns the chosen app dict, or
     None for "no app" (the generic, pre-app-awareness run). Auto-selects nothing:
     even a single app is offered, because the None escape has to stay reachable.
     Returns None (silently) in a non-interactive session so callers keep working
-    from --app / a saved profile."""
+    from --app / a saved profile.
+
+    `current` is the app id the setup is running: it is marked, and Enter keeps it.
+    Without it Enter always meant item 1, so opening this row on a setup running any
+    other app and pressing Enter switched the app - and took the map and the
+    scenario yaml with it, since both are invalidated by an app change."""
     if not apps:
         return None
     if not sys.stdin.isatty():
         return None
+    ids = [a["id"] for a in apps]
+    idx = ids.index(current) + 1 if current in ids else 1
     print("\n[apps] Pick an application to run:")
     for i, a in enumerate(apps, 1):
         missing = "" if os.path.isdir(app_dir(a, root)) else "   (folder missing)"
         maps = ", ".join(a["maps"]) or "-"
-        print(f"   {i:>2}) {a['title']:<34} maps: {maps}{missing}")
+        mark = "  (current)" if a["id"] == current else ""
+        print(f"   {i:>2}) {a['title']:<34} maps: {maps}{missing}{mark}")
     print("    0) none - just pick a map (generic co-sim)")
     while True:
         try:
-            ans = input(f"[apps] Which? [0-{len(apps)}], Enter = 1: ").strip()
+            ans = input(f"[apps] Which? [0-{len(apps)}], Enter = {idx}: ").strip()
         except EOFError:
             return None
         if ans == "":
-            return apps[0]
+            return apps[idx - 1]
         if ans == "0":
             return None
         if ans.isdigit() and 1 <= int(ans) <= len(apps):
