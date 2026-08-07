@@ -193,6 +193,54 @@ def test_frame_from_table_missing_file():
     assert run_cosim._frame_from_table("nope.csv", no_net_offset=True) is None
 
 
+class _FakeWorld:
+    """Only what _frame_from_map touches: world.get_map().get_spawn_points(),
+    each spawn exposing .location.x/.y/.z. No carla server involved."""
+
+    class _Loc:
+        def __init__(self, x, y, z):
+            self.x, self.y, self.z = x, y, z
+
+    class _Spawn:
+        def __init__(self, loc):
+            self.location = loc
+
+    class _Map:
+        def __init__(self, spawns):
+            self._spawns = spawns
+
+        def get_spawn_points(self):
+            return self._spawns
+
+    def __init__(self, points=(), raises=False):
+        self._spawns = [self._Spawn(self._Loc(*p)) for p in points]
+        self._raises = raises
+
+    def get_map(self):
+        if self._raises:
+            raise RuntimeError("map not queryable yet")
+        return self._Map(self._spawns)
+
+
+def test_frame_from_map_centroid_and_span():
+    """No-signal fallback: centroid + span of the map's spawn points, so a map with
+    no traffic lights still gets framed instead of leaving the camera at the origin."""
+    cx, cy, cz, span, anchor = run_cosim._frame_from_map(
+        _FakeWorld([(0, 0, 0), (100, 40, 10)]))
+    assert (cx, cy, cz) == (50.0, 20.0, 5.0)
+    assert span == 100.0                       # max(x-range 100, y-range 40)
+    assert "map centre" in anchor and "2 spawn points" in anchor
+
+
+def test_frame_from_map_no_spawn_points():
+    assert run_cosim._frame_from_map(_FakeWorld([])) is None
+
+
+def test_frame_from_map_unqueryable_map():
+    """A server that cannot answer get_map() degrades to 'no framing', not a crash."""
+    assert run_cosim._frame_from_map(_FakeWorld(raises=True)) is None
+
+
 # ---------------------------------------------- map import (no real cook)
 
 def test_map_is_imported_detects_umap(tmp_path):

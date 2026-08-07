@@ -1205,6 +1205,27 @@ def _frame_from_actors(world):
     return _frame_stats(xs, ys, zs, f"{len(locs)} traffic lights")
 
 
+def _frame_from_map(world):
+    """Centroid + span (m) of the map's spawn points - the last-resort anchor for a
+    map with no signals at all (a RoadRunner export without them, or a bare
+    generate_opendrive_world road). Spawn points sit on the drivable network and
+    span it, so this frames the whole map rather than any one place in it.
+
+    Without this the no-signal case left the spectator wherever the server put it,
+    which in -game mode is the world origin - so the map rendered as a distant
+    speck and looked like a failed load."""
+    try:
+        spawns = world.get_map().get_spawn_points()
+    except RuntimeError:
+        return None          # map not queryable yet; the caller just skips framing
+    if not spawns:
+        return None
+    xs = [s.location.x for s in spawns]
+    ys = [s.location.y for s in spawns]
+    zs = [s.location.z for s in spawns]
+    return _frame_stats(xs, ys, zs, f"map centre ({len(spawns)} spawn points)")
+
+
 def _table_junctions(tl_table, no_net_offset):
     """junction_id -> list of (x, y, z) CARLA-coord points from the TL table.
     With --no-net-offset (RoadRunner-local maps) SUMO (x, y) -> CARLA (x, -y)."""
@@ -3672,7 +3693,9 @@ def main():
         if not args.no_spectator:
             # Default: zoom to one intersection from the TL table so the signal
             # sync is legible. --spectator-all frames the whole network (placed TL
-            # actors, else the full table).
+            # actors, else the full table). A map with no signals at all falls back
+            # to the map centre - anywhere on the map beats the world origin, which
+            # is where the server otherwise leaves the camera.
             frame = None
             if tl_table and not args.spectator_all:
                 frame = _frame_from_table(tl_table, no_net_offset,
@@ -3681,10 +3704,13 @@ def main():
                 frame = _frame_from_actors(world)
             if frame is None and tl_table:
                 frame = _frame_from_table(tl_table, no_net_offset, whole=True)
+            if frame is None:
+                frame = _frame_from_map(world)
             if frame is not None:
                 position_spectator(world, frame)
             else:
-                print("[VIEW] no TL actors/table to anchor on; leaving spectator as is")
+                print("[VIEW] no TL actors/table and no spawn points to anchor on; "
+                      "leaving spectator as is")
 
         # The scenario yaml is a per-map artifact like tl_table.csv: always written
         # on first use (and refreshed by --reimport), whichever bridge runs. That
