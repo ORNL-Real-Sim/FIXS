@@ -105,7 +105,7 @@ def _fixs_tag_repo():
     """(tag, repo) from FIXS_VERSION.txt: line 1 is the tag; a 'Source:' line the repo."""
     tag, repo = None, "ORNL-Real-Sim/FIXS"
     try:
-        # utf-8-SIG: this file is written by fetch_fixs.ps1, and under Windows
+        # utf-8-SIG: this file is written by scripts/update_fixs.ps1, and under
         # PowerShell 5.1 `Out-File -Encoding UTF8` means UTF-8 *with* a BOM. Read as
         # plain utf-8 the BOM survives as ﻿ on line 1 - and str.strip() does not
         # remove it, because it is not whitespace - so the tag came out as
@@ -114,10 +114,10 @@ def _fixs_tag_repo():
         with open(os.path.join(FIXS_ROOT, "FIXS_VERSION.txt"), encoding="utf-8-sig") as f:
             lines = [ln.strip() for ln in f if ln.strip()]
         if lines:
-            # Line 1 is the tag, but initialize.sh stamps the rolling versions as
-            # "<tag> (<published_at>)" while fetch_fixs.ps1 writes the bare tag. Take
+            # Line 1 is the tag, but a rolling release is stamped as
+            # "<tag> (<published_at>)" while a pinned one writes the bare tag. Take
             # the first field so either form resolves; passing the stamped form to the
-            # releases API 404s and silently disables this check on Linux.
+            # releases API 404s and silently disables this check.
             tag = lines[0].split()[0]
         for ln in lines:
             if ln.lower().startswith("source:"):
@@ -140,30 +140,31 @@ def _remote_fixs_commit(repo, tag, timeout=4.0):
 
 
 def _run_initialize(tag):
-    """Re-fetch the FIXS bundle for <tag> via the app's fetch script (the tag is
-    passed as its argument, so it runs non-interactively). True on success.
+    """Re-fetch the FIXS bundle for <tag> through the app's front door (the tag is
+    passed as an argument, so it runs non-interactively). True on success.
 
-    Two locations, newest first: the app repo moved this out of the root and into
-    scripts/ when run_cosim absorbed it (FIXS_Applications#13), and the engine is
-    fetched from a release rather than pinned to an app checkout - so a bundle
-    this new can sit in a clone laid out either way. Looking for only one of them
-    is how a self-update came to report "initialize.sh not found" on a repo that
-    had simply renamed it."""
+    Goes through run_cosim.bat/.sh rather than reaching for an update script by
+    name. This used to probe a list of filenames per platform, because the app
+    repo had renamed the script once (FIXS_Applications#13) and a bundle this new
+    can sit in a clone laid out either way - so a self-update reported
+    "initialize.sh not found" on a repo that had simply renamed it. That list
+    could only grow: since #272 the updater itself lives in FIXS and is fetched
+    per release, so the ONE thing an app repo is guaranteed to expose is its
+    documented entry point. Naming that instead means the engine no longer tracks
+    any downstream repo's internal layout."""
     if platform.system() == "Windows":
-        names = [os.path.join(APP_ROOT, "scripts", "update_fixs.ps1"),
-                 os.path.join(APP_ROOT, "initialize.ps1")]
-        runner = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]
+        front_door = os.path.join(APP_ROOT, "run_cosim.bat")
+        cmd = ["cmd", "/c", front_door]
     else:
-        names = [os.path.join(APP_ROOT, "scripts", "update_fixs.sh"),
-                 os.path.join(APP_ROOT, "initialize.sh")]
-        runner = ["bash"]
-    script = next((p for p in names if os.path.isfile(p)), None)
-    if script is None:
-        print(f"[cosim] cannot self-update: none of these exist -\n        "
-              + "\n        ".join(names))
+        front_door = os.path.join(APP_ROOT, "run_cosim.sh")
+        cmd = ["bash", front_door]
+    if not os.path.isfile(front_door):
+        print(f"[cosim] cannot self-update: {front_door} not found.")
         return False
-    print(f"[cosim] updating FIXS -> {tag} via {os.path.basename(script)} ...")
-    return subprocess.call(runner + [script, tag]) == 0
+    print(f"[cosim] updating FIXS -> {tag} via {os.path.basename(front_door)} ...")
+    # --update-fixs exits before the front door's bootstrap gate and never re-runs
+    # python, so this cannot recurse back into run_cosim.py.
+    return subprocess.call(cmd + ["--update-fixs", tag]) == 0
 
 
 def maybe_update_fixs(no_check=False):

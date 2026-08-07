@@ -19,9 +19,9 @@
 # re-running is cheap and safe. -Force re-acquires the native deps; -SkipYamlCpp
 # / -SkipSubmodules / -SkipNativeDeps opt out of individual steps.
 #
-# NOT to be confused with scripts/fetch_fixs.ps1, which is the CONSUMER-side
-# script for downloading a published FIXS release zip. This one is for a
-# developer checkout.
+# NOT to be confused with scripts/update_fixs.ps1 / .sh, which are the
+# CONSUMER-side installers for a published FIXS release zip (#272). This one is
+# for a developer checkout.
 #
 # Usage:
 #   powershell -ExecutionPolicy Bypass -File scripts\initialize_fixs.ps1

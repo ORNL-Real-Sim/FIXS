@@ -79,11 +79,11 @@ jobs:
           #                          pytest is the right gate for Python (#57).
           #   environment.yml        copied into the zip only (8_create_zip.ps1:110);
           #                          a real env check is #248, not a C++ compile
-          #   scripts/fetch_fixs.ps1 consumer-side download script - not a build
+          #   scripts/update_fixs.*  consumer-side installer (#272) - not a build
           #                          input, and not packaged (8_create_zip.ps1:119)
           # NOTE: ^scripts/ must NOT be ignored wholesale - scripts/dispatch/** IS
           # the build system, and generate_version.ps1 stamps the version.
-          ignore='^doc/|^tests/|^\.github/|^\.vscode/|\.md$|\.py$|^LICENSE$|^\.gitignore$|^\.gitattributes$|^environment\.yml$|^scripts/fetch_fixs\.ps1$'
+          ignore='^doc/|^tests/|^\.github/|^\.vscode/|\.md$|\.py$|^LICENSE$|^\.gitignore$|^\.gitattributes$|^environment\.yml$|^scripts/update_fixs\.(ps1|sh)$'
           relevant=$(echo "$files" | grep -vE "$ignore" || true)
           if [ -z "$relevant" ]; then
             echo "No build-relevant changes -> skipping build (required check still passes)."

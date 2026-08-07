@@ -146,7 +146,7 @@ powershell -ExecutionPolicy Bypass -File scripts\initialize_fixs.ps1
 
 It initializes the `ProprietaryFiles` submodule (optional — private repo), acquires the native deps, and builds yaml-cpp, then prints a per-step summary. Idempotent, so re-running is cheap. `dispatch.bat` calls it as step 1, so `dispatch.bat` on its own also works on a fresh clone.
 
-`scripts/fetch_fixs.ps1` is a different thing: it is the **consumer-side** script for downloading a published FIXS release zip, not for setting up a developer checkout.
+`scripts/update_fixs.ps1` and `scripts/update_fixs.sh` are a different thing: they are the **consumer-side** installers for a published FIXS release zip, not for setting up a developer checkout.
 
 ### Native dependencies (`CommonLib/libsumo`, `CommonLib/libcarla`)
 Neither is committed to git. Both are gitignored and fetched at setup time from the public rolling release `fixs-native-deps` as version-named, SHA-256-verified assets (`libsumo-<ver>.zip`, `libcarla-<ver>.zip`); versions come from `dependencies.yaml`.
