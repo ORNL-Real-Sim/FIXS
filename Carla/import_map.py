@@ -19,8 +19,11 @@ new one.
 
 The package is sourced, in order:
   --pick-release        list the repo's map releases and prompt which VERSION to
-                        import, then download it via gh (needs gh; no URL/version
-                        to hand-maintain - you pick from what's published), or
+                        import, then download it via gh (no URL/version to
+                        hand-maintain - you pick from what's published). gh is
+                        needed to LIST and to DOWNLOAD, but not to import: when it
+                        is missing or cannot see the library, the picker says so,
+                        lists nothing online, and still offers the local file, or
   already staged        files already present under <carla_root>/Import, or
   --package-dir <dir>   a local folder holding the package files, or
   --package-url <url>   tried via the GitHub CLI if installed (handles private
@@ -259,22 +262,32 @@ def _try_gh_download(package_url):
     return None, None
 
 
-def _select_package(name, package_url):
+def _select_package(name, package_url, precooked=False):
     """Let the user point at a package they downloaded by hand - a native file
     picker, falling back to a typed path. This is the portable path: no GitHub
     CLI / auth needed, just browser access to the release.
 
-    Asks zip-or-folder first, because the two need different dialogs and
-    askopenfilename cannot select a directory. Everything downstream already
-    accepts a folder (_stage_from_path copies a tree); only this dialog could not
-    offer one, which made the picker's "select a local .zip / folder" a half
-    truth - a typed path was the sole way to hand it a raw extracted export."""
-    print(f"\n[import] Select the downloaded '{name}' map package.")
+    `precooked` says which artefact this CARLA can actually take, and it has to be
+    asked for by name. A PACKAGED build cooks nothing, so the only thing it can
+    install is the library's `*_cooked.tar.gz` (install_precooked) - yet this
+    dialog offered "[Z = zip, F = folder]" and filtered `*.zip`, steering the one
+    flavour that needs the tarball towards the two artefacts it must reject (#283).
+    A SOURCE build is the mirror image: it cooks, so it wants the .zip or the
+    extracted folder and cannot use a cooked tarball.
+
+    For a source build we still ask zip-or-folder first, because the two need
+    different dialogs and askopenfilename cannot select a directory. Everything
+    downstream already accepts a folder (_stage_from_path copies a tree); only this
+    dialog could not offer one, which made the picker's "select a local .zip /
+    folder" a half truth - a typed path was the sole way to hand it a raw
+    extracted export. A precooked package is always one file, so it asks nothing."""
+    what = "precooked package (*_cooked.tar.gz)" if precooked else ".zip (or extracted folder)"
+    print(f"\n[import] Select the downloaded '{name}' {what}.")
     if package_url:
         print("[import] If you don't have it yet, download it (browser is fine - "
               "you need access to the release):")
         print(f"             {package_url}")
-    folder = sys.stdin.isatty() and _prompt(
+    folder = (not precooked) and sys.stdin.isatty() and _prompt(
         "[import] Is it a .zip or an extracted folder? "
         "[Z = zip, F = folder, Enter = zip]: ").strip().lower().startswith("f")
     try:
@@ -286,6 +299,10 @@ def _select_package(name, package_url):
         if folder:
             path = filedialog.askdirectory(
                 title=f"Select the extracted {name} package folder")
+        elif precooked:
+            path = filedialog.askopenfilename(
+                title=f"Select the downloaded precooked {name} package (*_cooked.tar.gz)",
+                filetypes=[("Precooked map packages", "*.tar.gz"), ("All files", "*.*")])
         else:
             path = filedialog.askopenfilename(
                 title=f"Select the downloaded {name} package (.zip)",
@@ -296,9 +313,13 @@ def _select_package(name, package_url):
     except Exception as exc:  # no display / no tkinter
         print(f"[import] file picker unavailable ({exc}); type the path instead.")
     if not sys.stdin.isatty():
-        sys.exit("[import] non-interactive session: pass --package-dir "
-                 "<zip-or-folder> with the downloaded package.")
-    path = input("[import] Path to the downloaded .zip (or extracted folder): ").strip().strip('"')
+        sys.exit(f"[import] non-interactive session: pass --package-dir with the "
+                 f"downloaded {what}.")
+    # _prompt, not input: isatty() is unreliable through some Windows shells, so the
+    # guard above can let a closed stdin through. A source build never noticed - the
+    # zip-or-folder question above absorbed the EOF first - but a precooked pick asks
+    # nothing, which made this the first read and turned it into an EOFError traceback.
+    path = _prompt(f"[import] Path to the downloaded {what}: ").strip().strip('"')
     if not path or not os.path.exists(path):
         sys.exit(f"[import] path not found: {path!r}")
     return path
@@ -1053,10 +1074,17 @@ def install_precooked(carla_root, name, repo=None, tag=None, entry=None,
     in run_cosim, which is why `--import-map` - the command whose whole name is
     importing a map - could not import one on a packaged build (#276).
 
-    `local` is a path the user picked; only a precooked *.tar.gz is usable. Else the
-    asset name comes from the catalog `entry` and is downloaded from `repo`/`tag`.
+    `local` is a path the user picked; only a precooked package is usable, and it is
+    recognised by what is inside it rather than by its name. Else the asset name
+    comes from the catalog `entry` and is downloaded from `repo`/`tag`.
     `log` is the caller's message prefix, so the user reads one voice."""
-    if local and local.lower().endswith(".tar.gz"):
+    # Ask the archive, not the file name. The suffix was standing in for "is a
+    # precooked package", and the two disagree at the edges: a `.tgz`, or a tarball
+    # renamed on the way through a browser, is perfectly installable and was
+    # refused as a "source bundle", while any `.tar.gz` at all was accepted and
+    # failed later inside install_cooked. cooked_name_in_tar is the same evidence
+    # install_cooked itself uses, so the two can no longer disagree.
+    if local and cooked_name_in_tar(local):
         tar_path = local
     elif local:
         # A source bundle (carla/ with fbx+xodr) would have to be cooked, which is
@@ -1205,6 +1233,23 @@ def _cooked_name_in(members):
     return found.pop() if len(found) == 1 else None
 
 
+def cooked_name_in_tar(path):
+    """The map a precooked *.tar.gz provides, read out of the archive itself, or
+    None if it is not one / does not say.
+
+    The file name is not the answer: `mlk_no_signal_cooked.tar.gz` happens to carry
+    `mlk_no_signal`, but that is a publishing convention, not a rule - which is why
+    install_cooked resolves the name from the .Package.json inside. Peeking here
+    lets a hand-picked tarball be named before it is installed, so the picker can
+    say which map it selected instead of asking the user to guess a name that the
+    install would then override anyway."""
+    try:
+        with tarfile.open(path, "r:*") as tar:
+            return _cooked_name_in(tar.getmembers())
+    except (OSError, tarfile.TarError):
+        return None
+
+
 def read_map_config(path):
     """Parse a simple `key=value` map config (keys: package, url). Lets an app
     declare its map in one text file instead of hard-coding the URL in a wrapper."""
@@ -1219,14 +1264,24 @@ def read_map_config(path):
     return cfg
 
 
+GH_HOWTO = ("Install gh (https://cli.github.com) and run `gh auth login`; if it is "
+            "already\n        installed, `gh auth status` shows which account and "
+            "scopes it is using -\n        a token without `repo` cannot see a "
+            "private library and reports it as 404.")
+
+
 def _require_gh():
-    """Path to the GitHub CLI, or exit telling the user how to proceed without it."""
+    """Path to the GitHub CLI, or exit saying how to proceed without it.
+
+    Only DOWNLOADING needs this. Listing degrades instead (see list_map_releases):
+    a machine that cannot reach the library must still be able to import a package
+    the user fetched by hand, and that path needs no gh at all."""
     gh = shutil.which("gh")
     if not gh:
-        sys.exit("[import] --pick-release needs the GitHub CLI (gh) to list the map "
-                 "releases.\n        Install gh (https://cli.github.com) and run "
-                 "`gh auth login`, or import a specific version directly with "
-                 "--package + --package-url / --package-dir.")
+        sys.exit(f"[import] downloading a published map needs the GitHub CLI (gh).\n"
+                 f"        {GH_HOWTO}\n"
+                 f"        Or import a copy you downloaded yourself: --package <name> "
+                 f"--package-dir <file>.")
     return gh
 
 
@@ -1239,17 +1294,32 @@ def _package_from_tag(tag, tag_prefix=""):
 def list_map_releases(repo, tag_prefix=""):
     """Map releases in `repo` (tag starts with `tag_prefix`), newest first, via gh.
     Each item: {tag, title, date 'YYYY-MM-DD', prerelease}. Drafts are skipped -
-    their assets aren't downloadable."""
+    their assets aren't downloadable.
+
+    Returns [] - after saying why - when the releases cannot be listed: no gh, gh
+    not authenticated, no network, or a token that cannot see a private library.
+    This used to sys.exit, which made a gh problem fatal to the whole picker: the
+    menu is printed by choose_map AFTER this call, so the `L) local file` row - the
+    one path built to need nothing but browser access - was never reached on
+    exactly the failure it exists for (#283). Not listing the library is a smaller
+    fact than not being able to import, and only the first one is true here.
+    fetch_catalog already degrades the same way, for the same reason."""
     import json
-    gh = _require_gh()
+    gh = shutil.which("gh")
+    if not gh:
+        print(f"[import] the GitHub CLI (gh) is not installed, so the published maps "
+              f"cannot be listed.\n        {GH_HOWTO}")
+        return []
     try:
         out = subprocess.check_output(
             [gh, "release", "list", "-R", repo, "-L", "100", "--json",
              "tagName,name,publishedAt,isPrerelease,isDraft"],
             text=True, stderr=subprocess.PIPE)
-    except subprocess.CalledProcessError as exc:
-        sys.exit(f"[import] `gh release list` failed for {repo}:\n{exc.stderr.strip()}\n"
-                 "        Check `gh auth status` and that your account can see the repo.")
+    except (OSError, subprocess.CalledProcessError) as exc:
+        detail = (getattr(exc, "stderr", "") or "").strip() or str(exc)
+        print(f"[import] `gh release list` failed for {repo}, so the published maps "
+              f"cannot be listed:\n{detail}\n        {GH_HOWTO}")
+        return []
     rels = []
     for r in json.loads(out):
         tag = r.get("tagName", "")
@@ -1321,7 +1391,10 @@ def _app_map_choice(name, catalog, cooked):
 
 def choose_map(repo, tag_prefix="", carla_root=None, catalog=None,
                preferred=None, app_label=None, current=None):
-    """Interactive chooser. Two sections plus `L` for a hand-picked .zip / folder:
+    """Interactive chooser. Two sections plus `L` for a file the user downloaded by
+    hand - a .zip / folder on a source build, a precooked *_cooked.tar.gz on a
+    packaged one, which is also the only route left when gh cannot reach the
+    library (list_map_releases then returns [] and section 1 is simply empty):
       1. ONLINE - Digital-Twin-Library releases in `repo`. When an application is
                   selected and the library HAS its map(s), this section is narrowed
                   to those: an app pinned to Roosevelt should not be offered
@@ -1349,6 +1422,10 @@ def choose_map(repo, tag_prefix="", carla_root=None, catalog=None,
     releases = list_map_releases(repo, tag_prefix)
     cooked = list_imported_maps(carla_root) if carla_root else []
     preferred = preferred or []
+    # Which artefact `L` may hand back is a property of the CARLA installed here,
+    # not of the choice - a packaged build can only install a precooked tarball.
+    # Resolved once, and used for both the menu wording and the dialog.
+    packaged = _mode() == "packaged"
 
     resolved_app = [r for r in (_app_map_choice(n, catalog, cooked) for n in preferred) if r]
     app_tags = {tag for _k, _l, _f, tag in resolved_app if tag}
@@ -1398,7 +1475,8 @@ def choose_map(repo, tag_prefix="", carla_root=None, catalog=None,
             print(f"   {len(menu):>2}) {name}{mark}")
     if not menu:
         print("   (no online releases or imported maps found)")
-    print("   L) select a local .zip / folder instead")
+    print("   L) select a local precooked *_cooked.tar.gz instead" if packaged
+          else "   L) select a local .zip / folder instead")
     if current_idx:
         default_idx = current_idx
 
@@ -1412,7 +1490,21 @@ def choose_map(repo, tag_prefix="", carla_root=None, catalog=None,
         if ans == "" and menu:
             ans = str(default_idx)
         if ans == "l":
-            path = _select_package("map", None)  # native file picker / typed path
+            path = _select_package("map", None, precooked=packaged)
+            if packaged:
+                # Nothing to ask: a precooked package carries its own name, and
+                # install_cooked reads it from the same .Package.json this does. A
+                # name typed here could only disagree with the archive, and the
+                # archive would win - so state what was picked instead of asking.
+                name = cooked_name_in_tar(path)
+                if not name:
+                    sys.exit(f"[import] {path} does not look like a precooked map "
+                             f"package (no CarlaUE4/Content/<name>/Config/"
+                             f"<name>.Package.json inside).\n"
+                             f"        A PACKAGED CARLA can only install one of "
+                             f"those - it ships no editor to cook a source bundle.")
+                print(f"[import] that package provides map '{name}'")
+                return name, None, path
             name = _infer_package_name(path)
             if _has_descriptor(path):
                 # A packaged map is already named: its descriptor filename IS the
