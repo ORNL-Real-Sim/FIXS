@@ -108,9 +108,13 @@ add_executable(TrafficLayer ${TRAFFICLAYER_SOURCES})
 target_compile_features(TrafficLayer PRIVATE cxx_std_17)
 
 target_include_directories(TrafficLayer PRIVATE
+    # generated/ FIRST: on a machine that also builds with MSBuild,
+    # generate_version.ps1 leaves a CommonLib/RealSimVersion.h behind (gitignored,
+    # so CI never sees it). Since the include is quoted, CommonLib would win the
+    # search and the Linux build would silently embed the Windows run's version.
+    "${CMAKE_CURRENT_BINARY_DIR}/generated"
     "${CMAKE_CURRENT_SOURCE_DIR}/CommonLib"
-    "${FIXS_LIBTRACI_INCLUDE_DIR}"
-    "${CMAKE_CURRENT_BINARY_DIR}/generated")
+    "${FIXS_LIBTRACI_INCLUDE_DIR}")
 
 target_link_libraries(TrafficLayer PRIVATE
     yaml-cpp
