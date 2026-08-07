@@ -1,0 +1,63 @@
+# Stage B multi-port routing probe (issue #158, PR #165).
+#
+# Two Python clients connect to TrafficLayer (DSProxy mode) on DIFFERENT
+# ports. The ApplicationSetup.VehicleSubscription list now has TWO
+# entries; DSProxyMode.cpp's resolveAppSockets() expands each ports[i]
+# into its own AppSocketConfig and applies a per-port filter.
+#
+#   Port 2444 (type: ego)
+#     - Ego control + observer. Inbound id=='ego' is treated as the
+#       canonical DSProxy ego inject; outbound = full vehicle list.
+#       Signals = full TLS list.
+#
+#   Port 2445 (type: vehicleType, id: ['100'])
+#     - Observer-only. publishesVehicle() keeps outbound vehicles whose
+#       type matches '100' (= Car in the shipped DS example). Signals
+#       = full TLS list (signals are global, not filtered per-port).
+#
+# Invariants (validated in multiport_clients.py):
+#   - both clients connect
+#   - port 2444 observer sees ego at the pushed position (B_ego_visible)
+#   - port 2445 observer sees ONLY type==100 vehicles (M_type_filter)
+#   - both ports receive the same signal table size every tick (M_signals_global)
+#   - both clients stay tick-aligned (no drift)
+
+SimulationSetup:
+    EnableRealSim: false
+    EnableVerboseLog: false
+    SelectedTrafficSimulator: VISSIM
+    SimulationEndTime: 30
+    VehicleMessageField: [id, type, speed, speedDesired, positionX, positionY, positionZ, heading, linkId, laneId, grade]
+
+ApplicationSetup:
+    EnableApplicationLayer: true
+    VehicleSubscription:
+    -   type: ego
+        attribute: { id: ['ego'], radius: [0] }
+        ip: ['127.0.0.1']
+        port: [2444]
+    -   type: vehicleType
+        attribute: { id: ['100'], radius: [0] }
+        ip: ['127.0.0.1']
+        port: [2445]
+
+XilSetup:
+    EnableXil: false
+
+# DSProxy: TrafficLayer spawns VISSIM via DrivingSimulatorProxy.dll and ticks it.
+VissimSetup:
+    EnableDSProxy: true
+    EnableDriverModelRelay: false   # no FIXS DriverModel / CAV controller in this probe
+
+    # NetworkFile must be ABSOLUTE, so this committed value is a placeholder.
+    # run_multiport_xil.bat rewrites this line to the current checkout's
+    # stage_network and launches TrafficLayer with the generated copy
+    # (config.runtime.yaml), same convention as the CMoffice demos. Run the
+    # .bat — do not point TrafficLayer at this file directly.
+    NetworkFile: 'stage_network\driving_simulator_test.inpx'
+    VissimVersion: 2022
+    SimulatorFrequency: 10
+    VisibilityRadius: -1.0
+    MaxSimulatorVeh: 10
+    MaxTotalVeh: 50000
+    MaxVissimSigGrp: 1000
