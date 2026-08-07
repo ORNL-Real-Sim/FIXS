@@ -5,7 +5,22 @@
 
 param(
     [ValidateSet('standalone', 'inline')]
-    [string]$RunMode = 'standalone'
+    [string]$RunMode = 'standalone',
+
+    # Name the zip after the release CHANNEL it is being published to ('latest',
+    # 'v0.9.0-alpha') rather than deriving a name from git. CI passes the tag
+    # resolved by release_channel.ps1, via this parameter or the environment
+    # variable, so a channel's asset always has the same, predictable name.
+    #
+    # Why this exists: the git-derived fallback below names the zip after the
+    # nearest reachable version tag, and tags MOVE BETWEEN BRANCHES when a
+    # release branch merges. After dev_v0.9.0 merged into main, main's nearest
+    # tag was the 0.9.0 train's rolling v0.9.0-alpha, so a main build published
+    # to 'latest' shipped fixs-build-v0.9.0-alpha-1-g65f2970d.zip - a name that
+    # both misidentified the channel and changed on every dev-side retag.
+    #
+    # Local/PR builds pass nothing and keep the commit-traceable git name.
+    [string]$VersionLabel = $env:RS_FIXS_VERSION_LABEL
 )
 
 $ScriptDir = $PSScriptRoot
@@ -26,21 +41,29 @@ if (-not (Test-Path $BuildDir)) {
     Exit-Script 1
 }
 
-# Determine version label from git.
-# Full semver-matched describe (e.g. v0.8.0-120-gce90f3c0) so the zip name is
-# traceable to the exact commit. --match 'v[0-9]*' ignores the rolling
-# lightweight tags (latest, alpha_v0.9.0) that would otherwise shadow the real
-# semver tag (#191); --always degrades a tagless checkout to the short SHA.
-$VersionLabel = 'dev'
-try {
-    $describe = git describe --tags --match 'v[0-9]*' --always 2>$null
-    $commit = git rev-parse --short HEAD 2>$null
-    if ($describe) {
-        $VersionLabel = $describe
-    } elseif ($commit) {
-        $VersionLabel = "dev-$commit"
-    }
-} catch {}
+# Version label: the release channel when one was given, else derived from git.
+if ($VersionLabel) {
+    # Keep the label filename-safe - it reaches disk and a release asset name.
+    $VersionLabel = ($VersionLabel.Trim() -replace '[^A-Za-z0-9._-]', '-')
+    Write-Host "Version label from release channel: $VersionLabel"
+} else {
+    # No channel (local or PR build): full semver-matched describe
+    # (e.g. v0.8.0-120-gce90f3c0) so the zip is traceable to the exact commit.
+    # --match 'v[0-9]*' ignores the rolling lightweight tag 'latest' that would
+    # otherwise shadow a real version tag (#191); --always degrades a tagless
+    # checkout to the short SHA.
+    $VersionLabel = 'dev'
+    try {
+        $describe = git describe --tags --match 'v[0-9]*' --always 2>$null
+        $commit = git rev-parse --short HEAD 2>$null
+        if ($describe) {
+            $VersionLabel = $describe
+        } elseif ($commit) {
+            $VersionLabel = "dev-$commit"
+        }
+    } catch {}
+    Write-Host "Version label from git describe: $VersionLabel"
+}
 
 $ZipName = "fixs-build-$VersionLabel.zip"
 $ZipPath = Join-Path $BuildDir $ZipName

@@ -27,6 +27,10 @@ Schema (schema: 1)
       "note":   "...",                  # optional, printed when the app is picked
       "maps":   ["roosevelt", ...],     # optional, DEFAULT ["<id>"]; first = default pick
       "configs":[ <config>, ... ],      # optional app-owned scenario yamls
+      "launch": "run_my_app",           # optional: a command run alongside the stack
+                                        #   (the app's controller / XIL host), which
+                                        #   may also report the scenario to run. See
+                                        #   below - run_cosim does not read its args.
       "defaults": {                     # optional per-app run defaults (CLI wins)
         "engine": "py"|"cpp", "sumo_gui": true
       },                                # no timestep: the scenario yaml owns the
@@ -45,9 +49,42 @@ ships ONE app-independent scenario, and a co-sim requirement does not belong in 
 shared artifact - otherwise every new map needs the same edit before it works. So
 run_cosim injects the convention on the SUMO command line (printed, with each flag's
 origin) and an app deviates HERE, tracked and reviewed next to its declaration,
-valid on every map that app runs against. An app that needs different DEMAND does not
-belong here either: that is a different scenario, and it ships as files in the app
-folder (see mlk_eco_driving) chosen with --sumocfg.
+valid on every map that app runs against.
+
+`launch` is how an application gets to run under the one entry point. run_cosim starts
+SUMO, TrafficLayer and the bridge; an app that also has a controller names it here, and
+the user keeps typing `run_cosim` and nothing else. Deliberately opaque: run_cosim
+resolves the command in the app folder (extensionless -> .bat on Windows, .sh
+elsewhere, the convention run_cosim / import_map / place_tls already use) and passes
+every argument after the first token through UNTOUCHED. It never adds, removes or reads
+one, so what a controller needs to be told is the app's business and adding an app
+costs no engine change.
+
+It is started FIRST, before SUMO, and it may report the scenario to run. run_cosim
+gives it a path in FIXS_HANDOFF and waits for a json object to appear there:
+
+    {"sumocfg": "<abs path>"}       run this scenario instead of the bundle's
+    {}                             nothing to report; carry on
+
+That inverts who owns the SUMO scenario, which is the point. An application whose
+scenario is GENERATED per run - a run directory, its own demand, output paths written
+into the config - cannot declare a static path for it, and a config file is the only
+place some SUMO outputs can be redirected at all (<timedEvent dest=> has no command
+line flag). So the app builds the scenario and says where it put it.
+
+Reporting one also switches the SUMO CONVENTION off. The convention exists because a
+Digital-Twin-Library .sumocfg is a SHARED artifact that must not carry one consumer's
+co-sim requirement; an app that generated its own has no shared artifact and no such
+problem, and imposing sublane lane-changing on it would be changing a scenario behind
+its author's back. The CONTRACT (--step-length: one SUMO step per FIXS exchange) still
+applies - that is the protocol, not a preference - and `sumo_args` still adds whatever
+else an app wants, so what SUMO got is still one printed list either way.
+
+FIXS_HANDOFF is also how the command knows the stack is not its to start: SUMO and
+TrafficLayer are already being launched, and a second copy would fight for the TraCI
+and bridge ports. An app that ignores the variable entirely still works - it reports
+nothing, keeps the convention, and runs the bundle's scenario - so `launch` is usable
+without knowing any of this.
 
 A map is just a NAME - the word the picker matches against what already exists:
 a Digital-Twin-Library location / cooked map name / release tag (catalog_entry
@@ -138,6 +175,32 @@ def apps_home(app_id=None):
 def app_dir(app, root=None):
     """Absolute path of the app's folder under apps/ (entry['dir'], else its id)."""
     return os.path.join(root or app_root(), "apps", app.get("dir") or app["id"])
+
+
+def launch_command(app, root=None):
+    """(argv, cwd) for the app's `launch` command, or (None, None) if it declares none.
+
+    The first token is resolved in the app folder and given the platform's script
+    extension when it has none - `run_mlk_eco_driving` -> run_mlk_eco_driving.bat on
+    Windows, .sh elsewhere - which is the convention run_cosim / import_map /
+    place_tls already ship both halves of. Everything after the first token is passed
+    through verbatim and never interpreted: the app owns its own arguments."""
+    if not app or not app.get("launch"):
+        return None, None
+    import shlex
+    parts = shlex.split(app["launch"], posix=(os.name != "nt"))
+    if not parts:
+        return None, None
+    here = app_dir(app, root)
+    exe = parts[0]
+    if not os.path.splitext(exe)[1]:
+        exe += ".bat" if os.name == "nt" else ".sh"
+    path = exe if os.path.isabs(exe) else os.path.join(here, exe)
+    if not os.path.isfile(path):
+        _warn(f"app '{app['id']}': launch command '{app['launch']}' not found "
+              f"at {path}; nothing will be started for it.")
+        return None, None
+    return [path] + parts[1:], here
 
 
 def scenario_dir(app_id, map_name=None):
@@ -292,6 +355,18 @@ def _normalize_app(raw):
     if not maps:
         maps = [app_id]
     configs = [c for c in (_normalize_config(c, app_id) for c in raw.get("configs") or []) if c]
+    # Extra python packages this app needs on top of the engine's own env, as a path
+    # relative to the app folder. The engine owns environment.yml and nothing else;
+    # an app's plotting or analysis stack is the app's business, and pushing it
+    # upstream would put every FIXS consumer's env at the mercy of one application.
+    # Absent -> the app declares none, and nothing is installed for it.
+    requirements = (raw.get("requirements") or "").strip() or None
+    # A command run alongside the co-sim stack - the app's controller, XIL host, or
+    # whatever else attaches to TrafficLayer, and the thing that may report which
+    # scenario to run (see FIXS_HANDOFF above). Kept as one opaque string: run_cosim
+    # resolves it in the app folder and never reads its arguments, so what an app
+    # needs to pass itself costs no change here.
+    launch = (raw.get("launch") or "").strip() or None
     return {"id": app_id,
             "title": (raw.get("title") or "").strip() or app_id,
             "dir": (raw.get("dir") or "").strip() or app_id,
@@ -299,7 +374,9 @@ def _normalize_app(raw):
             "maps": maps,
             "configs": configs,
             "defaults": defaults,
-            "sumo_args": sumo_args}
+            "sumo_args": sumo_args,
+            "requirements": requirements,
+            "launch": launch}
 
 
 def load_catalog(root=None):
@@ -347,29 +424,37 @@ def find_app(apps, ident):
 # --------------------------------------------------------------------------- #
 # Picking
 # --------------------------------------------------------------------------- #
-def choose_app(apps, root=None):
+def choose_app(apps, root=None, current=None):
     """Numbered menu of the declared applications; returns the chosen app dict, or
     None for "no app" (the generic, pre-app-awareness run). Auto-selects nothing:
     even a single app is offered, because the None escape has to stay reachable.
     Returns None (silently) in a non-interactive session so callers keep working
-    from --app / a saved profile."""
+    from --app / a saved profile.
+
+    `current` is the app id the setup is running: it is marked, and Enter keeps it.
+    Without it Enter always meant item 1, so opening this row on a setup running any
+    other app and pressing Enter switched the app - and took the map and the
+    scenario yaml with it, since both are invalidated by an app change."""
     if not apps:
         return None
     if not sys.stdin.isatty():
         return None
+    ids = [a["id"] for a in apps]
+    idx = ids.index(current) + 1 if current in ids else 1
     print("\n[apps] Pick an application to run:")
     for i, a in enumerate(apps, 1):
         missing = "" if os.path.isdir(app_dir(a, root)) else "   (folder missing)"
         maps = ", ".join(a["maps"]) or "-"
-        print(f"   {i:>2}) {a['title']:<34} maps: {maps}{missing}")
+        mark = "  (current)" if a["id"] == current else ""
+        print(f"   {i:>2}) {a['title']:<34} maps: {maps}{missing}{mark}")
     print("    0) none - just pick a map (generic co-sim)")
     while True:
         try:
-            ans = input(f"[apps] Which? [0-{len(apps)}], Enter = 1: ").strip()
+            ans = input(f"[apps] Which? [0-{len(apps)}], Enter = {idx}: ").strip()
         except EOFError:
             return None
         if ans == "":
-            return apps[0]
+            return apps[idx - 1]
         if ans == "0":
             return None
         if ans.isdigit() and 1 <= int(ans) <= len(apps):

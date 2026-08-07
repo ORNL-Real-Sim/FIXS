@@ -17,19 +17,26 @@ Carla/                        <- self-contained co-sim component (shipped in the
     sumo_carla_tl_sync.py     standalone SUMO->CARLA TL mirror
     auto_place_tls.py         headless TL-actor placement (run inside the UE4 editor)
     unreal_placing_tls.py     spawns BP_TrafficLight actors from the table
-    set_spectator_view.py     move the CARLA spectator over the junctions
   utils/                      <- co-sim helpers (kept inside Carla/ so it ships self-contained)
     extract_sumo_tls_as_table.py   generate traffic_light_table.csv from a SUMO net
     trafficlight_helper.py         SUMO<->CARLA<->Unreal coordinate transforms
     unreal_remove_tl.py            remove placed TL actors
+  run_cosim.py                cross-platform launcher (Windows/Linux) - the entry point
   carla_env_setup.py          one-time/reconfigure CARLA env picker (saves ~/.fixs/carla.json)
-  setup_carla.bat / setup_carla.sh  thin per-OS wrappers for the picker
   import_map.py               import a RoadRunner/OpenDRIVE map into a source build
-  import_map.bat / import_map.sh    thin per-OS wrappers for the importer
   place_tls.py                place SUMO traffic lights into a cooked map (editor)
-  place_tls.bat / place_tls.sh      thin per-OS wrappers for the placer
-  run_cosim.py                cross-platform launcher (Windows/Linux)
-  run_cosim.bat / run_cosim.sh  thin per-OS wrappers
+  place_signs.py              place the RoadRunner sign meshes CARLA's import culled
+  unreal_place_signs.py       the editor-side half of place_signs.py
+  app_catalog.py              the apps/ manifest contract for FIXS application repos
+  run_profile.py              named run setups (~/.fixs/run_profiles.json) + review loop
+  props.py                    placement props and their manifest, from the map library
+  doctor.py                   check this machine can run a co-sim, before it tries
+  peer.py                     control channel between the halves of a distributed co-sim
+  set_spectator_view.py       point the CARLA spectator at a scene (top-down, or --follow)
+  load_opendrive_world.py     mesh an .xodr into a running server - no map package, no cook
+  launch_carla.bat            hand-launch a server from carla.env, for that no-cook path
+  carla.env.example           copy to carla.env and edit; read by launch_carla.bat
+  wait_for_rpc.ps1            block until that server accepts RPC
   README.md                   (this file)
 
 tests/Sumo/Carla/             <- tests only (no runtime code)
@@ -41,6 +48,15 @@ tests/Sumo/Carla/             <- tests only (no runtime code)
 
 (`sumo/` is named for the partner simulator &mdash; a future CARLA co-sim with another
 tool would slot in as e.g. `Carla/vissim/`.)
+
+**Every entry point here is run as `python Carla/<script>.py`**, on either OS. There
+are deliberately no `.bat`/`.sh` wrappers beside them: each script re-execs itself
+under the configured interpreter (see [Environment](#environment)), so the python
+you start with does not matter and a wrapper would add nothing. An application repo
+built on a fetched FIXS bundle exposes its own front door &mdash; `run_cosim.bat` /
+`run_cosim.sh` at the repo root &mdash; and that is what users should type; it sets
+the app's `FIXS_ENV_NAME` and bootstraps the bundle before calling in here. A
+same-named wrapper in this directory only shadowed it (ORNL-Real-Sim/FIXS#287).
 
 ## Environment
 
@@ -87,13 +103,9 @@ Run setup explicitly only to **switch CARLA** (packaged &harr; source build, or 
 different install/version):
 
 ```bash
-# Windows
-Carla\setup_carla.bat
-# Linux/macOS
-Carla/setup_carla.sh
-# or directly, on either OS:
-python Carla/carla_env_setup.py          # interactive picker
-python Carla/carla_env_setup.py --show   # print the current config
+python Carla/carla_env_setup.py                   # interactive picker
+python Carla/carla_env_setup.py --show            # print the current config
+python Carla/carla_env_setup.py --update-python   # rebind ONLY the python env
 ```
 
 Setup asks **packaged** vs **source build**, then opens a native folder picker:
@@ -105,10 +117,24 @@ Setup asks **packaged** vs **source build**, then opens a native folder picker:
   used automatically when it points at a real engine; otherwise you're prompted.
   Launched through the editor as `UE4Editor <uproject> -game`.
 
-**Windows note:** importing a *custom* map into a packaged CARLA is unsupported by
-CARLA (map ingestion is Linux + Docker only &mdash; there is no `ImportAssets.bat`),
-so on Windows setup offers **source build only** for custom-map apps. Pass
-`--allow-packaged-windows` if you only need stock maps (Town01, ...) from a package.
+**What a packaged build cannot do:** cook or place anything &mdash; that needs the
+Unreal editor, which a package does not ship. So it runs a Digital-Twin-Library map
+only if the library publishes it *precooked* (`<map>_cooked.tar.gz`), exactly as it
+was cooked; traffic lights and signs are whatever the asset already contains.
+`run_cosim` installs that asset for you, and names the missing asset up front for a
+map that has none. To cook a map yourself, use a source build. *Installing* a
+precooked asset works the same on Windows and Linux &mdash; it is a plain extract,
+done here in `tarfile` rather than through CARLA's bash-only `Util/ImportAssets.sh`.
+
+**Windows note:** the *assets* are not yet OS-neutral. Every `*_cooked.tar.gz` the
+library publishes today is a Linux cook &mdash; its materials carry SPIR-V and no
+Direct3D shaders &mdash; and a packaged build has no shader compiler, so on Windows
+those materials fall back to the default one: correct geometry and traffic lights,
+grey road surface. Setup therefore still offers **source build only** on Windows;
+pass `--allow-packaged-windows` if you only need stock maps (Town01, ...) from a
+package. `run_cosim` also warns before launching when the installed map has no
+shaders for the platform it is about to run on. Tracked in
+ORNL-Real-Sim/FIXS_Applications#29.
 
 Setup also resolves the **python env** that runs the co-sim and stores it in the
 config, so the launcher works on any machine no matter what the env is named:
@@ -119,17 +145,40 @@ config, so the launcher works on any machine no matter what the env is named:
    pick. For a **source build** the matching client wheel is auto-resolved from
    `PythonAPI/carla/dist` (manual pick as fallback).
 
-`run_cosim.py` then re-executes itself under that interpreter before importing
-`carla`, so the `.bat`/`.sh` stay trivial. A config written by an older setup
-(missing the python env) is repaired automatically on the next run.
+Whichever env is bound, setup says so when it is not the one that was asked for
+(`FIXS_ENV_NAME`) and when it cannot import the co-sim's runtime modules — those
+never stop a run, they degrade it under a different name (no `yaml` makes every
+scenario setting read as its default, including `CarlaServerIP`).
+
+**Every entry point runs under that one interpreter.** `carla_env_setup.
+reexec_under_configured` is each script's first act — `run_cosim.py`,
+`import_map.py`, `place_tls.py`, `place_signs.py` and the world/spectator helpers
+— so which script you happen to start with cannot change the env you end up in,
+and the `.bat`/`.sh` wrappers stay trivial `exec python <script>` one-liners.
+(`sumo/auto_place_tls.py` is deliberately excluded: it runs inside the Unreal
+editor's embedded python, which is not this env and must not be replaced.)
+
+A config written by an older setup (missing the python env), or one whose env has
+since been deleted or rebuilt without the carla client, is repaired automatically
+on the next run. To change the binding on purpose — you created the env setup
+asked for, or picked the wrong one from the list — use
+
+```
+run_cosim --update-python          # or: setup_carla --update-python
+```
+
+which re-resolves only the interpreter and keeps the CARLA / UE4 paths. Since
+every entry point follows the config, that one command moves them all.
 
 (No display? Pickers fall back to typing the path. Headless CI instead sets
 `CARLA_ROOT` and runs `verify_demo.py`, which bypasses the interactive setup.)
 
-## Importing a custom map (source build only)
+## Importing a custom map
 
 A custom RoadRunner/OpenDRIVE map must be **cooked into a source build** before
-CARLA can load it (packaged CARLA cannot import custom maps). `import_map.py`
+CARLA can load it &mdash; cooking runs the Unreal editor, which a packaged build does
+not ship. (A packaged CARLA is served instead by `import_map.install_cooked`, which
+extracts an already-cooked package; see the setup section above.) `import_map.py`
 generalizes CARLA's `Util/BuildTools/Import.py --package=<name>` primitive: it
 stages the package (the `<name>.json` descriptor + its fbx/xodr/fbm assets) under
 `<carla_root>/Import` and runs the cook, reading `carla_root`/`ue4_root` from the
@@ -151,6 +200,56 @@ python Carla/import_map.py --package RP_Ver0529 --package-dir C:/Downloads/RP_Ve
 (`--package-dir` and the prompt both accept either the downloaded `.zip` or an
 already-extracted folder.)
 
+### Raw RoadRunner exports
+
+A published bundle carries its own `<name>.json`. A raw export straight out of
+RoadRunner does not — it is just `.fbx` + `.xodr` (+ `.fbm`, `.rrdata.xml`,
+`.geojson`) — so `import_map` writes the descriptor for you: it stages the export
+under `Import/<name>/`, pairs each `.xodr` with its `<x>.fbx` or its
+`<x>_Tile_<i>_<j>.fbx` set, and emits `Import/<name>.json` with
+`use_carla_materials: false` (RoadRunner ships its own materials) and, for a
+tiled map, `tile_size` from the export's `TilesInfo.txt` or 2000.
+
+**The name you import as wins.** RoadRunner names an export after the author's
+working file (`MLK_no_signal_0805`, `Atl_R2024b_final`), so the staged geometry
+is renamed to the map name you asked for:
+
+```bash
+python Carla/import_map.py --package mlk_no_signal --package-dir C:/Downloads/MLK_no_signal.zip
+# -> Import/mlk_no_signal.json, Import/mlk_no_signal/mlk_no_signal.fbx
+```
+
+Renaming rather than adopting the export's name is deliberate:
+
+- the cook writes the walker navmesh as `Maps/<map>/Nav/<fbx_stem>.bin` while the
+  runtime loads `<MapName>.bin`, so a mismatched `.fbx` costs the map its
+  pedestrian navigation, silently;
+- a re-export would otherwise cook a *different* CARLA map every time and orphan
+  the saved run setups, app manifests and catalog entries pointing at the old name.
+
+Only the `.fbx` (and its `.fbm`) is renamed. The `.xodr` keeps the export's name —
+CARLA copies it to `<map>.xodr` during the cook — and `.geojson` / `.rrdata.xml`
+stay untouched, so `Import/<name>/` still shows which export the map came from.
+The descriptor records it too, as `exported_as`.
+
+**One package holds one map** — a tiled map is still one map. That is assumed of
+a Digital-Twin-Library bundle and of a folder you pick by hand, and it is what
+lets the importer resolve a package without asking anything. A package that
+breaks the rule is reported, not guessed at:
+
+| in the package | result |
+|---|---|
+| `.fbx` named after the `.xodr` | imported |
+| one `.fbx` (or one tile set) named *differently* | imported, with a warning naming what it adopted |
+| several `.xodr` — two maps, or one staged twice | refused |
+| several unrelated `.fbx` (a layer-split export) | refused |
+| `.xodr` with no `.fbx`, or `.fbx` with no `.xodr` | refused |
+| both `<name>.fbx` **and** `<name>_Tile_*.fbx` | refused (a map is one or the other) |
+
+The warning case is deliberate rather than silent: a stem mismatch usually means
+the package was assembled by hand, and the lone `.fbx` staged might be scenery
+rather than the road network — which the cook would happily accept.
+
 An app declares its map in a small text file and points the **generic** importer
 at it, so the URL lives in one place (not hard-coded in wrappers):
 
@@ -160,7 +259,7 @@ package=RP_Ver0529
 url=https://.../RP_Ver0529_carla_import.zip
 ```
 ```bash
-import_map.bat --package-pick --map-config apps/roosevelt/roosevelt_map.txt
+python Carla/import_map.py --package-pick --map-config apps/roosevelt/roosevelt_map.txt
 ```
 
 A **re-import** (`--force` / `--reimport`, or answering the prompt) moves the old
@@ -176,8 +275,8 @@ from the table into the map's level (running `sumo/auto_place_tls.py` in the ful
 editor) and writes a marker so it isn't repeated:
 
 ```bash
-place_tls.bat --map-config apps/roosevelt/roosevelt_map.txt \
-              --tl-table apps/roosevelt/Roosevelt_Sumo_Scenario/traffic_light_table.csv
+python Carla/place_tls.py --map-config apps/roosevelt/roosevelt_map.txt \
+                          --tl-table apps/roosevelt/Roosevelt_Sumo_Scenario/traffic_light_table.csv
 ```
 
 A re-import wipes the map's content (and the marker), so the lights are re-placed

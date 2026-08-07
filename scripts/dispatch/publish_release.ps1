@@ -4,9 +4,12 @@
 # Run after dispatch.bat when you're ready to publish.
 #
 # Usage:
-#   publish_release.ps1                              # rolling "latest" release
-#   publish_release.ps1 -Tag alpha_v0.9.0 -Rolling   # rolling named prerelease
-#   publish_release.ps1 -Tag v0.8.0                  # fixed versioned release
+#   publish_release.ps1                               # rolling "latest" release
+#   publish_release.ps1 -Tag v0.9.0-alpha -Rolling    # rolling named prerelease
+#   publish_release.ps1 -Tag v0.8.0                   # fixed versioned release
+#
+# CI does not hardcode any of these: it resolves the branch's channel with
+# release_channel.ps1 and passes -Tag/-Title from that.
 # ====================================
 
 param(
@@ -18,7 +21,11 @@ param(
     # defaults a new tag to the repo's DEFAULT branch (main) - which wrongly
     # pinned the dev_v0.9.0 alpha release to main. In CI pass $env:GITHUB_SHA so
     # the release anchors to the exact commit that was built (#191).
-    [string]$Target
+    [string]$Target,
+    # Release title. CI passes the one resolved by release_channel.ps1 so channel
+    # naming lives in exactly one place; when omitted this falls back to the same
+    # convention, for hand-run publishes.
+    [string]$Title
 )
 
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
@@ -77,10 +84,12 @@ if ($Rolling -or $Tag -eq 'latest') {
     # the current commit (delete+recreate is how the tag is re-pointed).
     gh release delete $Tag --yes --cleanup-tag 2>$null
 
-    $title = if ($Tag -eq 'latest') { 'Latest Dev Build' } else { "Rolling build: $Tag" }
+    if (-not $Title) {
+        $Title = if ($Tag -eq 'latest') { 'Latest Dev Build' } else { "Rolling build: $Tag" }
+    }
     gh release create $Tag $ZipPath @targetArgs `
         --prerelease `
-        --title $title `
+        --title $Title `
         --notes $notes
 
 } else {
@@ -93,14 +102,15 @@ if ($Rolling -or $Tag -eq 'latest') {
         exit 1
     }
 
+    if (-not $Title) { $Title = "FIXS $Tag" }
     gh release create $Tag $ZipPath @targetArgs `
-        --title "FIXS $Tag" `
+        --title $Title `
         --notes $notes
 }
 
 if ($LASTEXITCODE -eq 0) {
     Write-Host "Published successfully."
-    Write-Host "Consumers can fetch with: fetch_fixs.ps1 -Version $Tag"
+    Write-Host "Consumers install this with: run_cosim.bat --update-fixs $Tag (or ./run_cosim.sh)"
 } else {
     Write-Error "Failed to publish release."
     exit 1

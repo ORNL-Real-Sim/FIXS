@@ -5,17 +5,30 @@ Prompts for the CARLA flavour and folder(s), validates them, and saves the choic
 to ~/.fixs/carla.json. run_cosim.py reads that config and launches seamlessly; if
 no config exists, run_cosim.py invokes this on the first run.
 
+Three flavours:
+  packaged  a released build (CarlaUE4.exe / .sh) - stock maps
+  source    an Unreal source build - the only one that can cook a custom map
+  client    no CARLA on this machine at all; it runs on another host and is
+            reached over the network. The traffic stack (SUMO, TrafficLayer,
+            VirCarlaEnv) still runs here, so this machine needs the carla PYTHON
+            client but no install, no Unreal, and no GPU.
+
 Run this any time to switch CARLA (packaged <-> source build, or a different
 install/version):
 
-    python carla_env_setup.py            # interactive
-    python carla_env_setup.py --show     # print the current config
-    setup_carla.bat / setup_carla.sh     # thin per-OS wrappers
+    python carla_env_setup.py                  # interactive
+    python carla_env_setup.py --show           # print the current config
+    python carla_env_setup.py --update-python  # rebind the env, keep the CARLA paths
+
+Everything that runs a co-sim runs under the interpreter recorded here - see
+reexec_under_configured, which every entry point calls first, so which script you
+start with cannot change the env you end up in.
 
 The config is stored per-machine outside any repo, so every FIXS app on this
 computer reuses it and it is never git-tracked.
 """
 import argparse
+import hashlib
 import json
 import os
 import platform
@@ -43,7 +56,12 @@ def load_config():
             cfg = json.load(f)
     except (OSError, ValueError):
         return None
-    return cfg if cfg.get("mode") in ("packaged", "source") and cfg.get("carla_root") else None
+    mode = cfg.get("mode")
+    # 'client' has no local CARLA to point at - that is the whole point of it - so
+    # it is the one mode that is complete without a carla_root.
+    if mode == "client":
+        return cfg
+    return cfg if mode in ("packaged", "source") and cfg.get("carla_root") else None
 
 
 def save_config(cfg):
@@ -51,6 +69,51 @@ def save_config(cfg):
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2)
     print(f"[setup] saved CARLA env -> {CONFIG_PATH}")
+
+
+# ------------------------------------------------------- the configured python
+# carla.json names ONE interpreter, and every FIXS entry point must run under it -
+# it is the only env that has the carla client, the SUMO clients and whatever an
+# application's requirements.txt added. Which script you happen to start with
+# (run_cosim, import_map, place_tls, ...) must not change the answer.
+#
+# The per-OS wrappers cannot enforce that: they are `exec python <script>`, so they
+# run under whatever python is on PATH. So the rule lives here, in the module that
+# owns the config, and each entry point calls it as its first act.
+
+REEXEC_GUARD = "FIXS_REEXEC"
+
+
+def configured_python():
+    """The interpreter carla.json names, if it is on disk. Else None."""
+    py = (load_config() or {}).get("python")
+    return py if py and os.path.isfile(py) else None
+
+
+def _same_python(a, b):
+    return os.path.normcase(os.path.normpath(a)) == os.path.normcase(os.path.normpath(b))
+
+
+def reexec_under_configured(script, cfg=None, drop=(), tag="fixs"):
+    """Re-run `script` under the configured interpreter, if we are not on it already.
+
+    Does NOT return when it switches: the child's exit code becomes ours. Call it
+    before importing carla or anything else from the env, and before prompting -
+    re-execing after a prompt would ask the same question twice.
+
+    `cfg` lets a caller that has already loaded the config pass it in; `drop` names
+    arguments the child must not see again (run_cosim's --reconfigure has already
+    been honoured by the time we switch). REEXEC_GUARD stops a config that points
+    at a shim or a symlink - where the path comparison cannot tell parent from
+    child - from re-execing forever."""
+    target = (cfg if cfg is not None else load_config() or {}).get("python")
+    if not target or not os.path.isfile(target):
+        return                       # nothing configured yet, or it has been removed
+    if _same_python(target, sys.executable) or os.environ.get(REEXEC_GUARD) == "1":
+        return
+    print(f"[{tag}] switching to the configured python env:\n        {target}")
+    cmd = [target, os.path.abspath(script), *[a for a in sys.argv[1:] if a not in drop]]
+    sys.exit(subprocess.call(cmd, env=dict(os.environ, **{REEXEC_GUARD: "1"})))
 
 
 # ------------------------------------------------------------- path resolving
@@ -105,7 +168,7 @@ def _python_tag(py_exe):
     try:
         out = subprocess.check_output(
             [py_exe, "-c", "import sys;print('cp%d%d' % sys.version_info[:2])"],
-            text=True, timeout=30).strip()
+            text=True, stderr=subprocess.DEVNULL, timeout=30).strip()
         return out or None
     except Exception:
         return None
@@ -153,7 +216,18 @@ def _conda_candidates():
 
 
 def _canonical_env_name():
-    """The env name from the shipped environment.yml (defaults to 'realsim')."""
+    """The env to create and bind: $FIXS_ENV_NAME, else the name in the shipped
+    environment.yml (defaults to 'realsim').
+
+    The override exists so an application repo can put its OWN env in front - one
+    built from this same spec, plus whatever its apps need on top - without this
+    engine knowing that env exists. FIXS is told the name by its caller or uses its
+    own; it never learns an application's. Keeping the app extras out of 'realsim'
+    also keeps that env a faithful test of environment.yml, which is what a FIXS
+    developer needs it to be."""
+    override = (os.environ.get("FIXS_ENV_NAME") or "").strip()
+    if override:
+        return override
     try:
         with open(ENV_YML, encoding="utf-8") as f:
             for line in f:
@@ -191,18 +265,75 @@ def _find_conda():
     return None
 
 
-def _conda_create_env(conda_exe, yml_path):
-    cmd = [conda_exe, "env", "create", "-f", yml_path]
+def _conda_create_env(conda_exe, yml_path, name):
+    """Create the env from the spec, named `name`.
+
+    -n is required, not cosmetic: it overrides the spec's own `name:`, which is how
+    the same environment.yml can build the engine's env and an application repo's
+    without either restating python=, the channels or channel_priority. Without it
+    a caller that set FIXS_ENV_NAME got an env called 'realsim' created, then failed
+    to find the name it asked for, and fell through to binding something else."""
+    cmd = [conda_exe, "env", "create", "-n", name, "-f", yml_path]
     print(f"[setup] {' '.join(cmd)}")
     print("[setup] creating the env can take several minutes ...")
     return subprocess.call(cmd) == 0
 
 
 def resolve_python():
+    """Resolve the interpreter that runs the co-sim, then report the two ways the
+    result can differ from what was asked for: a different env than FIXS_ENV_NAME
+    named (_warn_if_not_requested), and an env missing co-sim modules
+    (_warn_if_incomplete). Both checks live here rather than in the branches below
+    so that every path into _resolve_python - canonical env, freshly created env,
+    ranked fallback, manual pick - is covered by the same one."""
+    py = _resolve_python()
+    _warn_if_not_requested(py, _canonical_env_name())
+    _warn_if_incomplete(py)
+    return py
+
+
+def ensure_runtime(cfg, force=False):
+    """Make sure `cfg` names a usable interpreter, re-resolving it if not.
+
+    Two callers, one job. Automatically: repair a config whose python is gone or
+    can no longer import carla - a deleted env, an env rebuilt without the client,
+    or a config written by a setup older than env resolution. On demand
+    (`force`, i.e. --update-python): rebind the interpreter even when the current
+    one works, which is how you move to a newly created 'fixs_applications' or off
+    an env you picked by mistake.
+
+    Either way the CARLA and UE4 paths are kept: which CARLA this machine has is a
+    separate question from which python drives it, and re-asking it here is how a
+    user updating an env ends up re-picking folders they never wanted to change."""
+    py = cfg.get("python")
+    usable = bool(py) and os.path.isfile(py) and _python_can_import(py, ("carla",))
+    if usable and not force:
+        return cfg
+    if force:
+        print(f"[setup] updating the python env (CARLA paths kept).\n"
+              f"        current: {py or '(none recorded)'}")
+    else:
+        print("[setup] saved config has no usable python env (carla not importable); "
+              "resolving it now (CARLA paths kept) ...")
+    cfg["python"] = resolve_python()
+    # .get: 'client' mode has no carla_root by design (CARLA is on another host).
+    wheel = ensure_carla(cfg["python"], cfg["mode"], cfg.get("carla_root"))
+    if wheel:
+        cfg["carla_wheel"] = wheel
+    elif force:
+        # A rebind that installs nothing must not leave the previous env's wheel
+        # behind describing this one.
+        cfg.pop("carla_wheel", None)
+    save_config(cfg)
+    print(f"[setup] python: {cfg['python']}")
+    return cfg
+
+
+def _resolve_python():
     """Resolve the interpreter that runs the co-sim.
 
     Order:
-      1. the canonical env named in environment.yml ('realsim') if it exists;
+      1. the canonical env (FIXS_ENV_NAME, else environment.yml's name) if it exists;
       2. else, if conda is available, offer to create it from environment.yml;
       3. else fall back to any conda env that already has the co-sim deps
          (carla + SUMO), then to a manual python picker.
@@ -222,11 +353,19 @@ def resolve_python():
         print(f"[setup] the '{name}' env is not installed (conda found: {conda}).")
         ans = input(f"        create it now from {ENV_YML}? [Y/n]: ").strip().lower()
         if ans in ("", "y", "yes"):
-            if _conda_create_env(conda, ENV_YML):
+            if _conda_create_env(conda, ENV_YML, name):
                 py = _named_env_python(name)
                 if py:
                     print(f"[setup] created '{name}': {py}")
                     return py
+            else:
+                # Say it failed HERE, where the cause is. Left to fall through in
+                # silence, the next steps pick some other interpreter and the
+                # first evidence of the failure is a co-sim behaving oddly hours
+                # later - which is exactly how a box ended up running without
+                # pyyaml and blaming a scenario yaml that was correct.
+                print(f"[setup] 'conda env create -f {ENV_YML}' FAILED. Its output "
+                      f"is above; a solve failure usually names the conflict.")
             print("[setup] env creation did not produce a usable interpreter; "
                   "falling back to detection.")
     elif not conda:
@@ -249,10 +388,191 @@ def resolve_python():
         return ranked[int(sel)] if sel.isdigit() and int(sel) < len(ranked) else ranked[0]
 
     print("[setup] no conda env with the co-sim deps found automatically.")
-    py = _pick_file(f"Select the python.exe of your '{name}' env (has carla + SUMO)")
-    if not py or not os.path.isfile(py):
-        sys.exit("[setup] no python interpreter selected.")
-    return py
+    return _no_env_fallback(name)
+
+
+def _warn_if_not_requested(py_exe, name):
+    """Say so when the interpreter bound is not the env that was asked for.
+
+    Only reachable when FIXS_ENV_NAME named an env that does not exist yet and the
+    fallbacks picked something else - typically the engine's own 'realsim', which
+    ranks first because it has carla and the SUMO clients. Left silent, an
+    application's extra packages would then be installed into the engine env, which
+    is the one thing the override exists to prevent."""
+    requested = (os.environ.get("FIXS_ENV_NAME") or "").strip()
+    if not requested or not py_exe:
+        return
+    # The env's NAME is the last component of its root, so compare that, not the
+    # tail of the whole path: endswith() also accepted '.../envs/my_fixs_applications'
+    # as 'fixs_applications' and stayed silent about a genuinely different env.
+    if os.path.normcase(os.path.basename(_env_root(py_exe))) == os.path.normcase(requested):
+        return
+    print(f"[setup] NOTE: '{requested}' was requested (FIXS_ENV_NAME) but is not what "
+          f"got bound:\n        {py_exe}\n"
+          f"        Anything an application installs will land there. Create "
+          f"'{requested}' with:\n"
+          f"            conda env create -n {requested} -f {ENV_YML}")
+
+
+# Imported by run_cosim/ConfigHelper and the TL-table generator. Missing any of
+# them does not stop the run, it degrades it in ways that name something else:
+# no yaml parser makes every scenario setting read as its default (including
+# CarlaServerIP -> localhost), and no pandas/shapely turns traffic-light sync off.
+RUNTIME_MODULES = ("yaml", "pandas", "shapely", "traci", "sumolib")
+
+# The distribution that provides a module, where the two names differ.
+PIP_NAME = {"yaml": "pyyaml"}
+
+
+def missing_runtime(py_exe):
+    """Which of RUNTIME_MODULES `py_exe` cannot import."""
+    return [m for m in RUNTIME_MODULES if not _python_can_import(py_exe, (m,))]
+
+
+def _warn_if_incomplete(py_exe):
+    """Say which co-sim modules the bound interpreter cannot import.
+
+    The ranked fallback in _resolve_python accepts an env for importing carla and
+    the SUMO clients alone, and its 'sumo only' entries do not even have carla - so
+    picking [4] from that list can bind an env that is missing yaml, pandas or
+    shapely with no comment at all. None of those stop a run; they degrade it in
+    ways that name something else (see RUNTIME_MODULES above), and setup is the one
+    moment where saying so costs a single line instead of an afternoon.
+
+    carla is deliberately not checked here: ensure_carla installs it right after
+    this, so its absence now is expected, not a defect."""
+    if not py_exe:
+        return
+    lacks = missing_runtime(py_exe)
+    if not lacks:
+        return
+    pkgs = " ".join(PIP_NAME.get(m, m) for m in lacks)
+    print(f"[setup] NOTE: this interpreter cannot import: {', '.join(lacks)}\n"
+          f"        {py_exe}\n"
+          f"        The co-sim will still start, and will misbehave in ways that name "
+          f"something else: no yaml makes every scenario setting read as its default "
+          f"(CarlaServerIP -> localhost), and no pandas/shapely turns traffic-light "
+          f"sync off.\n"
+          f"        Fix it with:\n"
+          f"            \"{py_exe}\" -m pip install {pkgs}")
+
+
+# Where an application's applied-dependency stamp lives, relative to the env root.
+APP_DEPS_STAMP_DIR = ".fixs_app_deps"
+
+
+def _env_root(py_exe):
+    """The env directory holding py_exe (<env>\\python.exe, or <env>/bin/python)."""
+    d = os.path.dirname(os.path.abspath(py_exe))
+    if os.path.basename(d).lower() in ("bin", "scripts"):
+        d = os.path.dirname(d)
+    return d
+
+
+def ensure_app_deps(py_exe, app_id, req_path, refresh=False):
+    """Install an application's extra packages into the interpreter that will run it.
+
+    environment.yml deliberately does not carry them - they belong to the
+    application, not to FIXS, and pushing them upstream would put every consumer's
+    engine env at the mercy of one app's plotting stack. An app declares its own
+    with a 'requirements' path in apps.json; an app that declares none costs
+    nothing here.
+
+    The stamp is written INSIDE the env, not into ~/.fixs. That is the whole point:
+    recreating the env destroys the packages AND the stamp together, so the next run
+    reinstalls. A stamp kept outside would still match a hash it no longer describes,
+    and the deps would be skipped silently - which is the failure this is meant to
+    avoid, not cause.
+
+    Returns True when the interpreter has the app's declared deps."""
+    if not (py_exe and app_id and req_path):
+        return True
+    if not os.path.isfile(req_path):
+        print(f"[setup] app '{app_id}' declares requirements '{req_path}', "
+              f"which does not exist - skipping.")
+        return True
+    try:
+        with open(req_path, "rb") as f:
+            digest = hashlib.sha256(f.read()).hexdigest()
+    except OSError as e:
+        print(f"[setup] cannot read {req_path}: {e}")
+        return False
+
+    stamp = os.path.join(_env_root(py_exe), APP_DEPS_STAMP_DIR, app_id)
+    if not refresh:
+        try:
+            with open(stamp, encoding="utf-8") as f:
+                if f.read().strip() == digest:
+                    return True          # unchanged since the last apply
+        except OSError:
+            pass                          # no stamp, or unreadable -> apply
+
+    print(f"[setup] applying '{app_id}' dependencies "
+          f"({os.path.basename(req_path)}) to {py_exe} ...")
+    rc = subprocess.call([py_exe, "-m", "pip", "install", "-r", req_path])
+    if rc != 0:
+        # Loud and specific: the alternative is an ImportError minutes into a run,
+        # naming a module rather than the app whose requirements never applied.
+        print(f"[setup] FAILED to install '{app_id}' dependencies (pip exit {rc}).\n"
+              f"        Install them by hand, or re-run with --refresh-deps:\n"
+              f"            \"{py_exe}\" -m pip install -r \"{req_path}\"")
+        return False
+    try:
+        os.makedirs(os.path.dirname(stamp), exist_ok=True)
+        with open(stamp, "w", encoding="utf-8") as f:
+            f.write(digest + "\n")
+    except OSError as e:
+        # The install SUCCEEDED, so the run is fine - but say this out loud rather
+        # than swallow it. An unwritable env root (a system-wide python, a shared
+        # env) means the stamp never persists and pip is re-run on every single
+        # launch. Silently that reads as "this is just slow to start".
+        print(f"[setup] note: could not record the applied-deps stamp ({e}).\n"
+              f"        '{app_id}' deps are installed, but this check will re-run "
+              f"pip on every launch. A writable env - the one `--setup` creates - "
+              f"avoids it.")
+    return True
+
+
+def _no_env_fallback(name):
+    """Nothing suitable was found. Ask rather than pick something broken.
+
+    Silently continuing under whatever interpreter happened to be current is how
+    a machine ends up running the co-sim without pyyaml: everything starts, and
+    the first symptom is a scenario setting quietly reading as its default."""
+    print(f"[setup] the '{name}' env could not be created or found. The co-sim "
+          f"needs: {', '.join(RUNTIME_MODULES)} (+ carla).")
+    here = sys.executable
+    lacks = missing_runtime(here)
+    print(f"   [1] use this interpreter and pip-install what it lacks\n"
+          f"       {here}\n"
+          f"       missing: {', '.join(lacks) if lacks else 'nothing'}")
+    print( "   [2] select a python.exe yourself")
+    print( "   [3] quit and fix conda first")
+    ans = (input("Enter 1, 2 or 3 (default 3): ").strip() or "3")
+    if ans == "1":
+        if lacks:
+            # environment.yml is a conda spec, so there is no conda-free way to
+            # replay it; these are its importable dependencies. NB it does not
+            # list shapely at all, though the TL-table generator needs it (#221).
+            if not _pip_install(here, ["pyyaml", "pandas", "shapely",
+                                       "eclipse-sumo", "traci", "sumolib"]):
+                sys.exit("[setup] pip install failed; fix the environment by hand.")
+            still = missing_runtime(here)
+            if still:
+                sys.exit(f"[setup] still missing after install: {', '.join(still)}")
+        return here
+    if ans == "2":
+        py = _pick_file(f"Select the python.exe of your '{name}' env (carla + SUMO)")
+        if not py or not os.path.isfile(py):
+            sys.exit("[setup] no python interpreter selected.")
+        lacks = missing_runtime(py)
+        if lacks:
+            print(f"[setup] warning: {py} cannot import {', '.join(lacks)}; the "
+                  f"co-sim will misbehave until that is fixed.")
+        return py
+    sys.exit(f"[setup] stopped. Create the env with:\n"
+             f"            conda env create -f {ENV_YML}\n"
+             f"        then re-run this setup.")
 
 
 def find_source_wheel(carla_root, py_exe=None):
@@ -278,22 +598,53 @@ def _pip_install(py_exe, args):
     return subprocess.call(cmd) == 0
 
 
+_VERSION_PROBE = """\
+import carla
+v = ""
+try:
+    from importlib.metadata import version
+    v = version("carla")
+except Exception:
+    v = getattr(carla, "__version__", "")
+print(v)
+"""
+
+
 def _carla_version(py_exe):
+    """The carla client version importable under py_exe, or '?'.
+
+    Asked via importlib.metadata (stdlib since 3.8), not pkg_resources: the latter
+    ships with setuptools, which a conda env is under no obligation to have and
+    which setuptools>=81 deprecates outright. Probing for it made any env without
+    it - i.e. any env that is not the one environment.yml built - dump a
+    ModuleNotFoundError traceback into the middle of setup and then report the
+    version as '?', which reads as a broken carla install when nothing is wrong.
+
+    stderr is discarded for the same reason: this is a probe whose failure is
+    already expressed by the return value, so its noise has no reader."""
     try:
-        return subprocess.check_output(
-            [py_exe, "-c", "import carla,pkg_resources;"
-                           "print(pkg_resources.get_distribution('carla').version)"],
-            text=True, timeout=30).strip()
+        out = subprocess.check_output([py_exe, "-c", _VERSION_PROBE],
+                                      text=True, stderr=subprocess.DEVNULL,
+                                      timeout=30).strip()
+        return out or "?"
     except Exception:
         return "?"
 
 
-def ensure_carla(py_exe, mode, carla_root):
+def ensure_carla(py_exe, mode, carla_root=None):
     """Make `import carla` work under py_exe, with the client matched to the
-    chosen CARLA: PyPI wheel for packaged, the source build's wheel for source."""
+    chosen CARLA: PyPI wheel for packaged and client, the source build's wheel
+    for source.
+
+    'client' takes the PyPI wheel because there is no local build to take one
+    from. run_cosim still needs `import carla` on this machine - it is what
+    drives load_world, the readiness check and the spectator against the remote
+    server - so the wheel is required even though nothing here ever launches
+    CARLA. If that remote server is a source build with a patched PythonAPI,
+    the version handshake is what catches the mismatch, not this."""
     has_carla = _python_can_import(py_exe, ("carla",))
 
-    if mode == "packaged":
+    if mode in ("packaged", "client"):
         if has_carla:
             print(f"[setup] carla {_carla_version(py_exe)} already importable.")
             return
@@ -309,7 +660,14 @@ def ensure_carla(py_exe, mode, carla_root):
         if wheel:
             ans = input(f"[setup] reinstall carla from this source build's wheel to guarantee\n"
                         f"        client/server match? {os.path.basename(wheel)} [y/N]: ").strip().lower()
-            if ans == "y" and not _pip_install(py_exe, ["--force-reinstall", "--no-deps", wheel]):
+            if ans != "y":
+                # Return nothing: the caller records what came back as the config's
+                # carla_wheel, i.e. as the wheel this env is running. Naming one that
+                # was declined would describe an install that never happened.
+                print(f"[setup] keeping the carla already in this env; "
+                      f"{os.path.basename(wheel)} not installed.")
+                return None
+            if not _pip_install(py_exe, ["--force-reinstall", "--no-deps", wheel]):
                 sys.exit("[setup] wheel reinstall failed.")
         return wheel
     # carla not importable -> must install the source wheel
@@ -372,18 +730,26 @@ def run_setup(allow_packaged_windows=False):
     # Windows therefore need a source build. We skip the packaged option here to
     # avoid a dead end; pass allow_packaged_windows=True (--allow-packaged-windows)
     # if you only need stock maps (Town01, ...) from a packaged build.
+    #
+    # [3] client is offered EVERYWHERE, Windows included: the reasoning above is
+    # about importing a map, and a client machine never imports one - the host
+    # running CARLA does. It is how a workstation with no CARLA at all drives a
+    # remote one.
     offer_packaged = platform.system() != "Windows" or allow_packaged_windows
+    print("Which CARLA do you want to use?")
     if offer_packaged:
-        print("Which CARLA do you want to use?")
         print("  [1] Packaged CARLA  (a released build with CarlaUE4.exe / CarlaUE4.sh)")
-        print("  [2] Source build    (run through the Unreal editor: UE4Editor -game)")
-        choice = input("Enter 1 or 2: ").strip()
-    else:
-        print("On Windows, custom-map import requires a SOURCE build (packaged-map")
-        print("import is Linux+Docker only in CARLA). Using source build.")
-        print("(Only need stock maps from a packaged build? re-run:")
-        print("   carla_env_setup.py --allow-packaged-windows )")
-        choice = "2"
+    print("  [2] Source build    (run through the Unreal editor: UE4Editor -game)")
+    print("  [3] None on this machine - CARLA runs on another host")
+    print("      (SUMO + TrafficLayer + VirCarlaEnv run here; CARLA is reached over")
+    print("       the network at CarlaSetup.CarlaServerIP)")
+    if not offer_packaged:
+        print("  (packaged is not offered on Windows: custom-map import is Linux+Docker")
+        print("   only in CARLA. Only need stock maps? re-run with --allow-packaged-windows)")
+    valid = ("1", "2", "3") if offer_packaged else ("2", "3")
+    choice = input(f"Enter {' or '.join(valid)}: ").strip()
+    if choice not in valid:
+        sys.exit(f"[setup] invalid choice (expected {' or '.join(valid)}).")
 
     if choice == "1":
         root = _pick_dir("Select your PACKAGED CARLA folder (contains CarlaUE4.exe / .sh)")
@@ -413,29 +779,71 @@ def run_setup(allow_packaged_windows=False):
             sys.exit(f"[setup] no CarlaUE4.uproject at {uproject}.")
         if not os.path.isfile(editor):
             sys.exit(f"[setup] no UE4Editor at {editor} (is this the engine root?).")
+        # The uproject and the editor say this build can RUN. Cooking a map runs
+        # CARLA's own Util/BuildTools/Import.py, which a partial checkout (or a
+        # packaged tree that happens to carry a uproject) may not have - and
+        # import_map only discovers that at cook time, several minutes and one
+        # download later. Say it here instead. Not fatal: everything except the
+        # cook works without it.
+        import_py = os.path.join(root, "Util", "BuildTools", "Import.py")
+        if not os.path.isfile(import_py):
+            print(f"[setup] NOTE: {import_py} is missing, so this build cannot cook a\n"
+                  f"        map (import_map will stop there). Running stock or "
+                  f"already-cooked maps is unaffected.")
         cfg = {"mode": "source", "carla_root": root, "ue4_root": ue4}
 
-    else:
-        sys.exit("[setup] invalid choice (expected 1 or 2).")
+    else:   # choice == "3"
+        # No carla_root and no ue4_root on purpose: there is no local install to
+        # validate, and inventing one would only give the cook/launch paths
+        # something to half-succeed against. The server address is NOT stored
+        # here either - it lives in the scenario yaml (CarlaSetup.CarlaServerIP),
+        # which is already the one place every component reads it from.
+        print("[setup] client mode: no CARLA on this machine. run_cosim will not")
+        print("        launch or cook anything here; point CarlaSetup.CarlaServerIP")
+        print("        at the host running CARLA, which must already have the map")
+        print("        cooked with traffic lights and signs placed.")
+        cfg = {"mode": "client"}
 
     # Resolve the interpreter (carla + SUMO) and match the carla client to the
     # chosen CARLA. Stored in the config so run_cosim re-execs under it on any
     # machine, regardless of the env's name.
     print("\n--- resolving the python env (carla + SUMO client) ---")
     cfg["python"] = resolve_python()
-    wheel = ensure_carla(cfg["python"], cfg["mode"], cfg["carla_root"])
+    wheel = ensure_carla(cfg["python"], cfg["mode"], cfg.get("carla_root"))
     if wheel:
         cfg["carla_wheel"] = wheel
 
     save_config(cfg)
-    print(f"\n[setup] done: {cfg['mode']} CARLA @ {cfg['carla_root']}")
+    where = cfg.get("carla_root") or "on another host (see CarlaSetup.CarlaServerIP)"
+    print(f"\n[setup] done: {cfg['mode']} CARLA @ {where}")
     print(f"[setup] python: {cfg['python']}")
     return cfg
+
+
+def update_python():
+    """--update-python: rebind the interpreter, keeping the CARLA choice.
+
+    Deliberately not a full re-setup: the common reason to want this - the
+    canonical env did not exist when setup ran, so the fallback bound a different
+    one - has nothing to do with which CARLA is installed, and making the user
+    re-pick their CARLA and UE4 folders to fix it is how a working config gets
+    broken by an unrelated typo."""
+    cfg = load_config()
+    if cfg is None:
+        print(f"[setup] nothing to update: no CARLA env configured ({CONFIG_PATH}).\n"
+              f"        Run setup first - it resolves the python env as its last step.")
+        return 1
+    ensure_runtime(cfg, force=True)
+    return 0
 
 
 def main():
     ap = argparse.ArgumentParser(description="Configure which CARLA run_cosim.py uses.")
     ap.add_argument("--show", action="store_true", help="print the current config and exit")
+    ap.add_argument("--update-python", action="store_true",
+                    help="re-resolve ONLY the python env (carla + SUMO client) and save "
+                         "it; the CARLA / UE4 paths are kept. Use after creating the env "
+                         "setup asked for, or to move off one you picked by mistake")
     ap.add_argument("--allow-packaged-windows", action="store_true",
                     help="on Windows, also offer packaged CARLA (stock maps only; "
                          "custom-map import is unsupported in Windows packages)")
@@ -444,6 +852,8 @@ def main():
         cfg = load_config()
         print(json.dumps(cfg, indent=2) if cfg else f"(no config at {CONFIG_PATH})")
         return 0
+    if args.update_python:
+        return update_python()
     run_setup(allow_packaged_windows=args.allow_packaged_windows)
     return 0
 

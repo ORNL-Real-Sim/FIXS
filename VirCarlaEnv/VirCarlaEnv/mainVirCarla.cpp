@@ -346,6 +346,39 @@ int main(int argc, const char* argv[]) {
                                     << "," << tf->location.y << "," << tf->rotation.yaw << "\n";
                 }
             }
+
+            // ---- PRE-tick: spectator follow (#254) --------------------------
+            // The camera has to be placed BEFORE the tick that renders the frame.
+            // This used to sit after world.Tick(), reading the pose back off the
+            // actor: the frame was then rendered with the NEW vehicle pose and the
+            // PREVIOUS camera pose, so the followed vehicle sat one frame off
+            // centre. The offset is one step of travel, which scales with speed --
+            // so it is not a constant nudge you stop noticing, it breathes with
+            // every acceleration, and an eco-driving ego (whose whole job is to
+            // vary speed) slides back and forth in frame for the entire run.
+            //
+            // The pose is taken from what the core just QUEUED for this tick
+            // (lastAppliedPose) rather than read back from the actor, because that
+            // is the pose this Tick is about to render -- available here, and only
+            // knowable after the fact anywhere later.
+            //
+            // Mirrored (teleported) vehicles only. A physics-driven ego
+            // (EgoMode >= 1) has no pre-tick answer: its pose is produced BY the
+            // tick, so it keeps the post-tick snap below and keeps its lag.
+            if (spectatorFollow && !(egoMode >= 1 && centeredViewId == egoId)
+                && interestedIds.count(centeredViewId)) {
+                const auto& mappedPre = core.mappedVehicles();
+                auto cit = mappedPre.find(centeredViewId);
+                if (cit != mappedPre.end()) {
+                    if (const carla::geom::Transform* tf = backend.lastAppliedPose(cit->second)) {
+                        carla::geom::Location loc = tf->location; loc.z += spectatorHeight;
+                        const float yaw = spectatorAlignYaw ? (tf->rotation.yaw - 90.f) : -90.f;
+                        spectator->SetTransform(
+                            carla::geom::Transform(loc, carla::geom::Rotation(-90.f, yaw, 0.f)));
+                    }
+                }
+            }
+
             world.Tick(10s);               // advance Carla one sub-step (10s: TM sync work rides on the tick)
 
             // FIXS feed boundary (0.1 s): a recv happened this step, so send the
@@ -395,7 +428,9 @@ int main(int argc, const char* argv[]) {
                 }
             }
 
-            // ---- POST-tick: interested-id readback (feed) + spectator (every tick)
+            // ---- POST-tick: interested-id readback (feed) ----------------------
+            // The spectator used to be snapped here too; it now runs pre-tick, see
+            // the PRE-tick block above (#254).
             const auto& mapped = core.mappedVehicles();
             for (const std::string& iid : interestedIds) {
                 if (egoMode >= 1 && iid == egoId) continue;   // ego handled above (never mapped)
@@ -416,15 +451,6 @@ int main(int argc, const char* argv[]) {
                     d.heading = sTf.rotation.yaw; d.grade = (float)(sTf.rotation.pitch * M_PI / 180.0);
                     core.Msg_c.VehDataSend_um[core.Sock_c.serverSock[sock0]].push_back(d);
                     if (dataLog.isOpen() && logWanted(d.id)) dataLog.logVehicle(simTime, d);
-                }
-                if (spectatorFollow && iid == centeredViewId) {
-                    // Rigid top-down BEV snapped to the ego each tick: no low-pass,
-                    // so no camera oscillation. The ego pose is already smooth, so
-                    // the camera is too. yaw: fixed north-up, or aligned to the
-                    // ego heading so its forward points "up" (SpectatorAlignYaw).
-                    carla::geom::Location loc = cTf.location; loc.z += spectatorHeight;
-                    const float yaw = spectatorAlignYaw ? (cTf.rotation.yaw - 90.f) : -90.f;
-                    spectator->SetTransform(carla::geom::Transform(loc, carla::geom::Rotation(-90.f, yaw, 0.f)));
                 }
             }
 

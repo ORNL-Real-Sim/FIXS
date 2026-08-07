@@ -227,6 +227,13 @@ struct SumoSetup_t {
 	int SpeedMode;
 	int ExecutionOrder;
 
+	// How far ahead (metres) to look for a preceding vehicle when filling the
+	// precedingVehicle* fields -- i.e. the car-following horizon the application
+	// sees. Too short and a controller is blind to a slower vehicle further ahead;
+	// too long and it may react to one that turns off before it matters. Default
+	// 1000 preserves the previously hard-coded behaviour.
+	double PrecedingVehicleLookahead;
+
 	// Auto-launch SUMO configuration
 	bool EnableAutoLaunch;
 	std::string SumoConfigFile;
@@ -290,7 +297,10 @@ struct SubscriptionVehicleList_t {
 struct SubscriptionSignalList_t {
 	std::unordered_set <std::string> signalId_v;
 
-	bool subAllSignalFlag; 
+	// Default-initialised: this was previously an indeterminate value until the
+	// CarMaker branch assigned it. Mirrors SubscriptionVehicleList_t's
+	// subscribeAllVehicle, which is default-initialised to {false, 0}.
+	bool subAllSignalFlag = false;
 };
 
 struct SubscriptionDetectorList_t {

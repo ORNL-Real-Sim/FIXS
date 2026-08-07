@@ -26,8 +26,15 @@ Branch name types: `feature/`, `bug/`, `maintenance/`, `docs/`
 ```bash
 git clone https://github.com/<your-username>/FIXS.git
 cd FIXS
-git submodule update --init --recursive
 ```
+
+Then initialize the checkout. This replaces the manual `git submodule update --init` step and also acquires the native dependencies, which are **not** in git:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\initialize_fixs.ps1
+```
+
+`ProprietaryFiles` is a private submodule — external contributors have no access, and that is expected. The script reports it as skipped and the public core still builds. See [BUILD.md — First-Run Setup](BUILD.md#first-run-setup-fresh-clone).
 
 ---
 

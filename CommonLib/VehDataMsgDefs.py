@@ -35,6 +35,7 @@ class VehData:
     signalLightColor: int = 0  # int8_t
     
     speedLimit: float = 0.0
+    speedFreeFlow: float = 0.0
     speedLimitNext: float = 0.0
     speedLimitChangeDistance: float = 0.0
     

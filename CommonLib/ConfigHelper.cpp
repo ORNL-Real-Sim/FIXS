@@ -436,7 +436,12 @@ int ConfigHelper::getConfig(string configName) {
 	else {
 		CarMakerSetup.SynchronizeTrafficSignal = false;
 	}
-	SubscriptionSignalList.subAllSignalFlag = CarMakerSetup.SynchronizeTrafficSignal;
+	// OR rather than assign: getSigSubscriptionList() runs earlier in getConfig() and
+	// may already have set this from the YAML `SignalSubscription` `all` attribute.
+	// A plain assignment here silently discarded that, which is why the YAML path
+	// could never work regardless of how it was parsed.
+	SubscriptionSignalList.subAllSignalFlag =
+		SubscriptionSignalList.subAllSignalFlag || CarMakerSetup.SynchronizeTrafficSignal;
 
 	if (node["TrafficSignalPort"]) {
 		CarMakerSetup.TrafficSignalPort = parserInteger(node, "TrafficSignalPort");
@@ -478,6 +483,15 @@ int ConfigHelper::getConfig(string configName) {
 	else {
 		SumoSetup.ExecutionOrder = 1;
 		if (!SuppressDefaultMessages) printf("\nSumo Execution Order not specified! Will use 1 as default!\n");
+	}
+	// How far ahead to look for a preceding vehicle (metres). Default 1000 keeps
+	// the previously hard-coded behaviour; lower it to narrow the car-following
+	// horizon an application sees.
+	if (node["PrecedingVehicleLookahead"]) {
+		SumoSetup.PrecedingVehicleLookahead = parserDouble(node, "PrecedingVehicleLookahead");
+	}
+	else {
+		SumoSetup.PrecedingVehicleLookahead = 1000.0;
 	}
 	if (node["EnableAutoLaunch"]) {
 		SumoSetup.EnableAutoLaunch = parserFlag(node, "EnableAutoLaunch");
@@ -651,8 +665,29 @@ int ConfigHelper::getConfig(string configName) {
 		CarlaSetup.TrafficRefreshRate = parserDouble(node, "TrafficRefreshRate");
 	}
 	else {
-		CarlaSetup.TrafficRefreshRate = 0.1;
-		//printf("\nCarMaker Port not specified! Will use 7331 as default!\n");
+		// 0 == every Carla tick. This key is the pose RE-APPLY cadence, and absent it
+		// should not impose one: mainVirCarla resolves 0 to CarlaTimeStep, and
+		// Carla/run_cosim.py already tells the user "the default is every CARLA tick".
+		//
+		// The old default was 0.1 -- a leftover from before #219, when this key WAS
+		// the feed period. It silently pinned traffic to 10 Hz no matter how fine the
+		// world step: with CarlaTimeStep 0.025 the bridge printed "interpolated 4x"
+		// and then re-applied poses once per feed, so the interpolator was evaluated
+		// once per interval and every vehicle held a stale pose for 3 of every 4
+		// ticks, jumping a whole feed of travel on the 4th -- 4x the ticks for the
+		// motion of a 1x run. Measured on mlk_eco_driving: the world advanced on 540
+		// of 2160 rendered frames (25%), the gap between advances exactly 4 frames,
+		// 539 times out of 539.
+		//
+		// Not only a visual matter. A physics-driven ego (EgoMode >= 1) runs its
+		// collision checks, sensors and traffic-manager decisions against neighbours
+		// that stand still for 75 ms and then teleport 0.29 m. CarMakerSetup's
+		// counterpart above defaults to 0.001 -- its own solver step -- which is the
+		// same intent expressed for a 1 kHz host.
+		//
+		// Set this key explicitly only to re-apply LESS often than the tick, as a
+		// cost knob on a heavy scene. See #261.
+		CarlaSetup.TrafficRefreshRate = 0.0;
 	}
 
 	// Carla render sub-step (interpolate the feed for smoother motion). 0 -> 1:1.
@@ -884,7 +919,11 @@ void ConfigHelper::parserSubscription(YAML::Node rootnode, std::string name, Sub
 				break;
 
 			case TypeNames_enum::intersection:
-				if (att.compare("id") == 0 || att.compare("name") == 0) {
+				// `all` accepted alongside id/name, matching the `ego` case above.
+				// Without it the attribute was dropped here before reaching attMap,
+				// so getSigSubscriptionList() could never see it -- and because the
+				// error box below is commented out, the drop was silent.
+				if (att.compare("id") == 0 || att.compare("name") == 0 || att.compare("all") == 0) {
 					extractSubscriptionAttributes(attnode, type, att, attMap);
 				}
 				else {
@@ -1155,6 +1194,22 @@ void ConfigHelper::getSigSubscriptionList(Subscription_t SigSub) {
 				}
 			}
 
+			// `all` subscription for signals, mirroring the vehicle `all` handling
+			// added for #176. `attribute: {all: ['true']}` subscribes every traffic
+			// light in the network instead of an explicit `name` list. Consumed in
+			// TrafficHelper::recvFromTrafficSimulator, which already branches on
+			// subAllSignalFlag to subscribe TrafficLight::getIDList().
+			bool subAllFlag = false;
+			if (att.find("all") != att.end() && !att["all"].empty()) {
+				subAllFlag = (att["all"][0].compare("true") == 0);
+			}
+			if (subAllFlag) {
+				SubscriptionSignalList.subAllSignalFlag = true;
+				if (!idlist.empty()) {
+					printf("\nWARNING: 'all' signal subscription is enabled; the configured 'name' list is ignored (all traffic lights in the network are sent).\n");
+				}
+			}
+
 			// get port map
 			vector <int> port_v;
 			port_v = get<3>(SigSub[iSub]);
@@ -1167,6 +1222,10 @@ void ConfigHelper::getSigSubscriptionList(Subscription_t SigSub) {
 				else {
 					SubscriptionAllList_t subAllList;
 					SocketPort2SubscriptionList_um[it] = subAllList;
+				}
+
+				if (subAllFlag) {
+					SocketPort2SubscriptionList_um[it].SignalList.subAllSignalFlag = true;
 				}
 
 				for (size_t i = 0; i < idlist.size(); i++) {
@@ -1185,13 +1244,9 @@ void ConfigHelper::getSigSubscriptionList(Subscription_t SigSub) {
 		
 	}
 
-	////if (CarMakerSetup.EnableCosimulation && CarMakerSetup.SynchronizeTrafficSignal){
-	//if (CarMakerSetup.SynchronizeTrafficSignal) {
-	//	SubscriptionSignalList.subAllSignalFlag = true;
-	//}
-	//else {
-	//	SubscriptionSignalList.subAllSignalFlag = false;
-	//}
+	// (The CarMaker SynchronizeTrafficSignal path that used to be sketched here now
+	// lives in getConfig(), where it ORs into subAllSignalFlag rather than
+	// overwriting whatever this function derived from the YAML.)
 }
 
 void ConfigHelper::getDetSubscriptionList(Subscription_t DetSub) {
