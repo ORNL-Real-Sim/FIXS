@@ -102,7 +102,11 @@ jobs:
         uses: actions/cache@v4
         with:
           path: CommonLib/libsumo
-          key: libsumo-${{ matrix.slug }}-${{ steps.sumo.outputs.version }}
+          # Keyed on the whole dependencies.yaml, matching release.yml's Windows
+          # step. Keying on the version alone would reuse a stale cache if the
+          # 'source' URL changed while the version did not -- and the fetch
+          # script now reads that URL from the same file.
+          key: libsumo-${{ matrix.slug }}-${{ hashFiles('dependencies.yaml') }}
 
       # Deliberately the same script a developer runs locally, not a copy of its
       # steps -- so CI failing means the documented path is broken, and the
