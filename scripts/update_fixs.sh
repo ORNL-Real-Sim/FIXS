@@ -94,9 +94,18 @@ installable_releases() {  # -> TAB-separated: tag, sha7, published(date), rollin
           END { flush() }'
 }
 
-select_release() {  # menu -> chosen tag on stdout, menu on stderr
-    local lines=() i tag kind sha pub choice default
-    while IFS= read -r l; do [[ -n "$l" ]] && lines+=("$l"); done
+select_release() {  # select_release <list> -> chosen tag on stdout, menu on stderr
+    # The list arrives as an ARGUMENT, not on stdin. It used to be piped in
+    # (`select_release <<< "$LIST"`), which made the prompt below unanswerable: the
+    # while-loop drained stdin to build the menu, so `read -r choice` hit EOF at
+    # once, came back empty, and every run took the default - the menu printed and
+    # the download started in the same breath, with no chance to answer. The
+    # caller's `[[ -t 0 ]]` gate proved a terminal was there; the here-string then
+    # took it away. Leaving stdin alone is what makes that gate mean something.
+    # scripts/update_fixs.ps1 has always passed the list as a parameter
+    # (Select-Release $installable); this brings the two halves back into line.
+    local list="$1" lines=() i tag kind sha pub choice default
+    while IFS= read -r l; do [[ -n "$l" ]] && lines+=("$l"); done <<< "$list"
     [[ ${#lines[@]} -gt 0 ]] || return 1
     # The Enter-default is the CONSUMING APP's channel preference, not ours: an
     # app built against 0.9.0 features wants v0.9.0-alpha even though 'latest' may
@@ -168,7 +177,7 @@ if [[ -z "$VERSION" ]]; then
     LIST="$(installable_releases)"
     [[ -n "$LIST" ]] || { echo "[ERROR] No installable FIXS release at $REPO (none carries a 'fixs-build-*.zip')." >&2; exit 1; }
     if [[ -t 0 ]]; then
-        VERSION="$(select_release <<< "$LIST")"
+        VERSION="$(select_release "$LIST")"
     elif [[ -n "$DEFAULT_VERSION" ]] && cut -f1 <<< "$LIST" | grep -qx "$DEFAULT_VERSION"; then
         VERSION="$DEFAULT_VERSION"
     else

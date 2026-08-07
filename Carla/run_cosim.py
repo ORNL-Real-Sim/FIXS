@@ -203,8 +203,16 @@ def maybe_update_fixs(no_check=False):
         if _run_initialize(tag):
             print("[cosim] FIXS updated; relaunching run_cosim ...")
             os.environ["FIXS_NO_FRESHNESS"] = "1"   # the relaunch is already current
-            os.execv(sys.executable,
-                     [sys.executable, os.path.join(HERE, "run_cosim.py")] + sys.argv[1:])
+            # subprocess, not os.execv. Windows has no exec, so the CRT emulates it
+            # by joining argv into ONE command line WITHOUT quoting - so an
+            # interpreter at 'C:\Program Files\Python39\python.exe' relaunched as
+            #   C:\Program: can't open file '...\main\Files\Python39\python.exe'
+            # CreateProcess still found the .exe by its space-fallback search, but
+            # argv was already split, so python took the tail of its own path as the
+            # script to run. subprocess quotes the vector properly on both OSes, and
+            # is what env.reexec_under_configured already uses for the same reason.
+            cmd = [sys.executable, os.path.join(HERE, "run_cosim.py")] + sys.argv[1:]
+            sys.exit(subprocess.call(cmd))
         print("[cosim] update did not complete; continuing with the current bundle.")
     except Exception as e:
         if os.environ.get("FIXS_DEBUG"):
