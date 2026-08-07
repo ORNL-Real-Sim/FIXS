@@ -186,6 +186,11 @@ def place_tls(name, tl_table, carla_root=None, ue4_root=None, force=False,
 
 
 def main():
+    # Run under the interpreter carla.json names, whatever python place_tls.sh was
+    # started with. run_cosim imports this module rather than spawning it, so that
+    # path is already on the right interpreter and this is a no-op there.
+    env.reexec_under_configured(__file__, tag="tls")
+
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--map", default=None, help="cooked map name (e.g. RP_Ver0529)")

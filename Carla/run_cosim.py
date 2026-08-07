@@ -171,8 +171,9 @@ def maybe_update_fixs(no_check=False):
     """Detect a local FIXS bundle that diverges from the published rolling release
     and, when interactive, offer to update + relaunch. Advisory only: every failure
     is swallowed so a run is never blocked by the check."""
-    # FIXS_REEXEC: maybe_reexec() relaunches us under the configured interpreter, and
-    # this runs before that - so without this guard the child asked the same question
+    # FIXS_REEXEC: env.reexec_under_configured() relaunches us under the configured
+    # interpreter, and this runs before that - so without the guard the child asked the
+    # same question
     # the parent had just answered, and a wrapper that starts a different python (any
     # of them: run_cosim.bat finds its own) prompted twice on every run. One bundle,
     # one question.
@@ -1045,40 +1046,13 @@ def resolve_carla_env(reconfigure=False):
     return cfg
 
 
-def ensure_runtime(cfg):
-    """Repair a config that lacks a usable python env (e.g. written by an older
-    setup before env resolution existed): resolve the interpreter + matching
-    carla and save it, WITHOUT re-asking the CARLA / UE4 paths."""
-    py = cfg.get("python")
-    if py and os.path.isfile(py) and env._python_can_import(py, ("carla",)):
-        return cfg
-    print("[cosim] saved config has no usable python env (carla not importable); "
-          "resolving it now (CARLA paths kept) ...")
-    cfg["python"] = env.resolve_python()
-    # .get: 'client' mode has no carla_root by design (CARLA is on another host).
-    wheel = env.ensure_carla(cfg["python"], cfg["mode"], cfg.get("carla_root"))
-    if wheel:
-        cfg["carla_wheel"] = wheel
-    env.save_config(cfg)
-    return cfg
-
-
-def maybe_reexec(cfg):
-    """Re-run this script under the configured python (the env that actually has
-    the carla + SUMO clients) if we are not already running under it. Lets the
-    .bat/.sh stay trivial and work on any machine, whatever the env is named."""
-    target = cfg.get("python")
-    if not target or not os.path.isfile(target):
-        return
-    same = os.path.normcase(os.path.normpath(target)) == \
-        os.path.normcase(os.path.normpath(sys.executable))
-    if same or os.environ.get("FIXS_REEXEC") == "1":
-        return
-    child_args = [a for a in sys.argv[1:] if a != "--reconfigure"]
-    cmd = [target, os.path.abspath(__file__), *child_args]
-    print(f"[cosim] switching to configured python env:\n        {target}")
-    osenv = dict(os.environ, FIXS_REEXEC="1")
-    sys.exit(subprocess.call(cmd, env=osenv))
+# ensure_runtime and maybe_reexec used to live here, as run_cosim's private copies.
+# Both now belong to carla_env_setup, the module that owns carla.json:
+# env.ensure_runtime because --update-python needs the same work on demand and a
+# second copy is how a repair path and an update path drift apart, and
+# env.reexec_under_configured because every entry point - import_map, place_tls,
+# place_signs, the world/spectator helpers - has to obey the same rule, and the
+# rule was enforced only by whichever script you happened to start with.
 
 
 def confirm_world_ready(client, expected_map, timeout):
@@ -2739,6 +2713,12 @@ def main():
                          "by run_cosim on the traffic machine. Ctrl+C stops it.")
     ap.add_argument("--reconfigure", action="store_true",
                     help="re-run CARLA env setup before launching (pick a different CARLA)")
+    ap.add_argument("--update-python", action="store_true",
+                    help="re-resolve ONLY the python env (carla + SUMO client) and save "
+                         "it to carla.json, then exit. The CARLA / UE4 paths are kept. "
+                         "Use after creating the env setup asked for, or to move off one "
+                         "picked by mistake; every entry point follows carla.json, so "
+                         "this changes them all at once")
     ap.add_argument("--render-offscreen", action="store_true", help="headless CARLA")
     ap.add_argument("--no-spectator", action="store_true",
                     help="do not auto-frame the CARLA spectator on the scene")
@@ -2782,6 +2762,13 @@ def main():
         _disable_quickedit()
     if args.log or args.log_file:
         start_log(args.log_file)
+
+    # --update-python answers a question and stops, and it is the one flag that must
+    # NOT re-exec first: re-execing runs it under the very interpreter it exists to
+    # replace, so a config pointing at a broken env could never be repaired from the
+    # front door. Handled before everything else for the same reason.
+    if args.update_python:
+        return env.update_python()
 
     # --doctor and --version answer a question and stop. Neither touches a map, a
     # setup or a server, so they are safe to run at any time - including while a
@@ -2841,8 +2828,10 @@ def main():
     if not args.no_launch and (cfg is None or args.reconfigure):
         cfg = resolve_carla_env(reconfigure=args.reconfigure)
     if cfg is not None:
-        cfg = ensure_runtime(cfg)  # repair stale configs that lack a python env
-        maybe_reexec(cfg)          # may not return (re-execs under the env python)
+        cfg = env.ensure_runtime(cfg)   # repair stale configs that lack a python env
+        # may not return (re-execs under the env python). --reconfigure is dropped:
+        # it has already been honoured above, and the child must not ask again.
+        env.reexec_under_configured(__file__, cfg, drop=("--reconfigure",), tag="cosim")
         if cfg.get("mode") == "client" and args.carla_only:
             sys.exit("[cosim] --carla-only serves a CARLA on THIS machine, but "
                      "carla.json is 'client' mode (no CARLA here). Run it on the "
@@ -2866,7 +2855,7 @@ def main():
 
     # Everything the run needs - application, map, scenario yaml, bridge, CARLA,
     # SUMO - is decided here, from a saved setup you pick and edit until you
-    # confirm. Deliberately AFTER maybe_reexec: it prompts, and re-execing under
+    # confirm. Deliberately AFTER the re-exec: it prompts, and re-execing under
     # the env python afterwards would ask the same questions twice. And
     # deliberately BEFORE anything heavy: no download, cook or load happens while
     # the user is still deciding what to run, so quitting out of it leaves nothing
@@ -2883,7 +2872,7 @@ def main():
         args, cfg, repo, tag_prefix, catalog)
 
     # The app is settled and we are already running under the configured interpreter
-    # (maybe_reexec above), so this is the first point where "what does THIS app
+    # (reexec_under_configured above), so this is the first point where "what does THIS app
     # need" is answerable. Deliberately here rather than later: it is still before
     # any download, cook or load, so a missing package is reported while nothing
     # slow has happened yet - instead of as an ImportError minutes into a run.

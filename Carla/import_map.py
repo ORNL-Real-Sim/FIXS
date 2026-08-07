@@ -901,10 +901,20 @@ def _resolve_carla(carla_root=None, ue4_root=None, need_source=True):
         # first use on a fresh clone: configure the CARLA env, just like run_cosim
         print("[import] no CARLA env configured; running first-time setup ...")
         cfg = env.run_setup()
+        # ... and continue under the interpreter setup just bound. main() already
+        # re-exec'd on the config as it stood on entry; there WAS no config then, so
+        # this is the first moment the answer exists - and run_import below hands
+        # sys.executable to CARLA's Import.py.
+        env.reexec_under_configured(__file__, cfg, tag="import")
     cfg = cfg or {}
     carla_root = carla_root or cfg.get("carla_root")
     ue4_root = ue4_root or cfg.get("ue4_root")
     if not carla_root:
+        if cfg.get("mode") == "client":
+            sys.exit("[import] this machine is configured as a CARLA CLIENT - CARLA runs "
+                     "on another host, so there is no local install to import into.\n"
+                     "        Import the map on that host, or re-run setup_carla here and "
+                     "pick a local packaged or source build.")
         sys.exit("[import] no CARLA configured - run setup_carla first.")
     if need_source and cfg.get("mode") == "packaged":
         sys.exit("[import] the configured CARLA is PACKAGED; cooking a custom map from "
@@ -1719,6 +1729,12 @@ def resolve_map_source(repo=None, tag_prefix=None):
 
 
 def main():
+    # First act: get onto the interpreter carla.json names. import_map.sh/.bat are
+    # `exec python import_map.py`, so without this the cook runs under whatever
+    # python is on PATH - a different env than the one run_cosim uses, from the same
+    # machine and the same config.
+    env.reexec_under_configured(__file__, tag="import")
+
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--package", default=None,
