@@ -1,0 +1,74 @@
+name: Bundle guard
+
+# Fails a PR that bumps the ProprietaryFiles submodule pointer unless the
+# matching Binaries-<key> release is already published. This makes "moved the
+# SHA but forgot to rebuild + publish the binaries" impossible to merge through.
+#
+# Scope is deliberately just the proprietary-source pointer - it does NOT try to
+# catch a FIXS-side wire-contract change (that can only be proven by running the
+# licensed binaries, so it's a separate licensed-box concern, not a hosted PR
+# check).
+#
+# Cheap: no compile, just a diff + one API call on a free Ubuntu runner.
+# To actually BLOCK a merge (not just show red), mark "bundle-guard" a REQUIRED
+# status check in the branch protection rules. (#191)
+
+on:
+  pull_request:
+    branches: [dev, dev_v0.9.0, main]
+
+jobs:
+  bundle-guard:
+    runs-on: ubuntu-latest
+    steps:
+      # This guard reads exactly two things: the ProprietaryFiles gitlink on both
+      # sides of the PR (a TREE read - no blob needed) and bundle_key.ps1. A full
+      # clone here is pure waste: the repo carries large vendored binaries in
+      # history (libsumo DLLs, VirtualEnvironment.lib, *.mat, ~840 MiB packed), so
+      # `fetch-depth: 0` pulled ~1 GB and made this 0-second check take 8-24 min,
+      # with all of the time - and all of the run-to-run variance - inside
+      # actions/checkout.
+      #   fetch-depth: 2  -> the PR merge commit + both parents (see below)
+      #   filter          -> commits/trees only; blobs fetched lazily
+      #   sparse-checkout -> materialize only the dir holding bundle_key.ps1
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          filter: blob:none
+          sparse-checkout: scripts/dispatch
+          submodules: false   # only the submodule POINTER is needed, not content
+
+      - name: Require a published bundle when the key moves
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # HEAD is refs/pull/N/merge, whose parents are ordered (base, head). Diff
+          # those directly rather than the event payload's base.sha: the payload SHA
+          # goes stale if the base branch moves after the event fires, while ^1 is
+          # by construction the base this merge ref was built against.
+          if ! git rev-parse -q --verify HEAD^2 >/dev/null; then
+            echo "::error title=Unexpected checkout state::HEAD is not a PR merge commit, so the PR base cannot be determined. Check the actions/checkout config (fetch-depth must cover both parents)."
+            exit 1
+          fi
+          # Did this PR move the ProprietaryFiles submodule pointer?
+          changed=$(git diff --name-only HEAD^1 HEAD^2 -- ProprietaryFiles || true)
+          if [ -z "$changed" ]; then
+            echo "ProprietaryFiles pointer unchanged - nothing to verify."
+            exit 0
+          fi
+          echo "ProprietaryFiles pointer moved by this PR:"; echo "$changed"
+
+          # Same key formula as pack_binaries.ps1 and release.yml (pwsh is
+          # preinstalled on ubuntu-latest).
+          key=$(pwsh -NoProfile -File scripts/dispatch/bundle_key.ps1 | tr -d '[:space:]')
+          echo "Required bundle release: Binaries-$key"
+
+          if gh release view "Binaries-$key" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "OK - Binaries-$key is published; safe to merge."
+            exit 0
+          fi
+
+          echo "::error title=Missing proprietary binaries bundle::This PR moves the proprietary-bundle key to '$key' but release 'Binaries-$key' is not published. On a licensed box run a full dispatch, then scripts/dispatch/pack_binaries.ps1 -Publish, and re-run this check before merging."
+          exit 1

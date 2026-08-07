@@ -50,12 +50,20 @@ Real-Sim FIXS uses a modular script-based build system with automated tool detec
 - **dependencies.yaml** - Central configuration file defining tool versions and paths
 - Optional: MATLAB 2024a, CarMaker 13.1.3/11.1.2, dSPACE ConfigurationDesk 2024-A
 
-The external library (yaml-cpp) is automatically built by the dispatch system or can be built manually:
+### First-run setup
+
+After cloning, initialize the checkout. `dispatch.bat` also runs this as its step 1, so a fresh clone can go straight to `dispatch.bat`:
+```
+powershell -ExecutionPolicy Bypass -File scripts\initialize_fixs.ps1
+```
+It is idempotent and does: ProprietaryFiles submodule (optional) -> native deps -> yaml-cpp, then prints a per-step summary. Not to be confused with `scripts/update_fixs.ps1` / `scripts/update_fixs.sh`, which are consumer-side (install a published release zip into an application checkout; see #272).
+
+**Native deps are not in git** (#109, #238). `CommonLib/libsumo` and `CommonLib/libcarla` are gitignored and fetched as SHA-256-verified, version-named zips from the public rolling release `fixs-native-deps`. libsumo is **required** (TrafficLayer links `libsumocpp.lib` directly, so a missing fetch is a hard error); libcarla is optional (VirCarlaEnv only). Bumping the SUMO version in `dependencies.yaml` requires publishing a matching asset first — `scripts\dispatch\pack_native_deps.ps1 -Component sumo -Publish` — or every clone breaks. Both fetch and pack load-test `libsumo/bin` (`libsumo_verify.ps1`) because the old vendored copy silently lacked `geos_c.dll`/`geos.dll` for months (#70).
+
+yaml-cpp can also be built alone; it uses CMake with the Visual Studio 17 2022 generator and builds both Release and Debug:
 ```
 scripts\dispatch\1_external_libraries.bat
 ```
-
-yaml-cpp uses CMake with Visual Studio 17 2022 generator and builds both Release and Debug configurations.
 
 ### Building Components
 
@@ -65,7 +73,7 @@ dispatch.bat
 ```
 
 Automatically builds all components and copies to `build/` directory:
-1. External libraries (yaml-cpp)
+1. Clone initialization (submodules, native deps, yaml-cpp) via `scripts/initialize_fixs.ps1`
 2. TrafficLayer.exe, CoordMerge.exe, VirtualEnvironment.lib
 3. DriverModel_RealSim.dll (default, int API, VISSIM 2021+) and DriverModel_RealSim_legacy.dll (frozen, long API, VISSIM ≤ 2020)
 4. CarMaker executables for all versions in dependencies.yaml (CM11, CM13)
@@ -258,6 +266,21 @@ If still failing after soft reset, reboot. Long-term fix is repair-installing
 VISSIM 2022 from PTV's installer so a healthy SxS VC runtime gets dropped
 next to `VISSIM220.exe`.
 
+### Automated self-heal in the CMoffice probes
+
+The DSProxy CarMaker probes now **automate** the dispatch check + soft reset so a
+single bad dispatch no longer wedges every run. `vissim_dispatch_probe.py` tests
+the `VISSIM.Vissim.2200` dispatch (exit 0 healthy / 1 poisoned, and self-closes
+its throwaway instance); `run_cm_office_demo.bat` runs it as a preflight and, only
+when it reports the zombie state, reaps `VISSIM220.exe` + clears `%TEMP%\VISSIM`
+locks and retries (×3). The headless `verify_demo.py` seed-sweep loop does the
+same check-and-clean between runs — that's why it can drive dozens of VISSIM runs
+unattended where the old bat would stall. The probe needs pywin32, so point
+`%PYTHON%` at the `realsim_dev` env; it skips harmlessly otherwise. The reap only
+fires when dispatch is *already* broken (a corpse, no live co-sim), so it does not
+leak CodeMeter sessions — which is why the blanket VISSIM kill stays off in the
+signal probe's bat.
+
 ### Other operational notes
 
 - **Never `taskkill /F` a process that holds an open VISSIM COM reference**
@@ -271,6 +294,140 @@ next to `VISSIM220.exe`.
   inherits half-initialized COM state from the parent and contends for
   the floating PSL license). When refactoring tests, prefer having
   Python — not a child MATLAB — run the VISSIM bootstrap.
+
+## SimpleLoop ego junction off-road (CarMaker IPGDriver) — demos are seed-pinned
+
+The CMoffice co-sim demos (SUMO and VISSIM) on the shared **SimpleLoop** scenario
+have a **stochastic ego off-road** at a junction curve: on some traffic
+realizations the ego leaves the road (around x≈8–23, y≈0–1) and CarMaker aborts
+with `Vehicle leaves road…` or `Embedded FARoadSensor … not found on Road`.
+
+Established by direct evidence on the #174 branch (don't re-derive — it's settled):
+
+- **Root cause is CarMaker-side, not the traffic feed.** When background traffic
+  halts the ego *on* the junction curve and it restarts from ~0 m/s, IPGDriver
+  fails to re-acquire its course — heading stays frozen, it drives nearly straight,
+  a tire crosses the inner edge (measured in `rs_ego.csv`). A *moving* ego tracks
+  the same corner fine. This is the #168 "drives straight off the link end."
+- **Stochastic + backend-agnostic.** Reproduced on BOTH backends at comparable
+  rates, driven only by the RNG seed (the traffic realization), NOT the simulator
+  or car-following model: SUMO Krauss **2/13**, SUMO W99 **4/13**, VISSIM **5/51**.
+  The traffic data CarMaker receives is clean at the abort. Do **not** chase this
+  as a SUMO-feed / sync / phantom-velocity bug — those were measured out.
+- `Driver.Course.CornerCutCoef=0` (TestRun `SimpleLoop_rs`) **reduces** it (fixed
+  the SUMO fails) but does **not** eliminate it (VISSIM still off-roaded) — corner
+  cutting contributes; the real fix is on the CarMaker junction/route side
+  (junction road topology in `simple_loop.rd5`), tracked separately.
+
+**Because of this the demos pin a verified-clean realization** (same seed ⇒ same
+outcome, deterministic):
+
+- **SUMO-CM:** `run_sumo_cm_demo.bat` launches SUMO with `--seed 5`;
+  `verify_sumo_cm.py` defaults to `RS_SUMO_SEED=5`. (The *unseeded* SUMO default is
+  the realization that crashes — that's why a seed must be pinned.)
+- **VISSIM-CM:** the committed default `randSeed=42` is already clean; no change.
+- **Reproduce a failure:** SUMO `RS_SUMO_SEED=10` (or `=none`); VISSIM
+  `RS_VISSIM_SEED=32` (also 25/31/21/40) — `setup_gui.py`/`verify_demo.py` rewrite
+  only the *staged* inpx randSeed, committed source untouched.
+
+## VISSIM ↔ CarMaker traffic-signal co-simulation (#172)
+
+The signal demo lives in
+[tests/Vissim/Probes/TrafficLayer_DSProxy_CMoffice_Signal/](tests/Vissim/Probes/TrafficLayer_DSProxy_CMoffice_Signal/)
+(`DEMO.md` there is the entry point). It drives CarMaker traffic lights from VISSIM
+signal state over the DSProxy co-sim, and the CM ego brakes at the VISSIM-driven red.
+One-click: `run_signal_demo.bat` (headless, self-checking) or
+`run_cm_office_signal_demo.bat` (GUI). The hard-won, non-obvious facts (a future
+agent WILL otherwise re-chase these — we spent a long time on signal placement):
+
+**Generation pipeline (one geometry, two simulators).** `gen_loop_net.py` writes the
+SUMO nodes/edges → `netconvert` → `simple_traffic_light.net.xml` → `netconvert
+--opendrive-output` → `simple_traffic_light.xodr` (the CM source; osc2cm → rd5) AND
+`import_to_vissim.py` (`ImportOpenDrive`) → the VISSIM `.inpx`. The co-sim exchanges
+ABSOLUTE X/Y, so VISSIM and CM **must** derive from the same geometry. If the VISSIM
+`.inpx` is stale (e.g. a 2000 m net while CM is the 1346 m loop), traffic/ego land
+off-road — regen VISSIM from the xodr, **never edit the CM side to match**. `parse_signals.py`
++ `build_demand.py` must read the PROBE-LOCAL `simple_traffic_light.net.xml`, not the
+stale `tests/Python/SimpleTrafficLight/` copy.
+
+**Signal identity is faithful SUMO → xodr → CM (1:1).** netconvert emits one
+`<signal id="<tls_id>_<linkIndex>">` per SUMO controlled connection, with the turn
+direction in `subtype` (10=left, 20=right, 30=straight). osc2cm stamps that id on each
+CM head as the `odrSignalId` tag and maps subtype → head type (1=straight,2=left,3=right).
+So the CM head NAME is the SUMO-canonical `<tls_id>_<head_id>` (== the tag); parse it by
+the LAST underscore (head_id = trailing int). THE ARROW TYPE IS ALWAYS CORRECT FROM THE
+SUBTYPE — never "fix" arrows by swapping the type.
+
+**Signal-head lateral placement — the bug we chased for a long time.** `add_signal_stops.py`
+relocates each approach's head mount to the ACROSS edge (past the junction) so the ego
+sees the heads ahead, then places each head over its SUMO lane via
+`hOff = t + gantry_len` (gantry_len = the mount beam length). CM mounts heads on a gantry
+and renders INCREASING hOff from the RIGHT lane to the LEFT; SUMO lateral `t` is negative
+and most-negative for the rightmost lane, so `t + gantry_len` puts the rightmost lane at
+the smallest hOff (CM right). The original `-t + 1.0` had the wrong sign → it MIRRORED the
+lane assignment (left-turn head on the right lane, etc.), which LOOKED like flipped arrows
+but was a flipped LANE mapping. Do NOT flip `facing` to "face the ego" — CM measures hOff
+in the facing frame, so flipping facing pushes heads OFF-ROAD.
+
+**Runtime sync (VISSIM is per-SignalGroup, NOT per-head).** The VISSIM driver DLL emits
+one state char per SignalGroup; `DSProxyMode::toTlsData` sends `name="<SCno>_<sg>"`,
+state = a single char. So `RSsignalTable.csv` (built by `build_signal_table.py`):
+`SignalControllerId=<SCno>_<sg>` (the runtime match key), `SignalHeadId=0` (single-char
+state), `CmTrafficLightIndex` = the `Control.TrfLight.<i>` array index, `CmControllerId` =
+the SUMO-canonical name. One SG fans out to several CM heads (multiple rows share the key).
+VISSIM hierarchy = SignalController(=tls) → SignalGroup(state unit) → SignalHead(unique No,
+NOT used by the sync). Today's net is one-head-per-light (the simple case).
+
+**Two co-sim gotchas:**
+- **Plan A:** with `SynchronizeTrafficSignal: true` the CM `.lib` opens a SECOND socket to
+  `TrafficSignalPort` (must differ from the vehicle port); `DSProxyMode` (TrafficLayer)
+  serves it and relays per-(controller,SG) `TlsData` there. The `.lib` is unchanged.
+- **Pass the signal table to CarMaker's `-s` WITHOUT the `.csv` extension** — the CM GUI/HIL
+  auto-parses a `.csv` argument as an InfoFile and FATALS at startup. `readSignalTable`
+  appends `.csv` itself, so the file stays `*.csv` on disk.
+
+**Interactive VISSIM zoom briefly stalls BOTH sides — inherent, not a bug (don't re-chase).**
+Zooming/panning the VISSIM window during the co-sim makes the whole lockstep hitch (cjffly
+flagged it on PR #170). We instrumented the DSProxy loop (`RS_DEBUG` → `rs_timing_tl.csv`,
+splitting the per-tick proxy calls): the cost is entirely in `proxy.getTrafficVehicles()`,
+which spikes from ~5–10 ms to **100–450 ms** while `setDriverVehicles`/`getSignalStates` stay
+flat. PTV's *Driving Simulator Interface* manual (`…\API\DrivingSimulator_DLL\doc\`) documents
+it: `VISSIM_GetTrafficVehicles` *"Blocks while the calculation of the time step in Vissim
+hasn't finished yet"* (§3, p.11), and §2 (p.6) says *"the visualization in Vissim should be
+switched off in order to achieve the highest possible simulation speed."* VISSIM runs the sim
+step and the network window on ONE thread, so an interactive zoom delays step completion and
+TL blocks longer. **Quick Mode does NOT fix it** (it only removes the autonomous per-step
+redraw — cuts *idle* `getVeh` ~6 ms→~2 ms — but can't offload an interactive zoom); **VISSIM
+2026 behaves identically** and no 2022/2026 release note touches it. Fix direction (NOT "don't
+touch VISSIM" — we want to watch it; and CarMaker can't pause in XIL/HIL real-time): automate
+the VISSIM launch to open already framed on the ego vehicle and follow it, so manual zoom/pan
+(the spike trigger) isn't needed — investigate VISSIM's COM camera/viewpoint API at startup, or
+bake the follow-viewpoint into the saved `.layx`. To re-measure: build TL with `-p:RS_DEBUG=1` to an isolated
+`OutDir`/`IntDir` (e.g. `x64\Release_dbg`, gitignored) so the shipped exe is untouched.
+
+## Carla / XIL ego co-simulation design notes
+
+Forward-looking decisions for unifying the virtual-environment bridges (CarMaker
+`VirEnvHelper`/`VirtualEnvironment.lib` and the standalone Carla `mainVirCarla`):
+
+- **Road surface fidelity is deliberately kept simple (near-term).** Carla cannot
+  supply the road properties a tire model actually needs — it exposes macro
+  geometry (grade/bank/elevation via OpenDRIVE waypoints) but **no queryable
+  friction (μ) map and no road-roughness profile** (friction is author-only via
+  wheel `tire_friction` + `static.trigger.friction` patches, never readable at a
+  point). So for any external-dynamics (Simulink/XIL) ego, **assume a simple road
+  in the dynamics model** (constant μ ≈ dry asphalt, smooth surface). If spatial
+  surface variation is ever needed, it comes from a **scenario dataset**
+  (μ/roughness keyed to road position) or CarMaker's native IPGRoad — **never**
+  from a Carla→Simulink contact query. Carla stays out of the dynamics ground loop
+  entirely; it is perception + visualization only.
+
+- **Ego dynamics ownership is a per-ego mode**, mirroring the two CarMaker
+  diagrams: mode A "backend owns ego" (CarMaker office / Carla-PhysX → bridge
+  *reads* ego pose back and sends out) vs mode B "external owns ego" (Simulink/
+  dSPACE → ego arrives on a 2nd FIXS connection and is *teleported in*). L2/L4 are
+  both mode A; they differ only in who controls (TM desired-speed vs external CAV
+  client + sensors). This switch belongs in `config.yaml` `CarlaSetup`.
 
 ## Documentation
 

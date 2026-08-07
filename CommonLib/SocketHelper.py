@@ -88,13 +88,41 @@ class SocketHelper:
 
         return DetDataRecv_v
 
+    # #87: must match MAX_RECORD_SIZE in CommonLib/SocketHelper.h. The two ends enforce
+    # the same record ceiling so a record one accepts is never one the other refuses.
+    MAX_RECORD_SIZE = 8192
+
+    @staticmethod
+    def _recv_exact(sock, n):
+        """Read exactly n bytes, looping until they all arrive (#87).
+
+        socket.recv(n) returns UP TO n bytes -- whatever has arrived so far. A
+        single call is only reliable while the whole message fits in one TCP
+        segment, which is why this went unnoticed with small vehicle counts.
+        Under 'all' subscription a message spans many segments and a partial
+        read desyncs the stream permanently: the leftover body bytes are then
+        parsed as the next record header.
+
+        Mirrors SocketHelper.cpp::recvExact so both ends frame identically.
+        """
+        if n == 0:
+            return b''
+        buf = bytearray()
+        while len(buf) < n:
+            chunk = sock.recv(n - len(buf))
+            if not chunk:
+                raise ConnectionError(
+                    f'peer closed mid-message: got {len(buf)} of {n} bytes')
+            buf += chunk
+        return bytes(buf)
+
     def recv_data(self, sock):
         # initialize return lists
-        
-        
+
+
         # get header for entire message
-        received_buffer = sock.recv(self.msg_header_size)
-        
+        received_buffer = self._recv_exact(sock, self.msg_header_size)
+
 
         sim_state, sim_time, total_msg_size = self.msg_helper.depack_msg_header(received_buffer)
         msg_processed_size = 0
@@ -108,7 +136,7 @@ class SocketHelper:
         
         while (msg_processed_size < total_msg_size):
             # get message type header
-            received_buffer = sock.recv(self.msg_each_header_size)
+            received_buffer = self._recv_exact(sock, self.msg_each_header_size)
             msg_size, msg_type = self.msg_helper.depack_msg_type(received_buffer)
 
             if self.enable_verbose_log:
@@ -117,7 +145,21 @@ class SocketHelper:
                     log_file.write(f"[MSG_HEADER] Size: {msg_size}, Type: {msg_type} | Hex: {received_buffer.hex()}\n")
 
             # get message it self
-            received_buffer = sock.recv(msg_size - self.msg_each_header_size)
+            body_size = msg_size - self.msg_each_header_size
+            if body_size < 0:
+                raise ValueError(
+                    f'record size {msg_size} is smaller than the record header '
+                    f'({self.msg_each_header_size}) -- stream desync (#87)')
+            # #87: same ceiling SocketHelper.cpp enforces (MAX_RECORD_SIZE). No FIXS
+            # sender emits a record above it, so hitting this means the stream is
+            # desynced and msg_size was read out of the middle of a record. Without the
+            # check Python would block forever waiting for bytes that never come, where
+            # the C++ receiver fails loudly.
+            if body_size > self.MAX_RECORD_SIZE:
+                raise ValueError(
+                    f'record size {msg_size} exceeds MAX_RECORD_SIZE '
+                    f'{self.MAX_RECORD_SIZE} -- stream desync (#87)')
+            received_buffer = self._recv_exact(sock, body_size)
 
             if self.enable_verbose_log:
                 log_file_path = "received_msg_buffer.log"
@@ -129,8 +171,12 @@ class SocketHelper:
                 aa = 1
                 vehicle_data_received = self.msg_helper.depack_veh_data(received_buffer)
                 self.vehicle_data_receive_list.append(vehicle_data_received)
-            elif msg_type == MessageType.traffic_light_data:               
-                aa = 1
+            elif msg_type == MessageType.traffic_light_data:
+                # Wire format is fixed: name (uint8 len + bytes), id (uint16),
+                # state (uint8 len + bytes). depack_traffic_light_data on
+                # MsgHelper handles it.
+                tls_data = self.msg_helper.depack_traffic_light_data(received_buffer)
+                self.traffic_light_data_receive_list.append(tls_data)
 
             elif msg_type == MessageType.detector_data:
                 # DetDataRecv_v = self.depackDetectorData(received_buffer) 

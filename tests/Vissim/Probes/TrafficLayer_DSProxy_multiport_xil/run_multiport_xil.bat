@@ -2,9 +2,13 @@
 REM Stage B multi-port routing probe (issue #158, PR #165).
 REM
 REM   1. Stage PTV's shipped DS example .inpx to stage_network/.
-REM   2. Launch TrafficLayer in DSProxy mode with TWO VehicleSubscription
+REM   2. Resolve config.yaml's NetworkFile to THIS checkout's stage_network
+REM      and write config.runtime.yaml (gitignored). VissimSetup.NetworkFile
+REM      must be absolute, so the committed config cannot be checkout-portable
+REM      on its own — the generated copy is what TrafficLayer actually reads.
+REM   3. Launch TrafficLayer in DSProxy mode with TWO VehicleSubscription
 REM      entries (ports 2444 + 2445).
-REM   3. Launch multiport_clients.py — opens both client sockets in
+REM   4. Launch multiport_clients.py — opens both client sockets in
 REM      threads and validates per-port filtering.
 
 setlocal
@@ -28,13 +32,20 @@ copy /Y "%PTV_DIR%\driving_simulator_test.fzp"  "%STAGE%\"  >nul
 copy /Y "%PTV_DIR%\driving_simulator_test.pp"   "%STAGE%\"  >nul
 copy /Y "%PTV_DIR%\CARRE4E_RO_500_1.sig"        "%STAGE%\"  >nul
 
-echo [1/2] Launch TrafficLayer in DSProxy mode (multi-port)
-start "TrafficLayer (multi-port)" /B cmd /c ""%TL%" -f "%HERE%config.yaml" > "%HERE%tl.log" 2>&1"
+echo [1/3] Resolve NetworkFile to this checkout
+set CFG=%HERE%config.runtime.yaml
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$inpx = Join-Path '%STAGE%' 'driving_simulator_test.inpx';" ^
+  "(Get-Content '%HERE%config.yaml') -replace \"^(\s*NetworkFile:\s*).*$\", \"`$1'$inpx'\" | Set-Content -Encoding ascii '%CFG%'"
+if not exist "%CFG%" ( echo ERROR: failed to generate %CFG% & exit /b 4 )
+
+echo [2/3] Launch TrafficLayer in DSProxy mode (multi-port)
+start "TrafficLayer (multi-port)" /B cmd /c ""%TL%" -f "%CFG%" > "%HERE%tl.log" 2>&1"
 
 echo Waiting 18s for VISSIM startup + ports 2444+2445 bind ...
 ping 127.0.0.1 -n 19 >nul
 
-echo [2/2] Launch multiport_clients.py
+echo [3/3] Launch multiport_clients.py
 "%PYEXE%" "%HERE%multiport_clients.py"
 set RC=%ERRORLEVEL%
 

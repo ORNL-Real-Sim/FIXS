@@ -36,6 +36,10 @@ typedef struct  {
 	float signalLightDistance; // distance to next signal light
 	int8_t signalLightColor; // color of next signal light
 	float speedLimit;
+	// Free-flow speed: the speed this vehicle would travel at on the current
+	// link, unimpeded. Distinct from speedLimit (the posted/road limit) because
+	// it reflects the individual driver/vehicle. SUMO: VAR_ALLOWED_SPEED.
+	float speedFreeFlow;
 	float speedLimitNext;
 	float speedLimitChangeDistance; 
 
@@ -58,6 +62,12 @@ typedef struct  {
 
 	uint16_t lightIndicators;
 
+	// #174 EgoDriver command channel (L2/L4). Serialized at the END of
+	// packVehData/depackVehData, gated by VehicleMessageField like every field.
+	// steer is a physical angle; pedals are unitless positions (as in a real car).
+	float steerAngleDesired;        // rad, desired front road-wheel steer angle (L4)
+	float acceleratorPedalDesired;  // [0,1] accelerator pedal position (L4)
+	float brakePedalDesired;        // [0,1] brake pedal position (L4)
 
 }VehFullData_t;
 

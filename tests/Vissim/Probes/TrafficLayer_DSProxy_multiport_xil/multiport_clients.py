@@ -199,10 +199,9 @@ def main() -> int:
     }
 
     # Both ports should see the same number of TLS messages per tick
-    # (signals are global, not filtered per port). The PYTHON-side TLS
-    # depack returning 0 is a known CommonLib gap (fixed separately in
-    # PR #163's CommonLib/MsgHelper.py changes); this invariant only
-    # checks that whatever count comes through is IDENTICAL across ports.
+    # (signals are global, not filtered per port). This invariant checks
+    # that the count is IDENTICAL across ports, whatever it is — on the
+    # shipped DS example that is 20 signal groups per tick.
     tls_aligned = 0
     n_pair = min(n_ego, n_obs)
     for i in range(n_pair):

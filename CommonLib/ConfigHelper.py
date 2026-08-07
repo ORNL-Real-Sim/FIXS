@@ -50,6 +50,15 @@ class ConfigHelper:
         # Sumo Setup
         sumo_node = config.get("SumoSetup", {})
         self.Sumo_setup["SpeedMode"] = sumo_node.get("SpeedMode", 0)
+        # Consumed by run_cosim.py (not the C++ engine): whether it launches SUMO
+        # itself, or waits for the user to start it. Parity with SumoSetup.AutoStart
+        # in ConfigHelper.cpp. Default true.
+        self.Sumo_setup["AutoStart"] = self.parserFlag(sumo_node, "AutoStart", True)
+        # How many TraCI clients SUMO waits for before it steps. Mirrors
+        # SumoSetup.NumClients in ConfigHelper.cpp (same default). run_cosim passes
+        # it to SUMO as --num-clients; without it parsed here the key was read back
+        # as None on the python side, so the yaml value silently stayed 1.
+        self.Sumo_setup["NumClients"] = self.parserInteger(sumo_node, "NumClients", 1)
         # Application Setup
         app_node = config.get("ApplicationSetup", {})
         self.application_setup["EnableApplicationLayer"] = self.parserFlag(app_node, "EnableApplicationLayer", False)
@@ -64,6 +73,11 @@ class ConfigHelper:
         carla_node = config.get("CarlaSetup", {})
         self.Carla_setup["EnableVerboseLog"] = self.parserFlag(carla_node, "EnableVerboseLog", False)
         self.Carla_setup["EnableCosimulation"] = self.parserFlag(carla_node, "EnableCosimulation", True)
+        # Co-sim bridge selector consumed by run_cosim.py (not the C++ engine):
+        # true = run_synchronization.py, false = TrafficLayer + VirCarlaEnv. Parity
+        # with CarlaSetup.EnablePythonBackend in ConfigHelper.cpp. Default true.
+        self.Carla_setup["EnablePythonBackend"] = self.parserFlag(
+            carla_node, "EnablePythonBackend", True)
         self.Carla_setup["EnableEgoSimulink"] = self.parserFlag(carla_node, "EnableEgoSimulink", False)
         self.Carla_setup["CarlaServerIP"] = self.parserString(carla_node, "CarlaServerIP", "127.0.0.1")
         self.Carla_setup["CarlaServerPort"] = self.parserInteger(carla_node, "CarlaServerPort", 420)

@@ -20,9 +20,12 @@ run_multiport_xil.bat
 ```
 
 Stages the PTV-shipped `driving_simulator_test.inpx` into `stage_network\`,
-launches TrafficLayer with the two-port config, then spawns
-`multiport_clients.py`. The latter opens both client sockets in threads
-and prints per-tick + invariant summary.
+writes `config.runtime.yaml` with `VissimSetup.NetworkFile` resolved to
+this checkout (the same generated-runtime-config convention the CMoffice
+demos use — the committed `config.yaml` path is a placeholder because
+NetworkFile must be absolute), launches TrafficLayer with the two-port
+config, then spawns `multiport_clients.py`. The latter opens both client
+sockets in threads and prints per-tick + invariant summary.
 
 ## Invariants
 
@@ -33,9 +36,15 @@ and prints per-tick + invariant summary.
 | `tick_aligned` | Both clients made the same number of ticks (TL drives in lockstep) |
 | `observer_filtered_to_Car` | Port 2445 only received vehicles whose `type=='100'` (Car) |
 | `ego_port_unfiltered` | Port 2444 received a mix of vehicle types (HGV/Bus also visible) |
-| `signals_count_aligned_across_ports` | Both ports received an identical TLS count every tick. Note: Python's TLS depack is fixed separately in PR #163; this probe only validates count alignment, not that signals were actually parsed. |
+| `signals_count_aligned_across_ports` | Both ports received an identical TLS count every tick (20 signal groups on the shipped DS example) |
 
 Output: `out/summary.json` + PASS/FAIL per invariant.
+
+Last verified run (all six PASS): observer saw only `['100']`, ego port
+saw `['100', '300', '400']`, 20 TLS/tick on both ports for 80/80 ticks.
+The per-tick vehicle-count delta between the ports (e.g. 58 vs 53 at
+tick 60) is the non-Car traffic on the network — direct evidence the
+filter selects rather than passes everything through.
 
 ## Config layout
 

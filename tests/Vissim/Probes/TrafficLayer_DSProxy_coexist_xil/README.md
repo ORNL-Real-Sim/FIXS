@@ -97,3 +97,38 @@ OVERALL: PASS
 - After any change to ProprietaryFiles' `DriverModel_FIXS_Common.h`, especially anything near `DRIVER_COMMAND_INIT` (Stage C)
 - After a VISSIM patch / dependency bump
 - Before tagging a 0.9.x release
+
+---
+
+## Update from Stage B+ investigation (2026-06-06)
+
+A separate Stage B+ probe (`tests/Vissim/Probes/TrafficLayer_DSProxy_cav_xil/`, draft
+PR #163) tries to extend the integrated stack with a CAV behavior-command path —
+Python CAV controller → TrafficLayer → DriverModel (with `EnableRealSim: true`).
+That probe hangs in the per-tick loop and tracing through the FIXS DriverModel
+source surfaced an architectural detail that's worth recording here so anyone
+finishing #163 doesn't have to re-discover it:
+
+`DriverModel_FIXS_Common.h::SUB_EGO_ONLY` is **hardcoded to `true`** (line 54),
+and that flag gates both the per-tick send/recv (line 613 — gated on `!SUB_EGO_ONLY`)
+and the per-vehicle send/recv (line 1735 — gated on `SUB_EGO_ONLY && VehDataSend_v.size() > 0`).
+The result:
+
+- With `SUB_EGO_ONLY=true` and an **empty** par-file VehicleSubscription, the
+  FIXS DriverModel does **no socket I/O at all** during the simulation. My
+  Stage C/Stage B+ probes accidentally rely on this — with `EnableRealSim: false`
+  (this probe) the DLL just no-ops; with `EnableRealSim: true` (Stage B+) the
+  DLL still no-ops and TrafficLayer's recv blocks forever.
+- For #163 to land cleanly, one of two changes is needed:
+  - **Easier**: par-file gets a non-empty `VehicleSubscription` (e.g., subscribe
+    to vehicle type 100), turning DM into per-vehicle send/recv mode. That
+    requires TrafficLayer DSProxyMode to do a recv/send pair per Car per tick
+    rather than one pair per tick — meaningful restructure.
+  - **Cleaner**: a `SubEgoOnly: false` config knob added to the FIXS DriverModel
+    (ProprietaryFiles patch), which enables the once-per-tick send/recv path.
+    That keeps TrafficLayer DSProxyMode's existing single-pair-per-tick loop
+    correct.
+
+This probe (Stage C with `EnableRealSim: false`) is unaffected by this finding
+— the DM is supposed to be a no-op behavior modifier here, which is exactly
+what the empirical baseline shows.

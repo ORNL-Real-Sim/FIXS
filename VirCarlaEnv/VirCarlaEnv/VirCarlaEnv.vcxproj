@@ -107,8 +107,8 @@
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>..\..\CommonLib\yaml-cpp\build\Debug\yaml-cppd.lib;..\..\CommonLib\libsumo\libsumo.lib;..\..\CommonLib\libsumo\libtracicppD.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;Shlwapi.lib;..\..\CommonLib\libcarla\lib\carla_client.lib;..\..\CommonLib\libcarla\lib\carla_client_debug.lib;..\..\CommonLib\libcarla\lib\DebugUtils.lib;..\..\CommonLib\libcarla\lib\Detour.lib;..\..\CommonLib\libcarla\lib\DetourCrowd.lib;..\..\CommonLib\libcarla\lib\DetourTileCache.lib;..\..\CommonLib\libcarla\lib\libboost_atomic-vc143-mt-x64-1_80.lib;..\..\CommonLib\libcarla\lib\libboost_date_time-vc143-mt-x64-1_80.lib;..\..\CommonLib\libcarla\lib\libboost_filesystem-vc143-mt-x64-1_80.lib;..\..\CommonLib\libcarla\lib\libboost_python38-vc143-mt-x64-1_80.lib;..\..\CommonLib\libcarla\lib\libboost_system-vc143-mt-x64-1_80.lib;..\..\CommonLib\libcarla\lib\Recast.lib;..\..\CommonLib\libcarla\lib\rpc.lib;..\..\CommonLib\libcarla\lib\zlib.lib;..\..\CommonLib\libcarla\lib\zlibstatic.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>..\..\CommonLib\libsumo;..\..\CommonLib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>..\..\CommonLib\yaml-cpp\build\Debug\yaml-cppd.lib;..\..\CommonLib\libsumo\libsumo.lib;..\..\CommonLib\libsumo\libtracicppD.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;Shlwapi.lib;..\..\CommonLib\libcarla\lib\carla_client.lib;..\..\CommonLib\libcarla\lib\carla_client_debug.lib;..\..\CommonLib\libcarla\lib\DebugUtils.lib;..\..\CommonLib\libcarla\lib\Detour.lib;..\..\CommonLib\libcarla\lib\DetourCrowd.lib;..\..\CommonLib\libcarla\lib\DetourTileCache.lib;..\..\CommonLib\libcarla\lib\libboost_atomic-vc142-mt-x64-1_80.lib;..\..\CommonLib\libcarla\lib\libboost_date_time-vc142-mt-x64-1_80.lib;..\..\CommonLib\libcarla\lib\libboost_filesystem-vc142-mt-x64-1_80.lib;..\..\CommonLib\libcarla\lib\libboost_python310-vc142-mt-x64-1_80.lib;..\..\CommonLib\libcarla\lib\libboost_system-vc142-mt-x64-1_80.lib;..\..\CommonLib\libcarla\lib\Recast.lib;..\..\CommonLib\libcarla\lib\rpc.lib;..\..\CommonLib\libcarla\lib\zlib.lib;..\..\CommonLib\libcarla\lib\zlibstatic.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>..\..\CommonLib\libsumo;..\..\CommonLib\libcarla\lib;..\..\CommonLib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -124,23 +124,34 @@
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>..\..\CommonLib\libsumo\libsumo.lib;..\..\CommonLib\libsumo\libtracicpp.lib;..\..\CommonLib\yaml-cpp\build\Release\yaml-cpp.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;Shlwapi.lib;..\..\CommonLib\libcarla\lib\carla_client.lib;..\..\CommonLib\libcarla\lib\carla_client_debug.lib;..\..\CommonLib\libcarla\lib\DebugUtils.lib;..\..\CommonLib\libcarla\lib\Detour.lib;..\..\CommonLib\libcarla\lib\DetourCrowd.lib;..\..\CommonLib\libcarla\lib\DetourTileCache.lib;..\..\CommonLib\libcarla\lib\libboost_atomic-vc143-mt-x64-1_80.lib;..\..\CommonLib\libcarla\lib\libboost_date_time-vc143-mt-x64-1_80.lib;..\..\CommonLib\libcarla\lib\libboost_filesystem-vc143-mt-x64-1_80.lib;..\..\CommonLib\libcarla\lib\libboost_python38-vc143-mt-x64-1_80.lib;..\..\CommonLib\libcarla\lib\libboost_system-vc143-mt-x64-1_80.lib;..\..\CommonLib\libcarla\lib\Recast.lib;..\..\CommonLib\libcarla\lib\rpc.lib;..\..\CommonLib\libcarla\lib\zlib.lib;..\..\CommonLib\libcarla\lib\zlibstatic.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>..\..\CommonLib\libsumo;..\..\CommonLib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>..\..\CommonLib\libsumo\bin\libsumocpp.lib;..\..\CommonLib\libsumo\bin\libtracicpp.lib;..\..\CommonLib\yaml-cpp\build\Release\yaml-cpp.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;Shlwapi.lib;..\..\CommonLib\libcarla\lib\carla_client.lib;..\..\CommonLib\libcarla\lib\DebugUtils.lib;..\..\CommonLib\libcarla\lib\Detour.lib;..\..\CommonLib\libcarla\lib\DetourCrowd.lib;..\..\CommonLib\libcarla\lib\DetourTileCache.lib;..\..\CommonLib\libcarla\lib\libboost_atomic-vc142-mt-x64-1_80.lib;..\..\CommonLib\libcarla\lib\libboost_date_time-vc142-mt-x64-1_80.lib;..\..\CommonLib\libcarla\lib\libboost_filesystem-vc142-mt-x64-1_80.lib;..\..\CommonLib\libcarla\lib\libboost_python310-vc142-mt-x64-1_80.lib;..\..\CommonLib\libcarla\lib\libboost_system-vc142-mt-x64-1_80.lib;..\..\CommonLib\libcarla\lib\Recast.lib;..\..\CommonLib\libcarla\lib\rpc.lib;..\..\CommonLib\libcarla\lib\zlib.lib;..\..\CommonLib\libcarla\lib\zlibstatic.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>..\..\CommonLib\libsumo;..\..\CommonLib\libcarla\lib;..\..\CommonLib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="..\..\CommonLib\ConfigHelper.cpp" />
+    <ClCompile Include="..\..\CommonLib\DataLogger.cpp" />
+    <ClCompile Include="..\..\CommonLib\EgoDriver.cpp" />
     <ClCompile Include="..\..\CommonLib\MsgHelper.cpp" />
     <ClCompile Include="..\..\CommonLib\SocketHelper.cpp" />
+    <ClCompile Include="..\..\CommonLib\VirEnvCore.cpp" />
+    <ClCompile Include="..\..\CommonLib\XilGuard.cpp" />
+    <ClCompile Include="CarlaBackend.cpp" />
     <ClCompile Include="BridgeHelper.cpp" />
     <ClCompile Include="DebugHelper.cpp" />
     <ClCompile Include="mainVirCarla.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\CommonLib\ConfigHelper.h" />
+    <ClInclude Include="..\..\CommonLib\DataLogger.h" />
+    <ClInclude Include="..\..\CommonLib\EgoDriver.h" />
+    <ClInclude Include="..\..\CommonLib\IVirEnvBackend.h" />
     <ClInclude Include="..\..\CommonLib\MsgHelper.h" />
     <ClInclude Include="..\..\CommonLib\SocketHelper.h" />
     <ClInclude Include="..\..\CommonLib\VehDataMsgDefs.h" />
+    <ClInclude Include="..\..\CommonLib\VirEnvCore.h" />
+    <ClInclude Include="..\..\CommonLib\XilGuard.h" />
+    <ClInclude Include="CarlaBackend.h" />
     <ClInclude Include="BridgeHelper.h" />
     <ClInclude Include="DebugHelper.h" />
     <ClInclude Include="RandomUtils.h" />
@@ -148,4 +159,11 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
+  <!-- Build with -p:RS_DEBUG=1 to emit the unified VirEnvCore diagnostic CSV
+       (rs_core_pos.csv), same switch as VirtualEnvironment.vcxproj. -->
+  <ItemDefinitionGroup Condition="'$(RS_DEBUG)'=='1'">
+    <ClCompile>
+      <PreprocessorDefinitions>RS_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+  </ItemDefinitionGroup>
 </Project>

@@ -307,6 +307,24 @@ void SocketHelper::disableClient() {
 	NCLIENT = 0;
 }
 
+#ifdef RS_DEBUG
+void SocketHelper::rsDebugLog(const char* msg) {
+	// RS_DEBUG breadcrumbs -> the TrafficLayer master log if one was assigned, else a
+	// persistent fallback under RealSim_tmp/ (gitignored). Plain C file I/O so this behaves
+	// identically in TrafficLayer AND the VirtualEnvironment .lib: no CarMaker dependency,
+	// no std::filesystem (CommonLib stays C++14).
+	std::string path = !MasterLogName.empty() ? MasterLogName : std::string("RealSim_tmp\\RealSim_debug.log");
+	FILE* f = fopen(path.c_str(), "a");
+	if (!f && MasterLogName.empty()) {
+#ifdef WIN32
+		CreateDirectoryA("RealSim_tmp", NULL);   // the .lib's CWD may lack it; best-effort
+#endif
+		f = fopen(path.c_str(), "a");
+	}
+	if (f) { fputs(msg, f); fclose(f); }
+}
+#endif
+
 int SocketHelper::initConnection(std::string errorLogName) {
 	const int RECVCLIENTBUFSIZE = 2048;
 	const int SENDCLIENTBUFSIZE = 8096;
@@ -340,7 +358,7 @@ int SocketHelper::initConnection(std::string errorLogName) {
 	==============================*/
 	if (ENABLE_SERVER) {
 #ifdef RS_DEBUG
-		Log("RealSim start server task\n");	
+		rsDebugLog("RealSim start server task\n");
 #endif
 		for (int iS = 0; iS < NSERVER; iS++) {
 			memset(&serverAddr[iS], 0, sizeof(serverAddr[iS]));   /* Zero out structure */
@@ -381,7 +399,7 @@ int SocketHelper::initConnection(std::string errorLogName) {
 				// placeholder
 			}
 #ifdef RS_DEBUG
-			Log("RealSim start server connection\n");	
+			rsDebugLog("RealSim start server connection\n");
 #endif
 			// Connect to server.
 			if (connect(serverSock[iS], (struct sockaddr*)&serverAddr[iS], sizeof(serverAddr[iS])) < 0) {
@@ -408,7 +426,7 @@ int SocketHelper::initConnection(std::string errorLogName) {
 				return -1;
 			}
 #ifdef RS_DEBUG
-			Log("RealSim server connected\n");	
+			rsDebugLog("RealSim server connected\n");
 #endif
 
 		}
@@ -807,10 +825,48 @@ int SocketHelper::initConnection(std::string errorLogName) {
 	}
 
 	cout << "RealSim Initialized" << endl;
-#ifdef RS_DEBUG
-	Log("RealSim Initialized\n");	
-#endif 
 
+	return 0;
+}
+
+// ===========================================================================
+// #87: exact-length stream I/O helpers
+//
+// TCP is a byte stream, not a datagram service: a single recv() returns only
+// what has arrived so far, and send() may accept only part of a buffer. A lone
+// call is reliable while a message fits in one segment -- which is why this was
+// invisible with a handful of vehicles and becomes routine under an 'all'
+// subscription, where one message spans many segments.
+//
+// A short read is worse than lost data here: recvData advances msgProcessed by
+// the DECLARED record size, so the unread tail of one record is parsed as the
+// header of the next and the connection is desynced for good.
+//
+// recvExact mirrors SocketHelper.py::_recv_exact so every FIXS client frames
+// identically regardless of language.
+// ===========================================================================
+// Returns n on success. Returns 0 ONLY for a clean peer close before any byte of
+// this read arrived -- callers rely on that to tell an orderly CarMaker shutdown
+// from a truncated message. A close part-way through is data loss, not a shutdown,
+// so it reports SOCKET_ERROR.
+static int recvExact(int sock, char* buf, int n) {
+	int got = 0;
+	while (got < n) {
+		int r = recv(sock, buf + got, n - got, 0);
+		if (r == SOCKET_ERROR) return SOCKET_ERROR;
+		if (r == 0) return (got == 0) ? 0 : SOCKET_ERROR;
+		got += r;
+	}
+	return got;
+}
+
+static int sendExact(int sock, const char* buf, int n) {
+	int sent = 0;
+	while (sent < n) {
+		int w = send(sock, buf + sent, n - sent, 0);
+		if (w == SOCKET_ERROR || w <= 0) return -1;
+		sent += w;
+	}
 	return 0;
 }
 
@@ -823,7 +879,7 @@ int SocketHelper::recvData(int sock, int* simState, float* simTime, MsgHelper& M
 
 	int recvSize;
 
-	if ((recvSize = recv(sock, recvBuffer, Msg_c.msgHeaderSize, 0)) == SOCKET_ERROR) {
+	if ((recvSize = recvExact(sock, recvBuffer, Msg_c.msgHeaderSize)) == SOCKET_ERROR) {
 #ifdef WIN32
 		if (WSAGetLastError() == WSAEINTR) {
 			return -1;
@@ -841,6 +897,15 @@ int SocketHelper::recvData(int sock, int* simState, float* simTime, MsgHelper& M
 	//+++++++++
 	// Parser received message
 	//+++++++++
+
+	if (recvSize == 0) {
+		// Peer closed the connection gracefully (recv returned EOF). In the
+		// co-sim this is CarMaker stopping / closing its socket (the GUI Stop
+		// button, or the run ending). Signal the caller (e.g. DSProxyMode) to
+		// break the lockstep and tear VISSIM down, instead of spinning on a
+		// dead socket -- which left VISSIM hanging when CarMaker was stopped.
+		return -1;
+	}
 
 	uint32_t msgProcessed = Msg_c.msgHeaderSize;
 	uint8_t simStateRecv;
@@ -861,7 +926,7 @@ int SocketHelper::recvData(int sock, int* simState, float* simTime, MsgHelper& M
 		uint8_t iMsgTypeRecv = 0;
 
 		char recvVehDataHeaderBuf[256];
-		if ((recvSize = recv(sock, recvVehDataHeaderBuf, Msg_c.msgEachHeaderSize, 0)) == SOCKET_ERROR) {
+		if ((recvSize = recvExact(sock, recvVehDataHeaderBuf, Msg_c.msgEachHeaderSize)) <= 0) {
 #ifdef WIN32
 			if (WSAGetLastError() == WSAEFAULT) {
 				printSocketErrorMessage(10014);
@@ -875,9 +940,32 @@ int SocketHelper::recvData(int sock, int* simState, float* simTime, MsgHelper& M
 		}
 		Msg_c.depackMsgType(recvVehDataHeaderBuf, &iMsgSizeRecv, &iMsgTypeRecv);
 
-		char recvEachDataBuf[1024];
+		// #87: sized to the largest single RECORD, not the largest message -- records are
+		// parsed and moved into Msg_c one at a time, so total_msg_size is only a loop
+		// bound and never an allocation size. Worst-case vehicle record is 1888 B:
+		// 3 (record header) + 7 strings x (1 + 255) + 93 B of numeric fields.
+		char recvEachDataBuf[MAX_RECORD_SIZE];
+		const int bodySize = (int)iMsgSizeRecv - Msg_c.msgEachHeaderSize;
+
+		// A record that is negative-length or larger than the buffer means the stream is
+		// desynced or the peer sent something we cannot represent. Fail loudly instead of
+		// smashing the stack (the old code passed this straight to recv()).
+		if (bodySize < 0 || bodySize > (int)sizeof(recvEachDataBuf)) {
+			printf("FIXS #87: bad record size %d (body %d, max %d) -- stream desync, dropping connection\n",
+			       (int)iMsgSizeRecv, bodySize, (int)sizeof(recvEachDataBuf));
+			return -1;
+		}
+
 		// this recvSize is purely the message body, without the Msg_c.msgEachHeaderSize
-		if ((recvSize = recv(sock, recvEachDataBuf, iMsgSizeRecv - Msg_c.msgEachHeaderSize, 0)) == SOCKET_ERROR) {
+		// Guard on <= 0, not just SOCKET_ERROR: a clean close here is mid-message, so
+		// recvExact returns 0 and treating that as success would depack an uninitialised
+		// buffer. bodySize == 0 is legitimate (header-only record) and must not trip it.
+		//
+		// recvSize is assigned unconditionally first: with the short-circuit below a
+		// zero-body record would otherwise leave it holding the PREVIOUS record's value,
+		// which depackDetectorData consumes as a length.
+		recvSize = 0;
+		if (bodySize > 0 && (recvSize = recvExact(sock, recvEachDataBuf, bodySize)) <= 0) {
 #ifdef WIN32
 			if (WSAGetLastError() == WSAEFAULT) {
 				printSocketErrorMessage(10014);
@@ -919,75 +1007,93 @@ int SocketHelper::recvData(int sock, int* simState, float* simTime, MsgHelper& M
 int SocketHelper::sendData(int sock, int iClient, float simTimeSend, uint8_t simStateSend, MsgHelper Msg_c) {
 	// for each socket, send only the message relevant to that socket
 
+	// =======================================================================
+	// #87: pack-and-flush instead of one big buffer.
+	//
+	// This used to allocate 65536 + 8096 + 8096 + 81728 bytes per call, pack every
+	// record into them and send once. Three problems: packVehData takes no capacity
+	// argument and never bounds-checked, so >~500 vehicles silently ran off the end
+	// of the 64 KB buffer; sendBuffer was 9 bytes short of the three temp buffers
+	// plus the header (81728 vs 81737); and not one of the four was ever deleted,
+	// leaking ~160 KB per call (~1.6 MB/s at a 10 Hz step).
+	//
+	// Now: two fixed buffers reused across calls, and the body is streamed out in
+	// TX_CHUNK_SIZE pieces, flushed at record boundaries. The receiver is record-
+	// framed and reads to total_msg_size, so it cannot observe where send() splits.
+	// Message size is unbounded; memory is constant and allocation-free (which is
+	// what the dSPACE/Simulink real-time targets need).
+	// =======================================================================
+	// txBuf is a member (see SocketHelper.h) -- reused, never on the stack.
+	int txLen = 0;
+
+	std::vector<VehFullData_t>&      vehs = Msg_c.VehDataSend_um[sock];
+	std::vector<TrafficLightData_t>& tlss = Msg_c.TlsDataSend_um[sock];
+	std::vector<TlsDetector_t>&      dets = Msg_c.DetDataSend_um[sock];
+
+	// --- pass 1: total size, so the 9-byte header can go out first --------------
+	// Uses the same field traversal as the pack calls below (NULL buffer = measure),
+	// so the declared total always matches the bytes actually written.
+	uint32_t totalMsgSize = MSG_HEADER_SIZE;
+	for (size_t iV = 0; iV < vehs.size(); iV++) totalMsgSize += Msg_c.vehRecordSize(vehs[iV]);
+	for (size_t iT = 0; iT < tlss.size(); iT++) totalMsgSize += Msg_c.tlsRecordSize(tlss[iT]);
+	for (size_t iD = 0; iD < dets.size(); iD++) totalMsgSize += Msg_c.detRecordSize(dets[iD]);
+
+	// --- pass 2: header, then records, flushing whenever the next may not fit ----
 	int iByte = 0;
+	Msg_c.packHeader(simStateSend, simTimeSend, totalMsgSize, txBuf, &iByte);
+	txLen = iByte;
 
-	// initialize send data buffer
-	//char tempVehDataBuffer[8096];
-	char* tempVehDataBuffer = new char[65536];
-	int tempVehDataByte = 0;
-
-	char* tempTlsDataBuffer = new char[8096];
-	int tempTlsDataByte = 0;
-
-	char* tempDetDataBuffer = new char[8096];
-	int tempDetDataByte = 0;
-
-	int sendMsgSize = 0;
-	char* sendBuffer = new char[81728];
-
-	// Pack vehicle and detector data
-	if (Msg_c.VehDataSend_um.size() > 0) {
-		for (size_t iV = 0; iV < Msg_c.VehDataSend_um[sock].size(); iV++) {
-			Msg_c.packVehData(Msg_c.VehDataSend_um[sock][iV], tempVehDataBuffer, &tempVehDataByte);
+	// Conservative guard: flush if a maximum-size record could not fit. Cheaper than
+	// measuring every record twice, and TX_CHUNK_SIZE >= MAX_RECORD_SIZE guarantees
+	// that after a flush there is always room for one.
+	//
+	// The reservation is the record's ACTUAL size, not a presumed maximum. A detector
+	// record carries a whole vector<DetectorData_t> (TlsDetector_t), so unlike a vehicle
+	// record it has no natural ceiling -- its size grows with the detector count at that
+	// intersection. Reserving a fixed guess per record would let a large one run past
+	// txBuf, so each is measured.
+	//
+	// MAX_RECORD_SIZE is the wire contract, not a buffer detail: a record above it is
+	// refused here rather than emitted, because a receiver would refuse it too. Both
+	// ends enforce the same number so neither sends what the other cannot accept.
+	#define FIXS_TX_FLUSH_IF_NEEDED(recBytes)                                            \
+		if ((recBytes) > MAX_RECORD_SIZE) {                                              \
+			fprintf(stderr, "FIXS #87: record of %d B exceeds MAX_RECORD_SIZE %d -- not" \
+			                " sent. A receiver could not accept it either; raise the"    \
+			                " constant on BOTH ends or split the record.\n",             \
+			        (int)(recBytes), (int)MAX_RECORD_SIZE);                              \
+			return -1;                                                                   \
+		}                                                                                \
+		if (txLen + (recBytes) > TX_CHUNK_SIZE) {                                      \
+			if (sendExact(sock, txBuf, txLen) < 0) {                                   \
+				fprintf(stderr, "FIXS #87: send() failed mid-message\n");              \
+				return -1;                                                             \
+			}                                                                          \
+			txLen = 0;                                                                 \
 		}
+
+	for (size_t iV = 0; iV < vehs.size(); iV++) {
+		FIXS_TX_FLUSH_IF_NEEDED(Msg_c.vehRecordSize(vehs[iV]));
+		Msg_c.packVehData(vehs[iV], txBuf, &txLen);
 	}
-
-	if (Msg_c.TlsDataSend_um.size() > 0) {
-		for (size_t iT = 0; iT < Msg_c.TlsDataSend_um[sock].size(); iT++) {
-			Msg_c.packTrafficLightData(Msg_c.TlsDataSend_um[sock][iT], tempTlsDataBuffer, &tempTlsDataByte);
-		}
+	for (size_t iT = 0; iT < tlss.size(); iT++) {
+		FIXS_TX_FLUSH_IF_NEEDED(Msg_c.tlsRecordSize(tlss[iT]));
+		Msg_c.packTrafficLightData(tlss[iT], txBuf, &txLen);
 	}
-
-	if (Msg_c.DetDataSend_um.size() > 0) {
-		for (size_t iD = 0; iD < Msg_c.DetDataSend_um[sock].size(); iD++) {
-			Msg_c.packDetectorData(Msg_c.DetDataSend_um[sock][iD], tempDetDataBuffer, &tempDetDataByte);
-		}
+	for (size_t iD = 0; iD < dets.size(); iD++) {
+		FIXS_TX_FLUSH_IF_NEEDED(Msg_c.detRecordSize(dets[iD]));
+		Msg_c.packDetectorData(dets[iD], txBuf, &txLen);
 	}
+	#undef FIXS_TX_FLUSH_IF_NEEDED
 
-	// pack header
-	Msg_c.packHeader(simStateSend, simTimeSend, MSG_HEADER_SIZE + tempVehDataByte + tempTlsDataByte + tempDetDataByte, sendBuffer, &iByte);
-	sendMsgSize = MSG_HEADER_SIZE;
-
-	// pack vehicle data
-	memcpy(sendBuffer + sendMsgSize, tempVehDataBuffer, tempVehDataByte);
-	sendMsgSize += tempVehDataByte;
-
-	// pack traffic light data
-	memcpy(sendBuffer + sendMsgSize, tempTlsDataBuffer, tempTlsDataByte);
-	sendMsgSize += tempTlsDataByte;
-
-	// pack detector data
-	memcpy(sendBuffer + sendMsgSize, tempDetDataBuffer, tempDetDataByte);
-	sendMsgSize += tempDetDataByte;
-
-	// send all vehicle and detector data
-	if (send(sock, sendBuffer, sendMsgSize, 0) != sendMsgSize) {
+	// --- final flush -------------------------------------------------------------
+	if (txLen > 0 && sendExact(sock, txBuf, txLen) < 0) {
 #ifdef WIN32
 		fprintf(stderr, "%s: %d\n", "send() failed", WSAGetLastError());
 #else
 		fprintf(stderr, "%s:\n", "send() failed");
 #endif
-		//exit(1);
 		return -1;
-	}
-
-
-	//if (tempVehDataByte[iEgo] > 0) {
-	if (tempVehDataByte > 0) {
-		//printf(" ====> sending: time %.1f #vehicles %d packet size %d\n", simTimeSend, (int)Msg_c.VehIdSend_v[iC].size(), sendMsgSize);
-	}
-	if (tempDetDataByte > 0) {
-
 	}
 
 	return 0;

@@ -1,21 +1,30 @@
 #pragma once
 
-// Stage B + multi-port routing entry point for the VISSIM
-// DrivingSimulatorProxy.dll coupling (issue #158). When
-// `VissimSetup.EnableDSProxy` is true in the config, mainTrafficLayer
-// dispatches to runDSProxyMode and exits when it returns.
+// Stage B+ entry point for the VISSIM DrivingSimulatorProxy.dll coupling
+// (issue #158). When `VissimSetup.EnableDSProxy` is true in the config,
+// mainTrafficLayer dispatches to runDSProxyMode and exits when it returns.
 //
-// This branch adds: multi-port subscription routing. The legacy single-
-// app-socket path becomes a list of AppSocketConfig entries built from
-// ApplicationSetup.VehicleSubscription[].port[]; each gets its own
-// publish filter (via publishesVehicle()).
+// Stage B+ scope: TrafficLayer drives VISSIM via DSProxy, publishes to
+// the app clients (CAV controller, CarMaker, observers), AND relays CAV
+// behavior commands down to the FIXS DriverModel via a second socket.
+// CAV controller sends per-vehicle speedDesired/accelerationDesired; TL
+// routes ego.Pose to DSProxy and non-ego.Intent to DriverModel.
+//
+// App-socket routing is multi-port: every (subscription, port) tuple in
+// ApplicationSetup.VehicleSubscription becomes its own AppSocketConfig
+// with its own server socket and its own outbound filter
+// (publishesVehicle); the legacy single-client path is the N=1 case.
+// That per-port filter in PHASE 3 is exactly the routing-table pattern
+// the XIL orchestrator refactor (#117) will formalize, so the per-port
+// loop body lifts into the orchestrator as a code-move.
 //
 // Per-tick tick flow follows the seven-phase canonical pattern documented
-// in doc/fixs_tick_flow.md — PHASES 1/2/7 are DSProxy adapter calls,
-// PHASES 3/4/5/6 use SocketHelper + MsgHelper. The per-port filter in
-// PHASE 3 is *exactly* the routing-table pattern the XIL orchestrator
-// refactor (#117) will formalize, so this branch's per-port loop body
-// lifts into the orchestrator as a code-move.
+// in doc/fixs_tick_flow.md. The DriverModel is treated as a second FIXS-
+// protocol endpoint — its PHASE 4 (TL→DM publish) and PHASE 5 (TL←DM
+// drain) use SocketHelper / MsgHelper identically to the app client.
+// From the future XIL orchestrator's pub/sub matrix view (#117), DM is
+// just another node with subscribes=[VehicleIntent] and publishes=[]
+// (we discard its state upload since DSProxy is canonical).
 //
 // Scope boundary: this file is the orchestrator for the DSProxy mode only.
 // If you're adding a different VISSIM integration mode (e.g., the legacy

@@ -23,6 +23,7 @@
     <ClCompile Include="..\..\CommonLib\MsgHelper.cpp" />
     <ClCompile Include="..\..\CommonLib\SocketHelper.cpp" />
     <ClCompile Include="..\..\CommonLib\TrafficHelper.cpp" />
+    <ClCompile Include="..\..\CommonLib\XilGuard.cpp" />
     <ClCompile Include="..\..\CommonLib\VissimDSProxyHelper.cpp" />
     <ClCompile Include="DSProxyMode.cpp" />
     <ClCompile Include="mainTrafficLayer.cpp" />
@@ -30,7 +31,6 @@
   <ItemGroup>
     <ClInclude Include="..\..\CommonLib\ConfigHelper.h" />
     <ClInclude Include="..\..\CommonLib\MsgHelper.h" />
-    <ClInclude Include="..\..\CommonLib\ryml_all.hpp" />
     <ClInclude Include="..\..\CommonLib\SocketHelper.h" />
     <ClInclude Include="..\..\CommonLib\TrafficHelper.h" />
     <ClInclude Include="..\..\CommonLib\VehDataMsgDefs.h" />
@@ -205,4 +205,9 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
+  <ItemDefinitionGroup Condition="'$(RS_DEBUG)'=='1'">
+    <ClCompile>
+      <PreprocessorDefinitions>RS_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+  </ItemDefinitionGroup>
 </Project>

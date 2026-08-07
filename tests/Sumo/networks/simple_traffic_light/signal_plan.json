@@ -1,0 +1,631 @@
+{
+  "int_center": {
+    "cycle": 90,
+    "offset": 0,
+    "nlinks": 15,
+    "groups": [
+      {
+        "sg": 1,
+        "states": [
+          "AMBER",
+          "GREEN",
+          "RED"
+        ],
+        "transitions": [
+          [
+            0,
+            "RED"
+          ],
+          [
+            45,
+            "GREEN"
+          ],
+          [
+            87,
+            "AMBER"
+          ]
+        ],
+        "members": [
+          {
+            "linkIndex": 0,
+            "road": "150",
+            "s": 289.6,
+            "t": -1.6,
+            "orient": "+",
+            "fromEdge": "center_N_in",
+            "fromLane": 0,
+            "dir": "r"
+          },
+          {
+            "linkIndex": 1,
+            "road": "150",
+            "s": 289.6,
+            "t": -1.6,
+            "orient": "+",
+            "fromEdge": "center_N_in",
+            "fromLane": 0,
+            "dir": "s"
+          },
+          {
+            "linkIndex": 2,
+            "road": "150",
+            "s": 289.6,
+            "t": -1.6,
+            "orient": "+",
+            "fromEdge": "center_N_in",
+            "fromLane": 0,
+            "dir": "l"
+          },
+          {
+            "linkIndex": 7,
+            "road": "152",
+            "s": 286.4,
+            "t": -1.6,
+            "orient": "+",
+            "fromEdge": "center_S_in",
+            "fromLane": 0,
+            "dir": "r"
+          },
+          {
+            "linkIndex": 8,
+            "road": "152",
+            "s": 286.4,
+            "t": -1.6,
+            "orient": "+",
+            "fromEdge": "center_S_in",
+            "fromLane": 0,
+            "dir": "s"
+          },
+          {
+            "linkIndex": 9,
+            "road": "152",
+            "s": 286.4,
+            "t": -1.6,
+            "orient": "+",
+            "fromEdge": "center_S_in",
+            "fromLane": 0,
+            "dir": "l"
+          }
+        ]
+      },
+      {
+        "sg": 2,
+        "states": [
+          "AMBER",
+          "GREEN",
+          "RED"
+        ],
+        "transitions": [
+          [
+            0,
+            "GREEN"
+          ],
+          [
+            42,
+            "AMBER"
+          ],
+          [
+            45,
+            "RED"
+          ]
+        ],
+        "members": [
+          {
+            "linkIndex": 3,
+            "road": "155",
+            "s": 385.6,
+            "t": -4.8,
+            "orient": "+",
+            "fromEdge": "corridor_ce_w",
+            "fromLane": 0,
+            "dir": "r"
+          },
+          {
+            "linkIndex": 4,
+            "road": "155",
+            "s": 385.6,
+            "t": -4.8,
+            "orient": "+",
+            "fromEdge": "corridor_ce_w",
+            "fromLane": 0,
+            "dir": "s"
+          },
+          {
+            "linkIndex": 5,
+            "road": "155",
+            "s": 385.6,
+            "t": -1.6,
+            "orient": "+",
+            "fromEdge": "corridor_ce_w",
+            "fromLane": 1,
+            "dir": "s"
+          },
+          {
+            "linkIndex": 6,
+            "road": "155",
+            "s": 385.6,
+            "t": -1.6,
+            "orient": "+",
+            "fromEdge": "corridor_ce_w",
+            "fromLane": 1,
+            "dir": "l"
+          },
+          {
+            "linkIndex": 10,
+            "road": "160",
+            "s": 385.6,
+            "t": -8.0,
+            "orient": "+",
+            "fromEdge": "corridor_wc_e",
+            "fromLane": 0,
+            "dir": "r"
+          },
+          {
+            "linkIndex": 11,
+            "road": "160",
+            "s": 385.6,
+            "t": -8.0,
+            "orient": "+",
+            "fromEdge": "corridor_wc_e",
+            "fromLane": 0,
+            "dir": "s"
+          },
+          {
+            "linkIndex": 12,
+            "road": "160",
+            "s": 385.6,
+            "t": -4.8,
+            "orient": "+",
+            "fromEdge": "corridor_wc_e",
+            "fromLane": 1,
+            "dir": "s"
+          },
+          {
+            "linkIndex": 13,
+            "road": "160",
+            "s": 385.6,
+            "t": -1.6,
+            "orient": "+",
+            "fromEdge": "corridor_wc_e",
+            "fromLane": 2,
+            "dir": "s"
+          },
+          {
+            "linkIndex": 14,
+            "road": "160",
+            "s": 385.6,
+            "t": -1.6,
+            "orient": "+",
+            "fromEdge": "corridor_wc_e",
+            "fromLane": 2,
+            "dir": "l"
+          }
+        ]
+      }
+    ]
+  },
+  "int_east": {
+    "cycle": 90,
+    "offset": 0,
+    "nlinks": 14,
+    "groups": [
+      {
+        "sg": 1,
+        "states": [
+          "AMBER",
+          "GREEN",
+          "RED"
+        ],
+        "transitions": [
+          [
+            0,
+            "RED"
+          ],
+          [
+            50,
+            "GREEN"
+          ],
+          [
+            87,
+            "AMBER"
+          ]
+        ],
+        "members": [
+          {
+            "linkIndex": 0,
+            "road": "162",
+            "s": 286.4,
+            "t": -1.6,
+            "orient": "+",
+            "fromEdge": "east_N_in",
+            "fromLane": 0,
+            "dir": "r"
+          },
+          {
+            "linkIndex": 1,
+            "road": "162",
+            "s": 286.4,
+            "t": -1.6,
+            "orient": "+",
+            "fromEdge": "east_N_in",
+            "fromLane": 0,
+            "dir": "s"
+          },
+          {
+            "linkIndex": 2,
+            "road": "162",
+            "s": 286.4,
+            "t": -1.6,
+            "orient": "+",
+            "fromEdge": "east_N_in",
+            "fromLane": 0,
+            "dir": "l"
+          },
+          {
+            "linkIndex": 7,
+            "road": "164",
+            "s": 286.4,
+            "t": -1.6,
+            "orient": "+",
+            "fromEdge": "east_S_in",
+            "fromLane": 0,
+            "dir": "r"
+          },
+          {
+            "linkIndex": 8,
+            "road": "164",
+            "s": 286.4,
+            "t": -1.6,
+            "orient": "+",
+            "fromEdge": "east_S_in",
+            "fromLane": 0,
+            "dir": "s"
+          },
+          {
+            "linkIndex": 9,
+            "road": "164",
+            "s": 286.4,
+            "t": -1.6,
+            "orient": "+",
+            "fromEdge": "east_S_in",
+            "fromLane": 0,
+            "dir": "l"
+          }
+        ]
+      },
+      {
+        "sg": 2,
+        "states": [
+          "AMBER",
+          "GREEN",
+          "RED"
+        ],
+        "transitions": [
+          [
+            0,
+            "GREEN"
+          ],
+          [
+            38,
+            "AMBER"
+          ],
+          [
+            41,
+            "RED"
+          ]
+        ],
+        "members": [
+          {
+            "linkIndex": 3,
+            "road": "156",
+            "s": 112.80944994,
+            "t": -8.0,
+            "orient": "+",
+            "fromEdge": "corridor_e_in",
+            "fromLane": 0,
+            "dir": "r"
+          },
+          {
+            "linkIndex": 4,
+            "road": "156",
+            "s": 112.80944994,
+            "t": -8.0,
+            "orient": "+",
+            "fromEdge": "corridor_e_in",
+            "fromLane": 0,
+            "dir": "s"
+          },
+          {
+            "linkIndex": 5,
+            "road": "156",
+            "s": 112.80944994,
+            "t": -4.8,
+            "orient": "+",
+            "fromEdge": "corridor_e_in",
+            "fromLane": 1,
+            "dir": "s"
+          },
+          {
+            "linkIndex": 10,
+            "road": "154",
+            "s": 385.6,
+            "t": -8.0,
+            "orient": "+",
+            "fromEdge": "corridor_ce_e",
+            "fromLane": 0,
+            "dir": "r"
+          },
+          {
+            "linkIndex": 11,
+            "road": "154",
+            "s": 385.6,
+            "t": -8.0,
+            "orient": "+",
+            "fromEdge": "corridor_ce_e",
+            "fromLane": 0,
+            "dir": "s"
+          },
+          {
+            "linkIndex": 12,
+            "road": "154",
+            "s": 385.6,
+            "t": -4.8,
+            "orient": "+",
+            "fromEdge": "corridor_ce_e",
+            "fromLane": 1,
+            "dir": "s"
+          }
+        ]
+      },
+      {
+        "sg": 3,
+        "states": [
+          "AMBER",
+          "GREEN",
+          "RED"
+        ],
+        "transitions": [
+          [
+            0,
+            "GREEN"
+          ],
+          [
+            47,
+            "AMBER"
+          ],
+          [
+            50,
+            "RED"
+          ]
+        ],
+        "members": [
+          {
+            "linkIndex": 6,
+            "road": "156",
+            "s": 112.80944994,
+            "t": -1.6,
+            "orient": "+",
+            "fromEdge": "corridor_e_in",
+            "fromLane": 2,
+            "dir": "l"
+          },
+          {
+            "linkIndex": 13,
+            "road": "154",
+            "s": 385.6,
+            "t": -1.6,
+            "orient": "+",
+            "fromEdge": "corridor_ce_e",
+            "fromLane": 2,
+            "dir": "l"
+          }
+        ]
+      }
+    ]
+  },
+  "int_west": {
+    "cycle": 90,
+    "offset": 0,
+    "nlinks": 15,
+    "groups": [
+      {
+        "sg": 1,
+        "states": [
+          "AMBER",
+          "GREEN",
+          "RED"
+        ],
+        "transitions": [
+          [
+            0,
+            "RED"
+          ],
+          [
+            45,
+            "GREEN"
+          ],
+          [
+            87,
+            "AMBER"
+          ]
+        ],
+        "members": [
+          {
+            "linkIndex": 0,
+            "road": "172",
+            "s": 289.6,
+            "t": -1.6,
+            "orient": "+",
+            "fromEdge": "west_N_in",
+            "fromLane": 0,
+            "dir": "r"
+          },
+          {
+            "linkIndex": 1,
+            "road": "172",
+            "s": 289.6,
+            "t": -1.6,
+            "orient": "+",
+            "fromEdge": "west_N_in",
+            "fromLane": 0,
+            "dir": "s"
+          },
+          {
+            "linkIndex": 2,
+            "road": "172",
+            "s": 289.6,
+            "t": -1.6,
+            "orient": "+",
+            "fromEdge": "west_N_in",
+            "fromLane": 0,
+            "dir": "l"
+          },
+          {
+            "linkIndex": 7,
+            "road": "174",
+            "s": 286.4,
+            "t": -1.6,
+            "orient": "+",
+            "fromEdge": "west_S_in",
+            "fromLane": 0,
+            "dir": "r"
+          },
+          {
+            "linkIndex": 8,
+            "road": "174",
+            "s": 286.4,
+            "t": -1.6,
+            "orient": "+",
+            "fromEdge": "west_S_in",
+            "fromLane": 0,
+            "dir": "s"
+          },
+          {
+            "linkIndex": 9,
+            "road": "174",
+            "s": 286.4,
+            "t": -1.6,
+            "orient": "+",
+            "fromEdge": "west_S_in",
+            "fromLane": 0,
+            "dir": "l"
+          }
+        ]
+      },
+      {
+        "sg": 2,
+        "states": [
+          "AMBER",
+          "GREEN",
+          "RED"
+        ],
+        "transitions": [
+          [
+            0,
+            "GREEN"
+          ],
+          [
+            42,
+            "AMBER"
+          ],
+          [
+            45,
+            "RED"
+          ]
+        ],
+        "members": [
+          {
+            "linkIndex": 3,
+            "road": "161",
+            "s": 385.6,
+            "t": -4.8,
+            "orient": "+",
+            "fromEdge": "corridor_wc_w",
+            "fromLane": 0,
+            "dir": "r"
+          },
+          {
+            "linkIndex": 4,
+            "road": "161",
+            "s": 385.6,
+            "t": -4.8,
+            "orient": "+",
+            "fromEdge": "corridor_wc_w",
+            "fromLane": 0,
+            "dir": "s"
+          },
+          {
+            "linkIndex": 5,
+            "road": "161",
+            "s": 385.6,
+            "t": -1.6,
+            "orient": "+",
+            "fromEdge": "corridor_wc_w",
+            "fromLane": 1,
+            "dir": "s"
+          },
+          {
+            "linkIndex": 6,
+            "road": "161",
+            "s": 385.6,
+            "t": -1.6,
+            "orient": "+",
+            "fromEdge": "corridor_wc_w",
+            "fromLane": 1,
+            "dir": "l"
+          },
+          {
+            "linkIndex": 10,
+            "road": "158",
+            "s": 112.80944994,
+            "t": -8.0,
+            "orient": "+",
+            "fromEdge": "corridor_w_in",
+            "fromLane": 0,
+            "dir": "r"
+          },
+          {
+            "linkIndex": 11,
+            "road": "158",
+            "s": 112.80944994,
+            "t": -8.0,
+            "orient": "+",
+            "fromEdge": "corridor_w_in",
+            "fromLane": 0,
+            "dir": "s"
+          },
+          {
+            "linkIndex": 12,
+            "road": "158",
+            "s": 112.80944994,
+            "t": -4.8,
+            "orient": "+",
+            "fromEdge": "corridor_w_in",
+            "fromLane": 1,
+            "dir": "s"
+          },
+          {
+            "linkIndex": 13,
+            "road": "158",
+            "s": 112.80944994,
+            "t": -1.6,
+            "orient": "+",
+            "fromEdge": "corridor_w_in",
+            "fromLane": 2,
+            "dir": "s"
+          },
+          {
+            "linkIndex": 14,
+            "road": "158",
+            "s": 112.80944994,
+            "t": -1.6,
+            "orient": "+",
+            "fromEdge": "corridor_w_in",
+            "fromLane": 2,
+            "dir": "l"
+          }
+        ]
+      }
+    ]
+  }
+}

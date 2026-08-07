@@ -69,6 +69,8 @@ The interface runs the connections to different software, simulators by itself t
 
 By default the executable looks for the SUMO runtime under `CommonLib/libsumo/bin` relative to the repository. When running from `TrafficLayer/x64/<Config>` or `build`, keep that folder with the executable or set `SumoSetup.RuntimeLibraryPath` in the configuration file.
 
+`CommonLib/libsumo` is **not** checked into git — it is fetched during first-run setup (`scripts\initialize_fixs.ps1`, also run automatically by `dispatch.bat`). If the directory is missing, run that first. See [doc/BUILD.md — First-Run Setup](doc/BUILD.md#first-run-setup-fresh-clone).
+
 **NOTE: below is still experimental features and only applies to SUMO for now.**
 There are different mode of synchronization and opeartion of the Real-Sim interface. The **SimulationMode** parameter is an integer with each bit as the followings:
 - bit 2, bit 1, bit 0: 

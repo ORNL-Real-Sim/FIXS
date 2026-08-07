@@ -1,3 +1,23 @@
+# ============================================================
+# build_sumo_executables.ps1 - Standalone Utility Script
+# ============================================================
+# PURPOSE: Build SUMO executables (sumo.exe, sumo-gui.exe, etc.) from source.
+#          Reads the SUMO version from dependencies.yaml, clones the SUMO
+#          repository if needed, and builds the full SUMO application suite.
+#
+# NOTE: This script is NOT called by dispatch.bat. It is a standalone utility
+#       used when you need to build or update the SUMO executables themselves
+#       (as opposed to libsumo DLLs). Most developers will use pre-built SUMO
+#       releases; this script is only needed when building SUMO from source.
+#
+# USAGE:
+#   powershell -ExecutionPolicy Bypass -File scripts\build_sumo_executables.ps1
+#   powershell -ExecutionPolicy Bypass -File scripts\build_sumo_executables.ps1 -DryRun
+#   powershell -ExecutionPolicy Bypass -File scripts\build_sumo_executables.ps1 -Configuration Debug
+#
+# PREREQUISITES: Visual Studio 2022 with C++ workload, CMake, vcpkg
+# ============================================================
+
 # Script to build SUMO executables (sumo.exe, sumo-gui.exe, etc.) from source
 # Reads version from dependencies.yaml, clones SUMO if needed, and builds executables
 
