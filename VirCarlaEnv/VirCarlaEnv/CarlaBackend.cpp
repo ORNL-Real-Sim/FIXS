@@ -158,8 +158,34 @@ void CarlaBackend::auditZAlignment() {
 }
 
 void CarlaBackend::flushBatch() {
-    if (client_) client_->ApplyBatch(batch_, false);
+    // ApplyBatchSync, not ApplyBatch. ApplyBatch is AsyncCall -- it hands the
+    // commands to the socket and returns without waiting for the server to apply
+    // them. The very next thing the loop does is world.Tick(), so the bridge was
+    // racing its own message: when the tick won, the frame rendered every mirrored
+    // vehicle at its PREVIOUS pose while the spectator -- placed from the pose we
+    // just commanded -- had already moved on. Measured on mlk_eco_driving at
+    // CarlaTimeStep 0.1: the ego actor was one full step (0.290 m) behind the
+    // camera on 29% of ticks, and its per-tick motion alternated 0.000 / 0.582 m
+    // instead of a steady 0.291. That is the followed vehicle visibly shuddering
+    // back and forth against a smooth camera.
+    //
+    // The rate tracks how often a batch is in flight when the tick fires:
+    //   tick 0.025, refresh 0.1  (batch every 4th tick)   0.5% of frames
+    //   tick 0.025, refresh 0.025 (batch every tick)      9.0%
+    //   tick 0.1,   refresh 0.1   (batch every tick)     29.0%
+    //
+    // Sync keeps the batching win that matters -- one RPC for ~180 vehicles
+    // instead of 180 -- and gives up only the round-trip. The server-side work is
+    // not extra: those transforms have to be applied before the tick regardless.
+    // It also feeds the interested-id readback below, which reports the actor's
+    // transform back to FIXS: a stale actor there is not a cosmetic problem, it
+    // sends a pose one step old and a differenced velocity of 0 then 2x.
+    if (client_) client_->ApplyBatchSync(batch_, false);
     batch_.clear();
+}
+
+void CarlaBackend::queueTransform(carla::rpc::ActorId id, const carla::geom::Transform& tf) {
+    batch_.push_back(carla::rpc::Command::ApplyTransform(id, tf));
 }
 
 void CarlaBackend::syncTrafficLight(const std::string& junctionId, const std::string& stateStr) {
