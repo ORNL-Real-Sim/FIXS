@@ -8,8 +8,8 @@ Windows and Linux.
 
 The very first time this runs on a fresh clone there is no saved config, so it
 auto-invokes carla_env_setup.run_setup() to ask which CARLA to use and remember
-it; every run afterwards is seamless. To switch CARLA later, run carla_env_setup.py
-(or setup_carla.bat / setup_carla.sh), or pass --reconfigure here.
+it; every run afterwards is seamless. To switch CARLA later, run
+`python carla_env_setup.py`, or pass --reconfigure here.
 
 Examples:
   # first run prompts for CARLA, then launches and runs; later runs are seamless:

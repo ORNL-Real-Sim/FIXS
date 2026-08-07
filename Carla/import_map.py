@@ -1958,10 +1958,10 @@ def resolve_map_source(repo=None, tag_prefix=None):
 
 
 def main():
-    # First act: get onto the interpreter carla.json names. import_map.sh/.bat are
-    # `exec python import_map.py`, so without this the cook runs under whatever
-    # python is on PATH - a different env than the one run_cosim uses, from the same
-    # machine and the same config.
+    # First act: get onto the interpreter carla.json names. This is started as
+    # `python Carla/import_map.py` from whatever shell the user has open, so without
+    # this the cook runs under whatever python is on PATH - a different env than the
+    # one run_cosim uses, from the same machine and the same config.
     env.reexec_under_configured(__file__, tag="import")
 
     ap = argparse.ArgumentParser(description=__doc__,
