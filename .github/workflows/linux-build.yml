@@ -3,13 +3,20 @@ name: Linux build (TrafficLayer)
 # Portability gate for #65. Compiles, links and smoke-tests TrafficLayer on
 # Linux, alongside (not instead of) the Windows MSBuild job in release.yml.
 #
-# Distro choice: 20.04 and 22.04 per the issue's scope. Both run as `container:`
-# rather than `runs-on:` images -- ubuntu-20.04 was retired from hosted runners
-# in 2025 and is only reachable as a container, and pinning both the same way
-# keeps the toolchain (glibc/gcc) determined by the image instead of by whatever
-# GitHub currently ships. 20.04 is also the artifact-worthy one: glibc is
-# forward-incompatible only, so a binary built on focal's 2.31 runs on jammy,
-# not the other way round.
+# Distro choice: 20.04, 22.04 and 24.04, all as `container:` rather than
+# `runs-on:` images -- ubuntu-20.04 was retired from hosted runners in 2025 and
+# is only reachable as a container, and pinning them all the same way keeps the
+# toolchain (glibc/gcc) determined by the image instead of by whatever GitHub
+# currently ships.
+#
+# 20.04 is the artifact-worthy leg: glibc is forward-incompatible only, so a
+# binary built on focal's 2.31 runs on jammy and noble, not the other way round.
+#
+# 24.04 earns its place by catching what the older two cannot. gcc 13 dropped a
+# pile of transitive includes, so a header that uses uint32_t without including
+# <cstdint> compiles on gcc 9/11 and MSVC and fails only here -- exactly the bug
+# it caught on its first run (VehDataMsgDefs.h). Compile coverage, not new
+# users: 24.04 users can already run the focal binary.
 #
 # NOT covered here: VirCarlaEnv (its libcarla client toolchain is a separate
 # piece of work) and any Carla runtime (needs a GPU, out of reach for hosted CI).
@@ -43,6 +50,9 @@ jobs:
           - name: ubuntu-22.04 (jammy, glibc 2.35, gcc 11)
             image: ubuntu:22.04
             slug: jammy
+          - name: ubuntu-24.04 (noble, glibc 2.39, gcc 13)
+            image: ubuntu:24.04
+            slug: noble
 
     steps:
       - name: Install toolchain
