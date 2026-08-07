@@ -93,11 +93,37 @@ jobs:
             echo "should_build=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Checkout (full history for git describe; no private submodule)
+      # fetch-depth: 0 is mandatory - `git describe --match 'v[0-9]*'` (below, and
+      # in generate_version.ps1) needs every commit and tag to find the nearest
+      # version ancestor. What it does NOT need is the file *contents* of those
+      # commits, and that is where the ~1 GB went: ~2.5 GiB of historical blob
+      # versions (deleted CM*_proj trees, a committed .venv, old build outputs)
+      # that no build step ever opens. #255.
+      #   filter: blob:none  -> fetch commits + trees, but no blobs up front; git
+      #                         lazily fetches only the blobs actually read. History
+      #                         stays complete, so git describe is unaffected.
+      #   sparse-checkout    -> HEAD is 231 MiB, but tests/ (197 MiB) and doc/
+      #                         (21 MiB) are 218 MiB of that and are never read by
+      #                         scripts/dispatch/dispatch.bat or 8_create_zip.ps1 -
+      #                         the same two directories the detect step above
+      #                         already ignores. Measured: excluding them takes the
+      #                         working tree from 231 MiB to 13 MiB. (CommonLib/
+      #                         YAMLMatlab/Tests is NOT affected - it lives under
+      #                         CommonLib/, which stays.)
+      #                         cone-mode must be off: cone mode can only express
+      #                         "include these", not "everything except these".
+      # Mirrors the fix PR #240 applied to bundle-guard.yml (24 min -> 1 s there).
+      - name: Checkout (full history for git describe; blobs on demand)
         if: steps.detect.outputs.should_build == 'true'
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          filter: blob:none
+          sparse-checkout: |
+            /*
+            !/tests/
+            !/doc/
+          sparse-checkout-cone-mode: false
           submodules: false
 
       - name: Add MSBuild to PATH
