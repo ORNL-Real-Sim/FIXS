@@ -7,6 +7,7 @@
 //#include <event2/util.h>
 //#include <event2/event.h>
 
+#include <cstdint>   // #65: uint8_t in sendData(); don't rely on a transitive include
 #include "MsgHelper.h"
 
 #ifndef WIN32
