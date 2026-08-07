@@ -8,7 +8,16 @@ per-app one-click import_*.bat / .sh wrappers.
 
 A map "package" is the `<name>.json` descriptor plus its fbx/xodr/fbm asset
 folder. This helper makes sure that package is staged under <carla_root>/Import,
-then runs the cook. The package is sourced, in order:
+then runs the cook.
+
+A raw RoadRunner export is accepted too: it ships no `<name>.json`, so one is
+generated from its filenames, and its geometry is renamed to the map name you
+are importing as (see generate_descriptor). That way `--package mlk_no_signal`
+cooks `mlk_no_signal` whether the export inside was called `MLK_no_signal_0805`
+or anything else, and next month's re-export lands on the same map rather than a
+new one.
+
+The package is sourced, in order:
   --pick-release        list the repo's map releases and prompt which VERSION to
                         import, then download it via gh (needs gh; no URL/version
                         to hand-maintain - you pick from what's published), or
@@ -248,21 +257,34 @@ def _try_gh_download(package_url):
 def _select_package(name, package_url):
     """Let the user point at a package they downloaded by hand - a native file
     picker, falling back to a typed path. This is the portable path: no GitHub
-    CLI / auth needed, just browser access to the release."""
+    CLI / auth needed, just browser access to the release.
+
+    Asks zip-or-folder first, because the two need different dialogs and
+    askopenfilename cannot select a directory. Everything downstream already
+    accepts a folder (_stage_from_path copies a tree); only this dialog could not
+    offer one, which made the picker's "select a local .zip / folder" a half
+    truth - a typed path was the sole way to hand it a raw extracted export."""
     print(f"\n[import] Select the downloaded '{name}' map package.")
     if package_url:
         print("[import] If you don't have it yet, download it (browser is fine - "
               "you need access to the release):")
         print(f"             {package_url}")
+    folder = sys.stdin.isatty() and _prompt(
+        "[import] Is it a .zip or an extracted folder? "
+        "[Z = zip, F = folder, Enter = zip]: ").strip().lower().startswith("f")
     try:
         import tkinter as tk
         from tkinter import filedialog
         root = tk.Tk()
         root.withdraw()
         root.update()
-        path = filedialog.askopenfilename(
-            title=f"Select the downloaded {name} package (.zip)",
-            filetypes=[("Zip archives", "*.zip"), ("All files", "*.*")])
+        if folder:
+            path = filedialog.askdirectory(
+                title=f"Select the extracted {name} package folder")
+        else:
+            path = filedialog.askopenfilename(
+                title=f"Select the downloaded {name} package (.zip)",
+                filetypes=[("Zip archives", "*.zip"), ("All files", "*.*")])
         root.destroy()
         if path:
             return path
@@ -299,17 +321,147 @@ def _has_descriptor(src):
     return False
 
 
-def _tile_xy(fbx_name, map_name):
-    """(x, y) parsed from a strict `<map_name>_Tile_<x>_<y>.fbx`, else None.
+def _tile_split(fbx_name):
+    """(stem, x, y) parsed from a strict `<stem>_Tile_<x>_<y>.fbx`, else None.
 
     Strict on purpose: CARLA reads the streaming-grid index off the last two
     underscore tokens of the tile name (LoadAssetMaterialsCommandlet.cpp), so a
     loose `<map>_Tile_0_0_final.fbx` would silently cook as tile (0,0) and
-    collide. Anything not exactly `<map>_Tile_<int>_<int>.fbx` is not a tile we
-    own - the caller warns about it rather than guessing."""
-    stem = fbx_name[:-4] if fbx_name.lower().endswith(".fbx") else fbx_name
-    m = re.fullmatch(re.escape(map_name) + r"_Tile_(\d+)_(\d+)", stem)
-    return (int(m.group(1)), int(m.group(2))) if m else None
+    collide. Anything not exactly `<stem>_Tile_<int>_<int>.fbx` is not a tile -
+    the caller warns about it rather than guessing.
+
+    Returns the stem too, so a tile set can be recognised without knowing its
+    name in advance: a raw export names its tiles after itself, not after the
+    map we are about to cook."""
+    if not fbx_name.lower().endswith(".fbx"):
+        return None
+    m = re.fullmatch(r"(.+)_Tile_(\d+)_(\d+)", fbx_name[:-4])
+    return (m.group(1), int(m.group(2)), int(m.group(3))) if m else None
+
+
+def _find_export(scan_root, map_name):
+    """(asset_dir, stem) of the RoadRunner export staged under `scan_root`, where
+    `stem` is the name the export gave itself - the stem of its `.xodr`.
+
+    Discovered, never assumed. A RoadRunner export carries the author's working
+    name (`MLK_no_signal_0805`, `JC_Newest_Ver_MLK_noped1002_final_debug`), which
+    is essentially never the name the map should be cooked under, so requiring
+    `<map_name>.xodr` here just fails on every real export.
+
+    One package holds one map. That is the rule for a Digital-Twin-Library bundle
+    and for a folder picked by hand, and a tiled map is still one map - so a
+    second .xodr is not a choice to offer, it is a packaging mistake to report.
+    Both shapes of it land on the same destination anyway: this import is headed
+    for a single `/Game/<pkg>/Maps/<map_name>`, which two maps would overwrite in
+    turn."""
+    hits = []
+    for root, _dirs, files in os.walk(scan_root):
+        for f in sorted(files):
+            if f.lower().endswith(".xodr"):
+                hits.append((root, f[:-5]))
+    if not hits:
+        sys.exit(f"[import] cannot describe '{map_name}': no .xodr under {scan_root}. "
+                 f"A raw RoadRunner export must ship its OpenDRIVE road network "
+                 f"(<export>.xodr) beside its <export>.fbx.")
+    if len(hits) == 1:
+        return hits[0]
+
+    rel = lambda h: os.path.relpath(os.path.join(h[0], h[1] + ".xodr"), scan_root)
+    what = (f"{hits[0][1]}.xodr is staged in {len(hits)} places (staged more than once?)"
+            if len({h[1] for h in hits}) == 1 else
+            f"{len(hits)} maps are staged here, and one package holds one map")
+    where = "\n".join(f"             {rel(h)}" for h in sorted(hits))
+    sys.exit(f"[import] cannot describe '{map_name}': {what}. Keep one, so a single "
+             f"descriptor maps to a single destination:\n{where}")
+
+
+def _export_fbx(asset_dir, stem):
+    """(source_fbx, [tile_fbx, ...]) - bare filenames - for the export `stem` in
+    `asset_dir`. Exactly one of the two is populated: a map is single-source or
+    tiled, never both.
+
+    Normally the fbx is named after the .xodr - that is what RoadRunner writes.
+    When it is not, one-map-per-package (_find_export) still identifies it: a
+    lone .fbx, or a single tile set, can only be this map's geometry. It is taken
+    with a WARNING rather than silently, because a stem mismatch usually means
+    the package was assembled by hand, and the one .fbx staged might be scenery
+    rather than the road network - which the cook would not catch.
+
+    Several unrelated .fbx (a RoadRunner layer-split export) cannot be resolved
+    that way, so it is reported: cooking the wrong layer as the whole map only
+    shows up after the cook, and the fix belongs in the package."""
+    fbx = sorted(f for f in os.listdir(asset_dir) if f.lower().endswith(".fbx"))
+    single = stem + ".fbx" if stem + ".fbx" in fbx else None
+    tiles = [f for f in fbx if (_tile_split(f) or (None,))[0] == stem]
+    if single and tiles:
+        sys.exit(f"[import] cannot describe '{stem}': both {stem}.fbx and "
+                 f"{stem}_Tile_*.fbx are present - a map is single-source or tiled, "
+                 f"not both.")
+    if single or tiles:
+        return single, tiles
+    if not fbx:
+        sys.exit(f"[import] cannot describe '{stem}': found {stem}.xodr but no .fbx "
+                 f"beside it in {asset_dir}.")
+
+    # The .xodr and the .fbx were named apart.
+    plain = [f for f in fbx if _tile_split(f) is None]
+    prefixes = sorted({t[0] for t in (_tile_split(f) for f in fbx) if t})
+    if len(prefixes) == 1 and not plain:
+        chosen = [f for f in fbx if _tile_split(f)[0] == prefixes[0]]
+        print(f"[import] warning: {stem}.xodr has no {stem}_Tile_<x>_<y>.fbx. Taking "
+              f"the only tile set staged, {prefixes[0]}_Tile_*.fbx ({len(chosen)} "
+              f"tiles) - check that is this map's geometry.")
+        return None, chosen
+    if len(plain) == 1 and not prefixes:
+        print(f"[import] warning: {stem}.xodr has no {stem}.fbx. Taking the only "
+              f"geometry staged, {plain[0]} - check that is this map's road network "
+              f"and not, say, scenery.")
+        return plain[0], []
+    listed = "\n".join(f"             {f}" for f in fbx)
+    sys.exit(f"[import] cannot describe '{stem}': {stem}.xodr has no {stem}.fbx or "
+             f"{stem}_Tile_<x>_<y>.fbx, and several geometries could be it:\n{listed}\n"
+             f"         One package holds one map: name the .fbx after the .xodr, or "
+             f"stage only that map's geometry.")
+
+
+def _rename_export(asset_dir, stem, map_name, source, tiles):
+    """Rename the staged export's geometry from `stem` to `map_name`, in place.
+    Returns (source, tiles) under their new names.
+
+    Why rename rather than name the map after the export: the cook writes the
+    walker navmesh as `Maps/<name>/Nav/<fbx_stem>.bin` (CARLA's
+    Util/BuildTools/Import.py build_binary_for_navigation), while at runtime
+    FNavigationMesh::Load asks for `<MapName>.bin` - so geometry whose stem is
+    not the map name costs that map its pedestrian navigation, silently. Keeping
+    package == map == umap == fbx stem also keeps a re-export importable under
+    the SAME name, so run profiles, app manifests and the library catalog keep
+    resolving instead of orphaning on every export date.
+
+    Only the .fbx moves. CARLA copies the .xodr to `<name>.xodr` itself, and the
+    .geojson / .rrdata.xml stay put so Import/<map_name>/ still shows which
+    export it came from. A sibling `<stem>.fbm` (embedded textures - normally
+    created by the importer, occasionally shipped) moves with its .fbx so the
+    pair cannot drift."""
+    def move(old, new):
+        if old == new:
+            return new
+        src, dst = os.path.join(asset_dir, old), os.path.join(asset_dir, new)
+        if os.path.exists(dst):
+            sys.exit(f"[import] cannot rename {old} -> {new}: {new} already exists in "
+                     f"{asset_dir}. Stage this export on its own.")
+        os.rename(src, dst)
+        fbm = os.path.join(asset_dir, old[:-4] + ".fbm")
+        if os.path.isdir(fbm):
+            os.rename(fbm, os.path.join(asset_dir, new[:-4] + ".fbm"))
+        return new
+
+    if source:
+        source = move(source, map_name + ".fbx")
+    tiles = [move(t, f"{map_name}_Tile_{xy[1]}_{xy[2]}.fbx")
+             for t, xy in ((t, _tile_split(t)) for t in tiles)]
+    print(f"[import] renamed the export geometry '{stem}' -> '{map_name}' so the cooked "
+          f"map, its assets and its navmesh all answer to one name.")
+    return source, tiles
 
 
 def _tile_size(asset_dir):
@@ -341,58 +493,53 @@ def generate_descriptor(import_dir, map_name):
     Import/<map_name>/, so that subtree is scanned - never the shared Import/
     root. Returns the descriptor path.
 
-    Resolve, never guess: exit loudly when the export cannot be described - no
-    <map_name>.xodr staged, the same map staged in two places, or an .xodr with
-    neither a <map_name>.fbx nor <map_name>_Tile_<x>_<y>.fbx beside it."""
+    The export names itself and we rename to match. RoadRunner writes the
+    author's working name, so nothing here may assume `<map_name>.xodr` exists:
+    _find_export discovers the export, _rename_export renames its geometry to
+    `map_name`, and the descriptor is written under that single name. Cooking
+    under the export's own name instead would make every re-export a *different*
+    CARLA map and orphan the run profiles, app manifests and catalog entries
+    pointing at the old one - and would break the walker navmesh (_rename_export).
+
+    Resolve or report, never guess. One package holds one map (a tiled map is
+    still one map), so anything that breaks that rule - no .xodr, several .xodr,
+    geometry that cannot be tied to the road network - is a packaging mistake
+    named on the spot rather than a prompt or a coin flip."""
     import json
 
     subtree = os.path.join(import_dir, map_name)
     scan_root = subtree if os.path.isdir(subtree) else import_dir
-    # Exactly one <map_name>.xodr is expected in the staged subtree; walk it to
-    # also cover an export that carried its own inner folder.
-    xodr_dirs = [root for root, _dirs, files in os.walk(scan_root)
-                 if map_name + ".xodr" in files]
-    if not xodr_dirs:
-        sys.exit(f"[import] cannot describe '{map_name}': no {map_name}.xodr under "
-                 f"{scan_root}. A raw RoadRunner export must be named after the map "
-                 f"({map_name}.xodr + {map_name}.fbx or {map_name}_Tile_<x>_<y>.fbx).")
-    if len(xodr_dirs) > 1:
-        where = "\n".join(f"             {os.path.relpath(d, import_dir)}"
-                          for d in sorted(xodr_dirs))
-        sys.exit(f"[import] cannot describe '{map_name}': {map_name}.xodr is staged "
-                 f"in {len(xodr_dirs)} places (staged more than once?). Keep one so a "
-                 f"single descriptor maps to a single destination:\n{where}")
+    asset_dir, stem = _find_export(scan_root, map_name)
+    source, tiles = _export_fbx(asset_dir, stem)
+    if stem != map_name:
+        source, tiles = _rename_export(asset_dir, stem, map_name, source, tiles)
 
-    asset_dir = xodr_dirs[0]
-    rel = lambda p: os.path.relpath(p, import_dir).replace(os.sep, "/")
-    single = os.path.join(asset_dir, map_name + ".fbx")
-    tiles = sorted(os.path.join(asset_dir, f) for f in os.listdir(asset_dir)
-                   if _tile_xy(f, map_name) is not None)
-    if os.path.isfile(single) and tiles:
-        sys.exit(f"[import] cannot describe '{map_name}': both {map_name}.fbx and "
-                 f"{map_name}_Tile_*.fbx present - a map is single-source or tiled, "
-                 f"not both.")
-
+    rel = lambda f: os.path.relpath(os.path.join(asset_dir, f),
+                                    import_dir).replace(os.sep, "/")
     entry = {"name": map_name,
-             "xodr": rel(os.path.join(asset_dir, map_name + ".xodr")),
+             # Left under the export's own name: CARLA copies it to <name>.xodr
+             # on import (Import.py, "Move maps XODR files if any").
+             "xodr": rel(stem + ".xodr"),
              "use_carla_materials": False}  # RoadRunner ships its own materials
-    if os.path.isfile(single):
-        entry["source"] = rel(single)
+    if source:
+        entry["source"] = rel(source)
         kind = "single-source"
-    elif tiles:
-        entry["tile_size"] = _tile_size(asset_dir)
-        entry["tiles"] = [rel(t) for t in tiles]
-        kind = f"tiled, {len(tiles)} tiles, tile_size={entry['tile_size']}"
     else:
-        sys.exit(f"[import] cannot describe '{map_name}': found {map_name}.xodr but "
-                 f"no {map_name}.fbx or {map_name}_Tile_<x>_<y>.fbx beside it.")
+        entry["tile_size"] = _tile_size(asset_dir)
+        entry["tiles"] = [rel(t) for t in sorted(tiles)]
+        kind = f"tiled, {len(tiles)} tiles, tile_size={entry['tile_size']}"
+    if stem != map_name:
+        # Provenance: which export this map was cooked from. CARLA's importer
+        # copies keys it does not know straight through, so this costs nothing
+        # and survives in the descriptor for whoever asks "which export is this?".
+        entry["exported_as"] = stem
 
     # Surface, don't silently drop, RoadRunner layer-split exports: extra .fbx
     # that are neither the source nor a strict tile. CARLA's own generator
     # ignores them; a dropped layer should at least be visible.
+    kept = {source} if source else set(tiles)
     for f in sorted(os.listdir(asset_dir)):
-        if f.lower().endswith(".fbx") and f != map_name + ".fbx" \
-                and _tile_xy(f, map_name) is None:
+        if f.lower().endswith(".fbx") and f not in kept:
             print(f"[import] warning: ignoring unexpected fbx {f!r} (not {map_name}.fbx "
                   f"or {map_name}_Tile_<x>_<y>.fbx); not part of the descriptor.")
 
@@ -437,9 +584,18 @@ def stage_package(carla_root, name, package_url=None, package_dir=None, package_
             print(f"[import] '{name}' ships no CARLA descriptor; treating it as a "
                   f"raw RoadRunner export and generating one.")
             raw_dest = os.path.join(import_dir, name)
+            fresh = not os.path.isdir(raw_dest)
             os.makedirs(raw_dest, exist_ok=True)
             _stage_from_path(src, raw_dest)
-            generate_descriptor(import_dir, name)
+            try:
+                generate_descriptor(import_dir, name)
+            except SystemExit:
+                # Don't leave a half-staged export behind for the next attempt to
+                # trip over: an abandoned copy reads as the same map staged twice.
+                if fresh:
+                    shutil.rmtree(raw_dest, ignore_errors=True)
+                    print(f"[import] removed the partially staged {raw_dest}")
+                raise
     finally:
         if tmpdir:
             shutil.rmtree(tmpdir, ignore_errors=True)
@@ -1035,20 +1191,28 @@ def list_map_releases(repo, tag_prefix=""):
 
 
 def _infer_package_name(path):
-    """Best-effort map/package name from a downloaded zip or folder: the stem of the
-    <name>.json descriptor it contains (handles Windows-built zips with backslash
-    entries). Returns None if no descriptor is found."""
+    """Best-effort map/package name from a downloaded zip or folder: the stem of
+    the <name>.json descriptor it contains, else - for a raw RoadRunner export,
+    which ships no descriptor - the stem of its lone <name>.xodr. Returns None if
+    neither is unambiguous. (Handles Windows-built zips with backslash entries.)
+
+    The .xodr fallback is what map_name_in() already does for a staged bundle;
+    without it the picker had to ask for "the name matching <name>.json" on a
+    package that has no .json, and any answer but the export's own name then
+    failed downstream."""
     entries = []
     if os.path.isfile(path) and path.lower().endswith(".zip"):
         with zipfile.ZipFile(path) as z:
             entries = z.namelist()
     elif os.path.isdir(path):
-        entries = os.listdir(path)
-    for e in entries:
-        base = os.path.basename(e.replace("\\", "/").rstrip("/"))
-        if base.lower().endswith(".json"):
+        entries = [os.path.join(r, f) for r, _d, fs in os.walk(path) for f in fs]
+    bases = [os.path.basename(e.replace("\\", "/").rstrip("/")) for e in entries]
+    for base in bases:
+        low = base.lower()
+        if low.endswith(".json") and low != "roadpainter_decals.json":
             return base[:-5]
-    return None
+    xodrs = {b[:-5] for b in bases if b.lower().endswith(".xodr")}
+    return xodrs.pop() if len(xodrs) == 1 else None
 
 
 def _prompt(msg):
@@ -1178,8 +1342,20 @@ def choose_map(repo, tag_prefix="", carla_root=None, catalog=None,
         if ans == "l":
             path = _select_package("map", None)  # native file picker / typed path
             name = _infer_package_name(path)
-            if not name:
-                name = _prompt("[import] map name (matches <name>.json inside the package): ").strip()
+            if _has_descriptor(path):
+                # A packaged map is already named: its descriptor filename IS the
+                # package CARLA cooks under, so it is not ours to rename here.
+                if not name:
+                    name = _prompt("[import] map name (matches <name>.json inside "
+                                   "the package): ").strip()
+            else:
+                # A raw export offers only the author's working name
+                # ('MLK_no_signal_0805'). Cooking under it would make the next
+                # export a different map, so offer it as a default and let the
+                # map be named something that outlives this export.
+                hint = f" [Enter = {name}]" if name else ""
+                name = _prompt(f"[import] cook this raw export as which map name?"
+                               f"{hint}: ").strip() or name
             if not name:
                 sys.exit("[import] no package name given; cannot import.")
             return name, None, path

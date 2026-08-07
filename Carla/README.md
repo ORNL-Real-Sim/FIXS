@@ -167,6 +167,56 @@ python Carla/import_map.py --package RP_Ver0529 --package-dir C:/Downloads/RP_Ve
 (`--package-dir` and the prompt both accept either the downloaded `.zip` or an
 already-extracted folder.)
 
+### Raw RoadRunner exports
+
+A published bundle carries its own `<name>.json`. A raw export straight out of
+RoadRunner does not — it is just `.fbx` + `.xodr` (+ `.fbm`, `.rrdata.xml`,
+`.geojson`) — so `import_map` writes the descriptor for you: it stages the export
+under `Import/<name>/`, pairs each `.xodr` with its `<x>.fbx` or its
+`<x>_Tile_<i>_<j>.fbx` set, and emits `Import/<name>.json` with
+`use_carla_materials: false` (RoadRunner ships its own materials) and, for a
+tiled map, `tile_size` from the export's `TilesInfo.txt` or 2000.
+
+**The name you import as wins.** RoadRunner names an export after the author's
+working file (`MLK_no_signal_0805`, `Atl_R2024b_final`), so the staged geometry
+is renamed to the map name you asked for:
+
+```bash
+python Carla/import_map.py --package mlk_no_signal --package-dir C:/Downloads/MLK_no_signal.zip
+# -> Import/mlk_no_signal.json, Import/mlk_no_signal/mlk_no_signal.fbx
+```
+
+Renaming rather than adopting the export's name is deliberate:
+
+- the cook writes the walker navmesh as `Maps/<map>/Nav/<fbx_stem>.bin` while the
+  runtime loads `<MapName>.bin`, so a mismatched `.fbx` costs the map its
+  pedestrian navigation, silently;
+- a re-export would otherwise cook a *different* CARLA map every time and orphan
+  the saved run setups, app manifests and catalog entries pointing at the old name.
+
+Only the `.fbx` (and its `.fbm`) is renamed. The `.xodr` keeps the export's name —
+CARLA copies it to `<map>.xodr` during the cook — and `.geojson` / `.rrdata.xml`
+stay untouched, so `Import/<name>/` still shows which export the map came from.
+The descriptor records it too, as `exported_as`.
+
+**One package holds one map** — a tiled map is still one map. That is assumed of
+a Digital-Twin-Library bundle and of a folder you pick by hand, and it is what
+lets the importer resolve a package without asking anything. A package that
+breaks the rule is reported, not guessed at:
+
+| in the package | result |
+|---|---|
+| `.fbx` named after the `.xodr` | imported |
+| one `.fbx` (or one tile set) named *differently* | imported, with a warning naming what it adopted |
+| several `.xodr` — two maps, or one staged twice | refused |
+| several unrelated `.fbx` (a layer-split export) | refused |
+| `.xodr` with no `.fbx`, or `.fbx` with no `.xodr` | refused |
+| both `<name>.fbx` **and** `<name>_Tile_*.fbx` | refused (a map is one or the other) |
+
+The warning case is deliberate rather than silent: a stem mismatch usually means
+the package was assembled by hand, and the lone `.fbx` staged might be scenery
+rather than the road network — which the cook would happily accept.
+
 An app declares its map in a small text file and points the **generic** importer
 at it, so the URL lives in one place (not hard-coded in wrappers):
 
