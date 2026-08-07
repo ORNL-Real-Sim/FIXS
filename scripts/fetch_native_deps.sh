@@ -41,9 +41,6 @@ JOBS="$(nproc 2>/dev/null || echo 4)"
 SUMO_SRC=""
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-COMMONLIB="$REPO_ROOT/CommonLib"
-LIBSUMO_DIR="$COMMONLIB/libsumo"
-SENTINEL="$LIBSUMO_DIR/bin/libtracicpp.so"
 
 die()  { echo "ERROR: $*" >&2; exit 1; }
 note() { echo "  $*"; }
@@ -64,15 +61,33 @@ done
        libcarla is not fetched here because VirCarlaEnv is not part of the Linux
        build yet (its client ABI is unresolved -- see issue #65, Q1)."
 
-# --- version, from the single source of truth --------------------------------
-# tr also strips \r: dependencies.yaml is CRLF in the repo, and a trailing
-# carriage return would silently poison the git tag below.
-SUMO_VERSION="$(grep -A2 '^  sumo:' "$REPO_ROOT/dependencies.yaml" \
-                | grep 'version:' | head -1 | tr -d ' "\r' | cut -d: -f2)"
-[ -n "$SUMO_VERSION" ] || die "could not read the SUMO version from dependencies.yaml"
+# --- everything about SUMO comes from dependencies.yaml ----------------------
+# version, upstream URL and install location are all declared there, so nothing
+# about SUMO is hardcoded here: moving the vendor directory or switching the
+# upstream fork is a one-line edit in the yaml, not a code change.
+#
+# tr strips \r as well: dependencies.yaml is CRLF in the repo, and a trailing
+# carriage return would silently poison the git tag and the paths below.
+yaml_sumo_key() {
+    awk '/^  sumo:/{inblk=1; next} /^  [a-z]/{inblk=0} inblk' "$REPO_ROOT/dependencies.yaml" \
+        | sed -n "s/^[[:space:]]*$1:[[:space:]]*\"\{0,1\}\([^\"]*\)\"\{0,1\}[[:space:]]*$/\1/p" \
+        | head -1 | tr -d '\r'
+}
+
+SUMO_VERSION="$(yaml_sumo_key version)"
+SUMO_SOURCE_URL="$(yaml_sumo_key source)"
+SUMO_LOCATION="$(yaml_sumo_key location)"
+
+[ -n "$SUMO_VERSION" ]    || die "could not read sumo.version from dependencies.yaml"
+[ -n "$SUMO_SOURCE_URL" ] || die "could not read sumo.source from dependencies.yaml"
+[ -n "$SUMO_LOCATION" ]   || die "could not read sumo.location from dependencies.yaml"
 SUMO_TAG="v$(echo "$SUMO_VERSION" | tr . _)"
 
+LIBSUMO_DIR="$REPO_ROOT/$SUMO_LOCATION"
+SENTINEL="$LIBSUMO_DIR/bin/libtracicpp.so"
+
 echo "libsumo/libtraci $SUMO_VERSION ($MODE mode)"
+echo "  install location: $SUMO_LOCATION (from dependencies.yaml)"
 
 # --- already there? -----------------------------------------------------------
 if [ -f "$SENTINEL" ] && [ "$FORCE" -eq 0 ]; then
@@ -111,10 +126,10 @@ CACHE_ROOT="${FIXS_CACHE_DIR:-$HOME/.fixs}"
 if [ -z "$SUMO_SRC" ]; then
     SUMO_SRC="$CACHE_ROOT/sumo-$SUMO_VERSION"
     if [ ! -d "$SUMO_SRC/.git" ]; then
-        note "cloning SUMO $SUMO_TAG into $SUMO_SRC"
+        note "cloning SUMO $SUMO_TAG from $SUMO_SOURCE_URL into $SUMO_SRC"
         mkdir -p "$(dirname "$SUMO_SRC")"
         git clone --depth 1 --branch "$SUMO_TAG" \
-            https://github.com/eclipse-sumo/sumo "$SUMO_SRC" >/dev/null 2>&1 \
+            "$SUMO_SOURCE_URL" "$SUMO_SRC" >/dev/null 2>&1 \
             || die "clone of SUMO $SUMO_TAG failed"
     else
         note "reusing SUMO checkout at $SUMO_SRC"
