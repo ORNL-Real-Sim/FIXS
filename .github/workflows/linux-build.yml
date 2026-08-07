@@ -118,16 +118,18 @@ jobs:
           # a missing diagnostic tool must not fail an otherwise-green build.
           ls -lh build/TrafficLayer
 
-      - name: Smoke - starts and prints usage
+      # No LD_LIBRARY_PATH on purpose: the executable carries an $ORIGIN-relative
+      # RUNPATH, so if that regressed to an absolute build path this fails here
+      # rather than in a user's hands after downloading the artifact.
+      - name: Smoke - starts and prints usage (no LD_LIBRARY_PATH)
         run: |
-          export LD_LIBRARY_PATH="$PWD/CommonLib/libsumo/bin:$LD_LIBRARY_PATH"
+          readelf -d build/TrafficLayer | grep RUNPATH
           ./build/TrafficLayer --help
 
       # The Linux build must REFUSE a VISSIM config rather than hang on a
       # connect() that can never succeed (VISSIM is Windows-only).
       - name: Smoke - a VISSIM config is rejected on Linux
         run: |
-          export LD_LIBRARY_PATH="$PWD/CommonLib/libsumo/bin:$LD_LIBRARY_PATH"
           cat > /tmp/vissim.yaml <<'EOF'
           SimulationSetup:
             EnableFIXS: true
@@ -145,5 +147,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: TrafficLayer-${{ matrix.slug }}
-          path: build/TrafficLayer
+          # Ship libtracicpp.so alongside, with the relative layout preserved,
+          # so the extracted artifact runs as-is: $ORIGIN/../CommonLib/libsumo/bin
+          # resolves inside the extracted tree. The binary alone would be useless.
+          path: |
+            build/TrafficLayer
+            CommonLib/libsumo/bin/libtracicpp.so
           if-no-files-found: error

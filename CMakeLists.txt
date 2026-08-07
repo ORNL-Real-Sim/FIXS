@@ -120,6 +120,26 @@ target_link_libraries(TrafficLayer PRIVATE
     yaml-cpp
     "${FIXS_LIBTRACI_LIBRARY}")
 
+if(NOT WIN32)
+    # Bind libtracicpp.so RELATIVE TO THE EXECUTABLE, the Linux analogue of the
+    # exe-relative DLL search on Windows.
+    #
+    # This matters because the two platforms bind SUMO at different times.
+    # Windows delay-loads libsumocpp.dll (/DELAYLOAD), so SetDllDirectoryA() at
+    # startup is early enough. On Linux libtracicpp.so is a DT_NEEDED entry the
+    # loader resolves BEFORE main() runs, so ConfigureSumoLibraryPath's
+    # setenv(LD_LIBRARY_PATH) cannot affect this process at all -- by the time
+    # it runs, the library is already bound (it still helps a child SUMO).
+    #
+    # Without this, CMake bakes the BUILD MACHINE's absolute library path into
+    # RUNPATH, so the binary only runs where it was built: a CI artifact would
+    # carry /__w/... and fail to start anywhere else. $ORIGIN makes it
+    # relocatable -- move or ship the tree and it still resolves.
+    set_target_properties(TrafficLayer PROPERTIES
+        BUILD_RPATH   "$ORIGIN/../CommonLib/libsumo/bin"
+        INSTALL_RPATH "$ORIGIN/../CommonLib/libsumo/bin")
+endif()
+
 if(WIN32)
     # Present for the eventual Windows migration; MSBuild supplies these today.
     target_compile_definitions(TrafficLayer PRIVATE
