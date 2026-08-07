@@ -31,6 +31,8 @@ on:
       - 'CMakeLists.txt'
       - 'cmake/**'
       - 'scripts/check_source_lists.py'
+      - 'scripts/fetch_native_deps.sh'
+      - 'dependencies.yaml'
       - '.github/workflows/linux-build.yml'
   push:
     branches: [main, dev_v0.9.0]
@@ -91,42 +93,26 @@ jobs:
           echo "tag=v$(echo $ver | tr . _)" >> "$GITHUB_OUTPUT"
           echo "Resolved SUMO $ver"
 
-      # libtraci is the active TraCI client (ENABLE_LIBSUMO is commented out in
-      # TrafficHelper.h), and building only that target avoids the gdal/fox/osg
-      # chain libsumocpp would pull in. Cached because it is by far the slowest
-      # step and only changes when dependencies.yaml does.
-      - name: Cache libtracicpp
-        id: cache-traci
+      # Caches the INSTALLED result (CommonLib/libsumo), which is what
+      # fetch_native_deps.sh's sentinel check looks for -- so a cache hit skips
+      # the SUMO build entirely. CommonLib/libsumo is gitignored, so restoring
+      # into the workspace cannot dirty the checkout.
+      - name: Cache libsumo
+        id: cache-libsumo
         uses: actions/cache@v4
         with:
-          path: ~/sumo-traci
-          key: libtraci-${{ matrix.slug }}-${{ steps.sumo.outputs.version }}
+          path: CommonLib/libsumo
+          key: libsumo-${{ matrix.slug }}-${{ steps.sumo.outputs.version }}
 
-      - name: Build libtracicpp
-        if: steps.cache-traci.outputs.cache-hit != 'true'
-        run: |
-          git clone --depth 1 --branch "${{ steps.sumo.outputs.tag }}" \
-            https://github.com/eclipse-sumo/sumo "$HOME/sumo-src"
-          cmake -S "$HOME/sumo-src" -B "$HOME/sumo-build" -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCHECK_OPTIONAL_LIBS=OFF \
-            -DENABLE_PYTHON_BINDINGS=OFF \
-            -DENABLE_JAVA_BINDINGS=OFF
-          cmake --build "$HOME/sumo-build" --target libtracicpp -j "$(nproc)"
-          mkdir -p "$HOME/sumo-traci/bin" "$HOME/sumo-traci/include/libsumo"
-          cp "$HOME/sumo-src/bin/libtracicpp.so" "$HOME/sumo-traci/bin/"
-          # #238 dropped the vendored CommonLib/libsumo headers from git, and
-          # fetch_native_deps.ps1 (which restores them on Windows) is PowerShell
-          # only. Take them from the SUMO checkout we just built, so headers and
-          # library are guaranteed to be the same version. Staged into a small
-          # tree so the cache stays small rather than holding all of src/.
-          cp "$HOME/sumo-src/src/libsumo/"*.h "$HOME/sumo-traci/include/libsumo/"
+      # Deliberately the same script a developer runs locally, not a copy of its
+      # steps -- so CI failing means the documented path is broken, and the
+      # documented path staying green means CI will be too.
+      - name: Fetch native deps (builds libtracicpp from SUMO source)
+        run: ./scripts/fetch_native_deps.sh --jobs "$(nproc)"
 
       - name: Configure and build TrafficLayer
         run: |
-          cmake -S . -B build -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DFIXS_SUMO_HOME="$HOME/sumo-traci"
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build -j "$(nproc)"
           # ls, not file(1): the minimal ubuntu:* images do not ship file, and
           # a missing diagnostic tool must not fail an otherwise-green build.
@@ -134,14 +120,14 @@ jobs:
 
       - name: Smoke - starts and prints usage
         run: |
-          export LD_LIBRARY_PATH="$HOME/sumo-traci/bin:$LD_LIBRARY_PATH"
+          export LD_LIBRARY_PATH="$PWD/CommonLib/libsumo/bin:$LD_LIBRARY_PATH"
           ./build/TrafficLayer --help
 
       # The Linux build must REFUSE a VISSIM config rather than hang on a
       # connect() that can never succeed (VISSIM is Windows-only).
       - name: Smoke - a VISSIM config is rejected on Linux
         run: |
-          export LD_LIBRARY_PATH="$HOME/sumo-traci/bin:$LD_LIBRARY_PATH"
+          export LD_LIBRARY_PATH="$PWD/CommonLib/libsumo/bin:$LD_LIBRARY_PATH"
           cat > /tmp/vissim.yaml <<'EOF'
           SimulationSetup:
             EnableFIXS: true
