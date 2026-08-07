@@ -3080,47 +3080,12 @@ def main():
             import_map.resolve_cooked_map(cfg["carla_root"], target_map, mode="packaged")
 
         if resolved is None:
-            # A local pick is usable only if it IS the precooked package; a source
-            # bundle (carla/ with fbx+xodr) would have to be cooked, which is the
-            # one thing this flavour cannot do.
-            local_tar = picked_local if (picked_local or "").lower().endswith(".tar.gz") else None
-            if local_tar:
-                tar_path = local_tar
-            elif picked_local:
-                sys.exit(f"[cosim] '{picked_local}' is a source bundle and this CARLA is "
-                         f"PACKAGED, which cannot cook one. Point at the map's precooked "
-                         f"*_cooked.tar.gz, or configure a source build (run_cosim --setup).")
-            elif not picked_tag:
-                sys.exit(f"[cosim] map '{target_map}' is not installed in {cfg['carla_root']} "
-                         f"and is not a Digital-Twin-Library map, so there is no precooked "
-                         f"package to install. Pick a library map, or point --package-dir at "
-                         f"a precooked *_cooked.tar.gz.")
-            else:
-                asset = import_map.catalog_cooked_asset(ent)
-                # Say "not published" by NAME, before downloading anything. The
-                # alternative is a gh pattern-miss the user has to decode - and for
-                # a map whose release genuinely has no cooked asset (atlanta, at the
-                # time of writing) that is the expected, not the exceptional, path.
-                published = import_map.release_assets(repo, picked_tag)
-                if asset is None or (published is not None and asset not in published):
-                    have = ", ".join(published) if published else "unknown"
-                    sys.exit(
-                        f"[cosim] no precooked package published for '{target_map}' "
-                        f"(release '{picked_tag}' of {repo}).\n"
-                        f"        A PACKAGED CARLA can only run maps that ship one.\n"
-                        f"        expected asset: {asset or '(none named in the catalog)'}\n"
-                        f"        published:      {have}\n"
-                        f"        Use a source build (run_cosim --setup) to cook this map "
-                        f"yourself, or ask for a precooked build of it.")
-                tar_path = import_map.download_cooked_tar(
-                    repo, picked_tag, asset, force_redownload=args.reimport,
-                    cache_name=target_map)
-
-            real = import_map.install_cooked(cfg["carla_root"], tar_path,
-                                             force=args.reimport)
-            if real != target_map:
-                print(f"[cosim] precooked package provides map '{real}'")
-                target_map = real
+            # Which asset, and the three "not from here" cases, live in import_map -
+            # the same call --import-map makes, so the two front doors cannot come to
+            # disagree about what a packaged build can install (#276).
+            target_map = import_map.install_precooked(
+                cfg["carla_root"], target_map, repo=repo, tag=picked_tag, entry=ent,
+                local=picked_local, force=args.reimport, log="cosim")
             resolved = import_map.resolve_cooked_map(cfg["carla_root"], target_map,
                                                      mode="packaged")
 
