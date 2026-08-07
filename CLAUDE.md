@@ -405,6 +405,30 @@ the VISSIM launch to open already framed on the ego vehicle and follow it, so ma
 bake the follow-viewpoint into the saved `.layx`. To re-measure: build TL with `-p:RS_DEBUG=1` to an isolated
 `OutDir`/`IntDir` (e.g. `x64\Release_dbg`, gitignored) so the shipped exe is untouched.
 
+## Carla / XIL ego co-simulation design notes
+
+Forward-looking decisions for unifying the virtual-environment bridges (CarMaker
+`VirEnvHelper`/`VirtualEnvironment.lib` and the standalone Carla `mainVirCarla`):
+
+- **Road surface fidelity is deliberately kept simple (near-term).** Carla cannot
+  supply the road properties a tire model actually needs — it exposes macro
+  geometry (grade/bank/elevation via OpenDRIVE waypoints) but **no queryable
+  friction (μ) map and no road-roughness profile** (friction is author-only via
+  wheel `tire_friction` + `static.trigger.friction` patches, never readable at a
+  point). So for any external-dynamics (Simulink/XIL) ego, **assume a simple road
+  in the dynamics model** (constant μ ≈ dry asphalt, smooth surface). If spatial
+  surface variation is ever needed, it comes from a **scenario dataset**
+  (μ/roughness keyed to road position) or CarMaker's native IPGRoad — **never**
+  from a Carla→Simulink contact query. Carla stays out of the dynamics ground loop
+  entirely; it is perception + visualization only.
+
+- **Ego dynamics ownership is a per-ego mode**, mirroring the two CarMaker
+  diagrams: mode A "backend owns ego" (CarMaker office / Carla-PhysX → bridge
+  *reads* ego pose back and sends out) vs mode B "external owns ego" (Simulink/
+  dSPACE → ego arrives on a 2nd FIXS connection and is *teleported in*). L2/L4 are
+  both mode A; they differ only in who controls (TM desired-speed vs external CAV
+  client + sensors). This switch belongs in `config.yaml` `CarlaSetup`.
+
 ## Documentation
 
 - VISSIM-specific: [doc/VISSIMdoc.md](doc/VISSIMdoc.md)

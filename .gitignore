@@ -231,6 +231,9 @@ tests/Vissim/Probes/TrafficLayer_DSProxy_CMoffice_Signal/simple_traffic_light*.l
 # Ignore Claude Code configuration
 .claude/
 
+# Ignore large SUMO output files
+fcd.xml
+
 # #177 regression harness: generated derived configs
 tests/Python/*/_regress_config.yaml
 dist/
