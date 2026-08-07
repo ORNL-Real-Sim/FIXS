@@ -100,7 +100,7 @@ if ($Rolling -or $Tag -eq 'latest') {
 
 if ($LASTEXITCODE -eq 0) {
     Write-Host "Published successfully."
-    Write-Host "Consumers can fetch with: fetch_fixs.ps1 -Version $Tag"
+    Write-Host "Consumers install this with: run_cosim.bat --update-fixs $Tag (or ./run_cosim.sh)"
 } else {
     Write-Error "Failed to publish release."
     exit 1

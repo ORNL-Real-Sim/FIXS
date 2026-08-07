@@ -51,7 +51,7 @@ It is idempotent: every step short-circuits when its output is already present, 
 
 Useful flags: `-Force` re-acquires the native deps, `-CarlaMode prebuilt|source` picks the libcarla path, and `-SkipSubmodules` / `-SkipNativeDeps` / `-SkipYamlCpp` opt out of individual steps.
 
-> Not to be confused with `scripts/fetch_fixs.ps1`, which is the **consumer-side** script for downloading a published FIXS release zip. `initialize_fixs.ps1` is for a developer checkout.
+> Not to be confused with `scripts/update_fixs.ps1` / `scripts/update_fixs.sh`, which are the **consumer-side** installers for a published FIXS release zip. `initialize_fixs.ps1` is for a developer checkout.
 
 ### Native dependencies are not in git
 
@@ -416,7 +416,8 @@ When building components in Debug mode, make sure to link against the Debug libr
 scripts/
 ├── initialize_fixs.ps1              # Fresh-clone setup (submodules, native deps, yaml-cpp)
 ├── generate_version.ps1             # Generate RealSimVersion.h from git tags
-├── fetch_fixs.ps1                   # CONSUMER-side: download a published release zip
+├── update_fixs.ps1                  # CONSUMER-side: install a published release (Windows)
+├── update_fixs.sh                   # CONSUMER-side: install a published release (POSIX)
 ├── build_libsumo.ps1                # STANDALONE: Build libsumo DLLs from SUMO source
 ├── build_sumo_executables.ps1       # STANDALONE: Build SUMO executables from source
 └── dispatch/
