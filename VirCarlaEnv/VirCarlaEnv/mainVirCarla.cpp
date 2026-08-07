@@ -392,7 +392,17 @@ int main(int argc, const char* argv[]) {
                     std::cerr << "co-sim recv/step ended: " << (err ? err : "?") << "\n";
                 break;
             }
-            backend.flushBatch();          // ApplyBatch(transform commands)
+            // NOTE: the batch is NOT flushed here. It is flushed just before
+            // world.Tick(), after the spectator has been queued into it, so the
+            // camera and the vehicles it follows are applied by ONE ApplyBatchSync
+            // and cannot land in different ticks. Nothing between here and there
+            // reads back a Carla transform -- the ego-control calls below drive TM
+            // / pedals, and the pose log reads lastAppliedPose (our own copy).
+            //
+            // The deferred ego spawn below is safe under that rule for the same
+            // reason: it reads the pose out of the FIXS record it just received,
+            // not off a Carla actor, so it does not depend on the batch having
+            // been applied yet.
 
             // ---- deferred ego: the traffic simulator inserted it, take it over ----
             // Spawn at the pose it just reported, so the physics actor starts exactly
@@ -482,11 +492,21 @@ int main(int argc, const char* argv[]) {
                     if (const carla::geom::Transform* tf = backend.lastAppliedPose(cit->second)) {
                         carla::geom::Location loc = tf->location; loc.z += spectatorHeight;
                         const float yaw = spectatorAlignYaw ? (tf->rotation.yaw - 90.f) : -90.f;
-                        spectator->SetTransform(
+                        // Into the SAME batch as the vehicles, not a separate
+                        // SetTransform RPC. A standalone RPC is its own message and
+                        // can be applied in a different tick from the poses it is
+                        // supposed to be centred on -- which put the followed
+                        // vehicle one step off centre on 4.7% of frames even after
+                        // the vehicles themselves were made reliable.
+                        backend.queueTransform(spectator->GetId(),
                             carla::geom::Transform(loc, carla::geom::Rotation(-90.f, yaw, 0.f)));
                     }
                 }
             }
+
+            // One atomic apply for this tick: every mirrored vehicle AND the camera
+            // that follows one of them, acknowledged by the server before we tick.
+            backend.flushBatch();
 
             world.Tick(10s);               // advance Carla one sub-step (10s: TM sync work rides on the tick)
 
