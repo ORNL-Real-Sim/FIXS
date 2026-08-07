@@ -19,9 +19,13 @@ then runs the cook. The package is sourced, in order:
                         downloaded by hand from the release - the portable path,
                         needing only browser access, no gh / auth.
 
-Importing requires a CARLA **source build** (the cook runs the Unreal editor);
-packaged CARLA cannot import custom maps. carla_root / ue4_root default to the
-saved env config (~/.fixs/carla.json) written by carla_env_setup.py.
+COOKING requires a CARLA **source build** - the cook runs the Unreal editor, which
+a packaged build does not ship. A packaged CARLA is served instead by
+`install_cooked`, which extracts an ALREADY-cooked package (the Digital-Twin
+Library's `*_cooked.tar.gz`) into the package root; that is a file operation and
+needs no editor. run_cosim picks the path that matches the configured flavour.
+carla_root / ue4_root default to the saved env config (~/.fixs/carla.json)
+written by carla_env_setup.py.
 
 Examples:
   # pick which published version to import (lists releases tagged map-*):
@@ -31,47 +35,84 @@ Examples:
 """
 import argparse
 import os
+import platform
 import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import zipfile
 
 import carla_env_setup as env
 
 
-def cooked_content_dir(carla_root, name):
+def _mode(mode=None):
+    """The CARLA flavour to resolve paths for: the caller's, else the saved
+    config's, else 'source'. Defaulting from the config is what lets every
+    existing (source-build) call site stay unchanged."""
+    if mode:
+        return mode
+    return (env.load_config() or {}).get("mode") or "source"
+
+
+def package_root(carla_root):
+    """The folder a packaged CARLA's own ImportAssets.sh cds into - the one that
+    directly holds CarlaUE4/Content.
+
+    env.packaged_exe accepts carla_root pointing EITHER at that folder or at a
+    wrapper holding WindowsNoEditor/ (LinuxNoEditor/), which are one level apart;
+    resolving through the launcher we already found is what keeps the two spellings
+    from producing two different Content roots."""
+    exe = env.packaged_exe(carla_root)
+    return os.path.dirname(exe) if exe else carla_root
+
+
+def content_root(carla_root, mode=None):
+    """The Content/ dir holding cooked assets for this CARLA flavour.
+
+    A source build keeps it under Unreal/CarlaUE4/; a packaged build has it beside
+    the launcher. Everything below resolves through here, so the packaged flavour
+    needed no new naming rules - only this one prefix differs."""
+    if _mode(mode) == "packaged":
+        return os.path.join(package_root(carla_root), "CarlaUE4", "Content")
+    return os.path.join(carla_root, "Unreal", "CarlaUE4", "Content")
+
+
+def cooked_content_dir(carla_root, name, mode=None):
     """The Content/<name> folder produced by a successful import."""
-    return os.path.join(carla_root, "Unreal", "CarlaUE4", "Content", name)
+    return os.path.join(content_root(carla_root, mode), name)
 
 
-def cooked_map_path(carla_root, name):
+def cooked_map_path(carla_root, name, mode=None):
     """Where the cooked .umap lands after a successful import."""
-    return os.path.join(cooked_content_dir(carla_root, name), "Maps", name, name + ".umap")
+    return os.path.join(cooked_content_dir(carla_root, name, mode),
+                        "Maps", name, name + ".umap")
 
 
-def map_is_imported(carla_root, name):
-    return os.path.isfile(cooked_map_path(carla_root, name))
+def map_is_imported(carla_root, name, mode=None):
+    return os.path.isfile(cooked_map_path(carla_root, name, mode))
 
 
-def package_descriptor(carla_root, name):
+def package_descriptor(carla_root, name, mode=None):
     """The <name>.Package.json the cook writes beside the imported content. It is
     the authoritative record of what the package actually holds - the map's real
     name and its /Game/... path - neither of which is *guaranteed* to equal the
-    package name (see _package_from_tag: that is a release convention, not a rule)."""
-    return os.path.join(cooked_content_dir(carla_root, name),
+    package name (see _package_from_tag: that is a release convention, not a rule).
+    A precooked package ships the same file, so a packaged build is resolved by the
+    same evidence a source build is."""
+    return os.path.join(cooked_content_dir(carla_root, name, mode),
                         "Config", name + ".Package.json")
 
 
-def declared_maps(carla_root, name):
+def declared_maps(carla_root, name, mode=None):
     """[(map_name, /Game/... level path)] declared by the package descriptor.
     Entries whose .umap is missing are dropped: a descriptor outlives the content
     it describes (a half-wiped re-import leaves one behind), and a name we hand to
     load_world must point at a level that is really on disk."""
     import json
     try:
-        with open(package_descriptor(carla_root, name), encoding="utf-8") as f:
+        with open(package_descriptor(carla_root, name, mode), encoding="utf-8") as f:
             declared = json.load(f).get("maps") or []
     except (OSError, ValueError):
         return []
@@ -80,21 +121,21 @@ def declared_maps(carla_root, name):
         mname, mpath = m.get("name"), m.get("path")
         if not mname or not str(mpath).startswith("/Game/"):
             continue
-        umap = os.path.join(carla_root, "Unreal", "CarlaUE4", "Content",
+        umap = os.path.join(content_root(carla_root, mode),
                             *mpath[len("/Game/"):].split("/"), mname + ".umap")
         if os.path.isfile(umap):
             found.append((mname, f"{mpath}/{mname}"))
     return found
 
 
-def find_level_paths(carla_root, name):
+def find_level_paths(carla_root, name, mode=None):
     """Every cooked level called <name>.umap, as /Game/... object paths.
 
     More than one means load_world(<name>) is a coin flip: CARLA resolves a bare
     name by recursive file search and silently takes the first hit (see
     UCarlaEpisode::LoadNewEpisode -> PathList[0]), so which copy you get is
     directory-traversal order, not a choice. A full /Game/... path is exact."""
-    content = os.path.join(carla_root, "Unreal", "CarlaUE4", "Content")
+    content = content_root(carla_root, mode)
     umap = name + ".umap"
     found = []
     for root, _dirs, files in os.walk(content):
@@ -104,11 +145,11 @@ def find_level_paths(carla_root, name):
     return sorted(found)
 
 
-def choose_level_path(carla_root, name):
+def choose_level_path(carla_root, name, mode=None):
     """Full /Game/... path to load for `name`. Only reached when the path could NOT
     be worked out from the package itself, so there is nothing to default to: if
     several cooked levels share the name, only the user can say which was meant."""
-    found = find_level_paths(carla_root, name)
+    found = find_level_paths(carla_root, name, mode)
     if len(found) <= 1:
         return found[0][0] if found else None
 
@@ -126,11 +167,11 @@ def choose_level_path(carla_root, name):
         print("[cosim] invalid choice; enter a number from the list.")
 
 
-def duplicate_level_note(carla_root, name, using):
+def duplicate_level_note(carla_root, name, using, mode=None):
     """Heads-up text when other cooked levels share `name`, else "". Informational
     only - we load by exact /Game/... path, so the copies cannot be picked up by
     mistake; they are just leftovers from repeat imports, worth deleting."""
-    others = [p for p, _ in find_level_paths(carla_root, name) if p != using]
+    others = [p for p, _ in find_level_paths(carla_root, name, mode) if p != using]
     if not others:
         return ""
     return (f"[cosim] note: {len(others)} other cooked map(s) also named '{name}'; "
@@ -138,7 +179,7 @@ def duplicate_level_note(carla_root, name, using):
             + "\n".join(f"           {p}" for p in others))
 
 
-def resolve_cooked_map(carla_root, name):
+def resolve_cooked_map(carla_root, name, mode=None):
     """(map_name, /Game/... level path) for an imported package, or None when it
     cannot be resolved *unambiguously*.
 
@@ -147,9 +188,9 @@ def resolve_cooked_map(carla_root, name):
     the conventional layout when it is genuinely on disk, else believe the
     package's own descriptor, else give up - so the caller can ask the user
     rather than invent a name that load_world will fail to open."""
-    if map_is_imported(carla_root, name):
+    if map_is_imported(carla_root, name, mode):
         return name, f"/Game/{name}/Maps/{name}/{name}"
-    found = declared_maps(carla_root, name)
+    found = declared_maps(carla_root, name, mode)
     return found[0] if len(found) == 1 else None
 
 
@@ -689,11 +730,16 @@ def _isolate_import(import_dir, keep):
     return restore
 
 
-def _resolve_carla(carla_root=None, ue4_root=None):
+def _resolve_carla(carla_root=None, ue4_root=None, need_source=True):
     """Resolve (carla_root, ue4_root) from the saved env config, running first-time
     setup if nothing is configured yet. Exits with a clear message if no CARLA is
-    configured, or if it is a packaged build (custom-map import needs a source
-    build). Explicit args win over the saved config."""
+    configured. Explicit args win over the saved config.
+
+    `need_source` is the operation's requirement, not a property of the machine:
+    COOKING an fbx/xodr runs the Unreal editor and genuinely needs a source build,
+    but INSTALLING an already-cooked package (install_cooked) is a file copy and
+    works on either flavour. The two were conflated here, which is why a packaged
+    CARLA could not consume a precooked map at all."""
     cfg = env.load_config()
     if cfg is None and not carla_root:
         # first use on a fresh clone: configure the CARLA env, just like run_cosim
@@ -704,9 +750,11 @@ def _resolve_carla(carla_root=None, ue4_root=None):
     ue4_root = ue4_root or cfg.get("ue4_root")
     if not carla_root:
         sys.exit("[import] no CARLA configured - run setup_carla first.")
-    if cfg.get("mode") == "packaged":
-        sys.exit("[import] the configured CARLA is PACKAGED; importing a custom map "
-                 "needs a SOURCE build (run setup_carla and pick source).")
+    if need_source and cfg.get("mode") == "packaged":
+        sys.exit("[import] the configured CARLA is PACKAGED; cooking a custom map from "
+                 "fbx/xodr needs a SOURCE build (run setup_carla and pick source).\n"
+                 "        A map published with a precooked asset installs here without "
+                 "one - run it through run_cosim, which picks that path automatically.")
     return carla_root, ue4_root
 
 
@@ -764,6 +812,169 @@ def ensure_map(name, carla_root=None, ue4_root=None, package_url=None,
               f"warnings as errors), but the map .umap was written.")
     print(f"[import] done: '{name}' imported -> {umap}")
     return 0
+
+
+# ------------------------------------------------- precooked (packaged CARLA)
+
+def _safe_members(tar, dest):
+    """Yield `tar`'s members, refusing any that would write outside `dest`.
+
+    tarfile.extractall follows absolute paths, `..` and symlinks straight out of
+    the destination; we extract release assets, so the archive is only as
+    trustworthy as whoever can publish one. Python 3.12's filter='data' does this,
+    but the shipped env is 3.10 (environment.yml), so it is done here."""
+    root = os.path.realpath(dest)
+    for m in tar.getmembers():
+        target = os.path.realpath(os.path.join(dest, m.name))
+        if target != root and not target.startswith(root + os.sep):
+            sys.exit(f"[import] refusing to extract '{m.name}': it escapes {dest}")
+        if m.issym() or m.islnk():
+            link = os.path.realpath(os.path.join(os.path.dirname(target), m.linkname))
+            if not link.startswith(root + os.sep):
+                sys.exit(f"[import] refusing link '{m.name}' -> '{m.linkname}': "
+                         f"it escapes {dest}")
+        yield m
+
+
+def cooked_asset_name(asset):
+    """The precooked asset that pairs with source bundle `asset`, by convention:
+    `<stem>_cooked.tar.gz` (mlk_no_signal.zip -> mlk_no_signal_cooked.tar.gz).
+
+    A fallback, not the truth. The catalog is meant to name the cooked asset
+    outright (FIXS_Applications#27); until that field lands this derives it, and
+    a derived name that is not actually published fails the same way a wrong
+    catalog entry would - at the download, by name, before anything is cooked or
+    launched."""
+    if not asset:
+        return None
+    stem = asset[:-4] if asset.lower().endswith(".zip") else asset
+    return stem + "_cooked.tar.gz"
+
+
+def catalog_cooked_asset(entry):
+    """The precooked asset name for a catalog entry, or None if that map has no
+    precooked build published. `cooked_asset` when the catalog says so; else the
+    conventional name derived from the source bundle."""
+    if not entry:
+        return None
+    named = entry.get("cooked_asset")
+    if named:
+        return named
+    # An explicit false/empty cooked_asset is a deliberate "this map has none";
+    # only a MISSING key falls through to the convention.
+    if "cooked_asset" in entry:
+        return None
+    return cooked_asset_name(entry.get("asset"))
+
+
+def install_cooked(carla_root, tar_path, name=None, force=False):
+    """Install a precooked map package into a PACKAGED CARLA. Returns the map name.
+
+    CARLA's own Util/ImportAssets.sh is exactly
+
+        for f in `find Import/ -name "*.tar.gz"`; do tar --keep-newer-files -xvf $f; done
+
+    run from the package root - a plain extract, no manifest, no commandlet, no
+    registration step. That is worth stating because it is the whole basis for
+    doing it here in `tarfile` instead: ImportAssets.sh is bash-only and CARLA
+    ships no .bat counterpart, so shelling out would leave Windows with no
+    packaged path at all. Reimplementing the extract gives both OSes the same one.
+
+    We deliberately do NOT copy `--keep-newer-files`. That flag exists because the
+    script re-extracts every tarball sitting in Import/ on each run and must not
+    clobber newer local edits; we extract one named asset on purpose, and an
+    install that silently skipped files because of mtimes would be a confusing
+    half-map. `force` instead removes the old Content/<name> first, mirroring
+    ensure_map's clean-reimport."""
+    dest = package_root(carla_root)
+    if not os.path.isdir(dest):
+        sys.exit(f"[import] packaged CARLA root not found: {dest}")
+
+    with tarfile.open(tar_path, "r:*") as tar:
+        members = list(_safe_members(tar, dest))
+        if name is None:
+            name = _cooked_name_in(members)
+            if name is None:
+                sys.exit(f"[import] cannot tell which map {tar_path} provides "
+                         f"(expected CarlaUE4/Content/<name>/Config/<name>.Package.json); "
+                         f"pass the name explicitly.")
+        content_dir = cooked_content_dir(carla_root, name, mode="packaged")
+        if os.path.isdir(content_dir):
+            if not force:
+                print(f"[import] '{name}' already installed: {content_dir}")
+                return name
+            print(f"[import] removing existing content for a clean re-install: {content_dir}")
+            shutil.rmtree(content_dir, ignore_errors=True)
+        print(f"[import] installing precooked '{name}' -> {dest}")
+        tar.extractall(dest, members=members)
+
+    umap = cooked_map_path(carla_root, name, mode="packaged")
+    if not os.path.isfile(umap):
+        sys.exit(f"[import] install finished but {umap} is missing - "
+                 f"{tar_path} does not look like a precooked package for '{name}'.")
+    print(f"[import] done: '{name}' installed -> {umap}")
+    return name
+
+
+_SHADER_MARKERS = {"d3d": b"DXBC", "vulkan": b"GLSL.std.450"}
+
+
+def shader_platforms_in(content_dir, size_cap=2 * 1024 * 1024):
+    """Which shader platforms a cooked package carries shaders for - a subset of
+    {'d3d', 'vulkan'}, empty if none is recognised.
+
+    UE4 compiles a material's shaders per shader platform and bakes the result
+    into the cooked asset, so a Linux cook ships SPIR-V and a Windows one ships
+    D3D bytecode; CARLA's own Windows package ships BOTH. A packaged build has no
+    shader compiler, so a material carrying no map for the running platform
+    silently falls back to the default material - the level loads, geometry and
+    placed actors are correct, and the road surface renders as grey checkerboard.
+    Nothing downstream can detect that, which is why it is detected here.
+
+    Every *_cooked.tar.gz the Digital-Twin-Library publishes today is a Linux cook
+    (FIXS_Applications#29), so on Windows this fires.
+
+    A heuristic by necessity: this pattern-matches container magic rather than
+    parsing UE4 packages, so it is used to WARN, never to refuse. Only small .uexp
+    are read - shader maps live in materials (~80KB), never in the multi-MB .umap
+    or mesh blobs - which keeps a full scan to a few hundred KB."""
+    found = set()
+    for root, _dirs, files in os.walk(content_dir):
+        for f in files:
+            if not f.endswith(".uexp"):
+                continue
+            path = os.path.join(root, f)
+            try:
+                if os.path.getsize(path) > size_cap:
+                    continue
+                with open(path, "rb") as fh:
+                    blob = fh.read()
+            except OSError:
+                continue
+            found.update(k for k, marker in _SHADER_MARKERS.items() if marker in blob)
+            if len(found) == len(_SHADER_MARKERS):
+                return found          # nothing more to learn
+    return found
+
+
+def host_shader_platform():
+    """The shader platform a packaged CARLA uses here by default: D3D on Windows,
+    Vulkan elsewhere. Windows CarlaUE4.exe also accepts -vulkan, so a 'vulkan'-only
+    package is not necessarily unusable there - only unusable as launched."""
+    return "d3d" if platform.system() == "Windows" else "vulkan"
+
+
+def _cooked_name_in(members):
+    """The map name a precooked archive describes - the stem of its lone
+    CarlaUE4/Content/<name>/Config/<name>.Package.json. None if 0 or >1, for the
+    same reason map_name_in gives up: a name we hand to load_world must be
+    resolved from the package, never guessed from the file name."""
+    found = set()
+    for m in members:
+        parts = m.name.replace("\\", "/").split("/")
+        if len(parts) >= 5 and parts[-2] == "Config" and parts[-1].endswith(".Package.json"):
+            found.add(parts[-1][:-len(".Package.json")])
+    return found.pop() if len(found) == 1 else None
 
 
 def read_map_config(path):
@@ -998,22 +1209,22 @@ def choose_sumo_source(cache_name=None):
     return sumo_dir
 
 
-def list_imported_maps(carla_root):
+def list_imported_maps(carla_root, mode=None):
     """Names of maps already cooked under this CARLA (i.e. that have a <name>.umap).
     Used to let tools that operate on an existing map (e.g. place_tls) offer a
     local choice without needing gh / the network."""
-    content = os.path.join(carla_root, "Unreal", "CarlaUE4", "Content")
+    content = content_root(carla_root, mode)
     if not os.path.isdir(content):
         return []
     return [name for name in sorted(os.listdir(content))
-            if os.path.isfile(cooked_map_path(carla_root, name))]
+            if os.path.isfile(cooked_map_path(carla_root, name, mode))]
 
 
-def choose_imported_map(carla_root):
+def choose_imported_map(carla_root, mode=None):
     """Numbered menu of the maps already cooked into this CARLA; returns the chosen
     name. Auto-selects when there is exactly one; exits if there are none, or if a
     choice is needed but the session is non-interactive."""
-    maps = list_imported_maps(carla_root)
+    maps = list_imported_maps(carla_root, mode)
     if not maps:
         sys.exit(f"[import] no cooked maps found under {carla_root}. Import one first "
                  "(e.g. import_<app>_map).")
@@ -1210,19 +1421,21 @@ def map_sumo_dir(name):
     return _dir_with_sumocfg(os.path.join(_map_cache_dir(name), "sumo"))
 
 
-def download_release_zip(repo, tag, force_redownload=False, cache_name=None):
-    """Return a local path to the release's .zip asset, downloading it via gh into
-    the ~/.fixs/maps/<cache_name or tag>/ cache (cache_name = the cooked map name,
-    so the zip sits beside the extracted carla/+sumo/). If a cached copy already
-    exists, ask whether to reuse or re-download (default reuse); force_redownload
-    skips the prompt. The zip stays in the cache so re-imports are free."""
+def _download_release_asset(repo, tag, pattern, suffix, force_redownload=False,
+                            cache_name=None, what="asset"):
+    """Shared body of download_release_zip / download_cooked_tar: return a local
+    path to the release asset matching `pattern`, downloading it via gh into the
+    ~/.fixs/maps/<cache_name or tag>/ cache. `suffix` is how a cached copy is
+    recognised, and is what keeps the two callers from seeing each other's file -
+    the source bundle (.zip) and the precooked package (.tar.gz) share a cache
+    dir, and a map may well have both downloaded."""
     gh = _require_gh()
     tag_dir = _map_cache_dir(cache_name or tag)
-    cached = [f for f in os.listdir(tag_dir) if f.lower().endswith(".zip")] \
+    cached = [f for f in os.listdir(tag_dir) if f.lower().endswith(suffix)] \
         if os.path.isdir(tag_dir) else []
 
     if cached and not force_redownload:
-        zip_path = os.path.join(tag_dir, cached[0])
+        path = os.path.join(tag_dir, cached[0])
         if sys.stdin.isatty():
             ans = input(f"[import] cached '{cached[0]}' found for '{tag}'. "
                         "[U]se it / [R]e-download / [C]ancel? [U]: ").strip().lower()
@@ -1230,20 +1443,56 @@ def download_release_zip(repo, tag, force_redownload=False, cache_name=None):
                 sys.exit("[import] cancelled by user.")
             force_redownload = ans.startswith("r")
         if not force_redownload:
-            print(f"[import] using cached {zip_path}")
-            return zip_path
+            print(f"[import] using cached {path}")
+            return path
 
     os.makedirs(tag_dir, exist_ok=True)
     print(f"[import] downloading release '{tag}' from {repo}\n"
-          f"[import]   into cache {tag_dir} (~720MB; set FIXS_MAP_CACHE to relocate) ...")
+          f"[import]   into cache {tag_dir} (set FIXS_MAP_CACHE to relocate) ...")
     rc = subprocess.call([gh, "release", "download", tag, "-R", repo,
-                          "-p", "*.zip", "-D", tag_dir, "--clobber"])
+                          "-p", pattern, "-D", tag_dir, "--clobber"])
     if rc != 0:
-        sys.exit(f"[import] `gh release download {tag}` failed (rc={rc}).")
-    zips = [f for f in os.listdir(tag_dir) if f.lower().endswith(".zip")]
-    if not zips:
-        sys.exit(f"[import] release '{tag}' has no .zip asset to import.")
-    return os.path.join(tag_dir, zips[0])
+        sys.exit(f"[import] `gh release download {tag} -p {pattern}` failed (rc={rc}).")
+    got = [f for f in os.listdir(tag_dir) if f.lower().endswith(suffix)]
+    if not got:
+        sys.exit(f"[import] release '{tag}' has no {what} matching '{pattern}'.")
+    return os.path.join(tag_dir, got[0])
+
+
+def download_release_zip(repo, tag, force_redownload=False, cache_name=None):
+    """Return a local path to the release's .zip asset, downloading it via gh into
+    the ~/.fixs/maps/<cache_name or tag>/ cache (cache_name = the cooked map name,
+    so the zip sits beside the extracted carla/+sumo/). If a cached copy already
+    exists, ask whether to reuse or re-download (default reuse); force_redownload
+    skips the prompt. The zip stays in the cache so re-imports are free."""
+    return _download_release_asset(repo, tag, "*.zip", ".zip", force_redownload,
+                                   cache_name, what="source bundle (.zip)")
+
+
+def download_cooked_tar(repo, tag, asset, force_redownload=False, cache_name=None):
+    """Return a local path to the release's precooked .tar.gz, downloading it via
+    gh into the same per-map cache the source bundle uses. `asset` is the exact
+    published name (from the catalog, or derived - see catalog_cooked_asset), so a
+    release that carries several is not a lottery."""
+    return _download_release_asset(repo, tag, asset, ".tar.gz", force_redownload,
+                                   cache_name, what="precooked package (.tar.gz)")
+
+
+def release_assets(repo, tag):
+    """Names of the assets published on release `tag`, or None if they cannot be
+    listed. Used to say 'this map has no precooked build published' BEFORE
+    downloading anything, and to name what is published instead - the alternative
+    is a gh failure the user has to interpret."""
+    gh = shutil.which("gh")
+    if not gh:
+        return None
+    try:
+        out = subprocess.check_output(
+            [gh, "release", "view", tag, "-R", repo, "--json", "assets",
+             "--jq", ".assets[].name"], text=True, stderr=subprocess.DEVNULL)
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return [line.strip() for line in out.splitlines() if line.strip()]
 
 
 def pick_and_import(repo, tag_prefix="", carla_root=None, ue4_root=None, force=False):
