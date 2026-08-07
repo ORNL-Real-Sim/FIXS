@@ -1,5 +1,5 @@
 """
-import_map.py - import a RoadRunner/OpenDRIVE map into a *source-build* CARLA.
+import_map.py - import a RoadRunner/OpenDRIVE map into the configured CARLA.
 
 Generalizes the proven one-click import (run CARLA's
 `Util/BuildTools/Import.py --package=<name>` directly, with UE4_ROOT set) into a
@@ -28,13 +28,18 @@ The package is sourced, in order:
                         downloaded by hand from the release - the portable path,
                         needing only browser access, no gh / auth.
 
-COOKING requires a CARLA **source build** - the cook runs the Unreal editor, which
-a packaged build does not ship. A packaged CARLA is served instead by
-`install_cooked`, which extracts an ALREADY-cooked package (the Digital-Twin
-Library's `*_cooked.tar.gz`) into the package root; that is a file operation and
-needs no editor. run_cosim picks the path that matches the configured flavour.
-carla_root / ue4_root default to the saved env config (~/.fixs/carla.json)
-written by carla_env_setup.py.
+Both CARLA flavours are served, by the route each one supports - the flavour is
+read from the saved config and dispatched on, not used to refuse:
+
+  source    COOKS the package. The cook runs the Unreal editor, so this is the
+            only flavour that can turn an fbx/xodr into a map.
+  packaged  INSTALLS the precooked package (the Digital-Twin Library's
+            `*_cooked.tar.gz`) into the package root - a plain extract, no editor
+            (`install_precooked` -> `install_cooked`).
+
+run_cosim's preflight calls the same `install_precooked`, so the two front doors
+cannot disagree about what a packaged build can install. carla_root / ue4_root
+default to the saved env config (~/.fixs/carla.json) written by carla_env_setup.py.
 
 Examples:
   # pick which published version to import (lists releases tagged map-*):
@@ -1033,6 +1038,63 @@ def catalog_cooked_asset(entry):
     return cooked_asset_name(entry.get("asset"))
 
 
+def install_precooked(carla_root, name, repo=None, tag=None, entry=None,
+                      local=None, force=False, log="import"):
+    """Resolve and install an ALREADY-cooked map package into a PACKAGED CARLA.
+    Returns the map name the package actually provides (may differ from `name`).
+
+    This is the packaged flavour's ENTIRE import path. A packaged build cannot cook
+    - cooking runs the Unreal editor it does not ship - so the map has to arrive
+    cooked, and putting it in place is a plain extract (install_cooked). What sits
+    in front of that extract is the part worth sharing: which asset to fetch, and
+    the three cases where the honest answer is "not from here".
+
+    Shared by run_cosim's packaged preflight and import_map's picker. It lived only
+    in run_cosim, which is why `--import-map` - the command whose whole name is
+    importing a map - could not import one on a packaged build (#276).
+
+    `local` is a path the user picked; only a precooked *.tar.gz is usable. Else the
+    asset name comes from the catalog `entry` and is downloaded from `repo`/`tag`.
+    `log` is the caller's message prefix, so the user reads one voice."""
+    if local and local.lower().endswith(".tar.gz"):
+        tar_path = local
+    elif local:
+        # A source bundle (carla/ with fbx+xodr) would have to be cooked, which is
+        # the one thing this flavour cannot do.
+        sys.exit(f"[{log}] '{local}' is a source bundle and this CARLA is PACKAGED, "
+                 f"which cannot cook one. Point at the map's precooked "
+                 f"*_cooked.tar.gz, or configure a source build (run_cosim --setup).")
+    elif not tag:
+        sys.exit(f"[{log}] map '{name}' is not installed in {carla_root} and is not a "
+                 f"Digital-Twin-Library map, so there is no precooked package to "
+                 f"install. Pick a library map, or point --package-dir at a precooked "
+                 f"*_cooked.tar.gz.")
+    else:
+        asset = catalog_cooked_asset(entry)
+        # Say "not published" by NAME, before downloading anything. The alternative
+        # is a gh pattern-miss the user has to decode - and for a map whose release
+        # genuinely has no cooked asset (atlanta, at the time of writing) that is the
+        # expected path, not the exceptional one.
+        published = release_assets(repo, tag)
+        if asset is None or (published is not None and asset not in published):
+            have = ", ".join(published) if published else "unknown"
+            sys.exit(
+                f"[{log}] no precooked package published for '{name}' "
+                f"(release '{tag}' of {repo}).\n"
+                f"        A PACKAGED CARLA can only run maps that ship one.\n"
+                f"        expected asset: {asset or '(none named in the catalog)'}\n"
+                f"        published:      {have}\n"
+                f"        Use a source build (run_cosim --setup) to cook this map "
+                f"yourself, or ask for a precooked build of it.")
+        tar_path = download_cooked_tar(repo, tag, asset, force_redownload=force,
+                                       cache_name=name)
+
+    real = install_cooked(carla_root, tar_path, force=force)
+    if real != name:
+        print(f"[{log}] precooked package provides map '{real}'")
+    return real
+
+
 def install_cooked(carla_root, tar_path, name=None, force=False):
     """Install a precooked map package into a PACKAGED CARLA. Returns the map name.
 
@@ -1683,13 +1745,33 @@ def release_assets(repo, tag):
 
 def pick_and_import(repo, tag_prefix="", carla_root=None, ue4_root=None, force=False):
     """List `repo`'s map releases (or accept a local .zip), ask which to import,
-    then download + cook it. If the chosen version is already cooked, skip the
-    download (unless the user opts to re-import, or force=True)."""
-    carla_root, ue4_root = _resolve_carla(carla_root, ue4_root)
-    name, tag, local = choose_map(repo, tag_prefix, carla_root)
+    then put it into the configured CARLA by the route that flavour supports:
+    a SOURCE build cooks it, a PACKAGED build installs the precooked package.
+    If the chosen version is already there, skip the work (unless the user opts to
+    re-import, or force=True).
 
-    if map_is_imported(carla_root, name) and not force:
-        print(f"[import] '{name}' is already imported: {cooked_map_path(carla_root, name)}")
+    need_source=False on purpose. Which flavour is installed is not a property of
+    this operation - "import a map" is meaningful on both - so the flavour is
+    resolved first and then dispatched on, instead of being used to refuse. Gating
+    the whole command on a source build is what made --import-map dead-end on a
+    packaged CARLA while run_cosim quietly did the same job (#276)."""
+    carla_root, ue4_root = _resolve_carla(carla_root, ue4_root, need_source=False)
+    mode = _mode()
+    catalog = fetch_catalog(repo)
+    name, tag, local = choose_map(repo, tag_prefix, carla_root, catalog=catalog)
+
+    # The picker returns what the RELEASE is called ('mlk'); the cooked map inside
+    # it is often named differently ('mlk_no_signal'). Everything below - the
+    # already-imported check, the install, the message - is about the map, so
+    # resolve it here, exactly as run_cosim does before its own preflight.
+    entry = catalog_entry(catalog, name)
+    if entry and entry.get("map_name") and entry["map_name"] != name:
+        print(f"[import] map '{name}' -> '{entry['map_name']}'  (DT release {tag})")
+        name = entry["map_name"]
+
+    if map_is_imported(carla_root, name, mode) and not force:
+        print(f"[import] '{name}' is already imported: "
+              f"{cooked_map_path(carla_root, name, mode)}")
         if not sys.stdin.isatty():
             return 0
         if input("[import] re-import it (re-download + re-cook)? [y/N]: ").strip().lower() != "y":
@@ -1697,9 +1779,58 @@ def pick_and_import(repo, tag_prefix="", carla_root=None, ue4_root=None, force=F
             return 0
         force = True
 
+    if mode == "packaged":
+        # install_cooked reports the finished install; no second "done" here.
+        install_precooked(carla_root, name, repo=repo, tag=tag, entry=entry,
+                          local=local, force=force)
+        return 0
+
     zip_path = local if local else download_release_zip(repo, tag, force_redownload=force)
     return ensure_map(name, carla_root=carla_root, ue4_root=ue4_root,
                       package_dir=zip_path, force=force)
+
+
+def import_named(name, carla_root=None, ue4_root=None, package_url=None,
+                 package_dir=None, force=False, prompt_if_exists=False,
+                 package_pick=False, repo=None, tag_prefix=None):
+    """Import the map called `name` by the route the configured CARLA supports.
+
+    The named counterpart of pick_and_import: same dispatch, no menu. A SOURCE
+    build cooks the package (ensure_map); a PACKAGED build installs the precooked
+    one. `--package <name>` used to go straight to the cook and so refused on a
+    packaged build, for the same reason the picker did (#276)."""
+    carla_root, ue4_root = _resolve_carla(carla_root, ue4_root, need_source=False)
+    if _mode() != "packaged":
+        return ensure_map(name, carla_root, ue4_root, package_url, package_dir,
+                          force, prompt_if_exists, package_pick)
+
+    repo, tag_prefix = resolve_map_source(repo, tag_prefix)
+    catalog = fetch_catalog(repo)
+    entry = catalog_entry(catalog, name)
+    if entry and entry.get("map_name") and entry["map_name"] != name:
+        print(f"[import] map '{name}' -> '{entry['map_name']}'  "
+              f"(DT release {entry.get('release')})")
+        name = entry["map_name"]
+    if package_url:
+        # There is no cook here to feed, and a source zip is not installable as-is.
+        print(f"[import] note: this CARLA is PACKAGED, so --package-url is not used; "
+              f"the precooked package is resolved from the map catalog instead.")
+
+    umap = cooked_map_path(carla_root, name, "packaged")
+    if os.path.isfile(umap) and not force:
+        print(f"[import] '{name}' is already installed: {umap}")
+        if not (prompt_if_exists and sys.stdin.isatty()):
+            return 0
+        if input("[import] re-install it (re-download + re-extract)? [y/N]: ").strip().lower() != "y":
+            print("[import] keeping the existing map.")
+            return 0
+        force = True
+
+    # install_cooked says "done: <name> installed -> <umap>" itself; saying it again
+    # here just made every packaged install report success twice.
+    install_precooked(carla_root, name, repo=repo, tag=(entry or {}).get("release"),
+                      entry=entry, local=package_dir, force=force)
+    return 0
 
 
 DEFAULT_MAP_REPO = "ORNL-Real-Sim/FIXS_Applications"
@@ -1777,9 +1908,12 @@ def main():
     url = args.package_url or mc.get("url")
 
     # run standalone -> offer to re-import if the map already exists
-    return ensure_map(package, args.carla_root, args.ue4_root,
-                      url, args.package_dir, args.force,
-                      prompt_if_exists=True, package_pick=args.package_pick)
+    return import_named(package, args.carla_root, args.ue4_root,
+                        url, args.package_dir, args.force,
+                        prompt_if_exists=True, package_pick=args.package_pick,
+                        repo=args.repo or mc.get("repo"),
+                        tag_prefix=(args.tag_prefix if args.tag_prefix is not None
+                                    else mc.get("tag_prefix")))
 
 
 if __name__ == "__main__":
