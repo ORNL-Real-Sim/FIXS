@@ -113,8 +113,14 @@ jobs:
             -DENABLE_PYTHON_BINDINGS=OFF \
             -DENABLE_JAVA_BINDINGS=OFF
           cmake --build "$HOME/sumo-build" --target libtracicpp -j "$(nproc)"
-          mkdir -p "$HOME/sumo-traci/bin"
+          mkdir -p "$HOME/sumo-traci/bin" "$HOME/sumo-traci/include/libsumo"
           cp "$HOME/sumo-src/bin/libtracicpp.so" "$HOME/sumo-traci/bin/"
+          # #238 dropped the vendored CommonLib/libsumo headers from git, and
+          # fetch_native_deps.ps1 (which restores them on Windows) is PowerShell
+          # only. Take them from the SUMO checkout we just built, so headers and
+          # library are guaranteed to be the same version. Staged into a small
+          # tree so the cache stays small rather than holding all of src/.
+          cp "$HOME/sumo-src/src/libsumo/"*.h "$HOME/sumo-traci/include/libsumo/"
 
       - name: Configure and build TrafficLayer
         run: |
