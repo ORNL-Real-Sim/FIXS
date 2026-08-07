@@ -15,7 +15,15 @@ Requires: a Python with the carla 0.9.15 package.
 from __future__ import annotations
 import argparse
 import sys
-import carla
+
+import carla_env_setup as env
+
+# Get onto the interpreter carla.json names BEFORE importing carla - see
+# load_opendrive_world.py for why this sits above the import rather than in main().
+if __name__ == "__main__":
+    env.reexec_under_configured(__file__, tag="carla")
+
+import carla  # noqa: E402  (deliberately after the re-exec above)
 
 
 def main() -> int:

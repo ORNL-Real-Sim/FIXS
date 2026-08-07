@@ -105,7 +105,7 @@ def _fixs_tag_repo():
     """(tag, repo) from FIXS_VERSION.txt: line 1 is the tag; a 'Source:' line the repo."""
     tag, repo = None, "ORNL-Real-Sim/FIXS"
     try:
-        # utf-8-SIG: this file is written by fetch_fixs.ps1, and under Windows
+        # utf-8-SIG: this file is written by scripts/update_fixs.ps1, and under
         # PowerShell 5.1 `Out-File -Encoding UTF8` means UTF-8 *with* a BOM. Read as
         # plain utf-8 the BOM survives as ﻿ on line 1 - and str.strip() does not
         # remove it, because it is not whitespace - so the tag came out as
@@ -114,10 +114,10 @@ def _fixs_tag_repo():
         with open(os.path.join(FIXS_ROOT, "FIXS_VERSION.txt"), encoding="utf-8-sig") as f:
             lines = [ln.strip() for ln in f if ln.strip()]
         if lines:
-            # Line 1 is the tag, but initialize.sh stamps the rolling versions as
-            # "<tag> (<published_at>)" while fetch_fixs.ps1 writes the bare tag. Take
+            # Line 1 is the tag, but a rolling release is stamped as
+            # "<tag> (<published_at>)" while a pinned one writes the bare tag. Take
             # the first field so either form resolves; passing the stamped form to the
-            # releases API 404s and silently disables this check on Linux.
+            # releases API 404s and silently disables this check.
             tag = lines[0].split()[0]
         for ln in lines:
             if ln.lower().startswith("source:"):
@@ -140,38 +140,40 @@ def _remote_fixs_commit(repo, tag, timeout=4.0):
 
 
 def _run_initialize(tag):
-    """Re-fetch the FIXS bundle for <tag> via the app's fetch script (the tag is
-    passed as its argument, so it runs non-interactively). True on success.
+    """Re-fetch the FIXS bundle for <tag> through the app's front door (the tag is
+    passed as an argument, so it runs non-interactively). True on success.
 
-    Two locations, newest first: the app repo moved this out of the root and into
-    scripts/ when run_cosim absorbed it (FIXS_Applications#13), and the engine is
-    fetched from a release rather than pinned to an app checkout - so a bundle
-    this new can sit in a clone laid out either way. Looking for only one of them
-    is how a self-update came to report "initialize.sh not found" on a repo that
-    had simply renamed it."""
+    Goes through run_cosim.bat/.sh rather than reaching for an update script by
+    name. This used to probe a list of filenames per platform, because the app
+    repo had renamed the script once (FIXS_Applications#13) and a bundle this new
+    can sit in a clone laid out either way - so a self-update reported
+    "initialize.sh not found" on a repo that had simply renamed it. That list
+    could only grow: since #272 the updater itself lives in FIXS and is fetched
+    per release, so the ONE thing an app repo is guaranteed to expose is its
+    documented entry point. Naming that instead means the engine no longer tracks
+    any downstream repo's internal layout."""
     if platform.system() == "Windows":
-        names = [os.path.join(APP_ROOT, "scripts", "update_fixs.ps1"),
-                 os.path.join(APP_ROOT, "initialize.ps1")]
-        runner = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]
+        front_door = os.path.join(APP_ROOT, "run_cosim.bat")
+        cmd = ["cmd", "/c", front_door]
     else:
-        names = [os.path.join(APP_ROOT, "scripts", "update_fixs.sh"),
-                 os.path.join(APP_ROOT, "initialize.sh")]
-        runner = ["bash"]
-    script = next((p for p in names if os.path.isfile(p)), None)
-    if script is None:
-        print(f"[cosim] cannot self-update: none of these exist -\n        "
-              + "\n        ".join(names))
+        front_door = os.path.join(APP_ROOT, "run_cosim.sh")
+        cmd = ["bash", front_door]
+    if not os.path.isfile(front_door):
+        print(f"[cosim] cannot self-update: {front_door} not found.")
         return False
-    print(f"[cosim] updating FIXS -> {tag} via {os.path.basename(script)} ...")
-    return subprocess.call(runner + [script, tag]) == 0
+    print(f"[cosim] updating FIXS -> {tag} via {os.path.basename(front_door)} ...")
+    # --update-fixs exits before the front door's bootstrap gate and never re-runs
+    # python, so this cannot recurse back into run_cosim.py.
+    return subprocess.call(cmd + ["--update-fixs", tag]) == 0
 
 
 def maybe_update_fixs(no_check=False):
     """Detect a local FIXS bundle that diverges from the published rolling release
     and, when interactive, offer to update + relaunch. Advisory only: every failure
     is swallowed so a run is never blocked by the check."""
-    # FIXS_REEXEC: maybe_reexec() relaunches us under the configured interpreter, and
-    # this runs before that - so without this guard the child asked the same question
+    # FIXS_REEXEC: env.reexec_under_configured() relaunches us under the configured
+    # interpreter, and this runs before that - so without the guard the child asked the
+    # same question
     # the parent had just answered, and a wrapper that starts a different python (any
     # of them: run_cosim.bat finds its own) prompted twice on every run. One bundle,
     # one question.
@@ -1044,40 +1046,13 @@ def resolve_carla_env(reconfigure=False):
     return cfg
 
 
-def ensure_runtime(cfg):
-    """Repair a config that lacks a usable python env (e.g. written by an older
-    setup before env resolution existed): resolve the interpreter + matching
-    carla and save it, WITHOUT re-asking the CARLA / UE4 paths."""
-    py = cfg.get("python")
-    if py and os.path.isfile(py) and env._python_can_import(py, ("carla",)):
-        return cfg
-    print("[cosim] saved config has no usable python env (carla not importable); "
-          "resolving it now (CARLA paths kept) ...")
-    cfg["python"] = env.resolve_python()
-    # .get: 'client' mode has no carla_root by design (CARLA is on another host).
-    wheel = env.ensure_carla(cfg["python"], cfg["mode"], cfg.get("carla_root"))
-    if wheel:
-        cfg["carla_wheel"] = wheel
-    env.save_config(cfg)
-    return cfg
-
-
-def maybe_reexec(cfg):
-    """Re-run this script under the configured python (the env that actually has
-    the carla + SUMO clients) if we are not already running under it. Lets the
-    .bat/.sh stay trivial and work on any machine, whatever the env is named."""
-    target = cfg.get("python")
-    if not target or not os.path.isfile(target):
-        return
-    same = os.path.normcase(os.path.normpath(target)) == \
-        os.path.normcase(os.path.normpath(sys.executable))
-    if same or os.environ.get("FIXS_REEXEC") == "1":
-        return
-    child_args = [a for a in sys.argv[1:] if a != "--reconfigure"]
-    cmd = [target, os.path.abspath(__file__), *child_args]
-    print(f"[cosim] switching to configured python env:\n        {target}")
-    osenv = dict(os.environ, FIXS_REEXEC="1")
-    sys.exit(subprocess.call(cmd, env=osenv))
+# ensure_runtime and maybe_reexec used to live here, as run_cosim's private copies.
+# Both now belong to carla_env_setup, the module that owns carla.json:
+# env.ensure_runtime because --update-python needs the same work on demand and a
+# second copy is how a repair path and an update path drift apart, and
+# env.reexec_under_configured because every entry point - import_map, place_tls,
+# place_signs, the world/spectator helpers - has to obey the same rule, and the
+# rule was enforced only by whichever script you happened to start with.
 
 
 def confirm_world_ready(client, expected_map, timeout):
@@ -2738,6 +2713,12 @@ def main():
                          "by run_cosim on the traffic machine. Ctrl+C stops it.")
     ap.add_argument("--reconfigure", action="store_true",
                     help="re-run CARLA env setup before launching (pick a different CARLA)")
+    ap.add_argument("--update-python", action="store_true",
+                    help="re-resolve ONLY the python env (carla + SUMO client) and save "
+                         "it to carla.json, then exit. The CARLA / UE4 paths are kept. "
+                         "Use after creating the env setup asked for, or to move off one "
+                         "picked by mistake; every entry point follows carla.json, so "
+                         "this changes them all at once")
     ap.add_argument("--render-offscreen", action="store_true", help="headless CARLA")
     ap.add_argument("--no-spectator", action="store_true",
                     help="do not auto-frame the CARLA spectator on the scene")
@@ -2781,6 +2762,13 @@ def main():
         _disable_quickedit()
     if args.log or args.log_file:
         start_log(args.log_file)
+
+    # --update-python answers a question and stops, and it is the one flag that must
+    # NOT re-exec first: re-execing runs it under the very interpreter it exists to
+    # replace, so a config pointing at a broken env could never be repaired from the
+    # front door. Handled before everything else for the same reason.
+    if args.update_python:
+        return env.update_python()
 
     # --doctor and --version answer a question and stop. Neither touches a map, a
     # setup or a server, so they are safe to run at any time - including while a
@@ -2840,8 +2828,10 @@ def main():
     if not args.no_launch and (cfg is None or args.reconfigure):
         cfg = resolve_carla_env(reconfigure=args.reconfigure)
     if cfg is not None:
-        cfg = ensure_runtime(cfg)  # repair stale configs that lack a python env
-        maybe_reexec(cfg)          # may not return (re-execs under the env python)
+        cfg = env.ensure_runtime(cfg)   # repair stale configs that lack a python env
+        # may not return (re-execs under the env python). --reconfigure is dropped:
+        # it has already been honoured above, and the child must not ask again.
+        env.reexec_under_configured(__file__, cfg, drop=("--reconfigure",), tag="cosim")
         if cfg.get("mode") == "client" and args.carla_only:
             sys.exit("[cosim] --carla-only serves a CARLA on THIS machine, but "
                      "carla.json is 'client' mode (no CARLA here). Run it on the "
@@ -2865,7 +2855,7 @@ def main():
 
     # Everything the run needs - application, map, scenario yaml, bridge, CARLA,
     # SUMO - is decided here, from a saved setup you pick and edit until you
-    # confirm. Deliberately AFTER maybe_reexec: it prompts, and re-execing under
+    # confirm. Deliberately AFTER the re-exec: it prompts, and re-execing under
     # the env python afterwards would ask the same questions twice. And
     # deliberately BEFORE anything heavy: no download, cook or load happens while
     # the user is still deciding what to run, so quitting out of it leaves nothing
@@ -2882,7 +2872,7 @@ def main():
         args, cfg, repo, tag_prefix, catalog)
 
     # The app is settled and we are already running under the configured interpreter
-    # (maybe_reexec above), so this is the first point where "what does THIS app
+    # (reexec_under_configured above), so this is the first point where "what does THIS app
     # need" is answerable. Deliberately here rather than later: it is still before
     # any download, cook or load, so a missing package is reported while nothing
     # slow has happened yet - instead of as an ImportError minutes into a run.

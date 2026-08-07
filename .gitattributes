@@ -1,0 +1,12 @@
+# Shell scripts must be LF in the blob AND in the working tree.
+#
+# Blob: scripts/update_fixs.sh is downloaded from raw.githubusercontent and run
+# directly by a consuming app's bootstrap, so a CR in the shebang breaks it
+# outright - the kernel reports "bash\r: no such file or directory".
+#
+# Working tree: the release zip is packed on Windows, where core.autocrlf=true
+# rewrites *.sh to CRLF on checkout, so the bundle shipped CRLF scripts with no
+# exec bit even though every blob was already LF. eol=lf overrides autocrlf for
+# these files, which is what lets the installer's unpack-time CRLF normalization
+# be retired once a release ships built from a checkout with this in place.
+*.sh text eol=lf

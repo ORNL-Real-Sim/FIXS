@@ -56,7 +56,7 @@ After cloning, initialize the checkout. `dispatch.bat` also runs this as its ste
 ```
 powershell -ExecutionPolicy Bypass -File scripts\initialize_fixs.ps1
 ```
-It is idempotent and does: ProprietaryFiles submodule (optional) -> native deps -> yaml-cpp, then prints a per-step summary. Not to be confused with `scripts/fetch_fixs.ps1`, which is consumer-side (downloads a published release zip).
+It is idempotent and does: ProprietaryFiles submodule (optional) -> native deps -> yaml-cpp, then prints a per-step summary. Not to be confused with `scripts/update_fixs.ps1` / `scripts/update_fixs.sh`, which are consumer-side (install a published release zip into an application checkout; see #272).
 
 **Native deps are not in git** (#109, #238). `CommonLib/libsumo` and `CommonLib/libcarla` are gitignored and fetched as SHA-256-verified, version-named zips from the public rolling release `fixs-native-deps`. libsumo is **required** (TrafficLayer links `libsumocpp.lib` directly, so a missing fetch is a hard error); libcarla is optional (VirCarlaEnv only). Bumping the SUMO version in `dependencies.yaml` requires publishing a matching asset first — `scripts\dispatch\pack_native_deps.ps1 -Component sumo -Publish` — or every clone breaks. Both fetch and pack load-test `libsumo/bin` (`libsumo_verify.ps1`) because the old vendored copy silently lacked `geos_c.dll`/`geos.dll` for months (#70).
 
