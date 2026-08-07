@@ -123,7 +123,8 @@ BIN="$BUILD_DIR/TrafficLayer"
 
 # --- step 3: smoke checks ----------------------------------------------------
 if [ "$DO_SMOKE" -eq 1 ]; then
-    export LD_LIBRARY_PATH="$REPO_ROOT/CommonLib/libsumo/bin:${LD_LIBRARY_PATH:-}"
+    # No LD_LIBRARY_PATH: the binary carries an $ORIGIN-relative RUNPATH, so
+    # these checks also prove it resolves libtracicpp.so on its own.
 
     if "$BIN" --help >/dev/null 2>&1; then
         step_ok "Smoke: --help"
@@ -159,7 +160,7 @@ echo "logs:              $CFG_LOG"
 echo "                   $BLD_LOG"
 echo
 echo "Run a config with:"
-echo "  export LD_LIBRARY_PATH=$REPO_ROOT/CommonLib/libsumo/bin:\$LD_LIBRARY_PATH"
 echo "  $BIN -f <config.yaml>"
+echo "(no LD_LIBRARY_PATH needed -- libtracicpp.so is found via an \$ORIGIN-relative RUNPATH)"
 
 [ ${#STEPS_FAIL[@]} -eq 0 ] || exit 1
