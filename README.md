@@ -71,28 +71,33 @@ By default the executable looks for the SUMO runtime under `CommonLib/libsumo/bi
 
 `CommonLib/libsumo` is **not** checked into git — it is fetched during first-run setup (`scripts\initialize_fixs.ps1`, also run automatically by `dispatch.bat`). If the directory is missing, run that first. See [doc/BUILD.md — First-Run Setup](doc/BUILD.md#first-run-setup-fresh-clone).
 
-**NOTE: below is still experimental features and only applies to SUMO for now.**
-There are different mode of synchronization and opeartion of the Real-Sim interface. The **SimulationMode** parameter is an integer with each bit as the followings:
-- bit 2, bit 1, bit 0: 
-    - **binary 000, integer 0**: Application/Xil will connect and sync with Simulator (SUMO/VISSIM) at the beginning of the simulation
-    - **binary 001, integer 1**: Application/Xil will connect with the Simulator and in wait mode until the ego vehicle enters the network then sync. 
+### Warm-up (SUMO only)
 
-        This is suitable for simulation environment where users want to run the SUMO simulation at fast pace without running a Simulink model until the ego vehicle enters. 
-    <!--    - **binary 010, integer 2**: Application/Xil will connect with the Simulator and running steps but NOT sync with the Simulator until the ego vehicle enters the network
+XIL testing usually cares about the simulation only from the moment the ego is on the
+road, but reaching that moment means simulating minutes of background traffic first. A
+**warm-up** runs the traffic simulator up to that moment with the FIXS boundary closed:
+no message reaches any client, and no client is accepted yet, so CARLA's map load and
+CarMaker's start-up overlap the warm-up instead of queueing ahead of it. The sockets are
+bound and listening throughout, so a client's `connect()` behaves exactly as before — it
+just receives nothing until the warm-up ends.
 
-        This is suitable for XIL environment where users want to run the VISSIM/SUMO simulation at fast pace before the ego vehicle enters the network, but the Simulink model needs to also starts at beginning. Before ego vehicle enters, Simulink and VISSIM/SUMO are both running without any message sharing. After ego vehicle enters, the ego vehicle in Simulink will then sync with the same one in VISSIM/SUMO. 
-    -->
-    - **binary 100, integer 4**: Application/Xil will connect with the Simulator and in wait mode until the specified initial simulation seconds (parameter **SimulationModeParamter**) then sync
+Two mutually exclusive triggers, chosen by who knows the entry time:
 
-        This is suitable for simulation environment where users want to run the SUMO simulation at fast pace without running a Simulink model until the a specific seconds later.
-        You could add ramp up and ramp down in the Simulink model and manipulate the SimulationModeParamter settings so that Simulink and SUMO sychronized only after the ego vehicle in Simulink reaches initial speed. 
+| Key | Warm-up ends when | Use when |
+| --- | --- | --- |
+| `WarmUpUntilEgoEntry: true` | the first subscribed ego is in the network | a controller inserts the ego — it keeps owning the entry time, and no number is duplicated in the config |
+| `WarmUpTime: <sim time>` | simulation time reaches that **absolute** value, reached in one batch step | nothing else inserts the ego, i.e. the CarMaker path where TrafficLayer injects it |
 
-<!--   - **binary 101, integer 5**: Application/Xil will connect with the Simulator and running steps but NOT sync with the Simulator until the specified initial simulation seconds (parameter **SimulationModeParamter**) then sync
+Setting neither means no warm-up (sync from the first step). Setting both warns and uses
+ego entry — a batch step cannot also watch for an ego arriving part-way through.
 
-        This is suitable for XIL environment where users want to run the VISSIM/SUMO simulation at fast pace before a specific second, but the Simulink model needs to also starts at beginning. Before the specific second, Simulink and VISSIM/SUMO are both running without any message sharing. After the specific second, the ego vehicle in Simulink will then sync with the same one in VISSIM/SUMO. 
--->
+For `WarmUpUntilEgoEntry`, the ids watched are the union of the by-id vehicle
+subscriptions in `ApplicationSetup` and `XilSetup`, and with several egos the *first* to
+arrive ends the warm-up: an ego on the road while the boundary is still closed would be
+driven by the traffic model instead of by its XIL.
 
-SimulationModeParamter is a double variable that currently only used for mode binary 100, integer 4 and binary 101, integer 5
+See [doc/ConfigSetup.md](doc/ConfigSetup.md#warm-up) for the full reference, including
+the migration from the removed `SimulationMode` / `SimulationModeParameter` keys (#86).
 
 ## Build
 

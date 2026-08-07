@@ -129,6 +129,22 @@ public:
 
 	int initConnection(std::string errorLogName="");
 
+	// Warm-up support (#86). When set before initConnection(), the sockets are
+	// still created, bound and listen()ed -- so a client's connect() succeeds
+	// exactly as before and lands in the backlog -- but the blocking accept loop
+	// is NOT run. The host calls acceptClients() later, when its warm-up ends.
+	//
+	// The point is not the accept itself (a client that connects early simply
+	// blocks on its first recv either way); it is that TrafficLayer no longer
+	// waits for every client to exist before it starts warming up, so CarMaker's
+	// and CARLA's start-up overlaps the warm-up instead of queueing ahead of it.
+	bool DeferAcceptClients = false;
+
+	// The blocking "wait for all clients" accept loop. Run automatically by
+	// initConnection() unless DeferAcceptClients is set; call it directly when it
+	// was deferred. Returns 0 on success, -1 on a socket error.
+	int acceptClients(std::string errorLogName="");
+
 	// RS_DEBUG master-log target. The host assigns it (TrafficLayer sets it to its
 	// RealSim_tmp/TrafficLayer_<timestamp>.log). When empty -- e.g. the VirtualEnvironment
 	// .lib running inside CarMaker -- RS_DEBUG breadcrumbs fall back to

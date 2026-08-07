@@ -125,14 +125,34 @@ Key configuration parameters:
 - `SelectedTrafficSimulator`: 'VISSIM' or 'SUMO'
 - `EnableExternalDynamics`: Allow external control of vehicle dynamics (SUMO)
 - `VehicleMessageField`: Array of fields to exchange (see [README.md](README.md) Appendix for full field list)
-- `SimulationMode`: Bitfield controlling sync behavior (0=sync at start, 1=wait for ego entry, 4=wait for specified time)
+- `WarmUpUntilEgoEntry` / `WarmUpTime`: warm-up triggers (see below)
 
-### Simulation Modes
+### Warm-up (#86, replaced SimulationMode)
 
-SimulationMode is a bitfield:
-- 0 (binary 000): Sync from simulation start
-- 1 (binary 001): Wait mode until ego vehicle enters network, then sync
-- 4 (binary 100): Wait mode until SimulationModeParameter seconds, then sync
+`SimulationMode` / `SimulationModeParameter` were removed in 0.9.0. They were documented
+as a bitfield but never were one — the code tested `4||5` and `1||2` as identical
+branches, and 3/6/7 silently meant 0. A config that still sets them is refused at
+startup.
+
+Two mutually exclusive keys in `SimulationSetup`, both SUMO-only:
+
+- `WarmUpUntilEgoEntry: true` — tick until the first subscribed ego is in the network.
+  The watched ids are the **union** of the by-id vehicle subscriptions in
+  `ApplicationSetup` and `XilSetup` (`ConfigHelper::WarmUpEgoIds`), deliberately not
+  `vehicleSubscribeId_v`, which is either/or and also drives message routing.
+- `WarmUpTime: <absolute sim time>` — one batch `Simulation::step(T)`.
+
+While the warm-up runs, the main loop returns to the top before any client I/O **and the
+clients are not accepted yet** (`SocketHelper::DeferAcceptClients` / `acceptClients()`),
+so client start-up overlaps the warm-up. Measured on MLK's 185 s warm-up: batch step
+2.70 s, tick loop + ego poll 3.29 s — both against minutes for a fully synced warm-up,
+because what dominates is client I/O, not stepping. A batch `step(T)` from TrafficLayer
+was verified to coexist with a second TraCI client stepping 1:1 (both land exactly on
+the target time), though SUMO then advances only as fast as that other client steps.
+
+VISSIM parity is not implemented: TrafficLayer does not own the VISSIM clock, and the
+DriverModel DLL still has its own hardcoded `ENABLE_WARMUP`. A VISSIM config that sets
+either key is rejected at startup.
 
 ## Running Tests
 

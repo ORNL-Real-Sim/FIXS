@@ -534,6 +534,11 @@ void TrafficHelper::getConfig() {
 		Config_c->getVehSubscriptionList(Config_c->ApplicationSetup.VehicleSubscription, edgeSubscribeId_v, vehicleSubscribeId_v, subscribeAllVehicle, pointSubscribeId_v, vehicleTypeSubscribedId_v);
 	}
 
+	// #86: the warm-up watches BOTH layers' by-id subscriptions, not the either/or
+	// list above -- ConfigHelper builds that union so the trigger sees the XIL ego
+	// even when the application layer is the one TrafficLayer talks to.
+	warmupEgoId_v = Config_c->WarmUpEgoIds;
+
 	// #176: the `all` subscription means every vehicle in the network, unbounded.
 	// If a radius was also configured alongside `all`, it is ignored — warn so the
 	// config author is not surprised.
@@ -641,32 +646,39 @@ int TrafficHelper::addEgoVehicleFromXY(double simTime, std::string vehicleId, st
 }
 
 
-int TrafficHelper::checkIfEgoExist(double* simTime) {
+// Is any warm-up ego in the network yet? (#86)
+//
+// "Any", not "all": if egos A and B enter at 100 s and 150 s and the warm-up
+// waited for both, then from 100-150 s A is on the road being driven by SUMO's
+// car-following model while its XIL is still held behind a closed boundary --
+// its entry would be simulated by the wrong thing. Stopping at the first arrival
+// has no such failure: B simply is not in the network yet, which is the ordinary
+// no-warm-up situation.
+//
+// Replaces checkIfEgoExist, which returned from inside the first loop iteration
+// on BOTH branches (so only one id was ever checked) and fell off the end with
+// no return value at all when the subscription list was empty.
+bool TrafficHelper::isWarmUpEgoInNetwork(double* simTime) {
 
-	if (SUMO_OR_VISSIM.compare("SUMO") == 0) {
-		*simTime = SUMO_TRACI_NAMESPACE::Simulation::getTime();
-		vector <string> VehIdInSimulator = SUMO_TRACI_NAMESPACE::Vehicle::getIDList();
+	if (SUMO_OR_VISSIM.compare("SUMO") != 0) {
+		// Unreachable: ConfigHelper rejects a warm-up on VISSIM, because
+		// TrafficLayer does not own the VISSIM clock. Kept explicit so this can
+		// never silently answer "no" forever the way it used to.
+		return false;
+	}
 
-		// check if subscribed vheicle is in the network
-		for (auto& iter : vehicleSubscribeId_v) {
-			string idStr = iter.first;
+	*simTime = SUMO_TRACI_NAMESPACE::Simulation::getTime();
+	vector <string> VehIdInSimulator = SUMO_TRACI_NAMESPACE::Vehicle::getIDList();
 
-			// if any one of vehicle has not been subscribed yet
-			if (find(VehIdInSimulator.begin(), VehIdInSimulator.end(), idStr) != VehIdInSimulator.end()) {
-				return 1;
-			}
-			else {
-				return 0;
-			}
-
-			// only check the first vehicle, which considered as the ego vehicle
-			// break;
+	for (auto& idStr : warmupEgoId_v) {
+		if (find(VehIdInSimulator.begin(), VehIdInSimulator.end(), idStr) != VehIdInSimulator.end()) {
+			printf("Warm-up complete: ego '%s' entered the network at t=%.2f\n",
+				idStr.c_str(), *simTime);
+			return true;
 		}
 	}
-	else {
-		return 0;
-	}
 
+	return false;
 }
 
 int TrafficHelper::getSimulationTime(double* simTime) {
@@ -679,14 +691,25 @@ int TrafficHelper::getSimulationTime(double* simTime) {
 	}
 }
 
+// Advance the traffic simulator to an absolute time in ONE call -- the WarmUpTime
+// path (#86). SUMO runs to endTime internally, so there is no per-step TraCI round
+// trip and no opportunity for anything else to be observed on the way; that is why
+// WarmUpTime and WarmUpUntilEgoEntry are mutually exclusive.
+//
+// Verified to work with a second TraCI client attached (the topology where an
+// application-layer controller holds order 2): both clients land exactly on
+// endTime. SUMO only advances as fast as the OTHER client steps, so a controller
+// that keeps doing per-step socket I/O during its own warm-up bounds this.
 int TrafficHelper::runSimulation(double endTime) {
 	if (SUMO_OR_VISSIM.compare("SUMO") == 0) {
 		SUMO_TRACI_NAMESPACE::Simulation::step(endTime);
 		return 1;
 	}
-	else {
-		return 0;
-	}
+	// VISSIM drives its own clock through the DriverModel DLL; there is nothing to
+	// batch-step here. ConfigHelper rejects a warm-up on VISSIM so this cannot be
+	// reached -- it used to return 0 while the caller marked the warm-up done,
+	// which is how mode 4 became a silent no-op on VISSIM.
+	return -1;
 }
 
 
