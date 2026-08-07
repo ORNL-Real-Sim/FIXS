@@ -4,9 +4,11 @@
 #include <unordered_map>
 #include <vector>
 #include <string>
-#ifdef RS_DSPACE
+// #65: unconditional, not #ifdef RS_DSPACE. The fixed-width types below are
+// declared by <cstdint>; MSVC and gcc <= 12 happen to pull it in transitively,
+// gcc 13 (Ubuntu 24.04) does not. Guarding it on RS_DSPACE only papered over
+// the dSPACE toolchain that noticed first.
 #include <cstdint>
-#endif
 // MESSAGE IDENTIFIER 1
 // Full vehicle data structure that will be shared between SUMO and other simulators
 // !!! This does not necessary mean all data directly communicated between simulators
