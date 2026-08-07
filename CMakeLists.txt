@@ -50,11 +50,30 @@ add_subdirectory(CommonLib/yaml-cpp EXCLUDE_FROM_ALL)
 # --- libtraci ---------------------------------------------------------------
 # TrafficHelper.h leaves ENABLE_LIBSUMO commented out, so the active client is
 # libtraci -- a thin TraCI socket client. That matters for cost: libtracicpp
-# avoids the gdal/proj/fox/osg chain that libsumocpp drags in. The HEADERS are
-# vendored under CommonLib/libsumo (which is why compiling needs no SUMO at
-# all); only linking needs a built library.
+# avoids the gdal/proj/fox/osg chain that libsumocpp drags in.
+#
+# #238 dropped the vendored CommonLib/libsumo from git -- on Windows it is
+# restored by fetch_native_deps.ps1, which has no Linux counterpart. So the
+# headers are LOCATED rather than assumed: the fetched copy when it is present,
+# otherwise the SUMO source checkout we build libtracicpp from, which carries
+# the headers for exactly the version we link against so the two cannot drift.
 set(FIXS_SUMO_HOME "$ENV{SUMO_HOME}" CACHE PATH
-    "Root of a built SUMO checkout (expects bin/libtracicpp.so)")
+    "Root of a built SUMO checkout (expects bin/libtracicpp.so, headers under src/ or include/)")
+
+find_path(FIXS_LIBTRACI_INCLUDE_DIR
+    NAMES libsumo/libtraci.h
+    HINTS "${CMAKE_CURRENT_SOURCE_DIR}/CommonLib"
+          "${FIXS_SUMO_HOME}/include"
+          "${FIXS_SUMO_HOME}/src"
+    NO_DEFAULT_PATH
+    DOC "Directory containing libsumo/libtraci.h")
+
+if(NOT FIXS_LIBTRACI_INCLUDE_DIR)
+    message(FATAL_ERROR
+        "libsumo/libtraci.h not found. These headers are no longer vendored in "
+        "git (#238). Point -DFIXS_SUMO_HOME=<sumo checkout> at a SUMO source "
+        "tree, or run fetch_native_deps to populate CommonLib/libsumo.")
+endif()
 
 find_library(FIXS_LIBTRACI_LIBRARY
     NAMES tracicpp libtracicpp
@@ -88,7 +107,7 @@ target_compile_features(TrafficLayer PRIVATE cxx_std_17)
 
 target_include_directories(TrafficLayer PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/CommonLib"
-    "${CMAKE_CURRENT_SOURCE_DIR}/CommonLib/libsumo"
+    "${FIXS_LIBTRACI_INCLUDE_DIR}"
     "${CMAKE_CURRENT_BINARY_DIR}/generated")
 
 target_link_libraries(TrafficLayer PRIVATE
