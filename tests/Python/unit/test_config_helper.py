@@ -75,24 +75,6 @@ def test_config_defaults_for_missing_fields():
     assert ch.simulation_setup['SimulationEndTime'] == 90000.0
 
 
-def test_removed_simulation_mode_is_refused(tmp_path):
-    """A config still setting SimulationMode is refused, not silently ignored (#86).
-
-    Silently dropping it would leave a run that still works and is merely, and
-    mysteriously, much slower — the whole warm-up would run in full sync.
-    """
-    cfg = tmp_path / "legacy_mode.yaml"
-    cfg.write_text(
-        "SimulationSetup:\n"
-        "  SelectedTrafficSimulator: \"SUMO\"\n"
-        "  SimulationMode: 4\n"
-        "  SimulationModeParameter: 450\n"
-    )
-    ch = ConfigHelper()
-    with pytest.raises(ValueError, match="WarmUpTime"):
-        ch.getConfig(str(cfg))
-
-
 def test_warmup_keys_are_parsed(tmp_path):
     """Both warm-up triggers round-trip through the parser (#86)."""
     cfg = tmp_path / "warmup.yaml"

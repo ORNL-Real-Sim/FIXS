@@ -195,18 +195,8 @@ int ConfigHelper::getConfig(string configName) {
 		SimulationSetup.TrafficSimulatorPort = 1337;
 		if (!SuppressDefaultMessages) printf("\nTraffic Simulator Port not specified! Will use 1337 as default!\n");
 	}
-	// #86: SimulationMode/SimulationModeParameter are gone. Refuse to start rather
-	// than ignore them -- an ignored 'SimulationMode: 4' still runs, it just runs
-	// the whole warm-up in full sync, so the only symptom is a run that got
-	// mysteriously slower. A tombstone turns that into a one-line fix.
-	if (node["SimulationMode"] || node["SimulationModeParameter"]) {
-		printf("\nERROR: 'SimulationMode' / 'SimulationModeParameter' were removed in v0.9.0 (#86).\n");
-		printf("\tmode 1 (wait for the ego)  ->  WarmUpUntilEgoEntry: true\n");
-		printf("\tmode 4 (wait until a time) ->  WarmUpTime: <absolute simulation time>\n");
-		printf("\tmode 0 (no warm-up)        ->  remove the key\n");
-		printf("\tSee doc/ConfigSetup.md.\n\n");
-		exit(-1);
-	}
+	// Warm-up (#86). Replaced SimulationMode/SimulationModeParameter, which no
+	// config sets any more -- see doc/ConfigSetup.md for the mapping.
 	if (node["WarmUpUntilEgoEntry"]) {
 		SimulationSetup.WarmUpUntilEgoEntry = parserFlag(node, "WarmUpUntilEgoEntry");
 	}

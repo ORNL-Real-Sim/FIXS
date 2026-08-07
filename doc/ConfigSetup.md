@@ -55,9 +55,9 @@ silently ignored.
 > the "bitfield" never behaved like one (`5` was a duplicate of `4`, and `3`/`6`/`7`
 > silently meant `0`). `SimulationMode: 1` becomes `WarmUpUntilEgoEntry: true`,
 > `SimulationMode: 4` + `SimulationModeParameter: T` becomes `WarmUpTime: T`, and
-> `SimulationMode: 0` means removing the key. A config that still sets the old keys is
-> refused at startup, because silently ignoring them would leave a run that still works
-> and is merely, mysteriously, much slower.
+> `SimulationMode: 0` means removing the key. No config in either FIXS or
+> FIXS_Applications set them, so they are simply gone: an old config that still does is
+> ignored like any other unknown key, and runs with no warm-up.
 
 ## SumoSetup
 

@@ -131,8 +131,8 @@ Key configuration parameters:
 
 `SimulationMode` / `SimulationModeParameter` were removed in 0.9.0. They were documented
 as a bitfield but never were one — the code tested `4||5` and `1||2` as identical
-branches, and 3/6/7 silently meant 0. A config that still sets them is refused at
-startup.
+branches, and 3/6/7 silently meant 0. No config in FIXS or FIXS_Applications set them, so
+they were dropped outright with no compatibility shim.
 
 Two mutually exclusive keys in `SimulationSetup`, both SUMO-only:
 

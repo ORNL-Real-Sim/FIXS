@@ -44,16 +44,8 @@ class ConfigHelper:
         self.simulation_setup["SelectedTrafficSimulator"] = self.parserString(simulation_node, "SelectedTrafficSimulator", "SUMO")
         self.simulation_setup["TrafficSimulatorIP"] = self.parserString(simulation_node, "TrafficSimulatorIP", "127.0.0.1")
         self.simulation_setup["TrafficSimulatorPort"] = self.parserInteger(simulation_node, "TrafficSimulatorPort", 1337)
-        # Warm-up (#86), mirroring ConfigHelper.cpp. SimulationMode /
-        # SimulationModeParameter were removed; the C++ parser refuses to start on a
-        # config that still sets them, so raise here too rather than let a python
-        # consumer read a key the engine will reject.
-        if "SimulationMode" in simulation_node or "SimulationModeParameter" in simulation_node:
-            raise ValueError(
-                "'SimulationMode' / 'SimulationModeParameter' were removed in v0.9.0 (#86). "
-                "Use 'WarmUpUntilEgoEntry: true' (old mode 1) or "
-                "'WarmUpTime: <absolute simulation time>' (old mode 4); "
-                "remove the key for no warm-up (old mode 0). See doc/ConfigSetup.md.")
+        # Warm-up (#86), mirroring ConfigHelper.cpp. Replaced SimulationMode /
+        # SimulationModeParameter; see doc/ConfigSetup.md for the mapping.
         self.simulation_setup["WarmUpUntilEgoEntry"] = self.parserFlag(simulation_node, "WarmUpUntilEgoEntry", False)
         self.simulation_setup["WarmUpTime"] = self.parserDouble(simulation_node, "WarmUpTime", 0)
         self.simulation_setup["VehicleMessageField"] = self.parserStringVector(simulation_node, "VehicleMessageField", ["id", "type", "speed", "positionX", "positionY"])
