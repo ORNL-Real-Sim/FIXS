@@ -60,9 +60,23 @@ add_subdirectory(CommonLib/yaml-cpp EXCLUDE_FROM_ALL)
 set(FIXS_SUMO_HOME "$ENV{SUMO_HOME}" CACHE PATH
     "Root of a built SUMO checkout (expects bin/libtracicpp.so, headers under src/ or include/)")
 
+# Where libsumo lives is declared in dependencies.yaml, not hardcoded here, so
+# moving the vendor directory is a one-line yaml edit. scripts/fetch_native_deps.sh
+# reads the same key, so the two cannot disagree.
+set(FIXS_LIBSUMO_RELDIR "CommonLib/libsumo")
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/dependencies.yaml" _fixs_deps_yaml)
+string(REGEX MATCH "\n  sumo:[^\n]*\n((  [^\n]*\n|    [^\n]*\n)+)" _m "${_fixs_deps_yaml}")
+if(CMAKE_MATCH_1)
+    string(REGEX MATCH "location:[ \t]*\"([^\"]+)\"" _m2 "${CMAKE_MATCH_1}")
+    if(CMAKE_MATCH_1)
+        set(FIXS_LIBSUMO_RELDIR "${CMAKE_MATCH_1}")
+    endif()
+endif()
+message(STATUS "FIXS libsumo location (dependencies.yaml): ${FIXS_LIBSUMO_RELDIR}")
+
 find_path(FIXS_LIBTRACI_INCLUDE_DIR
     NAMES libsumo/libtraci.h
-    HINTS "${CMAKE_CURRENT_SOURCE_DIR}/CommonLib"
+    HINTS "${CMAKE_CURRENT_SOURCE_DIR}/${FIXS_LIBSUMO_RELDIR}/.."
           "${FIXS_SUMO_HOME}/include"
           "${FIXS_SUMO_HOME}/src"
     NO_DEFAULT_PATH
@@ -77,7 +91,7 @@ endif()
 
 find_library(FIXS_LIBTRACI_LIBRARY
     NAMES tracicpp libtracicpp
-    HINTS "${CMAKE_CURRENT_SOURCE_DIR}/CommonLib/libsumo/bin"
+    HINTS "${CMAKE_CURRENT_SOURCE_DIR}/${FIXS_LIBSUMO_RELDIR}/bin"
           "${FIXS_SUMO_HOME}/bin" "${FIXS_SUMO_HOME}/lib"
     DOC "Path to libtracicpp")
 
@@ -135,9 +149,38 @@ if(NOT WIN32)
     # RUNPATH, so the binary only runs where it was built: a CI artifact would
     # carry /__w/... and fail to start anywhere else. $ORIGIN makes it
     # relocatable -- move or ship the tree and it still resolves.
+    # SEVERAL $ORIGIN-relative candidates, because the layout around the
+    # executable differs by how FIXS was obtained, and one hardcoded relative
+    # path would only serve one of them:
+    #
+    #   cloned repo / CI   build/TrafficLayer   + <repo>/CommonLib/libsumo/bin
+    #   released bundle    TrafficLayer         + libraries beside the exe
+    #                      (8_create_zip.ps1 stages executables at the zip root)
+    #   staged install     bin/TrafficLayer     + lib/
+    #
+    # $ORIGIN is resolved by the loader at run time, so all three work from one
+    # binary and nothing depends on where it was built.
+    # CMake also appends the link directory to RPATH automatically, as an
+    # ABSOLUTE build-machine path. That both leaks the build location into a
+    # shipped binary and masks a broken relative RPATH on the build machine
+    # (the binary keeps working there while failing everywhere else). Rewrite
+    # those automatic entries $ORIGIN-relative too, so nothing absolute
+    # survives into the artifact.
+    set(_fixs_rpath
+        "$ORIGIN"
+        "$ORIGIN/${FIXS_LIBSUMO_RELDIR}/bin"
+        "$ORIGIN/../${FIXS_LIBSUMO_RELDIR}/bin"
+        "$ORIGIN/../lib")
     set_target_properties(TrafficLayer PROPERTIES
-        BUILD_RPATH   "$ORIGIN/../CommonLib/libsumo/bin"
-        INSTALL_RPATH "$ORIGIN/../CommonLib/libsumo/bin")
+        BUILD_RPATH   "${_fixs_rpath}"
+        INSTALL_RPATH "${_fixs_rpath}"
+        # NOT SKIP_BUILD_RPATH: that drops the explicit list above as well, and
+        # then nothing resolves. CMake additionally appends the absolute
+        # directory of the library it linked, which stays as a harmless LAST
+        # entry -- the loader tries the $ORIGIN candidates first and simply
+        # skips a path that does not exist. INSTALL_RPATH (used by
+        # `cmake --install`) carries only the relative list.
+        BUILD_RPATH_USE_ORIGIN ON)
 endif()
 
 if(WIN32)
