@@ -77,13 +77,15 @@ endif()
 
 find_library(FIXS_LIBTRACI_LIBRARY
     NAMES tracicpp libtracicpp
-    HINTS "${FIXS_SUMO_HOME}/bin" "${FIXS_SUMO_HOME}/lib"
+    HINTS "${CMAKE_CURRENT_SOURCE_DIR}/CommonLib/libsumo/bin"
+          "${FIXS_SUMO_HOME}/bin" "${FIXS_SUMO_HOME}/lib"
     DOC "Path to libtracicpp")
 
 if(NOT FIXS_LIBTRACI_LIBRARY)
     message(FATAL_ERROR
-        "libtracicpp not found. Build SUMO ${FIXS_SUMO_VERSION} and point "
-        "-DFIXS_SUMO_HOME=<sumo checkout> at it, or set -DFIXS_LIBTRACI_LIBRARY=<path>.")
+        "libtracicpp not found. Run scripts/fetch_native_deps.sh to build and "
+        "install it into CommonLib/libsumo, or point -DFIXS_SUMO_HOME=<sumo "
+        "checkout> at an existing build, or set -DFIXS_LIBTRACI_LIBRARY=<path>.")
 endif()
 
 # --- TrafficLayer -----------------------------------------------------------
