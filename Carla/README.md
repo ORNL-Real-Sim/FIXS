@@ -105,10 +105,24 @@ Setup asks **packaged** vs **source build**, then opens a native folder picker:
   used automatically when it points at a real engine; otherwise you're prompted.
   Launched through the editor as `UE4Editor <uproject> -game`.
 
-**Windows note:** importing a *custom* map into a packaged CARLA is unsupported by
-CARLA (map ingestion is Linux + Docker only &mdash; there is no `ImportAssets.bat`),
-so on Windows setup offers **source build only** for custom-map apps. Pass
-`--allow-packaged-windows` if you only need stock maps (Town01, ...) from a package.
+**What a packaged build cannot do:** cook or place anything &mdash; that needs the
+Unreal editor, which a package does not ship. So it runs a Digital-Twin-Library map
+only if the library publishes it *precooked* (`<map>_cooked.tar.gz`), exactly as it
+was cooked; traffic lights and signs are whatever the asset already contains.
+`run_cosim` installs that asset for you, and names the missing asset up front for a
+map that has none. To cook a map yourself, use a source build. *Installing* a
+precooked asset works the same on Windows and Linux &mdash; it is a plain extract,
+done here in `tarfile` rather than through CARLA's bash-only `Util/ImportAssets.sh`.
+
+**Windows note:** the *assets* are not yet OS-neutral. Every `*_cooked.tar.gz` the
+library publishes today is a Linux cook &mdash; its materials carry SPIR-V and no
+Direct3D shaders &mdash; and a packaged build has no shader compiler, so on Windows
+those materials fall back to the default one: correct geometry and traffic lights,
+grey road surface. Setup therefore still offers **source build only** on Windows;
+pass `--allow-packaged-windows` if you only need stock maps (Town01, ...) from a
+package. `run_cosim` also warns before launching when the installed map has no
+shaders for the platform it is about to run on. Tracked in
+ORNL-Real-Sim/FIXS_Applications#29.
 
 Setup also resolves the **python env** that runs the co-sim and stores it in the
 config, so the launcher works on any machine no matter what the env is named:
@@ -126,10 +140,12 @@ config, so the launcher works on any machine no matter what the env is named:
 (No display? Pickers fall back to typing the path. Headless CI instead sets
 `CARLA_ROOT` and runs `verify_demo.py`, which bypasses the interactive setup.)
 
-## Importing a custom map (source build only)
+## Importing a custom map
 
 A custom RoadRunner/OpenDRIVE map must be **cooked into a source build** before
-CARLA can load it (packaged CARLA cannot import custom maps). `import_map.py`
+CARLA can load it &mdash; cooking runs the Unreal editor, which a packaged build does
+not ship. (A packaged CARLA is served instead by `import_map.install_cooked`, which
+extracts an already-cooked package; see the setup section above.) `import_map.py`
 generalizes CARLA's `Util/BuildTools/Import.py --package=<name>` primitive: it
 stages the package (the `<name>.json` descriptor + its fbx/xodr/fbm assets) under
 `<carla_root>/Import` and runs the cook, reading `carla_root`/`ue4_root` from the
