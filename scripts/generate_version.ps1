@@ -32,6 +32,43 @@ function New-VersionInfo {
     }
 }
 
+function Get-HighestSemverTag {
+    # Pick the HIGHEST semver tag reachable from HEAD, not the nearest one.
+    #
+    # `git describe` answers "nearest by commit distance", which is not stable
+    # once more than one version tag is in play. Tags enter a branch's history
+    # whenever a release branch merges, and rolling prerelease tags are deleted
+    # and recreated on new commits - so the nearest tag can jump BACKWARDS
+    # (v0.9.0-alpha one build, v0.7.0 the next) and the compiled version would
+    # follow it down. Highest-wins is monotonic: adding tags can only raise it.
+    #
+    # Ordering is semver: 0.9.0 > 0.8.1, and a stable release outranks its own
+    # prereleases (v0.9.0 > v0.9.0-alpha), so the final tag takes over from the
+    # alpha the moment it is cut.
+    $tags = & git tag --merged HEAD --list 'v[0-9]*' 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $tags) { return $null }
+
+    $parsed = foreach ($t in $tags) {
+        $t = $t.Trim()
+        if ($t -match '^v(\d+)\.(\d+)\.(\d+)(?:-(.+))?$') {
+            [pscustomobject]@{
+                Tag        = $t
+                Major      = [int]$Matches[1]
+                Minor      = [int]$Matches[2]
+                Patch      = [int]$Matches[3]
+                PreRelease = $Matches[4]
+                # 1 = stable, 0 = prerelease, so stable sorts above its own alphas.
+                Stability  = if ($Matches[4]) { 0 } else { 1 }
+            }
+        }
+    }
+    if (-not $parsed) { return $null }
+
+    return ($parsed |
+        Sort-Object Major, Minor, Patch, Stability, PreRelease |
+        Select-Object -Last 1)
+}
+
 function Get-GitVersionInfo {
     $gitPath = Get-Command git -ErrorAction SilentlyContinue
     if ($null -eq $gitPath) {
@@ -44,29 +81,25 @@ function Get-GitVersionInfo {
         throw "No .git directory present under $RepoRoot"
     }
 
-    # Semver macros: match ONLY vX.Y.Z tags. The rolling release publishes
-    # lightweight tags on HEAD (latest, alpha_v0.9.0); a bare `git describe
-    # --tags` returns one of those, the semver regex below throws, and the
-    # version silently falls back to 0.0.0. Restricting to 'v[0-9]*' ignores the
-    # rolling tags (issue #191).
-    $semverTag = & git describe --tags --match 'v[0-9]*' --abbrev=0 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw "git describe (semver tag) failed: $semverTag"
+    # Semver macros: only vX.Y.Z tags count. The rolling release also publishes a
+    # non-version tag on HEAD ('latest'); a bare `git describe --tags` returns
+    # that, the semver regex throws, and the version silently falls back to
+    # 0.0.0. Highest-wins rather than nearest-wins - see Get-HighestSemverTag.
+    $highest = Get-HighestSemverTag
+    if ($null -eq $highest) {
+        throw "No semver tag (vX.Y.Z) reachable from HEAD"
     }
 
-    if ($semverTag -match '^v?(\d+)\.(\d+)\.(\d+)') {
-        $major = [int]$Matches[1]
-        $minor = [int]$Matches[2]
-        $patch = [int]$Matches[3]
-    } else {
-        throw "Invalid tag format: $semverTag (expected vX.Y.Z)"
-    }
+    $semverTag = $highest.Tag
+    $major = $highest.Major
+    $minor = $highest.Minor
+    $patch = $highest.Patch
 
-    # Traceability label -> REALSIM_GIT_TAG. Full describe (e.g.
-    # v0.8.0-120-gce90f3c0) so a rolling/dev build points at its exact commit;
-    # still semver-matched so a rolling tag never leaks in. --always degrades a
-    # tagless checkout to the short SHA rather than failing the build.
-    $describeLabel = & git describe --tags --match 'v[0-9]*' --always 2>&1
+    # Traceability label -> REALSIM_GIT_TAG. Describe against the SAME tag the
+    # macros came from (e.g. v0.9.0-alpha-12-gce90f3c0), so the label and the
+    # version can never disagree about which release this build descends from.
+    # --always degrades a tagless checkout to the short SHA rather than failing.
+    $describeLabel = & git describe --tags --match $semverTag --always 2>&1
     if ($LASTEXITCODE -ne 0) {
         $describeLabel = $semverTag
     }
