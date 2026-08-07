@@ -35,6 +35,7 @@ Examples:
 """
 import argparse
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -910,6 +911,51 @@ def install_cooked(carla_root, tar_path, name=None, force=False):
                  f"{tar_path} does not look like a precooked package for '{name}'.")
     print(f"[import] done: '{name}' installed -> {umap}")
     return name
+
+
+_SHADER_MARKERS = {"d3d": b"DXBC", "vulkan": b"GLSL.std.450"}
+
+
+def shader_platforms_in(content_dir, size_cap=2 * 1024 * 1024):
+    """Which shader platforms a cooked package carries shaders for - a subset of
+    {'d3d', 'vulkan'}, empty if none is recognised.
+
+    UE4 compiles a material's shaders per shader platform and bakes the result
+    into the cooked asset, so a Linux cook ships SPIR-V and a Windows one ships
+    D3D bytecode; CARLA's own Windows package ships BOTH. A packaged build has no
+    shader compiler, so a material carrying no map for the running platform
+    silently falls back to the default material - the level loads, geometry and
+    placed actors are correct, and the road surface renders as grey checkerboard.
+    Nothing downstream can detect that, which is why it is detected here.
+
+    A heuristic by necessity: this pattern-matches container magic rather than
+    parsing UE4 packages, so it is used to WARN, never to refuse. Only small .uexp
+    are read - shader maps live in materials (~80KB), never in the multi-MB .umap
+    or mesh blobs - which keeps a full scan to a few hundred KB."""
+    found = set()
+    for root, _dirs, files in os.walk(content_dir):
+        for f in files:
+            if not f.endswith(".uexp"):
+                continue
+            path = os.path.join(root, f)
+            try:
+                if os.path.getsize(path) > size_cap:
+                    continue
+                with open(path, "rb") as fh:
+                    blob = fh.read()
+            except OSError:
+                continue
+            found.update(k for k, marker in _SHADER_MARKERS.items() if marker in blob)
+            if len(found) == len(_SHADER_MARKERS):
+                return found          # nothing more to learn
+    return found
+
+
+def host_shader_platform():
+    """The shader platform a packaged CARLA uses here by default: D3D on Windows,
+    Vulkan elsewhere. Windows CarlaUE4.exe also accepts -vulkan, so a 'vulkan'-only
+    package is not necessarily unusable there - only unusable as launched."""
+    return "d3d" if platform.system() == "Windows" else "vulkan"
 
 
 def _cooked_name_in(members):

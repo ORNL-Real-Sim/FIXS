@@ -111,9 +111,18 @@ only if the library publishes it *precooked* (`<map>_cooked.tar.gz`), exactly as
 was cooked; traffic lights and signs are whatever the asset already contains.
 `run_cosim` installs that asset for you and says so before it launches, and names the
 missing asset up front for a map that has none. To cook a map yourself, use a source
-build. This applies equally on Windows and Linux &mdash; installing a precooked asset
+build. *Installing* a precooked asset works the same on Windows and Linux &mdash; it
 is a plain extract, done here in `tarfile` rather than through CARLA's bash-only
 `Util/ImportAssets.sh`.
+
+**Windows note:** the *assets* are not yet OS-neutral. Every `*_cooked.tar.gz` the
+library publishes today is a Linux cook &mdash; its materials carry SPIR-V and no
+Direct3D shaders &mdash; and a packaged build has no shader compiler, so on Windows
+those materials fall back to the default one: correct geometry and traffic lights,
+grey road surface. Setup therefore still keeps packaged behind
+`--allow-packaged-windows` on Windows, and `run_cosim` warns before launching when
+the installed map has no shaders for the platform it is about to run on. Stock maps
+(Town01, ...) are unaffected. Tracked in ORNL-Real-Sim/FIXS_Applications#29.
 
 Setup also resolves the **python env** that runs the co-sim and stores it in the
 config, so the launcher works on any machine no matter what the env is named:

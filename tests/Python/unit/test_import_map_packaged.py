@@ -116,6 +116,30 @@ def test_traversal_outside_the_package_root_is_refused(tmp_path, packaged_root):
     assert not (tmp_path.parent / "escaped.uasset").exists()
 
 
+def test_installed_package_reports_its_shader_platform(packaged_root):
+    """The published assets are Linux cooks (FIXS_Applications#29): SPIR-V only,
+    no D3D. A packaged CARLA cannot compile shaders, so on Windows this is the
+    difference between a correct map and a grey one - and nothing downstream can
+    tell, which is why it is detected at install time."""
+    name = import_map.install_cooked(packaged_root, COOKED_TAR)
+    content = import_map.cooked_content_dir(packaged_root, name, mode="packaged")
+
+    found = import_map.shader_platforms_in(content)
+    assert found, "no recognised shader bytecode in the package at all"
+    assert found <= {"d3d", "vulkan"}
+    # Not asserting 'vulkan' specifically: a future Windows or dual cook must not
+    # fail this test. What must hold is that we can NAME what is in there.
+    assert import_map.host_shader_platform() in ("d3d", "vulkan")
+
+
+def test_shader_scan_ignores_large_blobs(packaged_root):
+    """Shader maps live in materials (~80KB); the .umap is ~19MB and the meshes
+    larger still. Scanning them would make every install pay for nothing."""
+    name = import_map.install_cooked(packaged_root, COOKED_TAR)
+    content = import_map.cooked_content_dir(packaged_root, name, mode="packaged")
+    assert import_map.shader_platforms_in(content, size_cap=1024) == set()
+
+
 def test_cooked_asset_name_convention_and_catalog_override():
     assert import_map.cooked_asset_name("mlk_no_signal.zip") == \
         "mlk_no_signal_cooked.tar.gz"

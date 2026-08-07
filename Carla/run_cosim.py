@@ -2092,6 +2092,22 @@ def main():
               f"placed here (that needs a source build's editor). TL sync depends on "
               f"what '{target_map}' was cooked with.")
 
+        # The other silent one: a cook made for a different shader platform. The
+        # level loads and every actor is where it should be, so nothing downstream
+        # notices - the road just renders as default-material grey.
+        have = import_map.shader_platforms_in(
+            import_map.cooked_content_dir(cfg["carla_root"], target_map, mode="packaged"))
+        want = import_map.host_shader_platform()
+        if have and want not in have:
+            print(f"[cosim] WARNING: '{target_map}' was cooked for {'/'.join(sorted(have))}, "
+                  f"not {want}. A packaged CARLA has no shader compiler, so its "
+                  f"materials will fall back to the default one - geometry and traffic "
+                  f"lights will be correct, the road surface will render grey.")
+            if want == "d3d" and "vulkan" in have:
+                print(f"[cosim]   Launching CARLA with -vulkan may resolve them "
+                      f"(unverified). Otherwise use a source build, or ask the map "
+                      f"library for a Windows cook.")
+
     # SUMO slot: --sumocfg wins; else an already-extracted sumo/, else the chosen
     # bundle's. This also runs for the paths that skip the source-build preflight
     # above (--no-launch, packaged builds), so the cache is checked here too - the

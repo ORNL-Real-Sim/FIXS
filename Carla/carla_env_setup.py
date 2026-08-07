@@ -366,25 +366,43 @@ def _pick_file(title):
 def run_setup(allow_packaged_windows=False):
     """Interactive setup; writes and returns the config.
 
-    `allow_packaged_windows` no longer gates anything - packaged is offered
-    everywhere. Kept so the flag that scripts and docs already pass stays valid."""
+    On Windows the packaged option is still opt-in (--allow-packaged-windows),
+    but for a different reason than it used to be - see below."""
     print("=== CARLA environment setup ===")
-    # Packaged is offered on every OS. It used to be hidden on Windows because a
-    # custom map could only reach a package through CARLA's Util/ImportAssets.sh,
-    # which is bash-only and has no .bat counterpart. import_map.install_cooked
-    # replaces that script with the same plain extract in `tarfile`, so the route
-    # is now OS-independent; the equivalence was checked by installing the same
-    # mlk_no_signal_cooked.tar.gz both ways into two packaged CARLA 0.9.15 roots
-    # and diffing the resulting Content trees (identical, down to modes+mtimes).
+    # The INSTALL route is now OS-independent: a custom map used to reach a package
+    # only through CARLA's Util/ImportAssets.sh (bash-only, no .bat), and
+    # import_map.install_cooked replaces that script with the same plain extract in
+    # `tarfile`. Installing the same mlk_no_signal_cooked.tar.gz both ways into two
+    # packaged CARLA 0.9.15 roots produces identical Content trees, down to modes
+    # and mtimes.
     #
-    # What stays true on both OSes is the *other* packaged limit: no editor, so
-    # nothing can be cooked or placed here. A packaged build runs only maps the
-    # library publishes precooked, exactly as they were cooked - run_cosim says so
-    # before it launches.
-    print("Which CARLA do you want to use?")
-    print("  [1] Packaged CARLA  (a released build with CarlaUE4.exe / CarlaUE4.sh)")
-    print("  [2] Source build    (run through the Unreal editor: UE4Editor -game)")
-    choice = input("Enter 1 or 2: ").strip()
+    # What is NOT OS-independent is the ASSET. UE4 compiles a material's shaders
+    # per shader platform and stores them in the cooked asset, and every
+    # *_cooked.tar.gz the Digital-Twin-Library publishes today is a LINUX cook: its
+    # four material .uexp carry SPIR-V (GLSL.std.450) and no DXBC anywhere in the
+    # archive, where stock Windows CARLA content carries both. A packaged build has
+    # no shader compiler, so on Windows/D3D those materials have no shader map to
+    # use and fall back to the default one - the map loads, the geometry and the
+    # placed traffic lights are right, and the road surface renders as grey
+    # checkerboard.
+    #
+    # So packaged-on-Windows stays behind --allow-packaged-windows until the
+    # library publishes a Windows cook (or -vulkan is confirmed to resolve these
+    # shader maps on the Windows package, which ships SPIR-V for its own content).
+    # Tracked in ORNL-Real-Sim/FIXS_Applications#29.
+    offer_packaged = platform.system() != "Windows" or allow_packaged_windows
+    if offer_packaged:
+        print("Which CARLA do you want to use?")
+        print("  [1] Packaged CARLA  (a released build with CarlaUE4.exe / CarlaUE4.sh)")
+        print("  [2] Source build    (run through the Unreal editor: UE4Editor -game)")
+        choice = input("Enter 1 or 2: ").strip()
+    else:
+        print("On Windows the map library's precooked maps are Linux cooks: their")
+        print("materials carry no Direct3D shaders, so a packaged CARLA would load")
+        print("them with default (grey) materials. Using source build.")
+        print("(Only need stock maps - Town01, ... - from a packaged build? re-run:")
+        print("   carla_env_setup.py --allow-packaged-windows )")
+        choice = "2"
 
     if choice == "1":
         root = _pick_dir("Select your PACKAGED CARLA folder (contains CarlaUE4.exe / .sh)")
@@ -438,7 +456,9 @@ def main():
     ap = argparse.ArgumentParser(description="Configure which CARLA run_cosim.py uses.")
     ap.add_argument("--show", action="store_true", help="print the current config and exit")
     ap.add_argument("--allow-packaged-windows", action="store_true",
-                    help=argparse.SUPPRESS)  # obsolete: packaged is offered on every OS
+                    help="on Windows, also offer packaged CARLA. The library's "
+                         "precooked maps are Linux cooks and render with default "
+                         "materials there; stock maps (Town01, ...) are fine.")
     args = ap.parse_args()
     if args.show:
         cfg = load_config()
