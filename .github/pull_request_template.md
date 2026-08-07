@@ -13,10 +13,25 @@ What this PR does and why. Use your own sub-headings -- narrative structure is
 fine, and usually better than a checklist for anything non-trivial.
 
 ## Related Issues
-Closes #___
+<!--
+REQUIRED -- the `PR intent` check fails without one of these three lines.
 
-Sibling repos, if applicable: `FIXS_Applications#__`, `Digital-Twin-Library#__`,
-`ProprietaryFiles#__`.
+  Closes #___            this PR finishes the issue
+  Part of #___           incremental work; the issue stays open
+  No issue: <reason>     deliberate (release line sync, merge plumbing)
+
+Say it here even though the title already carries the number. A bare `#N/`
+title reference means "finishes it" on some PRs and "one of twelve increments"
+on others, and nothing downstream can tell them apart. Because this PR targets
+a dev branch, GitHub never creates the closing link itself -- the automation
+reads this line instead, labels the issue `landed-on-dev` at merge, and closes
+it when the code reaches `main`. (#290)
+
+Sibling repos take the qualified form: `Closes FIXS_Applications#21`. GitHub
+cannot close those from a keyword at all, so the automation handles them
+separately.
+-->
+Closes #___
 
 ## Environment
 Only the tools you actually tested against -- leave the rest blank:

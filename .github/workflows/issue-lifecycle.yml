@@ -1,0 +1,120 @@
+name: Issue lifecycle
+
+# Carries an issue through the dev -> main branch model, which GitHub does not
+# model on its own:
+#
+#   PR merged to dev_v0.X.0  ->  its "Closes" issues get `landed-on-dev` and a
+#                                comment, and stay OPEN. They are fixed but not
+#                                shipped, and that is a real state on this
+#                                branch model with no other representation.
+#                                The label set is the fixed-but-unreleased
+#                                backlog, and the changelog for the next sync.
+#
+#   push to main             ->  resolve the arriving commits to the PRs that
+#                                carried them, read each declared intent, close
+#                                the issues, drop the label.
+#
+# Why this is needed at all: GitHub honours a closing keyword only when the PR
+# base IS the default branch. Measured on this repo - PR #265 body "Closes
+# #264", base dev_v0.9.0, closingIssuesReferences=[]; PR #259 body "Closes #70",
+# base main, closingIssuesReferences=[70,223,238]. The link on a dev PR is never
+# created, so there is nothing waiting to fire when the release sync lands. That
+# left seven fixed-and-shipped issues open (#127 #254 #258 #261 #264 #272 #276).
+#
+# Resolution goes commit -> PR through /commits/{sha}/pulls rather than parsing
+# "Merge pull request #N" subjects: main already contains cherry-picks of dev
+# commits under different SHAs (f24d0c50 vs 5bb44a70), and the API is correct
+# for squash, rebase and merge alike. (#290)
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [dev, dev_v0.9.0]
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      before:
+        # Do NOT reach back past 750252a2 (the #259 release sync, 2026-07-30).
+        # Older PR bodies predate the declaration convention and over-claim:
+        # #136 says "Closes #129" while DriverModel_FIXS_Common.h still carries
+        # eight `TODO #129` stubs; #135 says "Closes #131" while that issue's
+        # version-tracking half is the open #279. Those declarations are inert
+        # today because this workflow only ever sees NEW pushes -- a deep
+        # backfill is the one thing that would act on them.
+        description: 'Range start SHA (exclusive). Do not go back past 750252a2 - see the note in this file.'
+        required: true
+      after:
+        description: 'Range end SHA (inclusive)'
+        required: false
+        default: 'main'
+      dry_run:
+        description: 'Resolve and report only; close nothing'
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  # ---------------------------------------------------------------------
+  # Fixed on dev, not yet shipped.
+  # ---------------------------------------------------------------------
+  label-landed-on-dev:
+    if: github.event_name == 'pull_request' && github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          filter: blob:none
+          sparse-checkout: .github/scripts
+          submodules: false
+
+      - name: Label the issues this PR fixed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/close_landed.py \
+            --repo "$GITHUB_REPOSITORY" \
+            label-dev --pr "${{ github.event.pull_request.number }}"
+
+  # ---------------------------------------------------------------------
+  # Shipped.
+  # ---------------------------------------------------------------------
+  close-landed-on-main:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          filter: blob:none
+          sparse-checkout: .github/scripts
+          submodules: false
+
+      - name: Close the issues that reached main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # On a push these come from the event. On workflow_dispatch they come
+          # from the inputs, which is how a historical range is backfilled -
+          # the same code path, so the backfill exercises what will then run
+          # unattended.
+          BEFORE: ${{ github.event.inputs.before || github.event.before }}
+          AFTER: ${{ github.event.inputs.after || github.event.after }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # A manual run defaults to dry-run; an automatic push never is.
+          dry=""
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            dry="--dry-run"
+          fi
+          python3 .github/scripts/close_landed.py \
+            --repo "$GITHUB_REPOSITORY" $dry \
+            close-main --before "$BEFORE" --after "$AFTER"

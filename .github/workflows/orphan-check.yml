@@ -1,0 +1,67 @@
+name: Orphan check
+
+# Sweeps for merged PRs whose commits never reached a shipping branch.
+#
+# GitHub marks a PR "Merged" when its head lands on its BASE. It never checks
+# whether that base goes anywhere. So a PR can be merged, green and
+# closed-looking while its code has never run on a branch that ships.
+#
+# The specimen: PR #267 merged into bug/254_spectator_frame_lag at 12:51:15Z;
+# PR #256 had merged that same branch into dev_v0.9.0 at 12:50:35Z, forty
+# seconds earlier. Commit 3f08d945 is reachable only from two dead branches.
+# GitHub still shows #267 as Merged, and the #266 fix has never executed.
+#
+# issue-lifecycle.yml structurally cannot catch this. It is event-driven -- it
+# reacts to commits arriving on main, and a commit that never arrives produces
+# no event. The defect is defined by ABSENCE, which only a sweep can see. That
+# is the whole reason this runs on a schedule instead of a trigger. (#290)
+#
+# Findings go to one tracking issue, edited in place rather than reopened
+# weekly, and closed automatically when the list empties.
+
+on:
+  schedule:
+    # Mondays 07:00 UTC - a weekly cadence is enough for a failure this rare,
+    # and keeps the tracking issue from becoming background noise.
+    - cron: '0 7 * * 1'
+  workflow_dispatch:
+    inputs:
+      days:
+        description: 'Only examine PRs merged in the last N days (0 = all)'
+        required: false
+        default: '180'
+      no_issue:
+        description: 'Report only; do not create or edit the tracking issue'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  orphan-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          filter: blob:none
+          sparse-checkout: .github/scripts
+          submodules: false
+
+      - name: Sweep merged PRs for unreachable merge commits
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Reachability is answered with the compare API, not git: FIXS packs
+          # ~840 MiB of history (see bundle-guard.yml) and cloning it weekly to
+          # answer a question the API answers directly is pure waste.
+          python3 .github/scripts/orphan_check.py \
+            --repo "$GITHUB_REPOSITORY" \
+            --days "${{ github.event.inputs.days || '180' }}" \
+            ${{ github.event.inputs.no_issue == 'true' && '--no-issue' || '' }}

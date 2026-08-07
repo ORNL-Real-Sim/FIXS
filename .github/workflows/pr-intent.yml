@@ -1,0 +1,53 @@
+name: PR intent
+
+# Requires every PR to declare, in its body, what it does to an issue:
+#
+#   Closes #N            this PR finishes it
+#   Part of #N           incremental work; N stays open
+#   No issue: <reason>   deliberate (release sync, merge plumbing)
+#
+# The gate exists because FIXS PRs target dev_v0.X.0, where GitHub never links
+# the issue at all - the closing keyword is honoured only when the PR base IS
+# the default branch. So the lifecycle automation has to read the intent out of
+# the body, and the body has to actually carry one.
+#
+# Inferring it later is not possible. Of 73 merged dev-targeted PRs, 24 carried
+# a closing keyword and 34 carried only a bare "#N/" title reference - which
+# meant "finishes it" on #269 (issue #258) and "one of twelve increments" on the
+# #191 series. Identical syntax, opposite meaning. The author is the only one
+# who knows which, and only at the moment they open the PR. (#290)
+#
+# Cheap: no compile, no clone of the repo's ~840 MiB history - just the scripts
+# directory and one regex pass on a free Ubuntu runner.
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize, ready_for_review]
+    branches: [dev, dev_v0.9.0, main]
+
+permissions:
+  contents: read
+
+jobs:
+  pr-intent:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          filter: blob:none
+          sparse-checkout: .github/scripts
+          submodules: false
+
+      - name: Require a declared issue intent
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Via a file, not an argument: PR bodies routinely contain quotes,
+          # backticks and newlines that would not survive the shell.
+          printf '%s' "$BODY" > /tmp/pr_body.md
+          python3 .github/scripts/pr_intent.py \
+            --body-file /tmp/pr_body.md \
+            --repo "$GITHUB_REPOSITORY"
