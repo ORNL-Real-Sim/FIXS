@@ -9,7 +9,17 @@ Usage:
   python set_spectator_view.py [--host H] [--port P] [--height M] [--pitch DEG]
 """
 import argparse
-import carla
+import os
+import sys
+
+# Get onto the interpreter carla.json names before importing carla - see
+# sumo_carla_tl_sync.py for why this sits above the import rather than in main().
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import carla_env_setup as env  # noqa: E402
+if __name__ == "__main__":
+    env.reexec_under_configured(__file__, tag="carla")
+
+import carla  # noqa: E402  (deliberately after the re-exec above)
 
 
 def main():

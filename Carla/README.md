@@ -133,9 +133,30 @@ config, so the launcher works on any machine no matter what the env is named:
    pick. For a **source build** the matching client wheel is auto-resolved from
    `PythonAPI/carla/dist` (manual pick as fallback).
 
-`run_cosim.py` then re-executes itself under that interpreter before importing
-`carla`, so the `.bat`/`.sh` stay trivial. A config written by an older setup
-(missing the python env) is repaired automatically on the next run.
+Whichever env is bound, setup says so when it is not the one that was asked for
+(`FIXS_ENV_NAME`) and when it cannot import the co-sim's runtime modules — those
+never stop a run, they degrade it under a different name (no `yaml` makes every
+scenario setting read as its default, including `CarlaServerIP`).
+
+**Every entry point runs under that one interpreter.** `carla_env_setup.
+reexec_under_configured` is each script's first act — `run_cosim.py`,
+`import_map.py`, `place_tls.py`, `place_signs.py` and the world/spectator helpers
+— so which script you happen to start with cannot change the env you end up in,
+and the `.bat`/`.sh` wrappers stay trivial `exec python <script>` one-liners.
+(`sumo/auto_place_tls.py` is deliberately excluded: it runs inside the Unreal
+editor's embedded python, which is not this env and must not be replaced.)
+
+A config written by an older setup (missing the python env), or one whose env has
+since been deleted or rebuilt without the carla client, is repaired automatically
+on the next run. To change the binding on purpose — you created the env setup
+asked for, or picked the wrong one from the list — use
+
+```
+run_cosim --update-python          # or: setup_carla --update-python
+```
+
+which re-resolves only the interpreter and keeps the CARLA / UE4 paths. Since
+every entry point follows the config, that one command moves them all.
 
 (No display? Pickers fall back to typing the path. Headless CI instead sets
 `CARLA_ROOT` and runs `verify_demo.py`, which bypasses the interactive setup.)
