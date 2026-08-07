@@ -36,6 +36,10 @@ typedef struct  {
 	float signalLightDistance; // distance to next signal light
 	int8_t signalLightColor; // color of next signal light
 	float speedLimit;
+	// Free-flow speed: the speed this vehicle would travel at on the current
+	// link, unimpeded. Distinct from speedLimit (the posted/road limit) because
+	// it reflects the individual driver/vehicle. SUMO: VAR_ALLOWED_SPEED.
+	float speedFreeFlow;
 	float speedLimitNext;
 	float speedLimitChangeDistance; 
 

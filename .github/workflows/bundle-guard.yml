@@ -21,20 +21,39 @@ jobs:
   bundle-guard:
     runs-on: ubuntu-latest
     steps:
+      # This guard reads exactly two things: the ProprietaryFiles gitlink on both
+      # sides of the PR (a TREE read - no blob needed) and bundle_key.ps1. A full
+      # clone here is pure waste: the repo carries large vendored binaries in
+      # history (libsumo DLLs, VirtualEnvironment.lib, *.mat, ~840 MiB packed), so
+      # `fetch-depth: 0` pulled ~1 GB and made this 0-second check take 8-24 min,
+      # with all of the time - and all of the run-to-run variance - inside
+      # actions/checkout.
+      #   fetch-depth: 2  -> the PR merge commit + both parents (see below)
+      #   filter          -> commits/trees only; blobs fetched lazily
+      #   sparse-checkout -> materialize only the dir holding bundle_key.ps1
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 2
+          filter: blob:none
+          sparse-checkout: scripts/dispatch
           submodules: false   # only the submodule POINTER is needed, not content
 
       - name: Require a published bundle when the key moves
         env:
           GH_TOKEN: ${{ github.token }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         shell: bash
         run: |
           set -euo pipefail
+          # HEAD is refs/pull/N/merge, whose parents are ordered (base, head). Diff
+          # those directly rather than the event payload's base.sha: the payload SHA
+          # goes stale if the base branch moves after the event fires, while ^1 is
+          # by construction the base this merge ref was built against.
+          if ! git rev-parse -q --verify HEAD^2 >/dev/null; then
+            echo "::error title=Unexpected checkout state::HEAD is not a PR merge commit, so the PR base cannot be determined. Check the actions/checkout config (fetch-depth must cover both parents)."
+            exit 1
+          fi
           # Did this PR move the ProprietaryFiles submodule pointer?
-          changed=$(git diff --name-only "$BASE_SHA" HEAD -- ProprietaryFiles || true)
+          changed=$(git diff --name-only HEAD^1 HEAD^2 -- ProprietaryFiles || true)
           if [ -z "$changed" ]; then
             echo "ProprietaryFiles pointer unchanged - nothing to verify."
             exit 0

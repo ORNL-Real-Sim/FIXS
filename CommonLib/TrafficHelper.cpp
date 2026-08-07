@@ -33,6 +33,31 @@ static int tlsStateToColor(char tlsState) {
 	}
 }
 
+#ifdef ENABLE_LIBSUMO
+// #70: libsumocpp.dll is delay-loaded (TrafficLayer.vcxproj <DelayLoadDLLs>), so a
+// missing runtime dependency does not surface at startup - it surfaces on the first
+// libsumo call, which is Simulation::start(). That failure arrives as a Win32 loader
+// exception (0xC06D007E), NOT a C++ exception, so the try/catch around start() cannot
+// catch it and TrafficLayer dies with no message in the console or TrafficLayer.err.
+// Loading the DLL explicitly first turns that into a normal, catchable error.
+static void libsumoPreflight() {
+#ifdef WIN32
+#ifdef _DEBUG
+	const char* dllName = "libsumocppD.dll";
+#else
+	const char* dllName = "libsumocpp.dll";
+#endif
+	if (LoadLibraryA(dllName) == NULL) {
+		printf("ERROR: cannot load %s (GetLastError=%lu).\n", dllName, GetLastError());
+		printf("       A runtime dependency is missing from CommonLib/libsumo/bin.\n");
+		printf("       Re-fetch the native deps: scripts\\dispatch\\fetch_native_deps.ps1\n");
+		throw std::runtime_error(std::string("failed to load ") + dllName +
+			" - missing runtime dependency in CommonLib/libsumo/bin");
+	}
+#endif
+}
+#endif
+
 //CentralCtrl CentralCtrl_g;
 
 // The convention is that, Server always provide service to the Client. 
@@ -71,17 +96,52 @@ void TrafficHelper::connectionSetup(string trafficIp, int trafficPort, int nClie
 #ifdef ENABLE_LIBSUMO
 		// -----------------------------------------------------------------------
 		// OPTION A: Direct launch via libsumo (headless only, no GUI)
-		// This is the active implementation
+		// OPT-IN, not the default: enabled by #define ENABLE_LIBSUMO in
+		// TrafficHelper.h, which is commented out. Stock builds take OPTION B.
+		// libsumo on Windows cannot drive sumo-gui - SUMO silently falls back to
+		// headless ("Libsumo on Windows does not work with GUI"), so use OPTION B
+		// whenever a visible network is wanted.
 		// -----------------------------------------------------------------------
+		// #70: libsumo runs SUMO *inside this process*. There is no TraCI server and
+		// no second client, so the multi-client options below are not just useless
+		// here, they are actively harmful:
+		//   --num-clients : meaningless without a TraCI server.
+		//   --remote-port : DO NOT ADD. It makes SUMO open a real TraCI server and
+		//                   block inside start() until a separate client connects,
+		//                   which never happens in-process -> TrafficLayer hangs.
+		// Ordering (setOrder) is likewise a multi-client concept and is rejected by
+		// libsumo at runtime - see the guard below.
+		//
+		// Those two settings are user-facing YAML keys (SumoSetup.NumClients,
+		// SumoSetup.ExecutionOrder). Dropping them silently would let a config ask
+		// for something the build cannot do and still appear to run, so report it.
+		if (Config_c->SumoSetup.NumClients != 1) {
+			printf("ERROR: SumoSetup.NumClients = %d, but this build embeds SUMO via libsumo.\n",
+				Config_c->SumoSetup.NumClients);
+			printf("       libsumo runs SUMO in-process with no TraCI server, so there is exactly\n");
+			printf("       one client and additional clients could never connect.\n");
+			printf("       Use a libtraci build (comment out ENABLE_LIBSUMO) for multi-client runs,\n");
+			printf("       or set NumClients: 1.\n");
+			throw std::runtime_error("SumoSetup.NumClients > 1 is not supported by a libsumo build "
+				"(no TraCI server; use libtraci or set NumClients: 1)");
+		}
+		if (order != 1) {
+			// Not fatal: with a single in-process client the ordering is simply moot.
+			printf("WARNING: SumoSetup.ExecutionOrder = %d is ignored in libsumo mode.\n", order);
+			printf("         Client ordering is a multi-client TraCI concept and libsumo rejects\n");
+			printf("         setOrder(). The in-process simulation is the only client.\n");
+		}
+		libsumoPreflight();
 		try {
 			std::vector<std::string> cmd = {"sumo", "-c", Config_c->SumoSetup.SumoConfigFile, "--start",
-				"--step-length", kTrafficStepArg,
-				"--num-clients", std::to_string(Config_c->SumoSetup.NumClients)};
+				"--step-length", kTrafficStepArg};
 
 			printf("Launching SUMO via libsumo::Simulation::start()...\n");
 			libsumo::Simulation::start(cmd);
-			libsumo::Simulation::setOrder(order);
-			printf("SUMO launched successfully via libsumo\n");
+			// NOTE: no setOrder() here. libsumo throws "Multi client support
+			// (including connection switching) is not implemented in libsumo."
+			// A non-default ExecutionOrder was already reported above.
+			printf("SUMO launched successfully via libsumo (in-process, headless)\n");
 		}
 		catch (const std::exception& e) {
 			printf("ERROR: Failed to start SUMO via libsumo: %s\n", e.what());
@@ -137,6 +197,17 @@ void TrafficHelper::connectionSetup(string trafficIp, int trafficPort, int nClie
 	}
 	else {
 		// Original behavior: connect to existing SUMO instance
+#ifdef ENABLE_LIBSUMO
+		// #70: libsumo embeds the simulation in this process; it cannot attach to a
+		// SUMO that is already running elsewhere. Both calls below are libtraci-only
+		// and throw at runtime under libsumo, so fail loudly with an actionable
+		// message instead of dying inside the library.
+		printf("ERROR: EnableAutoLaunch is false, but this build embeds SUMO via libsumo.\n");
+		printf("       libsumo cannot attach to an externally running SUMO instance.\n");
+		printf("       Set EnableAutoLaunch: true, or build without ENABLE_LIBSUMO to use libtraci.\n");
+		throw std::runtime_error("libsumo build cannot connect to an external SUMO instance "
+			"(set EnableAutoLaunch: true, or build with libtraci)");
+#else
 		try {
 			SUMO_TRACI_NAMESPACE::Simulation::init(trafficPort, libsumo::DEFAULT_NUM_RETRIES, trafficIp);
 			SUMO_TRACI_NAMESPACE::Simulation::setOrder(order);
@@ -145,6 +216,7 @@ void TrafficHelper::connectionSetup(string trafficIp, int trafficPort, int nClie
 			printf("ERROR: Failed to connect to SUMO at %s:%d - %s\n", trafficIp.c_str(), trafficPort, e.what());
 			throw;
 		}
+#endif
 	}
 
 	/********************************************
@@ -1520,6 +1592,11 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 
 			vector <int> sigSubscribeList = { libsumo::TL_RED_YELLOW_GREEN_STATE };
 
+			printf("[signal-sub] subAllSignalFlag=%d  namedIds=%zu  tlsInNetwork=%zu\n",
+				(int)Config_c->SubscriptionSignalList.subAllSignalFlag,
+				Config_c->SubscriptionSignalList.signalId_v.size(),
+				sigAllId_v.size());
+
 			if (!Config_c->SubscriptionSignalList.subAllSignalFlag) {
 				for (auto it : Config_c->SubscriptionSignalList.signalId_v) {
 					SUMO_TRACI_NAMESPACE::TrafficLight::subscribe(it.c_str(), sigSubscribeList, 0, tSimuEnd);
@@ -1675,7 +1752,8 @@ void TrafficHelper::parserSumoSubscription(libsumo::TraCIResults VehDataSubscrib
 	CurVehData.hasPrecedingVehicle = 0;
 	CurVehData.precedingVehicleSpeed = -1.0;
 	if (NEED_PRECEDING_VEH) {
-		pair<string, double> leaderIdNSpeed = SUMO_TRACI_NAMESPACE::Vehicle::getLeader(vehId, 1000);
+		pair<string, double> leaderIdNSpeed = SUMO_TRACI_NAMESPACE::Vehicle::getLeader(
+			vehId, Config_c->SumoSetup.PrecedingVehicleLookahead);
 		CurVehData.precedingVehicleId = get<0>(leaderIdNSpeed);
 		CurVehData.precedingVehicleDistance = get<1>(leaderIdNSpeed);
 		if (CurVehData.precedingVehicleId.compare("") != 0) {
@@ -1784,6 +1862,11 @@ void TrafficHelper::parserSumoSubscription(libsumo::TraCIResults VehDataSubscrib
 	tempDoublePtr = static_pointer_cast<libsumo::TraCIDouble> (VehDataSubscribeTraciResults[libsumo::VAR_ALLOWED_SPEED]);
 	tempDoublePtr2 = static_pointer_cast<libsumo::TraCIDouble> (VehDataSubscribeTraciResults[libsumo::VAR_SPEED_FACTOR]);
 	CurVehData.speedLimit = tempDoublePtr->value / tempDoublePtr2->value;
+	// VAR_ALLOWED_SPEED is "max speed on the current lane AND speed factor", i.e.
+	// what this particular vehicle will cruise at. Reported as-is so consumers do
+	// not have to reconstruct it (a speedLimit * speedFactor product would also
+	// miss the vType maxSpeed cap that SUMO already applies here).
+	CurVehData.speedFreeFlow = tempDoublePtr->value;
 
 	// retrieve next speed limit
 	vector <string> edgeRouteList = VehicleId2EdgeList_um[vehId];

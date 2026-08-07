@@ -36,6 +36,12 @@ function Get-DepVersion([string]$block) {
     if ($c -match "(?ms)^\s*${block}:\s.*?^\s*version:\s*[`"']?([0-9][0-9.]*)") { return $Matches[1] }
     throw "could not parse $block version from dependencies.yaml"
 }
+# The load probe #237 introduced here as Assert-LibsumoSelfContained now lives in
+# libsumo_verify.ps1, because #238 needs the SAME check on the fetch side: the
+# zip became the only source of the SUMO runtime, so a clone must be able to
+# reject a bad asset, not just refuse to publish one. Same technique, one copy.
+. (Join-Path $PSScriptRoot 'libsumo_verify.ps1')
+
 function New-Zip([string]$stageDir, [string]$zipName) {
     $zipPath = Join-Path $OutDir $zipName
     if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
@@ -79,6 +85,10 @@ if ($Component -in 'both', 'sumo') {
         Get-ChildItem $libsumo | Where-Object { $_.Name -ne 'out' } |
             ForEach-Object { Copy-Item $_.FullName -Destination $ss -Recurse -Force }
         Write-Host "libsumo ${sver}: staged (headers + bin/)"
+        # Probe the STAGED tree, not the source tree: this is byte-for-byte what
+        # gets zipped, so a staging bug cannot slip past the check either.
+        Test-LibsumoLoadable -BinDir (Join-Path $ss 'bin') `
+            -Context 'Re-run scripts/build_libsumo.ps1, or restore the missing DLL from the official SUMO Windows distribution, before packing.'
         $assets.Add((New-Zip $stage "libsumo-$sver.zip"))
         Remove-Item $stage -Recurse -Force
     } else { Write-Warning "CommonLib/libsumo not present - skipping libsumo." }
