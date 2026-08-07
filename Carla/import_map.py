@@ -873,7 +873,7 @@ def _app_map_choice(name, catalog, cooked):
 
 
 def choose_map(repo, tag_prefix="", carla_root=None, catalog=None,
-               preferred=None, app_label=None):
+               preferred=None, app_label=None, current=None):
     """Interactive chooser. Two sections plus `L` for a hand-picked .zip / folder:
       1. ONLINE - Digital-Twin-Library releases in `repo`. When an application is
                   selected and the library HAS its map(s), this section is narrowed
@@ -888,7 +888,11 @@ def choose_map(repo, tag_prefix="", carla_root=None, catalog=None,
     To browse the whole library while a narrowing app is selected, pick "none" at
     the application prompt.
 
-    Enter takes the app's map wherever it landed (library or cooked), else item 1.
+    Enter takes `current` - the map the setup is already running - wherever it
+    landed; then the app's map, wherever IT landed (library or cooked); else item 1.
+    A setup pinned to a map has to be able to open this row and back out of it
+    unchanged, which "Enter = item 1" did not allow. The cooked copy wins the
+    default over the library one: same map, but no re-import to reach it.
 
     Returns (name, tag, local_path):
       online release -> (name, tag,  None)
@@ -908,6 +912,7 @@ def choose_map(repo, tag_prefix="", carla_root=None, catalog=None,
     print("\n[import] Pick a map to run:")
     menu = []          # menu number -> ("release", release) | ("cooked", name)
     default_idx = 1    # menu number Enter selects; the app's map when there is one
+    current_idx = 0    # ... unless the setup already runs one of these
     if releases:
         who = f" for {app_label}" if app_tags and app_label else ""
         print(f"  Online (Digital-Twin-Library){who}:")
@@ -925,6 +930,9 @@ def choose_map(repo, tag_prefix="", carla_root=None, catalog=None,
             flag = "  (pre-release)" if r["prerelease"] else ""
             if label in cooked:
                 flag += "  (already imported)"
+            if label == current:
+                flag += "  (current)"
+                current_idx = len(menu)
             print(f"   {len(menu):>2}) {label:<26} {r['date']}{flag}")
     if cooked:
         print("  Local (already imported into CARLA):")
@@ -937,10 +945,15 @@ def choose_map(repo, tag_prefix="", carla_root=None, catalog=None,
                 # default - it just lives in this section instead of the one above.
                 if not app_tags:
                     default_idx = len(menu)
+            if name == current:
+                mark += "  (current)"
+                current_idx = len(menu)     # cooked beats the library copy
             print(f"   {len(menu):>2}) {name}{mark}")
     if not menu:
         print("   (no online releases or imported maps found)")
     print("   L) select a local .zip / folder instead")
+    if current_idx:
+        default_idx = current_idx
 
     if not sys.stdin.isatty():
         sys.exit("[import] non-interactive session: cannot prompt. Pass --map / --package "

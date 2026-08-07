@@ -207,6 +207,14 @@ def summarize(rec):
     return " | ".join(bits)
 
 
+def _same_path(a, b):
+    """Same file or folder? Paths make a round trip through run_profiles.json, so
+    they come back with whatever spelling was current when they were written."""
+    if not a or not b:
+        return False
+    return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
+
+
 def _fmt(slot, rec, carla_cfg, derived=None):
     """The value text for one summary line.
 
@@ -219,19 +227,32 @@ def _fmt(slot, rec, carla_cfg, derived=None):
         return rec.get("app") or "(none - generic co-sim)"
     if slot == "map":
         origin = rec.get("map_origin")
-        return f"{rec.get('map') or '(not chosen)':<26}" + (f"({origin})" if origin else "")
+        return f"{rec.get('map') or '(not chosen)':<26} " + (f"({origin})" if origin else "")
     if slot == "config":
         path = rec.get("config")
         if not path:
             return "(auto-generated for this map)"
+        # config_scope stores two values because two is all the BEHAVIOUR needs:
+        # whether the generator may overwrite the file, and whether a map change
+        # invalidates it. It is too coarse to name the file by - "not app-owned"
+        # was being printed as "generated", which is what a yaml you dropped in
+        # yourself got called. Which file it is, is a question about the path.
         scope = rec.get("config_scope") or "map"
-        where = "app-owned, edit in ~/.fixs/apps" if scope == "app" \
-            else "generated, this app on this map"
-        return f"{os.path.basename(path):<26}({where})"
+        app_id = rec.get("app") or GENERIC
+        generated = app_catalog.scenario_path(app_id, rec["map"]) if rec.get("map") else None
+        if scope == "app":
+            where = "app-owned, edit in ~/.fixs/apps"
+        elif generated and _same_path(path, generated):
+            where = "generated, this app on this map"
+        elif _same_path(os.path.dirname(path), app_catalog.scenario_dir(app_id)):
+            where = "your variant, in ~/.fixs/apps"
+        else:
+            where = "your variant, outside ~/.fixs/apps"
+        return f"{os.path.basename(path):<26} ({where})"
     if slot == "engine":
         eng = derived.get("engine") or "py"
         how = "run_synchronization.py" if eng == "py" else "TrafficLayer + VirCarlaEnv"
-        return f"{eng:<26}({how}, from the yaml)"
+        return f"{eng:<26} ({how}, from the yaml)"
     if slot == "carla":
         # Two different things on one line, so label them: the INSTALL comes from
         # ~/.fixs/carla.json, the ENDPOINT from the scenario yaml. A bare "?" for
