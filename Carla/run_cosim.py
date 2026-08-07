@@ -29,6 +29,7 @@ import socket
 import subprocess
 import sys
 import time
+import traceback
 import urllib.request
 
 import app_catalog
@@ -59,6 +60,12 @@ DEFAULT_TRACI_PORT = 1337    # SUMO TraCI server (TrafficLayer connects as its c
 DEFAULT_BRIDGE_PORT = 440    # TrafficLayer serves VirCarlaEnv here
 DEFAULT_CARLA_HOST = "localhost"   # CARLA RPC; CarlaSetup.CarlaServerIP overrides
 DEFAULT_CARLA_PORT = 2000
+
+# How many runs may fail back-to-back before --serve gives up and stops listening.
+# Not unlimited: a host whose CARLA cannot start would otherwise accept peer after
+# peer and fail each one, which on the traffic side is indistinguishable from a
+# service that is simply busy. Any success resets it.
+SERVE_MAX_CONSECUTIVE_FAILURES = 5
 
 # The FIXS exchange period, in seconds - the python mirror of fixs::kFeedPeriodS
 # (CommonLib/FixsProtocol.h). This is a property of the protocol, NOT a knob:
@@ -167,10 +174,15 @@ def _run_initialize(tag):
     return subprocess.call(cmd + ["--update-fixs", tag]) == 0
 
 
-def maybe_update_fixs(no_check=False):
+def maybe_update_fixs(no_check=False, interactive=None):
     """Detect a local FIXS bundle that diverges from the published rolling release
     and, when interactive, offer to update + relaunch. Advisory only: every failure
-    is swallowed so a run is never blocked by the check."""
+    is swallowed so a run is never blocked by the check.
+
+    `interactive` is the caller's answer, not this function's guess. serve_forever
+    re-enters main() for every run, so on a --serve host this is asked again
+    between runs - with the operator long gone and the peer port not yet
+    listening. An advisory prompt must never be what stops a service serving."""
     # FIXS_REEXEC: env.reexec_under_configured() relaunches us under the configured
     # interpreter, and this runs before that - so without the guard the child asked the
     # same question
@@ -193,7 +205,7 @@ def maybe_update_fixs(no_check=False):
             return  # up to date
         print(f"[cosim] local FIXS bundle {local[:8]} diverges from the published "
               f"{tag} ({remote[:8]}).")
-        if not sys.stdin.isatty():
+        if not (sys.stdin.isatty() if interactive is None else interactive):
             print("[cosim] non-interactive; run initialize to update. Continuing.")
             return
         ans = input("[cosim] update the local FIXS bundle now? [y/N]: ").strip().lower()
@@ -1490,6 +1502,22 @@ PROFILE_SLOTS = {
 MUST_ANSWER = ("app", "map", "config")
 
 
+def _interactive(args):
+    """Whether THIS run is allowed to stop and ask a human. Asked once, here.
+
+    A terminal is necessary but not sufficient. --serve has one and must still not
+    prompt: the traffic machine already chose, and the person who could answer is
+    sitting at the OTHER keyboard. Helpers that re-derive this from
+    sys.stdin.isatty() are answering a different question - "is anyone reachable?"
+    instead of "is anyone expected?" - and prompt anyway. That is how a serving
+    host came to sit on the scenario menu while its peer printed "still waiting -
+    it is launching CARLA and loading the map". It was not. Nobody was there.
+
+    So: pass this value down. isatty() is the DEFAULT for `interactive`, never the
+    authority."""
+    return sys.stdin.isatty() and not getattr(args, "serve", False)
+
+
 def _ask(prompt, default=None):
     """input() that treats EOF as 'take the default' rather than exploding."""
     try:
@@ -1498,7 +1526,7 @@ def _ask(prompt, default=None):
         return default or ""
 
 
-def _config_menu(who, options, current=None):
+def _config_menu(who, options, current=None, interactive=None):
     """The scenario row: pick a yaml, or edit the current one in place.
 
     Picking a file was the only thing this offered, and with a single generated
@@ -1523,7 +1551,7 @@ def _config_menu(who, options, current=None):
             print(f"   {i}) {label}{mark}")
         print("   ---")
         print("   e) edit the current one in your editor")
-        if not sys.stdin.isatty():
+        if not (sys.stdin.isatty() if interactive is None else interactive):
             return current
         ans = _ask(f"[cosim] Which? [1-{len(options)} / e], Enter = keep "
                    f"{os.path.basename(current)}: ").strip().lower()
@@ -2031,7 +2059,16 @@ def await_peer(args):
                 try: sock.close()
                 except OSError: pass
                 continue
-            # The peer decides; this side only carries it out.
+            # The peer decides; this side only carries it out - so it has to have
+            # decided. With no map on either side the run would fall through to the
+            # map picker, which is a prompt on a host whose whole contract is that
+            # it prompts for nothing; the peer would then wait out --prep-timeout
+            # against a menu. Refuse it as the protocol error it is, and stay up.
+            if not (msg.get("map") or args.map):
+                peer.fail(sock, "SERVE carried no map, and this host has no "
+                                "--carla-map to fall back on", retryable=False)
+                print("[serve] peer sent no map; still listening.")
+                continue
             args.map = msg.get("map") or args.map
             args.carla_port = msg.get("carla_port") or args.carla_port
             args.quality_level = msg.get("quality_level") or args.quality_level
@@ -2040,6 +2077,8 @@ def await_peer(args):
             print(f"[serve] peer asked for map '{args.map}' on port "
                   f"{args.carla_port or DEFAULT_CARLA_PORT}")
             srv.close()
+            global _SERVE_SOCK
+            _SERVE_SOCK = sock       # so any later sys.exit can still say why
             return sock
     except KeyboardInterrupt:
         srv.close()
@@ -2049,17 +2088,32 @@ def await_peer(args):
 def ask_peer_to_serve(args, target_map):
     """Traffic side: tell the CARLA host what to serve, and wait for it.
 
-    Returns the live control socket, or None when no peer answers - in which case
-    the run continues exactly as it did before this existed, against a CARLA
-    someone started by hand. Retrying is what makes start order irrelevant."""
+    Returns the live control socket, or None when no peer answers AND the user has
+    said that is acceptable (--allow-manual-carla). Retrying is what makes start
+    order irrelevant."""
     import peer
     port = args.peer_port or peer.peer_port(args.carla_port or DEFAULT_CARLA_PORT)
     try:
         sock = peer.connect(args.carla_host, port, wait=args.peer_wait)
     except peer.PeerError as e:
+        # Continuing here used to be the default, and it is the one failure in this
+        # protocol that does not look like a failure: nothing is listening, so the
+        # run proceeds against whatever CARLA is up on that host - which, after a
+        # --serve that died, is the PREVIOUS run's server, still holding the
+        # previous map. It then works, for the wrong reason, and the peer protocol
+        # is quietly not in use. Same class of bug as the one serve_forever's
+        # docstring describes. So: say so and stop, unless asked not to.
+        if not args.allow_manual_carla:
+            sys.exit(f"[peer] {e}\n"
+                     f"[peer] not continuing: a CARLA already running on "
+                     f"{args.carla_host} may be serving a different map, and this "
+                     f"run cannot tell.\n"
+                     f"[peer] Start it there with 'run_cosim --serve', or pass "
+                     f"--allow-manual-carla if you started CARLA by hand with "
+                     f"'{target_map}' loaded.")
         print(f"[peer] {e}\n"
-              f"[peer] continuing anyway - assuming CARLA on {args.carla_host} was "
-              f"started by hand with '{target_map}' loaded.")
+              f"[peer] --allow-manual-carla: continuing, assuming CARLA on "
+              f"{args.carla_host} was started by hand with '{target_map}' loaded.")
         return None
     try:
         r, welcome = peer.hello(sock, _fixs_version())
@@ -2105,7 +2159,16 @@ def ask_peer_to_serve(args, target_map):
             return sock
         elif msg.get("t") == "ERROR":
             sock.close()
-            sys.exit(f"[peer] the CARLA host could not serve it: {msg.get('why')}")
+            # retryable says whether the render host thinks another attempt could
+            # work. It goes back to listening either way, so the advice is what
+            # differs: "run it again" is right for a busy port and actively
+            # misleading for a map that host can never install.
+            again = ("\n[peer] The render host is listening again - re-run this "
+                     "once it is ready." if msg.get("retryable") else
+                     "\n[peer] Retrying will not help until that is fixed on "
+                     f"{args.carla_host}.")
+            sys.exit(f"[peer] the CARLA host could not serve it: "
+                     f"{msg.get('why')}{again}")
 
 
 class _Tee:
@@ -2169,6 +2232,49 @@ def _tell_peer(sock, stage, msg):
         return
     import peer
     peer.progress(sock, stage, msg)
+
+
+# The control socket of the run currently being served, or None. Module-level
+# because serve_forever() has to reach it and main() does not hand it back:
+# main() fails by sys.exit() from dozens of places, and the peer is entitled to
+# the reason from every one of them. Threading a socket out of each would be a
+# far larger change than the problem is worth, and --serve holds exactly one of
+# these at a time (await_peer stops listening once a peer connects), so a single
+# slot is the whole state.
+_SERVE_SOCK = None
+
+
+def _drop_serve_sock():
+    """Close and forget the served run's control socket, if it is still open."""
+    global _SERVE_SOCK
+    sock, _SERVE_SOCK = _SERVE_SOCK, None
+    if sock is None:
+        return
+    try:
+        sock.close()
+    except OSError:
+        pass
+
+
+def _fail_peer(why, retryable=False):
+    """Tell the waiting traffic machine WHY this run is not happening, then close.
+
+    Every render-side failure used to reach the peer as a bare socket close, which
+    it reported as "the CARLA host disconnected before serving" - the same
+    sentence for a map that is not installed, a busy RPC port, a failed cook and a
+    pulled cable. The peer cannot act on that, and the person reading it is on the
+    machine that has none of the evidence.
+
+    `retryable` says whether re-running could help: the render host goes back to
+    listening either way (serve_forever), but "the port was busy, try again" and
+    "this CARLA is packaged and cannot cook that map" deserve different advice,
+    and only this side can tell them apart."""
+    global _SERVE_SOCK
+    sock, _SERVE_SOCK = _SERVE_SOCK, None
+    if sock is None:
+        return
+    import peer
+    peer.fail(sock, why, retryable=retryable)
 
 
 def _who_has_port(port):
@@ -2354,7 +2460,8 @@ def _edit_slots(slots, rec, ctx, cfg, apps, catalog, repo, tag_prefix, args=None
             rec["config"], rec["config_scope"] = edit_config(
                 ctx.get("staged"), (ctx.get("app") or {}).get("title"),
                 rec["map"], rec.get("app") or run_profile.GENERIC,
-                rec.get("config") if keep else None)
+                rec.get("config") if keep else None,
+                interactive=(_interactive(args) if args is not None else None))
         elif slot == "engine":
             # Derived from the yaml, not from the record: the yaml owns it, so the
             # value being edited must be the one currently in the file.
@@ -2395,7 +2502,7 @@ def configure_run(args, cfg, repo, tag_prefix, catalog):
     # wrong human - two people picking independently is exactly how the two ends
     # come to disagree about the map, and that failure lands minutes later inside
     # a cook. So a serving host runs the same code path a non-tty run takes.
-    interactive = sys.stdin.isatty() and not args.serve
+    interactive = _interactive(args)
     doc = run_profile.load_doc()
     ctx = {"app": None, "staged": [], "picked_local": None, "picked_now": False}
 
@@ -2444,8 +2551,18 @@ def configure_run(args, cfg, repo, tag_prefix, catalog):
                 # sitting at the wrong machine for an answer nothing would read.
                 # ('none' is a legitimate answer, but `not rec.get("app")` cannot
                 # tell "chose none" from "not asked yet", so it is set here.)
+                # The SCENARIO YAML is the same story, and was missed. peer.py's
+                # contract is "decisions, never files - the yaml stays on the
+                # machine that owns it", and every key a render host would read
+                # out of one is consumed elsewhere: Backend picks a bridge this
+                # host never dispatches (--serve returns at hold_carla),
+                # CarlaTimeStep / TrafficRefreshRate / RealtimePacing are read by
+                # VirCarlaEnv and TrafficLayer on the TRAFFIC machine, and
+                # CarlaServerIP/Port would be written back to a local file nothing
+                # local reads. So it changes nothing here and cost a prompt: every
+                # serve on a fresh host stopped on the scenario menu.
                 rec["app"] = None
-                pending -= {"app"}
+                pending -= {"app", "config"}
             dirty = True
         else:
             _apply_cli(rec, args)
@@ -2502,7 +2619,8 @@ def _rec_to_args(rec, args):
     args.sumo_gui = bool(rec.get("sumo_gui", True))
 
 
-def edit_config(staged, app_title, map_name, setup_app_id, current=None):
+def edit_config(staged, app_title, map_name, setup_app_id, current=None,
+                interactive=None):
     """Pick the scenario yaml, from every candidate that exists for this pairing.
 
     Two kinds are legitimate and both are listed together, because from where the
@@ -2576,7 +2694,7 @@ def edit_config(staged, app_title, map_name, setup_app_id, current=None):
     app_paths = {c["path"] for c in staged}
     # WHICH yaml is only half of it: mostly there is one, and what people actually
     # want is to change what is IN it. So the list always offers the file itself.
-    picked = _config_menu(who, options, current)
+    picked = _config_menu(who, options, current, interactive=interactive)
     print(f"[cosim] scenario config: {picked}")
     return picked, ("app" if picked in app_paths else "map")
 
@@ -2715,6 +2833,11 @@ def main():
                     help="traffic host: seconds to wait for the peer to cook and "
                          "launch (default 2700). A first cook is minutes of Unreal "
                          "work plus shader compilation.")
+    ap.add_argument("--allow-manual-carla", action="store_true",
+                    help="traffic host: run against a CARLA started by hand on the "
+                         "peer host when no 'run_cosim --serve' answers. Off by "
+                         "default - a leftover server from an earlier run happily "
+                         "accepts the connection while holding a DIFFERENT map.")
     ap.add_argument("--carla-only", action="store_true",
                     help="launch CARLA, load the map and HOLD it open, running no "
                          "bridge here - the CARLA half of a two-machine run, driven "
@@ -2827,7 +2950,7 @@ def main():
                   f"world step.")
 
     # Advisory: nudge to update a stale local FIXS bundle before doing real work.
-    maybe_update_fixs(no_check=args.no_update_check)
+    maybe_update_fixs(no_check=args.no_update_check, interactive=_interactive(args))
 
     # Resolve the saved CARLA env (running first-time setup if needed) and make
     # sure we are on its python before importing carla. --no-launch still needs
@@ -3000,7 +3123,7 @@ def main():
         # regenerate the TL table. A pick of an already-imported map (both picked_*
         # None) is run as-is, no prompt.
         if resolved is not None and picked_now and (picked_tag or picked_local) \
-                and not args.reimport and sys.stdin.isatty():
+                and not args.reimport and _interactive(args):
             ans = input(f"[cosim] '{resolved[0]}' is already imported. Reimport "
                         f"(re-cook + re-place TLs/signs + regen TL table)? [y/N]: ").strip().lower()
             if ans.startswith("y"):
@@ -3058,9 +3181,11 @@ def main():
         if resolved is None:
             print(f"[cosim] could not tell which cooked map '{target_map}' provides; "
                   f"pick the one to load:")
-            target_map = import_map.choose_imported_map(cfg["carla_root"], mode="source")
+            target_map = import_map.choose_imported_map(cfg["carla_root"], mode="source",
+                                                        interactive=_interactive(args))
             target_level = import_map.choose_level_path(cfg["carla_root"], target_map,
-                                                       mode="source")
+                                                       mode="source",
+                                                       interactive=_interactive(args))
         else:
             if resolved[0] != target_map:
                 print(f"[cosim] package '{target_map}' provides map '{resolved[0]}'")
@@ -3088,6 +3213,13 @@ def main():
             import_map.resolve_cooked_map(cfg["carla_root"], target_map, mode="packaged")
 
         if resolved is None:
+            # Say so BEFORE the download. A precooked package is gigabytes, and the
+            # source branch above already narrates its cook - so this branch staying
+            # silent meant the traffic machine sat through the longest step of a
+            # packaged bring-up being told only "it is launching CARLA and loading
+            # the map", which is not what is happening yet.
+            _tell_peer(ctl_sock, "install", f"installing the precooked '{target_map}' "
+                       f"package - a download and extract, several GB")
             # Which asset, and the three "not from here" cases, live in import_map -
             # the same call --import-map makes, so the two front doors cannot come to
             # disagree about what a packaged build can install (#276).
@@ -3100,9 +3232,11 @@ def main():
         if resolved is None:
             print(f"[cosim] could not tell which installed map '{target_map}' provides; "
                   f"pick the one to load:")
-            target_map = import_map.choose_imported_map(cfg["carla_root"], mode="packaged")
+            target_map = import_map.choose_imported_map(cfg["carla_root"], mode="packaged",
+                                                        interactive=_interactive(args))
             target_level = import_map.choose_level_path(cfg["carla_root"], target_map,
-                                                        mode="packaged")
+                                                        mode="packaged",
+                                                        interactive=_interactive(args))
         else:
             target_map, target_level = resolved
 
@@ -3607,15 +3741,69 @@ def serve_forever():
     CARLA up. That is the worst kind of working: right answer, wrong reason, and
     the peer protocol quietly not in use.
 
-    So loop: serve one run, tear its CARLA down, listen again."""
+    So loop: serve one run, tear its CARLA down, listen again.
+
+    A FAILED run has to loop too, and used not to. `rc = main(); if rc != 0` was
+    nearly dead code: almost every failure in main() is sys.exit("message"), which
+    raises SystemExit straight past that check and out of the process. So any
+    error at all - a map that is not installed, a busy RPC port, a failed cook -
+    took the whole service down, and the next run from the traffic machine found
+    nothing listening and fell into exactly the "assume CARLA was started by hand"
+    path described above. The clean-exit hole was closed; this is the same hole on
+    the error path.
+
+    Ctrl+C is the one thing that still stops serving: it is the operator at THIS
+    machine saying so, which is the only voice this loop takes."""
     n = 0
+    consecutive = 0
     while True:
         n += 1
-        rc = main()
-        if rc != 0:
+        try:
+            rc = main()
+        except KeyboardInterrupt:
+            _fail_peer("stopped from the render host (Ctrl+C)", retryable=True)
+            print("\n[serve] stopped.")
+            return 0
+        except SystemExit as e:
+            # sys.exit("message") carries the reason in .code as a string, and that
+            # message is the most useful thing this side has. sys.exit(int) means a
+            # status with no words; sys.exit() / sys.exit(None) is a clean stop.
+            code = e.code
+            if code is None or code == 0:
+                rc = 0
+            else:
+                rc = code if isinstance(code, int) else 1
+                _fail_peer(code if isinstance(code, str) else
+                           f"the render host exited with status {code}",
+                           retryable=False)
+                print(f"\n[serve] run {n} FAILED - reported to the peer.")
+        except Exception as e:                 # noqa: BLE001 - a service must not die
+            # An unhandled exception is a bug, not a decision. Print the traceback
+            # so it is diagnosable, tell the peer, and go back to listening rather
+            # than leaving the traffic machine to time out against a dead port.
+            traceback.print_exc()
+            _fail_peer(f"unexpected error on the render host: {e!r}", retryable=True)
+            rc = 1
+            print(f"\n[serve] run {n} FAILED ({e!r}) - reported to the peer.")
+        else:
+            if rc != 0:
+                _fail_peer(f"the render host exited with status {rc}", retryable=False)
+
+        # Whatever happened, this run's control socket is finished with. hold_carla
+        # returns without closing it on the two paths where the peer spoke first
+        # (it disconnected, or it said BYE), so without this the next run would
+        # start holding a dead socket in the slot _fail_peer reports through.
+        _drop_serve_sock()
+
+        consecutive = consecutive + 1 if rc != 0 else 0
+        if consecutive >= SERVE_MAX_CONSECUTIVE_FAILURES:
+            # Something here is broken in a way retrying cannot fix, and a service
+            # silently failing every run looks identical to one nobody is using.
+            print(f"[serve] {consecutive} runs failed in a row; stopping so the "
+                  f"problem is not hidden by an endlessly listening port.")
             return rc
-        print(f"\n[serve] run {n} finished; listening again "
-              f"(Ctrl+C to stop serving).\n")
+        print(f"\n[serve] run {n} {'finished' if rc == 0 else 'failed'}; listening "
+              f"again (Ctrl+C to stop serving).\n")
 
 
 if __name__ == "__main__":

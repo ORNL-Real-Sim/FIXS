@@ -162,10 +162,13 @@ def find_level_paths(carla_root, name, mode=None):
     return sorted(found)
 
 
-def choose_level_path(carla_root, name, mode=None):
+def choose_level_path(carla_root, name, mode=None, interactive=None):
     """Full /Game/... path to load for `name`. Only reached when the path could NOT
     be worked out from the package itself, so there is nothing to default to: if
-    several cooked levels share the name, only the user can say which was meant."""
+    several cooked levels share the name, only the user can say which was meant.
+
+    `interactive` is the caller's answer to "may this stop and ask?"; isatty() is
+    only the default. A --serve host has a terminal and no one at it."""
     found = find_level_paths(carla_root, name, mode)
     if len(found) <= 1:
         return found[0][0] if found else None
@@ -174,7 +177,7 @@ def choose_level_path(carla_root, name, mode=None):
           f"identifies which is wanted - pick one:")
     for i, (path, size) in enumerate(found, 1):
         print(f"   {i}) {path}  ({size / 1048576:.1f} MB)")
-    if not sys.stdin.isatty():
+    if not (sys.stdin.isatty() if interactive is None else interactive):
         sys.exit("[cosim] non-interactive and the name is ambiguous; pass --map "
                  "<package> so the path resolves, or delete the stale copies.")
     while True:
@@ -1560,10 +1563,13 @@ def list_imported_maps(carla_root, mode=None):
             if os.path.isfile(cooked_map_path(carla_root, name, mode))]
 
 
-def choose_imported_map(carla_root, mode=None):
+def choose_imported_map(carla_root, mode=None, interactive=None):
     """Numbered menu of the maps already cooked into this CARLA; returns the chosen
     name. Auto-selects when there is exactly one; exits if there are none, or if a
-    choice is needed but the session is non-interactive."""
+    choice is needed but the session is non-interactive.
+
+    `interactive` is the caller's answer to "may this stop and ask?"; isatty() is
+    only the default. A --serve host has a terminal and no one at it."""
     maps = list_imported_maps(carla_root, mode)
     if not maps:
         sys.exit(f"[import] no cooked maps found under {carla_root}. Import one first "
@@ -1573,7 +1579,7 @@ def choose_imported_map(carla_root, mode=None):
     print("\n[import] Imported maps:")
     for i, m in enumerate(maps, 1):
         print(f"   {i}) {m}")
-    if not sys.stdin.isatty():
+    if not (sys.stdin.isatty() if interactive is None else interactive):
         sys.exit("[import] non-interactive session: pass --map <name> to choose one.")
     while True:
         ans = _prompt(f"[import] Which map? [1-{len(maps)}]: ").strip()
