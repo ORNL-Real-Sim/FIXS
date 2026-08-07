@@ -19,7 +19,6 @@ install/version):
     python carla_env_setup.py                  # interactive
     python carla_env_setup.py --show           # print the current config
     python carla_env_setup.py --update-python  # rebind the env, keep the CARLA paths
-    setup_carla.bat / setup_carla.sh           # thin per-OS wrappers
 
 Everything that runs a co-sim runs under the interpreter recorded here - see
 reexec_under_configured, which every entry point calls first, so which script you

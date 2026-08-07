@@ -93,9 +93,9 @@ def place_signs(name, carla_root=None, ue4_root=None, force=False):
 
 
 def main():
-    # Run under the interpreter carla.json names, whatever python place_signs.sh
-    # was started with. run_cosim imports this module rather than spawning it, so
-    # that path is already on the right interpreter and this is a no-op there.
+    # Run under the interpreter carla.json names, whatever python this script was
+    # started with. run_cosim imports this module rather than spawning it, so that
+    # path is already on the right interpreter and this is a no-op there.
     env.reexec_under_configured(__file__, tag="signs")
 
     ap = argparse.ArgumentParser(description=__doc__,
