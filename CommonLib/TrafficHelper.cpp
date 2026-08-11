@@ -838,6 +838,12 @@ int TrafficHelper::sendToSUMO(double simTime, MsgHelper Msg_c) {
 					}
 					SUMO_TRACI_NAMESPACE::Vehicle::moveToXY(idStr, "", -1, positionX, positionY, heading, 6);
 					SUMO_TRACI_NAMESPACE::Vehicle::setSpeed(idStr, speed);
+					// TraCI setSpeed PINS the speed until it is released with -1. Track
+					// who is pinned so a vehicle the WM stops sending (handback, e.g. it
+					// dropped below MinControlSpeed) is RELEASED back to SUMO's
+					// car-following instead of crawling forever at its last commanded
+					// speed. Released in the pass below.
+					WorldModelHeldIds.insert(idStr);
 				}
 				catch (const std::exception& e) {
 					printf("WorldModel move '%s' failed: %s\n", idStr.c_str(), e.what());
@@ -893,6 +899,28 @@ int TrafficHelper::sendToSUMO(double simTime, MsgHelper Msg_c) {
 			}
 		}
 
+
+		// #189: release any WM-pinned vehicle the world model stopped sending this
+		// step (handback). TraCI setSpeed pins the speed indefinitely, so without
+		// this a vehicle handed back below MinControlSpeed keeps crawling at its
+		// last commanded speed instead of resuming SUMO car-following.
+		if (ENABLE_WORLDMODEL && !WorldModelHeldIds.empty()) {
+			std::set<std::string> stillHeld;
+			for (int iV = 0; iV < Msg_c.VehDataSend_um[0].size(); iV++) {
+				string sentId = Msg_c.VehDataSend_um[0][iV].id;
+				if (WorldModelHeldIds.find(sentId) != WorldModelHeldIds.end()) {
+					stillHeld.insert(sentId);
+				}
+			}
+			for (std::set<std::string>::iterator it = WorldModelHeldIds.begin(); it != WorldModelHeldIds.end(); ++it) {
+				if (stillHeld.find(*it) != stillHeld.end()) continue;
+				try {
+					SUMO_TRACI_NAMESPACE::Vehicle::setSpeed(*it, -1.0);   // -1 => resume car-following
+				}
+				catch (const std::exception&) { /* vehicle already left the network */ }
+			}
+			WorldModelHeldIds = stillHeld;
+		}
 
 		if (ENABLE_VERBOSE) {
 			printf("send SUMO complete\n ");

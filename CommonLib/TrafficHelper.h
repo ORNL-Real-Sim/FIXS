@@ -157,6 +157,10 @@ public:
 	// #189: external World Model owns non-ego bubble poses (moveToXY write-back)
 	bool ENABLE_WORLDMODEL = false;
 	std::string WorldModelEgoId = "";
+	// Ids whose speed is currently PINNED by TraCI setSpeed from the WM branch.
+	// setSpeed holds indefinitely, so an id the WM stops sending (handback) must
+	// be released with setSpeed(-1) or it crawls forever at its last command.
+	std::set<std::string> WorldModelHeldIds;
 
 	double tSimuEnd = 90000;
 
