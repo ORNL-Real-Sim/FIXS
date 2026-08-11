@@ -248,6 +248,21 @@ struct SumoSetup_t {
 	// 1000 preserves the previously hard-coded behaviour.
 	double PrecedingVehicleLookahead;
 
+	// keepRoute bitmask for the moveToXY that mirrors an externally-driven ego
+	// back into SUMO (the Carla external-control inject path). Default 6 is the
+	// value that call site hardcoded before this key existed, so behaviour is
+	// unchanged unless it is set.
+	//
+	// It is really a choice of FAILURE MODE once SUMO no longer drives the ego:
+	//   bit 0 (1) map only onto the vehicle's OWN route; SUMO raises if it cannot
+	//             -> the ego cannot silently lose its route, and with it the
+	//                next-TLS lookup a signal-aware controller plans on
+	//   bit 1 (2) place at the exact position, off the network if need be
+	//             -> off-road driving is possible; degradation is silent
+	//   bit 2 (4) ignore lane permissions
+	// https://sumo.dlr.de/docs/TraCI/Change_Vehicle_State.html#move_to_xy
+	int EgoKeepRoute;
+
 	// Auto-launch SUMO configuration
 	bool EnableAutoLaunch;
 	std::string SumoConfigFile;

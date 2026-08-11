@@ -546,6 +546,14 @@ int ConfigHelper::getConfig(string configName) {
 	else {
 		SumoSetup.PrecedingVehicleLookahead = 1000.0;
 	}
+	// keepRoute for the externally-driven ego's moveToXY. 6 is what that call
+	// site hardcoded, so an absent key changes nothing. See SumoSetup_t.
+	if (node["EgoKeepRoute"]) {
+		SumoSetup.EgoKeepRoute = parserInteger(node, "EgoKeepRoute");
+	}
+	else {
+		SumoSetup.EgoKeepRoute = 6;
+	}
 	if (node["EnableAutoLaunch"]) {
 		SumoSetup.EnableAutoLaunch = parserFlag(node, "EnableAutoLaunch");
 	}

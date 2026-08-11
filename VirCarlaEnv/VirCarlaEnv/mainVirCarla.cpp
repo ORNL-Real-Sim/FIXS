@@ -129,10 +129,25 @@ int main(int argc, const char* argv[]) {
     const bool   useWireActuation = (cs.EgoL0Driver == "Actuation" || cs.EgoL0Driver == "actuation");
     const double kMaxSteerRad = 0.7;   // must match the client's DriveCommand steer scaling
     const std::string egoId = cs.EgoId;
-    if (egoMode >= 1 && cs.EgoSpawnPose.size() < 4) {
-        std::cerr << "EgoMode " << egoMode << " needs EgoSpawnPose: [x, y, z, headingDeg]\n";
-        return -1;
-    }
+    // WHO CREATES THE EGO -- decided by whether EgoSpawnPose is configured:
+    //
+    //   pose given   this bridge creates it, before the co-sim loop, at that pose.
+    //                The traffic simulator gets it injected from Carla
+    //                (addEgoVehicleFromXY) on a single-edge dummy route. Use when
+    //                the ego has no counterpart in the traffic scenario.
+    //
+    //   pose absent  the TRAFFIC SIMULATOR creates it -- on its own route, at its
+    //                own depart time -- and this bridge spawns a physics actor at
+    //                the pose it reports, the first tick the id shows up in the
+    //                feed. External dynamics then take that vehicle over, which is
+    //                what the CarMaker/XIL path has always done.
+    //
+    // The second is the better default wherever the scenario has an ego: the entry
+    // time has one home (the scenario), a warm-up can end on ego entry because the
+    // trigger is visible to the only component running during it, and the traffic
+    // simulator's ego keeps a real route -- which is what keeps its next-signal
+    // information, and any controller planning on it, meaningful.
+    const bool deferEgoSpawn = (egoMode >= 1 && cs.EgoSpawnPose.size() < 4);
 
     std::unordered_set<std::string> interestedIds(cs.InterestedIds.begin(), cs.InterestedIds.end());
 
@@ -214,28 +229,31 @@ int main(int argc, const char* argv[]) {
         // first, THEN create the TM + sync + autopilot. TM must be synchronous in
         // a synchronous world; world.Tick() then drives TM's SynchronousTick
         // automatically (in-process TM instance).
-        if (egoMode >= 1) {
-            virenv::Pose sp;
-            sp.x = cs.EgoSpawnPose[0]; sp.y = cs.EgoSpawnPose[1];
-            sp.z = cs.EgoSpawnPose[2]; sp.headingDeg = cs.EgoSpawnPose[3];
+        // Spawn the ego and wire its driver. Called either BEFORE the loop from a
+        // configured EgoSpawnPose, or from inside it at the pose the traffic
+        // simulator reports the first time the ego id arrives (see deferEgoSpawn).
+        //
+        // `settleOutOfBand` is the difference between those two. Before the loop
+        // the bridge owns the clock and can tick the world to drop the car onto its
+        // tires. Inside the loop it does not: an extra world.Tick() there advances
+        // Carla past the feed and desyncs every mirrored vehicle. A deferred ego is
+        // spawned as the traffic simulator inserts it -- at ~0 m/s -- so it settles
+        // over the loop's own next ticks (0.5 s at CarlaTimeStep 0.05) instead.
+        bool egoIsUp = false;
+        auto bringUpEgo = [&](const virenv::Pose& sp, bool settleOutOfBand) -> bool {
             if (backend.spawnEgo(cs.EgoBlueprint, sp, cs.TrafficManagerPort) == virenv::kNoHandle) {
                 std::cerr << "EgoMode " << egoMode << ": ego spawn failed\n";
-                return -1;
+                return false;
             }
-            // Two L0 drivers (config EgoL0Driver):
+            // Two in-Carla L0 drivers (config EgoL0Driver):
             //  - native Carla TM autopilot (default): server-side, needs a
             //    routable map (the simple_loop junction-id fix makes it routable);
             //  - EgoDriver fallback module: map-agnostic pure pursuit on
             //    EgoRoutePoints, through full PhysX -- needs the route.
-            if (useFallbackDriver) {
-                if (cs.EgoRoutePoints.empty()) {
-                    std::cerr << "EgoMode " << egoMode << " (Pursuit) needs EgoRoutePoints\n";
-                    return -1;
-                }
+            if (useFallbackDriver)
                 backend.setEgoRoute(cs.EgoRoutePoints, cs.EgoRouteRepeat, cs.TrafficManagerPort);
-            }
-            // settle the spawned ego onto its tires before wiring the driver / loop
-            for (int i = 0; i < 10; i++) world.Tick(30s);
+            if (settleOutOfBand)
+                for (int i = 0; i < 10; i++) world.Tick(30s);
             if (useWireActuation) {
                 // No in-Carla driver: the ego stays physics-on and MANUAL (no autopilot),
                 // driven each feed by the external EgoDriver client's wire actuation.
@@ -250,10 +268,40 @@ int main(int argc, const char* argv[]) {
                 // (generous timeout, before the co-sim loop couples with TL/SUMO), so
                 // the loop's tight world.Tick() never stalls past its timeout and
                 // drops the TrafficLayer/SUMO connection.
-                std::cout << "Pre-building TM InMemoryMap (one-time, may take ~30 s)...\n";
-                for (int i = 0; i < 5; i++) world.Tick(120s);
-                std::cout << "TM InMemoryMap ready; entering co-sim loop.\n";
+                if (settleOutOfBand) {
+                    std::cout << "Pre-building TM InMemoryMap (one-time, may take ~30 s)...\n";
+                    for (int i = 0; i < 5; i++) world.Tick(120s);
+                    std::cout << "TM InMemoryMap ready; entering co-sim loop.\n";
+                }
+                else {
+                    // Deferred + TM: that one-time build now lands inside the loop and
+                    // can stall the feed. Configure EgoSpawnPose to pay it up front.
+                    std::cout << "WARNING: TM autopilot on a deferred ego -- its one-time "
+                              << "InMemoryMap build happens now, inside the co-sim loop.\n";
+                }
             }
+            egoIsUp = true;
+            return true;
+        };
+
+        // ---- L0+ (EgoMode >= 1): Carla drives the ego ----------------------
+        // Order matters (matches the proven Python sequence): spawn + physics
+        // first, THEN create the TM + sync + autopilot. TM must be synchronous in
+        // a synchronous world; world.Tick() then drives TM's SynchronousTick
+        // automatically (in-process TM instance).
+        if (egoMode >= 1 && useFallbackDriver && cs.EgoRoutePoints.empty()) {
+            std::cerr << "EgoMode " << egoMode << " (Pursuit) needs EgoRoutePoints\n";
+            return -1;
+        }
+        if (egoMode >= 1 && !deferEgoSpawn) {
+            virenv::Pose sp;
+            sp.x = cs.EgoSpawnPose[0]; sp.y = cs.EgoSpawnPose[1];
+            sp.z = cs.EgoSpawnPose[2]; sp.headingDeg = cs.EgoSpawnPose[3];
+            if (!bringUpEgo(sp, /*settleOutOfBand=*/true)) return -1;
+        }
+        else if (deferEgoSpawn) {
+            std::cout << "EgoMode " << egoMode << ": no EgoSpawnPose -- waiting for '"
+                      << egoId << "' to enter the traffic simulator, then taking it over.\n";
         }
 
         // ---- L2 (EgoMode >= 2): artificial external speed-advisory controller ----
@@ -307,6 +355,29 @@ int main(int argc, const char* argv[]) {
                 break;
             }
             backend.flushBatch();          // ApplyBatch(transform commands)
+
+            // ---- deferred ego: the traffic simulator inserted it, take it over ----
+            // Spawn at the pose it just reported, so the physics actor starts exactly
+            // where the traffic simulator put its vehicle and the two are one from the
+            // first tick. Everything downstream already tolerates a missing ego --
+            // applyEgoActuation, driveEgoFallback and readEgoState all return early
+            // without an actor -- so before this fires the bridge simply mirrors
+            // traffic, and nothing about the ego reaches the traffic simulator.
+            if (deferEgoSpawn && !egoIsUp) {
+                auto itNew = core.Msg_c.VehDataRecv_um.find(egoId);
+                if (itNew != core.Msg_c.VehDataRecv_um.end()) {
+                    virenv::Pose sp;
+                    sp.x = itNew->second.positionX;
+                    sp.y = itNew->second.positionY;
+                    sp.z = itNew->second.positionZ;
+                    sp.headingDeg = itNew->second.heading;
+                    std::cout << "Ego '" << egoId << "' entered at t=" << simTime
+                              << " (" << sp.x << ", " << sp.y << ", " << sp.z
+                              << ", " << sp.headingDeg << " deg) -- spawning the physics ego.\n";
+                    if (!bringUpEgo(sp, /*settleOutOfBand=*/false)) break;
+                }
+            }
+
             // ---- L2: apply the external speed advisory at each 0.1s FIXS feed ----
             // Set the driver target BEFORE it runs this tick. applyEgoControl routes
             // it to native TM (SetDesiredSpeed) or the EgoDriver fallback (override);

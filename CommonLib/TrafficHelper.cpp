@@ -888,7 +888,21 @@ int TrafficHelper::sendToSUMO(double simTime, MsgHelper Msg_c) {
 					// moveToXY also works on not-yet-departed vehicles -- it INSERTS
 					// them at the given position (default departPos would otherwise
 					// stay blocked behind bg traffic entering the same edge).
-					if (carlaInjectedIds_.find(idStr) == carlaInjectedIds_.end()) {
+					//
+					// ... and ADOPT one the scenario already declared, rather than
+					// trying to create it. That is what the CarMaker branch above has
+					// always done (its "add the ego if missing" block is commented out,
+					// because there SUMO owns the insertion), and it is the convention
+					// this branch now supports too: the traffic simulator inserts the
+					// ego on its own route at its own depart time, the virtual
+					// environment takes its dynamics over from there.
+					//
+					// `vehicleExist` was already being computed here and never read.
+					// Without it Vehicle::add throws "already exists" on EVERY step,
+					// and because the throw happens before the moveToXY / setSpeed
+					// below -- same try block -- the ego is never mirrored at all: the
+					// Carla vehicle drives while SUMO's copy of it does something else.
+					if (!vehicleExist && carlaInjectedIds_.find(idStr) == carlaInjectedIds_.end()) {
 						addEgoVehicleFromXY(simTime, idStr, vehicleType, positionX, positionY);
 						carlaInjectedIds_.insert(idStr);
 					}
@@ -905,7 +919,17 @@ int TrafficHelper::sendToSUMO(double simTime, MsgHelper Msg_c) {
 						}
 						catch (...) {}
 					}
-					SUMO_TRACI_NAMESPACE::Vehicle::moveToXY(idStr, "", -1, positionX, positionY, heading, 6);
+					// keepRoute is config-driven (SumoSetup.EgoKeepRoute, default 6 =
+					// today's hardcoded value). It is really a choice of FAILURE MODE
+					// for a vehicle SUMO no longer drives: bit 1 (2/6) places it at the
+					// exact position and lets it leave the drivable network, which is
+					// what allows off-road driving but also lets it quietly lose its
+					// lane -- and with it the next-TLS lookup an eco/CAV controller
+					// depends on. Bit 0 (1/5) pins it to its own route and makes SUMO
+					// raise when it cannot, i.e. fail loudly instead. The CarMaker
+					// branch above keeps its own hardcoded 6.
+					SUMO_TRACI_NAMESPACE::Vehicle::moveToXY(idStr, "", -1, positionX, positionY, heading,
+						Config_c->SumoSetup.EgoKeepRoute);
 					carlaLastFed_[idStr] = std::make_pair(positionX, positionY);
 					// #174: setSpeed with the ACTUAL Carla speed -- the `.speed` field, NOT
 					// `speedDesired` (the L2 command). This makes SUMO's getSpeed the true ego
@@ -1806,10 +1830,26 @@ void TrafficHelper::parserSumoSubscription(libsumo::TraCIResults VehDataSubscrib
 		double odo = static_pointer_cast<libsumo::TraCIDouble>(
 			VehDataSubscribeTraciResults[libsumo::VAR_DISTANCE])->value;
 
+		// Is this vehicle one whose motion an external environment owns? Its route
+		// is then the one thing SUMO still decides for it, and a reroute nobody
+		// asked for is how a co-sim silently stops being signal-aware -- see the
+		// two guards below. Same condition as the inject path's carlaOwnsId.
+		const bool externallyDriven = ENABLE_CARLA && ENABLE_CARLA_EXTERNAL_CONTROL &&
+			find(Config_c->CarlaSetup.InterestedIds.begin(), Config_c->CarlaSetup.InterestedIds.end(), vehId)
+				!= Config_c->CarlaSetup.InterestedIds.end();
+
 		// seed once per vehicle (or when the route changed): one getNextTLS walk
 		// captures every TLS ahead of this vehicle for the rest of its route.
 		auto cacheIt = VehicleId2Tls_um.find(vehId);
 		if (cacheIt == VehicleId2Tls_um.end() || cacheIt->second.routeId != routeId) {
+			// GUARD: an externally-driven vehicle that had a route and now has a
+			// different one was rerouted BY the mirror, not by a decision -- SUMO
+			// could not keep the fed pose on its route (see EgoKeepRoute). Its next
+			// signals are whatever the replacement route implies, which for a
+			// single-edge replacement is none at all.
+			if (externallyDriven && cacheIt != VehicleId2Tls_um.end()) {
+				fixs::RS_XIL_GUARD("ego_sumo_route_changed", 1.0, 0.0);
+			}
 			VehTlsCache entry;
 			entry.routeId = routeId;
 			vector<libsumo::TraCINextTLSData> seed = SUMO_TRACI_NAMESPACE::Vehicle::getNextTLS(vehId);
@@ -1875,6 +1915,20 @@ void TrafficHelper::parserSumoSubscription(libsumo::TraCIResults VehDataSubscrib
 				CurVehData.signalLightColor = tlsStateToColor(tlsState);
 				break;
 			}
+		}
+
+		// GUARD: an externally-driven vehicle that HAD a next signal and now has
+		// none. A controller reading these fields cannot tell that apart from an
+		// honestly empty road ahead -- it simply plans as if no signal were in
+		// sight -- so the run keeps producing plausible output with its signal
+		// logic switched off. Reported here, where the loss is first knowable.
+		if (externallyDriven) {
+			const bool haveTls = !CurVehData.signalLightId.empty();
+			auto hadIt = vehHadNextTls_.find(vehId);
+			if (!haveTls && hadIt != vehHadNextTls_.end() && hadIt->second) {
+				fixs::RS_XIL_GUARD("ego_sumo_next_tls_lost", 1.0, 0.0);
+			}
+			vehHadNextTls_[vehId] = haveTls;
 		}
 	}
 
