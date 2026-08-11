@@ -282,6 +282,14 @@ void CarlaBackend::driveEgoFallback(double targetSpeed) {
     c.brake    = (float)dc.brake;
     c.steer    = (float)dc.steer;
     egoActor_->ApplyControl(c);
+
+    // Remember what was applied, and the target it was chasing. Without this the
+    // only observable is "the ego did not move" -- which is the same symptom for
+    // a driver commanding nothing, a driver commanding the wrong thing, and a
+    // vehicle that cannot act on what it was told. Reported on the ego's own
+    // record so it lands in whatever log is already collecting it.
+    lastEgoCmd_ = dc;
+    lastEgoTarget_ = tgt;
 }
 
 void CarlaBackend::applyEgoActuation(double throttle, double brake, double steerNorm) {

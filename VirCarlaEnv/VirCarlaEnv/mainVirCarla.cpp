@@ -476,6 +476,18 @@ int main(int argc, const char* argv[]) {
                         d.speedDesired = (egoMode >= 2) ? (float)lastAdvisory : (float)es.speed;
                         d.positionX = (float)es.x; d.positionY = (float)es.y; d.positionZ = (float)es.z;
                         d.heading = (float)es.heading; d.grade = (float)es.grade;
+                        // What the in-bridge driver actually applied this tick. These are
+                        // the actuation fields' natural meaning -- normally an EXTERNAL
+                        // client fills them and the bridge applies them; with an in-Carla
+                        // driver the flow is reversed and the bridge reports them. Costs
+                        // nothing on the wire (a field is only serialised if the config
+                        // lists it) and makes the driver's decisions observable.
+                        if (useFallbackDriver) {
+                            const auto& cmd = backend.lastEgoCommand();
+                            d.acceleratorPedalDesired = (float)cmd.throttle;
+                            d.brakePedalDesired       = (float)cmd.brake;
+                            d.steerAngleDesired       = (float)(cmd.steer * kMaxSteerRad);
+                        }
                         core.Msg_c.VehDataSend_um[core.Sock_c.serverSock[sock0]].push_back(d);
                         if (dataLog.isOpen() && logWanted(d.id)) dataLog.logVehicle(simTime, d);
                         // Handover trace: the first 5 s after the ego becomes ours, one
@@ -487,11 +499,18 @@ int main(int argc, const char* argv[]) {
                         // advisory it is not tracking, or a pose that never changes.
                         if (onFeed && egoTraceLeft > 0) {
                             --egoTraceLeft;
+                            const auto& cmd = backend.lastEgoCommand();
                             std::cout << "[ego] t=" << simTime
                                       << " advisory=" << lastAdvisory << " m/s"
                                       << " measured=" << es.speed << " m/s"
-                                      << " pos=(" << es.x << ", " << es.y << ", " << es.z << ")"
-                                      << " heading=" << es.heading << "\n";
+                                      << " thr=" << cmd.throttle << " brk=" << cmd.brake
+                                      << " steer=" << cmd.steer
+                                      // A mirrored TWIN of the ego would be teleported
+                                      // through the physics ego every tick and knock it
+                                      // about; the core is supposed to skip the ego's
+                                      // SUMO echo entirely, so this must stay 0.
+                                      << " mirroredTwin=" << core.mappedVehicles().count(egoId)
+                                      << " pos=(" << es.x << ", " << es.y << ", " << es.z << ")\n";
                         }
                         // Also log the SUMO-VIEW ego (what SUMO reports back this feed) on the
                         // SAME clock as the Carla view, so a plot compares them directly. It's
