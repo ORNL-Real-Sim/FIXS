@@ -1917,19 +1917,13 @@ void TrafficHelper::parserSumoSubscription(libsumo::TraCIResults VehDataSubscrib
 			}
 		}
 
-		// GUARD: an externally-driven vehicle that HAD a next signal and now has
-		// none. A controller reading these fields cannot tell that apart from an
-		// honestly empty road ahead -- it simply plans as if no signal were in
-		// sight -- so the run keeps producing plausible output with its signal
-		// logic switched off. Reported here, where the loss is first knowable.
-		if (externallyDriven) {
-			const bool haveTls = !CurVehData.signalLightId.empty();
-			auto hadIt = vehHadNextTls_.find(vehId);
-			if (!haveTls && hadIt != vehHadNextTls_.end() && hadIt->second) {
-				fixs::RS_XIL_GUARD("ego_sumo_next_tls_lost", 1.0, 0.0);
-			}
-			vehHadNextTls_[vehId] = haveTls;
-		}
+		// NOTE: "the ego had a next signal and now has none" is deliberately NOT
+		// guarded here. signalLightId only goes empty when no cached entry is still
+		// ahead of the odometer, which means either the cached list is empty -- the
+		// route was replaced by one without signals, which changed routeId and the
+		// guard above already fired -- or the vehicle has passed the last signal on
+		// its route, which is ordinary. Guarding it would warn at the end of every
+		// run and teach everyone to ignore the one warning that matters.
 	}
 
 	//=================

@@ -210,10 +210,6 @@ public:
 	struct TlsOnRoute { std::string id; int index; double cumDist; };
 	struct VehTlsCache { std::string routeId; std::vector<TlsOnRoute> list; };
 	std::unordered_map<std::string, VehTlsCache> VehicleId2Tls_um;
-	// Did an externally-driven vehicle have a next signal last step? Only used to
-	// guard the transition "had one -> has none", which is invisible downstream:
-	// the fields simply read as an empty road ahead.
-	std::unordered_map<std::string, bool> vehHadNextTls_;
 	// per-step snapshot of TLS R/Y/G state, filled on demand for the (sparse) set of
 	// TLS that are actually some subscribed vehicle's next signal, then distributed.
 	std::unordered_map<std::string, std::string> CurTlsState_um;
