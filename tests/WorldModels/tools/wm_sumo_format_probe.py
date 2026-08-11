@@ -53,6 +53,11 @@ VARIANTS = {
     "sumo+go":     (True,  "ours",   "cv",  "go"),
     "sumo+stop":   (True,  "ours",   "cv",  "stop"),
     "native+go":   (False, "native", "log", "go"),
+    # history bisection: native everything, but the 16-frame history is
+    # synthetically FROZEN (current pose repeated) or a smooth creep ramp --
+    # isolates whether launch needs real stopped-history microstructure.
+    "native+frozen": (False, "native", "log", None),
+    "native+creep":  (False, "native", "log", None),
 }
 LIGHT_IDX = {"stop": 2, "go": 3}   # upstream _polygon_light_type indices
 
@@ -119,6 +124,20 @@ def rollout(env, lane_lines, model, variant: str, seconds: float, topk: int,
     hxyz = source_xyz[:, history_start: start + 1].numpy().copy()
     hhead = source_heading[:, history_start: start + 1].numpy().copy()
     hvalid = source_valid[:, history_start: start + 1].numpy().copy()
+    if variant in ("native+frozen", "native+creep"):
+        # replace real history with synthetic: pose held (frozen) or a linear
+        # decel ramp ending at the current pose (creep), along each heading
+        hvalid[:] = True
+        cur = hxyz[:, -1].copy()
+        hxyz[:] = cur[:, None, :]
+        hhead[:] = hhead[:, -1:][:, [0]]
+        if variant == "native+creep":
+            v = np.linspace(0.5, 0.1, HISTORY)
+            back = np.cumsum((v[::-1] * DT))[::-1]
+            for a in range(hxyz.shape[0]):
+                hd = hhead[a, -1]
+                hxyz[a, :-1, 0] = cur[a, 0] - back[:-1] * np.cos(hd)
+                hxyz[a, :-1, 1] = cur[a, 1] - back[:-1] * np.sin(hd)
     lwh = env["agents"]["lwh"][selected]
     class_ids = env["agents"]["class_ids"][selected]
     A = len(selected)
