@@ -1842,21 +1842,36 @@ void TrafficHelper::parserSumoSubscription(libsumo::TraCIResults VehDataSubscrib
 		// captures every TLS ahead of this vehicle for the rest of its route.
 		auto cacheIt = VehicleId2Tls_um.find(vehId);
 		if (cacheIt == VehicleId2Tls_um.end() || cacheIt->second.routeId != routeId) {
-			// GUARD: an externally-driven vehicle that had a route and now has a
-			// different one. Usually that means the mirror rerouted it -- SUMO
-			// could not keep the fed pose on its route (see EgoKeepRoute) -- and
-			// its next signals become whatever the replacement route implies,
-			// which for a single-edge replacement is none at all.
-			//
-			// It does not fire on ordinary looping: a <route repeat="n"> is
-			// expanded when the scenario loads, so a vehicle laps a 70-edge
-			// corridor 21 times under one routeID holding 1470 edges (measured on
-			// the MLK arterial scenario). It WILL fire if the scenario reroutes
-			// the vehicle deliberately -- a rerouting device, say -- which for a
-			// vehicle whose motion an external simulator owns is worth saying out
-			// loud too: the route it is being steered along just changed.
-			if (externallyDriven && cacheIt != VehicleId2Tls_um.end()) {
-				fixs::RS_XIL_GUARD("ego_sumo_route_changed", 1.0, 0.0);
+			// The route changed (or this is the first sight of the vehicle).
+			// Refresh the cached edge list: it is read below to reconstruct the
+			// signal head, and it is captured when a vehicle is FIRST seen -- so
+			// after a reroute it describes a route the vehicle is no longer on.
+			if (cacheIt != VehicleId2Tls_um.end()) {
+				vector<string> newEdges = SUMO_TRACI_NAMESPACE::Vehicle::getRoute(vehId);
+
+				// GUARD: a route REPLACED BY THE MIRROR -- which is not the same
+				// event as a route change. Changing a vehicle's route is a normal
+				// thing for an application to do: route guidance is a CAV function,
+				// and a rerouting device is the scenario's own business. Raising on
+				// "the routeId is different" would mean the first controller that
+				// reroutes its ego teaches everyone to ignore this.
+				//
+				// What is not normal is SUMO replacing the route because moveToXY
+				// could not keep the fed pose on it, and that has a signature: per
+				// SUMO's semantics the replacement "consists of that edge only"
+				// (see SumoSetup.EgoKeepRoute). A single-edge route is what no
+				// deliberate reroute produces, and it also predicts the damage --
+				// one edge holds at most one signal, so a controller planning on
+				// this vehicle is about to lose its stop bar.
+				//
+				// Ordinary looping cannot reach here at all: <route repeat="n"> is
+				// expanded when the scenario loads, so a vehicle laps a 70-edge
+				// corridor 21 times under ONE routeId holding 1470 edges (measured
+				// on the MLK arterial scenario).
+				if (externallyDriven && newEdges.size() <= 1) {
+					fixs::RS_XIL_GUARD("ego_sumo_route_replaced", 1.0, 0.0);
+				}
+				VehicleId2EdgeList_um[vehId] = std::move(newEdges);
 			}
 			VehTlsCache entry;
 			entry.routeId = routeId;
