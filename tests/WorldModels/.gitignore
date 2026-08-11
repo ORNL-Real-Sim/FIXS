@@ -11,3 +11,6 @@ Demo/config_fcd.yaml
 tools/sandbox*.html
 tools/sandbox*.npz
 tools/*.html
+tools/*.npz
+tools/native*.npz
+tools/signal*.npz
