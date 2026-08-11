@@ -1843,10 +1843,18 @@ void TrafficHelper::parserSumoSubscription(libsumo::TraCIResults VehDataSubscrib
 		auto cacheIt = VehicleId2Tls_um.find(vehId);
 		if (cacheIt == VehicleId2Tls_um.end() || cacheIt->second.routeId != routeId) {
 			// GUARD: an externally-driven vehicle that had a route and now has a
-			// different one was rerouted BY the mirror, not by a decision -- SUMO
-			// could not keep the fed pose on its route (see EgoKeepRoute). Its next
-			// signals are whatever the replacement route implies, which for a
-			// single-edge replacement is none at all.
+			// different one. Usually that means the mirror rerouted it -- SUMO
+			// could not keep the fed pose on its route (see EgoKeepRoute) -- and
+			// its next signals become whatever the replacement route implies,
+			// which for a single-edge replacement is none at all.
+			//
+			// It does not fire on ordinary looping: a <route repeat="n"> is
+			// expanded when the scenario loads, so a vehicle laps a 70-edge
+			// corridor 21 times under one routeID holding 1470 edges (measured on
+			// the MLK arterial scenario). It WILL fire if the scenario reroutes
+			// the vehicle deliberately -- a rerouting device, say -- which for a
+			// vehicle whose motion an external simulator owns is worth saying out
+			// loud too: the route it is being steered along just changed.
 			if (externallyDriven && cacheIt != VehicleId2Tls_um.end()) {
 				fixs::RS_XIL_GUARD("ego_sumo_route_changed", 1.0, 0.0);
 			}
