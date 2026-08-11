@@ -69,6 +69,9 @@ class AlpaSimBackend:
         self.predict = int(cfg.get("EgoFutureHorizon", 5))
         self.half = float(cfg.get("BevHalfExtent", 200.0))
         self._light_radius = float(cfg.get("SignalLightRadius", 10.0))
+        # Paint SUMO signal state onto nearby map tokens. Measured inert on the
+        # v120 checkpoint (see _inject_light_type), so off by default.
+        self.inject_light = bool(cfg.get("SignalLightInject", False))
         # Feed CATK an EGO-CENTERED scene (subtract the ego position). WOMD/SMART
         # is trained SDC-centered; absolute SUMO coords (~600-1300 m) are far
         # out-of-distribution and hurt stability. Outputs are shifted back.
@@ -83,11 +86,10 @@ class AlpaSimBackend:
         # Map resample spacing (m). CATK map tokens are 3 consecutive lane points,
         # so this sets the token scale; matches CATK's own 1.0 m default.
         self.map_interval = float(cfg.get("MapResampleInterval", 1.0))
-        # Crop the (dense 1 m) map to points within this radius of ANY bubble
-        # agent (ego + others), mirroring CATK's v_to_ego_and_obs filter. Without
-        # it a 200 m ego bubble at 1 m spacing feeds ~5k triplets/step (slow) while
-        # most cover empty road. ~30 m keeps each agent's local lanes.
-        self.map_crop_r = float(cfg.get("MapCropRadius", 30.0))
+        # Crop the map to segments within this radius of ANY bubble agent (ego +
+        # others), mirroring CATK's own v_to_ego_and_obs filter (its config uses
+        # map_max_pts_to_ego_distance=25).
+        self.map_crop_r = float(cfg.get("MapCropRadius", 25.0))
         # Physical speed ceiling (m/s) for the WM write-back. CATK occasionally
         # emits a garbage token (seen: 85-130 m/s) that moveToXY would apply as a
         # multi-metre teleport, stranding a car mid-junction. Clamp per-substep
@@ -115,13 +117,28 @@ class AlpaSimBackend:
         )
         self.model.model_predict_step_num = self.predict
         if self.topk > 0:
-            try:
-                self.model.validation_rollout_sampling.num_k = self.topk
-                print(f"[alpasim] SamplingTopK={self.topk} ({'greedy' if self.topk == 1 else 'top-K'})",
-                      file=sys.stderr)
-            except Exception as e:
-                print(f"[alpasim] could not set SamplingTopK: {e}", file=sys.stderr)
+            # NOTE: the sampling scheme lives on the SMART instance INSIDE the
+            # CATK wrapper (model_adapter: self.model = SMART(...)). Setting it
+            # on the wrapper silently creates a dead attribute -- which is why an
+            # earlier "greedy" setting never actually took effect.
+            self.model.model.validation_rollout_sampling.num_k = self.topk
+            print(f"[alpasim] SamplingTopK={self.topk} "
+                  f"({'greedy' if self.topk == 1 else 'top-K'})", file=sys.stderr)
         self._meta = obstacle_class_metadata()
+
+        # Static multi-layer map (net.xml -> netconvert -> trajdata -> CATK
+        # layers), parsed once. Lane centrelines ALONE measurably degrade CATK
+        # (see catk_map docstring), so the junction layers matter.
+        self.catk_map = None
+        net_file = cfg.get("NetFile", "")
+        if net_file and os.path.exists(net_file):
+            from catk_map import CatkMap
+            self.catk_map = CatkMap.build(net_file, spacing=self.map_interval,
+                                          netconvert=cfg.get("NetconvertExe") or None)
+            print(f"[alpasim] CATK map layers: {self.catk_map.summary()}", file=sys.stderr)
+        else:
+            print(f"[alpasim] WARNING: no NetFile -- CATK will run without a map",
+                  file=sys.stderr)
 
         # warm-up / degenerate fallback
         self._fallback = ConstantVelocityBackend()
@@ -129,66 +146,27 @@ class AlpaSimBackend:
 
     # ------------------------------------------------------------------ #
     def _full_map_layers(self, ox: float, oy: float, agent_xy_c=None) -> dict:
-        """Lane polylines near the bubble agents as a CATK 'lane_centers' layer.
+        """Multi-layer CATK map cropped to the bubble agents.
 
-        CATK builds map tokens as 3 CONSECUTIVE points via unfold(size=3,step=1)
-        (env_data_adapter.extract_map_data), so the point SPACING *is* the token
-        scale. CATK's own scene_adapter resamples maps to ``map_resample_interval_m
-        = 1.0`` m; a coarse spacing makes every token span many metres and the
-        model can't localise a lane. So we resample each lane by a fixed arc-length
-        interval (``self.map_interval``, ~1 m) -- NOT a fixed point count, which
-        stretched a 385 m corridor lane to ~20 m spacing.
+        Delegates to :mod:`catk_map`, which converts the SUMO net through
+        netconvert + trajdata into AlpaSim's own 8-layer format (lane centres,
+        lane/road boundaries, stop lines, junction areas). Feeding lane centres
+        ALONE strips the junction semantics CATK relies on and measurably
+        degrades it (2/10 vs 8/10 stopped-queue launches on AlpaSim's own scene),
+        which is why this no longer hand-rolls geometry.
 
-        We then crop to points within ``self.map_crop_r`` of ANY bubble agent
-        (``agent_xy_c``, ego-centered; ego is the origin) -- CATK's
-        v_to_ego_and_obs filter. This is both correctness (each agent keeps its
-        local lanes, incl. junction lanes) and speed (a 200 m bubble at 1 m
-        otherwise feeds ~5k triplets/step of mostly-empty road). Contiguous kept
-        runs of >=3 points become sub-polylines; variable lengths are NaN-padded,
-        and extract_map_data drops NaN triplets (valid_mask), so padding is safe.
+        ``agent_xy_c`` are the bubble agents in the EGO-CENTRED frame, so the
+        anchors are shifted back to world coords for the crop.
         """
-        if self.vector_map is None or not self.vector_map.lanes:
+        if self.catk_map is None:
             return {}
         import numpy as np
 
-        def resample_by_interval(pts, step_m):
-            pts = np.asarray(pts, dtype=np.float64)
-            seg = np.r_[0.0, np.cumsum(np.linalg.norm(np.diff(pts, axis=0), axis=1))]
-            if seg[-1] == 0:
-                return pts[:1]
-            n = max(2, int(np.ceil(seg[-1] / step_m)) + 1)   # >=2 pts; >=3 needed to yield a triplet
-            t = np.linspace(0.0, seg[-1], n)
-            return np.column_stack([np.interp(t, seg, pts[:, 0]),
-                                    np.interp(t, seg, pts[:, 1])])
-
-        # ego-centered anchors: the ego (origin) plus every other bubble agent
-        anchors = np.zeros((1, 2), dtype=np.float64)
+        anchors = np.array([[ox, oy]], dtype=np.float64)          # the ego
         if agent_xy_c is not None and len(agent_xy_c):
-            anchors = np.vstack([anchors, np.asarray(agent_xy_c, dtype=np.float64)])
-        r2 = self.map_crop_r * self.map_crop_r
-
-        subpolys = []
-        for p in self.vector_map.lanes:
-            rp = resample_by_interval(p, self.map_interval)
-            rp = rp - np.array([ox, oy])                       # ego-center
-            d2 = ((rp[:, None, :] - anchors[None, :, :]) ** 2).sum(-1).min(1)
-            m = d2 < r2
-            if not m.any():
-                continue
-            keep = np.where(m)[0]
-            for run in np.split(keep, np.where(np.diff(keep) > 1)[0] + 1):
-                if len(run) >= 3:                              # >=3 pts -> >=1 triplet
-                    subpolys.append(rp[run])
-
-        if not subpolys:
-            return {}
-        vmax = max(len(s) for s in subpolys)
-        arr = np.full((len(subpolys), vmax, 3), np.nan, dtype=np.float64)   # NaN pad -> dropped downstream
-        for i, s in enumerate(subpolys):
-            arr[i, :len(s), 0:2] = s
-            arr[i, :len(s), 2] = 0.0
-        return {"lane_centers": {"polylines": self._torch.tensor(arr, dtype=self._torch.float32),
-                                 "label": [5] * len(subpolys)}}
+            anchors = np.vstack([anchors,
+                                 np.asarray(agent_xy_c, dtype=np.float64) + [ox, oy]])
+        return self.catk_map.crop(anchors, self.map_crop_r, self._torch, ox, oy)
 
     def _inject_light_type(self, result, bev, ox: float = 0.0, oy: float = 0.0) -> None:
         """Tag CATK map triplets near a red/yellow stop-line with light_type=STOP.
@@ -197,9 +175,21 @@ class AlpaSimBackend:
         adapter zeros it, so the model never sees signals. We derive stop-lines
         from each bubble vehicle's next-signal (pos + dist along heading) and set
         the STOP index (1, per SMART's ['NONE','STOP','GO','CAUTION','GO_TO_STOP'])
-        on map triplets within light_radius of one. Experiment: does CATK then
-        slow/stop for the red on its own?
+        on map triplets within light_radius of one.
+
+        OFF by default (``SignalLightInject: false``): AlpaSim's own runtime
+        always feeds light_type=0, and a controlled test on their ClipGT queue
+        scene showed painting STOP changes nothing (3/4 launches with STOP held
+        vs 3/4 with no light) -- the pathway is effectively inert in the v120
+        checkpoint. Kept, corrected and disabled rather than deleted so it can be
+        re-tested against a checkpoint that does use it.
+
+        The enum now matches upstream CATK training (data_preprocess.py
+        _polygon_light_type): NO_LANE_STATE=0, UNKNOWN=1, STOP=2, GO=3,
+        CAUTION=4 -- the previous code wrote 1, which is UNKNOWN, not STOP.
         """
+        if not self.inject_light:
+            return
         import numpy as np
         torch = self._torch
         stops = []
@@ -208,25 +198,32 @@ class AlpaSimBackend:
             d = float(bev.sig_dist[i])
             if c in (1, 2) and d >= 0.0:                 # red or yellow ahead
                 yaw = float(bev.yaw[i])
+                state = 2 if c == 1 else 4               # STOP / CAUTION
                 stops.append((bev.xy[i, 0] + d * np.cos(yaw) - ox,   # ego-centered frame
-                              bev.xy[i, 1] + d * np.sin(yaw) - oy))
+                              bev.xy[i, 1] + d * np.sin(yaw) - oy, state))
         if not stops:
             return
         pe = result["input_data"]["map"]["polyline_extras"]
         tri = result["input_data"]["map"]["triplets"]     # (M, 3, 2)
         centers = tri.float().mean(dim=1)                 # (M, 2)
-        stops_t = torch.tensor(stops, dtype=centers.dtype, device=centers.device)
-        d2 = ((centers[:, None, :] - stops_t[None, :, :]) ** 2).sum(-1)  # (M, S)
-        near = d2.min(dim=1).values < (self._light_radius ** 2)
+        st = torch.tensor([[s[0], s[1]] for s in stops],
+                          dtype=centers.dtype, device=centers.device)
+        states = torch.tensor([s[2] for s in stops], device=centers.device)
+        d2 = ((centers[:, None, :] - st[None, :, :]) ** 2).sum(-1)  # (M, S)
+        best = d2.min(dim=1)
+        near = best.values < (self._light_radius ** 2)
         lt = pe["light_type"].clone()
-        lt[near] = 1                                      # STOP
+        lt[near] = states[best.indices[near]].to(lt.dtype)
         pe["light_type"] = lt
 
     def _dump_bev(self, bev) -> None:
-        """Append one ego-centered BEV snapshot of EXACTLY the converted CATK
-        input, for manual verification. Self-contained (built from bev + its
-        history + the vector map), so it fires EVERY step -- including warm-up and
+        """Append one ego-centered BEV snapshot of the agent state sent to CATK,
+        for manual verification. Fires EVERY step -- including warm-up and
         fallback -- giving a CONTIGUOUS 10 Hz sequence (no skipped frames).
+
+        NOTE: the 'lanes' here are the RAW SUMO net polylines (road reference
+        geometry for readability). They are NOT the map CATK receives, which is
+        the multi-layer netconvert/trajdata conversion (see catk_map).
 
         Per frame: sim time, ego (heading + pinned future plan), each agent's
         history tail (x,y) + heading + speed, the local road lane polylines, and
@@ -391,7 +388,7 @@ class AlpaSimBackend:
                 # from the CURRENT pose to vmax*dt per sub-step (+slack), and speed.
                 dx, dy = tx - cx, ty - cy
                 dist = float(np.hypot(dx, dy))
-                maxd = self.vmax * self.dt * (s + 1) * 1.5
+                maxd = self.vmax * self.dt * (s + 1)
                 if dist > maxd > 0.0:
                     f = maxd / dist
                     tx, ty = cx + dx * f, cy + dy * f

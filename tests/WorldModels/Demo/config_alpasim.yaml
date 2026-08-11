@@ -41,12 +41,18 @@ WorldModelSetup:
     # only hand back once STOPPED so SUMO gives a clean launch at green.
     RedApproachHandback: false
     MinControlSpeed: 2.0
-    SamplingTopK: 1        # 1 = greedy (deterministic)
+    # 0 = model default (top-5). Do NOT use 1 (greedy): with the sampler path
+    # fixed, greedy is deterministic and reliably locks up a stopped queue
+    # (measured 0.02 m/s / 75% stopped on AlpaSim's own ClipGT queue scene).
+    SamplingTopK: 0
     InferenceStride: 3     # infer every 3 steps, replay the token sub-steps
-    MapResampleInterval: 1.0  # lane point spacing (m); CATK map tokens are 3
+    MapResampleInterval: 1.0  # map point spacing (m); CATK map tokens are 3
                               # consecutive points, so this is the token scale
-                              # (matches CATK's own 1.0 m default). Junction lanes
-                              # are now included so there IS a path through int_*.
+                              # (matches CATK's own 1.0 m default)
+    MapCropRadius: 25.0    # keep map within this of ego/any agent (CATK uses 25)
+    SignalLightInject: false  # painting SUMO signal state onto map tokens is
+                              # measured inert on the v120 checkpoint
+    MaxSpeed: 25.0         # clamp WM write-back (guards garbage-token teleports)
     NetFile: './simple_traffic_light.net.xml'
     # CATK checkpoint + tokens (absolute; live outside the repo)
     ModelDir: 'C:/src_git/WM_AlpaSim/data/trafficsim-models/catk_v120'
