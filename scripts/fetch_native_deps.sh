@@ -8,7 +8,12 @@
 # WINDOWS binaries only (.lib/.dll), which are useless on Linux -- so the modes
 # here are deliberately not symmetric with the .ps1:
 #
-#   --mode source    (default) build libtracicpp from the SUMO source tree at
+#   --mode prebuilt  (default) download the published, SHA-256-verified Linux
+#                    asset from the rolling release -- the same path the Windows
+#                    .ps1 takes. Seconds instead of minutes, and no SUMO build
+#                    dependencies needed.
+#
+#   --mode source    build libtracicpp from the SUMO source tree at
 #                    the version pinned in dependencies.yaml, then install the
 #                    headers + shared library into CommonLib/libsumo. Building
 #                    only the libtracicpp target avoids the gdal/fox/osg chain
@@ -35,12 +40,13 @@
 set -euo pipefail
 
 COMPONENT=sumo
-MODE=source
+MODE=prebuilt
 FORCE=0
 JOBS="$(nproc 2>/dev/null || echo 4)"
 SUMO_SRC=""
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BUILD_ON_HINT="20.04"   # distro pack_native_deps.sh publishes from
 
 die()  { echo "ERROR: $*" >&2; exit 1; }
 note() { echo "  $*"; }
@@ -95,10 +101,46 @@ if [ -f "$SENTINEL" ] && [ "$FORCE" -eq 0 ]; then
     exit 0
 fi
 
+# --- prebuilt: download the published Linux asset -----------------------------
+# Same rolling, PUBLIC release the Windows .ps1 uses, same .sha256 sidecar
+# convention. The asset is built on the oldest supported distro, so one file
+# serves 20.04/22.04/24.04 (glibc is forward-compatible only).
 if [ "$MODE" = "prebuilt" ]; then
-    die "no Linux assets are published to the 'fixs-native-deps' release yet.
-       The release currently holds Windows .lib/.dll only. Use --mode source
-       (the default), which builds libtracicpp from SUMO $SUMO_VERSION."
+    ASSET="libsumo-${SUMO_VERSION}-linux-x86_64.zip"
+    BASE="https://github.com/${FIXS_DEPS_REPO:-ORNL-Real-Sim/FIXS}/releases/download/${FIXS_DEPS_TAG:-fixs-native-deps}"
+    TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+
+    note "downloading $ASSET"
+    curl -fsSL --retry 3 -o "$TMP/$ASSET" "$BASE/$ASSET" || die "could not download $ASSET from $BASE.
+       If the SUMO version in dependencies.yaml was just bumped, the matching
+       asset may not be published yet -- publish it with
+       scripts/pack_native_deps.sh --publish (run on Ubuntu $BUILD_ON_HINT), or
+       use --mode source to build it locally."
+    curl -fsSL --retry 3 -o "$TMP/$ASSET.sha256" "$BASE/$ASSET.sha256"         || die "asset downloaded but its .sha256 sidecar is missing; refusing to trust it"
+
+    ( cd "$TMP" && sha256sum -c "$ASSET.sha256" >/dev/null 2>&1 )         || die "SHA-256 mismatch for $ASSET; refusing to extract"
+    note "checksum OK"
+
+    # The zip carries a leading libsumo/ directory, so extract into the PARENT
+    # of the configured location.
+    DEST_PARENT="$(dirname "$LIBSUMO_DIR")"
+    mkdir -p "$DEST_PARENT"
+    if command -v unzip >/dev/null 2>&1; then
+        unzip -qo "$TMP/$ASSET" -d "$DEST_PARENT" || die "extract failed"
+    elif command -v python3 >/dev/null 2>&1; then
+        python3 -c "import zipfile,sys; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])"             "$TMP/$ASSET" "$DEST_PARENT" || die "extract failed"
+    else
+        die "need 'unzip' or python3 to extract: sudo apt-get install -y unzip"
+    fi
+
+    [ -f "$SENTINEL" ] || die "$ASSET did not contain bin/libtracicpp.so"
+    if command -v ldd >/dev/null 2>&1 && ldd "$SENTINEL" 2>/dev/null | grep -q 'not found'; then
+        ldd "$SENTINEL" | grep 'not found' >&2
+        die "libsumo loadability check failed"
+    fi
+    note "loadability check OK"
+    echo "libsumo ready: $LIBSUMO_DIR (prebuilt)"
+    exit 0
 fi
 
 # --- toolchain ----------------------------------------------------------------
@@ -140,6 +182,19 @@ else
 fi
 
 BUILD_DIR="$CACHE_ROOT/sumo-build-$SUMO_VERSION"
+
+# A CMake build dir is bound to the source dir it was configured from. Switching
+# between --sumo-src and the default checkout otherwise fails with "does not
+# match the source used to generate cache", so drop a cache that points
+# elsewhere instead of making the user delete it by hand.
+if [ -f "$BUILD_DIR/CMakeCache.txt" ]; then
+    cached_src="$(sed -n 's/^CMAKE_HOME_DIRECTORY:INTERNAL=//p' "$BUILD_DIR/CMakeCache.txt" | head -1)"
+    if [ -n "$cached_src" ] && [ "$cached_src" != "$SUMO_SRC" ]; then
+        note "build cache was configured from $cached_src; reconfiguring"
+        rm -rf "$BUILD_DIR"
+    fi
+fi
+
 note "configuring (libtraci only)"
 cmake -S "$SUMO_SRC" -B "$BUILD_DIR" $GENERATOR \
       -DCMAKE_BUILD_TYPE=Release \

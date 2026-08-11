@@ -61,9 +61,11 @@ jobs:
         run: |
           export DEBIAN_FRONTEND=noninteractive
           apt-get update -qq
+          # No SUMO build dependencies (xerces/proj/gdal) any more: libtraci is
+          # fetched prebuilt from the rolling release, so the runner needs only a
+          # C++ toolchain, curl/unzip to fetch it, and python3 for the TU guard.
           apt-get install -y -qq --no-install-recommends \
-            build-essential cmake ninja-build git ca-certificates \
-            libxerces-c-dev libproj-dev libgdal-dev zlib1g-dev python3 python3-dev
+            build-essential cmake ninja-build git ca-certificates curl unzip python3
           echo "--- toolchain ---"
           cmake --version | head -1
           g++ --version | head -1
@@ -111,8 +113,13 @@ jobs:
       # Deliberately the same script a developer runs locally, not a copy of its
       # steps -- so CI failing means the documented path is broken, and the
       # documented path staying green means CI will be too.
-      - name: Fetch native deps (builds libtracicpp from SUMO source)
-        run: ./scripts/fetch_native_deps.sh --jobs "$(nproc)"
+      #
+      # Prebuilt by default, exactly as release.yml does on Windows. A SUMO
+      # version bump therefore requires publishing the matching asset first
+      # (scripts/pack_native_deps.sh --publish) -- the same contract the Windows
+      # asset already carries.
+      - name: Fetch native deps (prebuilt libtraci)
+        run: ./scripts/fetch_native_deps.sh
 
       - name: Configure and build TrafficLayer
         run: |
