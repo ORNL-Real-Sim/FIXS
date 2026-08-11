@@ -240,6 +240,7 @@ int main(int argc, const char* argv[]) {
         // spawned as the traffic simulator inserts it -- at ~0 m/s -- so it settles
         // over the loop's own next ticks (0.5 s at CarlaTimeStep 0.05) instead.
         bool egoIsUp = false;
+        int  egoTraceLeft = 50;   // feeds of handover trace (5 s at the 0.1 s feed)
         auto bringUpEgo = [&](const virenv::Pose& sp, bool settleOutOfBand) -> bool {
             if (backend.spawnEgo(cs.EgoBlueprint, sp, cs.TrafficManagerPort) == virenv::kNoHandle) {
                 std::cerr << "EgoMode " << egoMode << ": ego spawn failed\n";
@@ -477,6 +478,21 @@ int main(int argc, const char* argv[]) {
                         d.heading = (float)es.heading; d.grade = (float)es.grade;
                         core.Msg_c.VehDataSend_um[core.Sock_c.serverSock[sock0]].push_back(d);
                         if (dataLog.isOpen() && logWanted(d.id)) dataLog.logVehicle(simTime, d);
+                        // Handover trace: the first 5 s after the ego becomes ours, one
+                        // line per feed. This is the moment the whole arrangement turns
+                        // on -- the ego exists, a driver is steering it, and its state
+                        // starts flowing back into the traffic simulator -- and when it
+                        // goes wrong ("the ego just sits there") the answer is always
+                        // one of these three numbers: no advisory to follow, an
+                        // advisory it is not tracking, or a pose that never changes.
+                        if (onFeed && egoTraceLeft > 0) {
+                            --egoTraceLeft;
+                            std::cout << "[ego] t=" << simTime
+                                      << " advisory=" << lastAdvisory << " m/s"
+                                      << " measured=" << es.speed << " m/s"
+                                      << " pos=(" << es.x << ", " << es.y << ", " << es.z << ")"
+                                      << " heading=" << es.heading << "\n";
+                        }
                         // Also log the SUMO-VIEW ego (what SUMO reports back this feed) on the
                         // SAME clock as the Carla view, so a plot compares them directly. It's
                         // the ego ~2 ticks stale (Carla is a step ahead + SUMO getPosition is
