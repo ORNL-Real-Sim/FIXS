@@ -39,14 +39,22 @@ QUEUE_USDZ = pathlib.Path(
     "026d6a39-bd8f-4175-bc61-fe50ed0403a3.usdz"
 )
 
-# variant -> (ego_center, map_kind, ego_future_kind)
+# variant -> (ego_center, map_kind, ego_future_kind, light)
+# light: None = no signal tokens (light_type stays 0 = NO_LANE_STATE);
+#        "go"/"stop" = paint the queue's WHOLE approach lane with the upstream
+#        CATK training enum (data_preprocess.py:51): STOP=2, GO=3 -- the state
+#        is stamped once and held, matching training (tf_current_light).
 VARIANTS = {
-    "native":      (False, "native", "log"),
-    "sumo":        (True,  "ours",   "cv"),
-    "sumo+logfut": (True,  "ours",   "log"),
-    "sumo+abs":    (False, "ours",   "cv"),
-    "sumo+natmap": (True,  "native", "cv"),
+    "native":      (False, "native", "log", None),
+    "sumo":        (True,  "ours",   "cv",  None),
+    "sumo+logfut": (True,  "ours",   "log", None),
+    "sumo+abs":    (False, "ours",   "cv",  None),
+    "sumo+natmap": (True,  "native", "cv",  None),
+    "sumo+go":     (True,  "ours",   "cv",  "go"),
+    "sumo+stop":   (True,  "ours",   "cv",  "stop"),
+    "native+go":   (False, "native", "log", "go"),
 }
+LIGHT_IDX = {"stop": 2, "go": 3}   # upstream _polygon_light_type indices
 
 
 # ------------------------------------------------------------------ #
@@ -97,7 +105,7 @@ def rollout(env, lane_lines, model, variant: str, seconds: float, topk: int,
     import torch
     from alpasim_trafficsim.catk.obstacle_classes import obstacle_class_metadata
 
-    ego_center, map_kind, egofut = VARIANTS[variant]
+    ego_center, map_kind, egofut, light = VARIANTS[variant]
     torch.manual_seed(seed)
     np.random.seed(seed)
     model.model.validation_rollout_sampling.num_k = topk
@@ -114,6 +122,25 @@ def rollout(env, lane_lines, model, variant: str, seconds: float, topk: int,
     lwh = env["agents"]["lwh"][selected]
     class_ids = env["agents"]["class_ids"][selected]
     A = len(selected)
+
+    # --- queue approach-lane polyline (for whole-lane light painting) ---
+    # queue agents = those stopped at rollout start; the lane centerline is
+    # approximated by their positions plus the LEAD car's logged future path
+    # (the lane continues through the junction along it).
+    queue_line = None
+    if light is not None:
+        v0 = np.linalg.norm(
+            source_xyz[:, start, :2].numpy() - source_xyz[:, start - 5, :2].numpy(),
+            axis=1) / (5 * DT)
+        stopped_i = np.flatnonzero(v0 < 0.5)
+        if len(stopped_i):
+            # union of the stopped cars' logged paths = the controlled lane's
+            # travelled extent (queue positions + through-junction continuation)
+            pts = [source_xyz[stopped_i, start, :2].numpy()]
+            for i in stopped_i:
+                fut = source_xyz[i, start::5, :2].numpy()
+                pts.append(fut[source_valid[i, start::5].numpy()])
+            queue_line = np.vstack(pts)
 
     max_steps = env["ego"]["xyz"].shape[0] - start - 1
     n_step = min(int(round(seconds / DT)), max_steps)
@@ -176,6 +203,20 @@ def rollout(env, lane_lines, model, variant: str, seconds: float, topk: int,
         }
         result = model.create_model_input(step_env, filter_map_by_ego=filter_by_ego,
                                           filter_distance_th=filter_th)
+        if light is not None and queue_line is not None:
+            # upstream convention: EVERY map token of the controlled lane gets
+            # the state (split_light_type repeats per token). Tag triplets whose
+            # center lies within a lane half-width of the queue lane polyline.
+            pe = result["input_data"]["map"]["polyline_extras"]
+            tri = result["input_data"]["map"]["triplets"]          # (M, 3, 2)
+            centers = tri.float().mean(dim=1)                      # (M, 2)
+            ql = torch.tensor(queue_line - np.array([ox, oy]),
+                              dtype=centers.dtype, device=centers.device)
+            d2 = ((centers[:, None, :] - ql[None, :, :]) ** 2).sum(-1).min(1).values
+            near = d2 < (2.0 ** 2)
+            lt = pe["light_type"].clone()
+            lt[near] = LIGHT_IDX[light]
+            pe["light_type"] = lt
         actions = model.inference(result["input_data"])
         action_xyz = actions["agent_future_xyz"].cpu().numpy() + off.numpy()
         action_head = actions["agent_future_heading"].cpu().numpy()
