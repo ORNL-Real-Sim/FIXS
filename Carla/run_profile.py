@@ -30,6 +30,14 @@ Editing loops: after each change the summary is redrawn, so you see the result a
 can keep going. Nothing heavy happens until you confirm - all six are pure
 decisions, so no map is downloaded, cooked or loaded while you are still deciding.
 
+A row opens its editor when you SELECT it. A row that is merely blank, or that
+another change invalidated, settles itself where there is an obvious answer and
+says what it took - the summary is then where you disagree with it. That is why
+ask() returns exactly what was picked and the caller applies cascade(): the two
+cases are answered differently, and only the caller can tell them apart. Today
+only the scenario yaml has such an answer (the application declares it); app and
+map have none worth guessing, so they always ask.
+
 Running a setup saves it back under the same name; `N` is how you keep the old one
 and start another. The store is one file so the whole list can be read, shown and
 switched in one place - and a future front-end can drive exactly the same file:
@@ -429,12 +437,9 @@ def ask(name, rec, carla_cfg=None, interactive=True, can_switch=True, derived=No
             return set(SLOT_KEYS)
         picks = [t for t in ans.replace(",", " ").split() if t]
         if picks and all(t.isdigit() and 1 <= int(t) <= len(SLOTS) for t in picks):
-            chosen = {SLOT_KEYS[int(t) - 1] for t in picks}
-            widened = cascade(rec, chosen)
-            extra_slots = widened - chosen
-            if extra_slots:
-                labels = ", ".join(l for s, l in SLOTS if s in extra_slots)
-                print(f"[cosim] also asking for: {labels} (it depended on what you changed)")
-            return widened
+            # Exactly what was selected. cascade() is applied by the caller, which
+            # needs to tell a row the user opened from one that only fell over with
+            # it - the first asks, the second settles itself where it can.
+            return {SLOT_KEYS[int(t) - 1] for t in picks}
         print("[cosim] enter numbers to change, Enter to run"
               + (", S / N to switch" if can_switch else "") + ", or Q.")
