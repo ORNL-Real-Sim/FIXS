@@ -488,7 +488,20 @@ int main(int argc, const char* argv[]) {
                             d.brakePedalDesired       = (float)cmd.brake;
                             d.steerAngleDesired       = (float)(cmd.steer * kMaxSteerRad);
                         }
-                        core.Msg_c.VehDataSend_um[core.Sock_c.serverSock[sock0]].push_back(d);
+                        // Report the ego to FIXS only when something is going to
+                        // INJECT it. With EnableExternalControl false there is no
+                        // carlaOwnsId path in TrafficLayer, so this record falls
+                        // through to the ordinary application-layer branch and is
+                        // applied as a plain setSpeed on the traffic simulator's
+                        // ego -- from the highest-numbered client, so it also beats
+                        // the controller that is supposed to be driving it. That
+                        // turns "own an ego in Carla, but do not feed it back"
+                        // into "silently drive the traffic simulator's ego from
+                        // Carla", which is the opposite of what the flag says.
+                        // Still logged either way: the ego's state is worth
+                        // recording whether or not anyone is consuming it.
+                        if (enableExternalControl)
+                            core.Msg_c.VehDataSend_um[core.Sock_c.serverSock[sock0]].push_back(d);
                         if (dataLog.isOpen() && logWanted(d.id)) dataLog.logVehicle(simTime, d);
                         // Handover trace: the first 5 s after the ego becomes ours, one
                         // line per feed. This is the moment the whole arrangement turns
