@@ -223,7 +223,7 @@ class CatkMap:
     }
 
     def crop(self, anchors_xy: np.ndarray, radius: float, torch,
-             ox: float = 0.0, oy: float = 0.0) -> dict:
+             ox: float = 0.0, oy: float = 0.0, apply_caps: bool = True) -> dict:
         """CATK ``env_data['map']`` for segments within ``radius`` of any anchor.
 
         Mirrors CATK's own ``v_to_ego_and_obs`` distance filter (ego + every
@@ -249,6 +249,12 @@ class CatkMap:
 
         # then apply the per-group budget across the layers of that group
         out = {}
+        if not apply_caps:
+            for n, (idx, _d) in kept.items():
+                seg = self.segments[n][idx] - off
+                out[n] = {"polylines": torch.from_numpy(np.ascontiguousarray(seg)),
+                          "label": torch.full((len(seg),), LAYER_IDS[n], dtype=torch.long)}
+            return out
         for names, cap in self.GROUP_CAPS.values():
             present = [n for n in names if n in kept]
             total = sum(len(kept[n][0]) for n in present)

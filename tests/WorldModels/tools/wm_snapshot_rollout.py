@@ -133,7 +133,7 @@ def build_snapshot(fcd, t0: float, ego_id: str, half_extent: float):
 # --------------------------------------------------------------------------- #
 def rollout(ids, hxyz, hhead, ego_idx, fcd, t0, catk_map, model, torch,
             seconds, seed, stride, crop_r, ego_id,
-            light_pts=None, tls_states=None, light_link=4):
+            light_pts=None, tls_states=None, light_link=4, apply_caps=True):
     from alpasim_trafficsim.catk.obstacle_classes import obstacle_class_metadata
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -169,7 +169,7 @@ def rollout(ids, hxyz, hhead, ego_idx, fcd, t0, catk_map, model, torch,
 
         a = time.time()
         anchors = np.vstack([ego_hist[-1:, :2], hxyz[others][:, -1, :2]])
-        step_map = catk_map.crop(anchors, crop_r, torch)
+        step_map = catk_map.crop(anchors, crop_r, torch, apply_caps=apply_caps)
         timing["crop"] += time.time() - a
 
         a = time.time()
@@ -187,19 +187,24 @@ def rollout(ids, hxyz, hhead, ego_idx, fcd, t0, catk_map, model, torch,
         timing["prep"] += time.time() - a
         if res is None:
             break
-        if light_pts is not None and len(light_pts):
+        if light_pts:
             # upstream CATK enum: NO_LANE_STATE=0 UNKNOWN=1 STOP=2 GO=3 CAUTION=4
             st = tls_at(tls_states, now)
-            ch = st[light_link] if len(st) > light_link else "r"
-            state = 2 if ch == "r" else (4 if ch == "y" else 3)
             pe = res["input_data"]["map"]["polyline_extras"]
-            tri = res["input_data"]["map"]["triplets"]
-            ctr = tri.float().mean(dim=1)
-            lp = torch.tensor(light_pts, dtype=ctr.dtype, device=ctr.device)
-            near = ((ctr[:, None, :] - lp[None, :, :]) ** 2).sum(-1).min(1).values < 4.0
+            ctr = res["input_data"]["map"]["triplets"].float().mean(dim=1)
             lt = pe["light_type"].clone()
-            lt[near] = state
+            painted = 0
+            for pts, link in light_pts:
+                ch = st[link] if len(st) > link else "r"
+                state = 2 if ch == "r" else (4 if ch == "y" else 3)
+                lp = torch.tensor(pts, dtype=ctr.dtype, device=ctr.device)
+                near = ((ctr[:, None, :] - lp[None, :, :]) ** 2).sum(-1).min(1).values < 4.0
+                lt[near] = state
+                painted += int(near.sum())
             pe["light_type"] = lt
+            if step == 0:
+                print(f"  light painting: {painted} of {len(ctr)} map tokens tagged "
+                      f"(state string '{st}')")
         a = time.time()
         act = model.inference(res["input_data"])
         timing["infer"] += time.time() - a
@@ -235,25 +240,40 @@ def rollout(ids, hxyz, hhead, ego_idx, fcd, t0, catk_map, model, torch,
 # --------------------------------------------------------------------------- #
 #  behaviour checks
 # --------------------------------------------------------------------------- #
-def approach_lanes(net_file: str, junction: str = "int_east", link: int = 4):
-    """Centreline points of the lanes controlled by `link` at `junction`.
+def controlled_lanes(net_file: str, junction: str = "int_east", spacing: float = 1.0):
+    """[(points, linkIndex)] for EVERY lane controlled by `junction`.
 
-    Upstream CATK paints the signal state on EVERY map token of the controlled
-    lane (data_preprocess.py get_map_features), so we need the lane geometry,
-    not just the stop-line point.
+    Upstream CATK paints the signal state on every map token of the controlled
+    lane (data_preprocess.get_map_features), so we need the full lane geometry --
+    the approach lane AND the internal lane through the junction -- resampled
+    densely enough to cover it. Each entry carries its own linkIndex so the state
+    char for that specific movement is used.
+
+    (Earlier version painted only linkIndex 4 and did not resample: 2 points on a
+    113 m lane, in a lane the queue was not even in. Nothing got painted.)
     """
     txt = open(net_file, encoding="utf-8").read()
     shapes = {m.group(1): np.array([tuple(map(float, q.split(","))) for q in m.group(2).split()])
               for m in re.finditer(r'<lane id="([^"]*)"[^>]*shape="([^"]+)"', txt)}
-    pts = []
-    for m in re.finditer(r'<connection from="([^"]+)" to="([^"]+)" fromLane="(\d+)"[^>]*'
-                         r'tl="' + junction + r'" linkIndex="(\d+)"', txt):
-        if int(m.group(4)) != link:
-            continue
-        lid = f"{m.group(1)}_{m.group(3)}"
-        if lid in shapes:
-            pts.append(shapes[lid])
-    return np.vstack(pts) if pts else np.zeros((0, 2))
+
+    def resample(p):
+        p = np.asarray(p, dtype=np.float64)
+        d = np.r_[0.0, np.cumsum(np.linalg.norm(np.diff(p, axis=0), axis=1))]
+        if d[-1] <= 0:
+            return p
+        n = max(2, int(np.ceil(d[-1] / spacing)) + 1)
+        t = np.linspace(0.0, d[-1], n)
+        return np.column_stack([np.interp(t, d, p[:, 0]), np.interp(t, d, p[:, 1])])
+
+    out = []
+    for m in re.finditer(r'<connection from="([^"]+)" to="([^"]+)" fromLane="(\d+)" toLane="(\d+)"'
+                         r'(?: via="([^"]*)")? tl="' + junction + r'" linkIndex="(\d+)"', txt):
+        frm, _to, flane, _tlane, via, link = m.groups()
+        link = int(link)
+        for lid in (f"{frm}_{flane}", via):
+            if lid and lid in shapes and len(shapes[lid]) >= 2:
+                out.append((resample(shapes[lid]), link))
+    return out
 
 
 def lane_segments(net_file: str):
@@ -391,6 +411,12 @@ def main() -> int:
     ap.add_argument("--seconds", type=float, default=20.0)
     ap.add_argument("--stride", type=int, default=3)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--no-map-cap", action="store_true",
+                    help="disable the per-group map segment caps (reference _map_near has none)")
+    ap.add_argument("--creep", type=float, default=0.0, metavar="V",
+                    help="rewrite STOPPED vehicles' history as a constant creep of V m/s "
+                         "ending at the observed pose (ClipGT queues that launch show "
+                         "0.2-0.3 m/s residual; SUMO stops at exactly 0)")
     ap.add_argument("--jitter", type=float, default=0.0, metavar="SIGMA_M",
                     help="correlated micro-motion added to STOPPED vehicles' history "
                          "(real stopped cars move ~0.02-0.07 m/frame; SUMO stops are exactly 0)")
@@ -411,6 +437,15 @@ def main() -> int:
         raise SystemExit(f"ego never comes within range of {args.junction} in {args.fcd}")
     ids, hxyz, hhead, _ = build_snapshot(fcd, t0, args.ego, args.half_extent)
     ego_idx = ids.index(args.ego)
+    if getattr(args, "creep", 0.0) > 0:
+        moved = np.linalg.norm(hxyz[:, -1, :2] - hxyz[:, 0, :2], axis=1)
+        stopped = [i for i in np.flatnonzero(moved < 0.5) if i != ego_idx]
+        back = args.creep * DT * np.arange(HISTORY - 1, -1, -1)     # distance still to travel
+        for i in stopped:
+            hd = hhead[i, -1]
+            hxyz[i, :, 0] = (hxyz[i, -1, 0] - back * np.cos(hd)).astype(np.float32)
+            hxyz[i, :, 1] = (hxyz[i, -1, 1] - back * np.sin(hd)).astype(np.float32)
+        print(f"creep {args.creep} m/s applied to {len(stopped)} stopped vehicles")
     if args.jitter > 0:
         rng = np.random.default_rng(args.seed)
         moved = np.linalg.norm(hxyz[:, -1, :2] - hxyz[:, 0, :2], axis=1)
@@ -432,12 +467,13 @@ def main() -> int:
                  ckpt_path=f"{MODELS}/catk_v120/latest.ckpt",
                  token_pkl_dir=f"{MODELS}/tokens",
                  disable_sub_plyline_type=True, device="cuda")
-    light_pts = approach_lanes(args.net, args.junction) if args.light else None
+    light_pts = controlled_lanes(args.net, args.junction) if args.light else None
     if args.light:
-        print(f"signal painting ON: {len(light_pts)} approach-lane points")
+        print(f"signal painting ON: {len(light_pts)} controlled lanes, "
+              f"{sum(len(p) for p, _ in light_pts)} points")
     rec, timing = rollout(ids, hxyz, hhead, ego_idx, fcd, t0, catk_map, model, torch,
                           args.seconds, args.seed, args.stride, args.crop_radius, args.ego,
-                          light_pts, tls)
+                          light_pts, tls, apply_caps=not args.no_map_cap)
     n = max(1, timing["n"])
     print(f"rolled {rec['t'][-1]-t0+DT:.1f}s in {timing['n']} inferences  "
           f"(crop {timing['crop']/n*1000:.0f} ms, prep {timing['prep']/n*1000:.0f} ms, "
