@@ -133,10 +133,12 @@ def build_snapshot(fcd, t0: float, ego_id: str, half_extent: float):
 # --------------------------------------------------------------------------- #
 def rollout(ids, hxyz, hhead, ego_idx, fcd, t0, catk_map, model, torch,
             seconds, seed, stride, crop_r, ego_id,
-            light_pts=None, tls_states=None, light_link=4, apply_caps=True):
+            light_pts=None, tls_states=None, light_link=4, apply_caps=True,
+            force_light=None, obs_noise=0.0):
     from alpasim_trafficsim.catk.obstacle_classes import obstacle_class_metadata
     torch.manual_seed(seed)
     np.random.seed(seed)
+    rng = np.random.default_rng(seed)
     meta = obstacle_class_metadata()
 
     others = [i for i in range(len(ids)) if i != ego_idx]
@@ -148,12 +150,18 @@ def rollout(ids, hxyz, hhead, ego_idx, fcd, t0, catk_map, model, torch,
     step = 0
     while step < n_step:
         now = round(t0 + step * DT, 1)
-        ax = torch.tensor(np.concatenate([hxyz[others],
-                          np.repeat(hxyz[others][:, -1:], PREDICT, axis=1)], axis=1))
+        fed = hxyz.copy()
+        if obs_noise > 0:
+            # CATK only ever saw TRACKED vehicles: even a stopped car carries a
+            # few cm of residual motion. SUMO emits bit-exact zeros, which is
+            # outside that distribution. Perturb only what we FEED the model.
+            fed[:, :, :2] += rng.normal(0.0, obs_noise, fed[:, :, :2].shape)
+        ax = torch.tensor(np.concatenate([fed[others],
+                          np.repeat(fed[others][:, -1:], PREDICT, axis=1)], axis=1))
         ah = torch.tensor(np.concatenate([hhead[others],
                           np.repeat(hhead[others][:, -1:], PREDICT, axis=1)], axis=1))
         # ego: history + logged future plan
-        ego_hist = hxyz[ego_idx]
+        ego_hist = fed[ego_idx]
         plan = np.zeros((PREDICT, 3), np.float32)
         ph = np.zeros(PREDICT, np.float32)
         for k in range(PREDICT):
@@ -195,8 +203,11 @@ def rollout(ids, hxyz, hhead, ego_idx, fcd, t0, catk_map, model, torch,
             lt = pe["light_type"].clone()
             painted = 0
             for pts, link in light_pts:
-                ch = st[link] if len(st) > link else "r"
-                state = 2 if ch == "r" else (4 if ch == "y" else 3)
+                if force_light:
+                    state = {"stop": 2, "go": 3, "caution": 4}[force_light]
+                else:
+                    ch = st[link] if len(st) > link else "r"
+                    state = 2 if ch == "r" else (4 if ch == "y" else 3)
                 lp = torch.tensor(pts, dtype=ctr.dtype, device=ctr.device)
                 near = ((ctr[:, None, :] - lp[None, :, :]) ** 2).sum(-1).min(1).values < 4.0
                 lt[near] = state
@@ -420,6 +431,11 @@ def main() -> int:
     ap.add_argument("--jitter", type=float, default=0.0, metavar="SIGMA_M",
                     help="correlated micro-motion added to STOPPED vehicles' history "
                          "(real stopped cars move ~0.02-0.07 m/frame; SUMO stops are exactly 0)")
+    ap.add_argument("--obs-noise", type=float, default=0.0, metavar="SIGMA_M",
+                    help="per-step observation noise on the history FED to CATK "
+                         "(domain gap: SUMO stops are bit-exact, tracked data is not)")
+    ap.add_argument("--force-light", default=None, choices=["stop","go","caution"],
+                    help="override the schedule and paint this state on every step")
     ap.add_argument("--light", action="store_true",
                     help="paint the true SUMO signal state onto the controlled lane's map tokens")
     ap.add_argument("--out", default="snapshot_rollout.html")
@@ -467,13 +483,15 @@ def main() -> int:
                  ckpt_path=f"{MODELS}/catk_v120/latest.ckpt",
                  token_pkl_dir=f"{MODELS}/tokens",
                  disable_sub_plyline_type=True, device="cuda")
-    light_pts = controlled_lanes(args.net, args.junction) if args.light else None
+    light_pts = (controlled_lanes(args.net, args.junction)
+                 if (args.light or args.force_light) else None)
     if args.light:
         print(f"signal painting ON: {len(light_pts)} controlled lanes, "
               f"{sum(len(p) for p, _ in light_pts)} points")
     rec, timing = rollout(ids, hxyz, hhead, ego_idx, fcd, t0, catk_map, model, torch,
                           args.seconds, args.seed, args.stride, args.crop_radius, args.ego,
-                          light_pts, tls, apply_caps=not args.no_map_cap)
+                          light_pts, tls, apply_caps=not args.no_map_cap,
+                          force_light=args.force_light, obs_noise=args.obs_noise)
     n = max(1, timing["n"])
     print(f"rolled {rec['t'][-1]-t0+DT:.1f}s in {timing['n']} inferences  "
           f"(crop {timing['crop']/n*1000:.0f} ms, prep {timing['prep']/n*1000:.0f} ms, "

@@ -54,6 +54,8 @@ def main() -> int:
                          "ending at the observed pose (ClipGT queues that launch show "
                          "0.2-0.3 m/s residual; SUMO stops at exactly 0)")
     ap.add_argument("--jitter", type=float, default=0.0)
+    ap.add_argument("--obs-noise", type=float, default=0.0)
+    ap.add_argument("--light", action="store_true")
     ap.add_argument("--span", type=float, default=90.0, help="half-width of the view (m)")
     ap.add_argument("--dx", type=float, default=0.0)
     ap.add_argument("--dy", type=float, default=0.0)
@@ -91,8 +93,10 @@ def main() -> int:
                  ckpt_path=f"{SR.MODELS}/catk_v120/latest.ckpt",
                  token_pkl_dir=f"{SR.MODELS}/tokens",
                  disable_sub_plyline_type=True, device="cuda")
+    tls_pts = SR.controlled_lanes(args.net, args.junction) if args.light else None
     rec, _ = SR.rollout(ids, hxyz.copy(), hhead.copy(), ego_idx, fcd, t0, cm, model, torch,
-                        args.seconds, args.seed, args.stride, args.crop_radius, args.ego)
+                        args.seconds, args.seed, args.stride, args.crop_radius, args.ego,
+                        tls_pts, tls, obs_noise=args.obs_noise)
 
     lanes = lane_polylines(args.net)
     jx, jy = SR.JUNCTIONS[args.junction]
