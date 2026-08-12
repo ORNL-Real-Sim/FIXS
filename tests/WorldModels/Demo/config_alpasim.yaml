@@ -53,6 +53,12 @@ WorldModelSetup:
     SignalLightInject: false  # painting SUMO signal state onto map tokens is
                               # measured inert on the v120 checkpoint
     MaxSpeed: 25.0         # clamp WM write-back (guards garbage-token teleports)
+    # Noise (m, std) added ONLY to the history fed to CATK -- never to the pose we
+    # write back. SUMO stops vehicles at exactly zero motion; CATK was trained on
+    # tracked data where a stopped car still moves a few cm/frame, and reads an
+    # exactly-static queue as parked (it then never launches at green). See
+    # CATK_FINDINGS.md sec.3. Use zero-mean noise, not a forward creep.
+    ObservationNoise: 0.05
     NetFile: './simple_traffic_light.net.xml'
     # CATK checkpoint + tokens (absolute; live outside the repo)
     ModelDir: 'C:/src_git/WM_AlpaSim/data/trafficsim-models/catk_v120'

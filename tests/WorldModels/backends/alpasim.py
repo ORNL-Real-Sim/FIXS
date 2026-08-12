@@ -96,6 +96,12 @@ class AlpaSimBackend:
         # displacement to vmax*dt and speed to vmax; well above lane speed so
         # normal motion is untouched.
         self.vmax = float(cfg.get("MaxSpeed", 25.0))
+        # Per-step observation noise (m, std) on the history handed to CATK. Closes
+        # the domain gap between SUMO's bit-exact stopped vehicles and the tracked
+        # data CATK was trained on; without it a stopped queue never launches.
+        self.obs_noise = float(cfg.get("ObservationNoise", 0.05))
+        import numpy as _np
+        self._rng = _np.random.default_rng(int(cfg.get("ObservationNoiseSeed", 0)))
         self._istep = 0
         self._cache = {}
         self.vector_map = vector_map
@@ -317,6 +323,15 @@ class AlpaSimBackend:
                   if self.ego_center else (0.0, 0.0))
         win[:, :, 0] -= ox
         win[:, :, 1] -= oy
+
+        # Observation noise on what we FEED the model (write-back is untouched).
+        # CATK only ever saw TRACKED vehicles: even a stopped car carries a few cm
+        # of residual motion per frame. SUMO stops vehicles at mathematically exact
+        # zero, which is outside that distribution -- the model then reads a queue
+        # as parked and holds it through green. Zero-mean noise (NOT a forward
+        # creep, which makes it run reds) restores the launch. See CATK_FINDINGS.md.
+        if self.obs_noise > 0.0:
+            win[:, :, 0:2] += self._rng.normal(0.0, self.obs_noise, win[:, :, 0:2].shape)
 
         # --- ego: history + pinned future (the plan) ---
         ego_xyz = torch.zeros(L, 3)
