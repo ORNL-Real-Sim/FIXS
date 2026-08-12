@@ -73,6 +73,13 @@ model; the write-back is untouched. `--obs-noise` in the harness,
 | 0.05 m | launches, 0 red-light violations |
 | 0.10 m | launches, 1 violation across 3 seeds |
 
+**Gate the noise to near-static vehicles only** (`ObservationNoiseMaxTravel`, default
+0.5 m of travel over the whole 1.6 s history). Only bit-exact-stopped vehicles need it.
+Applying it to movers corrupts their heading: at 2 m/s a frame is 0.2 m, so 5 cm of
+noise is a quarter of the signal. Measured >90 deg heading flips: vanilla 0%,
+WM without noise **18%**, WM with UNGATED noise **29%**, WM with gated noise: per-step
+yaw back to 2-9.5 deg.
+
 **Zero-mean noise, not a forward creep.** A constant creep (`--creep 0.5`) also
 launches the queue (3/3) but makes vehicles **run the red** (crossings at t=176.9 and
 177.3, 3 s early) and drift up to 3.7 m off-lane — because a creep tells the model
@@ -214,6 +221,10 @@ Typical: `python wm_snapshot_rollout.py --at 175.4 --half-extent 200 --seconds 2
 
 ## 11. Open
 
+- **Heading flips are a pre-existing WM defect**: 18% of vehicles show a >90 deg
+  flip in one 0.1 s step even with no observation noise (vanilla: 0%). Mostly at
+  junctions at 1.6-2.2 m/s. Gating the noise reduced it but did not remove it. This
+  is very likely the "orientation messed up" seen in the GUI. NOT yet root-caused.
 - Discharge is still messier than vanilla — vehicles bunch near the junction where
   vanilla has cleared. Quantify with headways, not eyeballing.
 - Two seeds errored in the σ=0.02/0.05 sweep (no vehicles parsed) — undiagnosed.

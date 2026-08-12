@@ -102,6 +102,8 @@ class AlpaSimBackend:
         self.obs_noise = float(cfg.get("ObservationNoise", 0.05))
         import numpy as _np
         self._rng = _np.random.default_rng(int(cfg.get("ObservationNoiseSeed", 0)))
+        # only perturb vehicles that moved less than this over the whole history
+        self.obs_noise_max_travel = float(cfg.get("ObservationNoiseMaxTravel", 0.5))
         self._istep = 0
         self._cache = {}
         self.vector_map = vector_map
@@ -331,7 +333,16 @@ class AlpaSimBackend:
         # as parked and holds it through green. Zero-mean noise (NOT a forward
         # creep, which makes it run reds) restores the launch. See CATK_FINDINGS.md.
         if self.obs_noise > 0.0:
-            win[:, :, 0:2] += self._rng.normal(0.0, self.obs_noise, win[:, :, 0:2].shape)
+            # ONLY for vehicles whose history is (near-)static -- those are the ones
+            # SUMO reports as bit-exact zero and that CATK reads as parked. Applying
+            # it to movers corrupts their heading: at 2 m/s a frame is 0.2 m, so 5 cm
+            # is a quarter of the signal, and the inferred heading flips (measured:
+            # >90 deg flips on 18% of vehicles without noise, 29% with it ungated).
+            travel = np.linalg.norm(win[:, -1, 0:2] - win[:, 0, 0:2], axis=1)
+            static = travel < self.obs_noise_max_travel
+            if static.any():
+                win[static, :, 0:2] += self._rng.normal(
+                    0.0, self.obs_noise, win[static][:, :, 0:2].shape)
 
         # --- ego: history + pinned future (the plan) ---
         ego_xyz = torch.zeros(L, 3)

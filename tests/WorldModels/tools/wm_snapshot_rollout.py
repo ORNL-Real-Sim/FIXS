@@ -155,7 +155,10 @@ def rollout(ids, hxyz, hhead, ego_idx, fcd, t0, catk_map, model, torch,
             # CATK only ever saw TRACKED vehicles: even a stopped car carries a
             # few cm of residual motion. SUMO emits bit-exact zeros, which is
             # outside that distribution. Perturb only what we FEED the model.
-            fed[:, :, :2] += rng.normal(0.0, obs_noise, fed[:, :, :2].shape)
+            travel = np.linalg.norm(fed[:, -1, :2] - fed[:, 0, :2], axis=1)
+            st = travel < 0.5                      # near-static only (see backend)
+            if st.any():
+                fed[st, :, :2] += rng.normal(0.0, obs_noise, fed[st][:, :, :2].shape)
         ax = torch.tensor(np.concatenate([fed[others],
                           np.repeat(fed[others][:, -1:], PREDICT, axis=1)], axis=1))
         ah = torch.tensor(np.concatenate([hhead[others],
