@@ -542,7 +542,7 @@ int SocketHelper::initConnection(std::string errorLogName) {
 //  exist before it could start warming up the traffic simulator. Run
 //  automatically by initConnection unless DeferAcceptClients is set.
 // ===========================================================================
-int SocketHelper::acceptClients(std::string errorLogName) {
+int SocketHelper::acceptClients(std::string errorLogName, const std::vector<int>* requiredIdx) {
 	const int RECVCLIENTBUFSIZE = 2048;
 	const int SENDCLIENTBUFSIZE = 8096;
 
@@ -557,8 +557,22 @@ int SocketHelper::acceptClients(std::string errorLogName) {
 
 		int max_sd = selfServerSock[0];
 
-		cout << "Waiting for all clients to connect...." << endl;
+		// Which clients this call must see before it returns. A subset is how a
+		// warm-up serves some clients from the first step and lets the rest join
+		// at the end; ClientConnected[] persists across calls, so the later call
+		// only blocks on whoever is still missing.
+		std::vector<int> required;
+		if (requiredIdx) required = *requiredIdx;
+		else for (int iS = 0; iS < N_ACT_CLIENT; iS++) required.push_back(iS);
+		if (required.empty()) return 0;
 
+		if (requiredIdx) {
+			cout << "Waiting for " << required.size() << " of " << N_ACT_CLIENT
+			     << " client(s) to connect (the rest join when the warm-up ends)...." << endl;
+		}
+		else cout << "Waiting for all clients to connect...." << endl;
+
+		AllClientConnected = 0;
 		while (!AllClientConnected) {
 			//clear the socket set  
 			FD_ZERO(&readfds);
@@ -644,7 +658,7 @@ int SocketHelper::acceptClients(std::string errorLogName) {
 			}
 
 			AllClientConnected = 1;
-			for (int iS = 0; iS < N_ACT_CLIENT; iS++) {
+			for (int iS : required) {
 				if (!ClientConnected[iS]) {
 					AllClientConnected = 0;
 					break;

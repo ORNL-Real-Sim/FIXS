@@ -159,7 +159,13 @@ public:
 	// The blocking "wait for all clients" accept loop. Run automatically by
 	// initConnection() unless DeferAcceptClients is set; call it directly when it
 	// was deferred. Returns 0 on success, -1 on a socket error.
-	int acceptClients(std::string errorLogName="");
+	// requiredIdx: the client indices this call must see connected before it
+	// returns. nullptr = all of them (the original behaviour). A subset lets a
+	// host accept the clients that have to observe its warm-up now and the rest
+	// when the warm-up ends; ClientConnected[] persists, so the second call only
+	// waits for whoever is still missing. Any client that connects early is
+	// accepted regardless of the subset -- it is already at the door.
+	int acceptClients(std::string errorLogName="", const std::vector<int>* requiredIdx = nullptr);
 
 	// RS_DEBUG master-log target. The host assigns it (TrafficLayer sets it to its
 	// RealSim_tmp/TrafficLayer_<timestamp>.log). When empty -- e.g. the VirtualEnvironment
