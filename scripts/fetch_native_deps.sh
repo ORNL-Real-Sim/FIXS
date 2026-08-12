@@ -146,7 +146,15 @@ if [ "$MODE" = "prebuilt" ] && [ "$LIB_READY" -eq 0 ]; then
     LIB_READY=1
 fi
 
-# --- toolchain ----------------------------------------------------------------
+# Nothing left to build? Then the library is already in place (cache hit, prior
+# run, or the prebuilt download above) and no server was asked for. Everything
+# below builds SUMO from source, so it must not run -- and must not demand
+# SUMO's build dependencies -- in the common prebuilt case.
+if [ "$LIB_READY" -eq 1 ] && [ "$WITH_SERVER" -eq 0 ]; then
+    exit 0
+fi
+
+# --- toolchain (only reached when something is built from source) -------------
 for tool in git cmake c++; do
     command -v "$tool" >/dev/null 2>&1 || die "'$tool' not found. Install the build toolchain:
        sudo apt-get install -y build-essential cmake ninja-build git"
