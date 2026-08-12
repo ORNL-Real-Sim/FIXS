@@ -465,6 +465,23 @@ int SocketHelper::initConnection(std::string errorLogName) {
 			selfServerAddr[iS].sin_addr.s_addr = htonl(INADDR_ANY); /* Any incoming interface */
 			selfServerAddr[iS].sin_port = htons(selfServerPort[iS]);      /* Local port */
 
+#ifndef WIN32
+			// #65: POSIX only, and deliberately NOT on Windows.
+			//
+			// Linux refuses to bind a port that still has a socket in TIME_WAIT
+			// from a previous run, so restarting TrafficLayer inside the ~60 s
+			// TIME_WAIT window fails with EADDRINUSE. Windows already allows
+			// that rebind by default, and there SO_REUSEADDR means something
+			// different and dangerous -- it lets a SECOND process bind a port
+			// already in use, which is a hijacking risk. So the option is set
+			// on the platform that needs it and left alone on the one that does
+			// not.
+			{
+				int reuse = 1;
+				setsockopt(selfServerSock[iS], SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+			}
+#endif
+
 			/* Bind to the local address */
 			if (::bind(selfServerSock[iS], (struct sockaddr*)&selfServerAddr[iS], sizeof(selfServerAddr[iS])) < 0) {
 #ifdef WIN32

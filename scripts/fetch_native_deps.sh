@@ -44,6 +44,7 @@ MODE=prebuilt
 FORCE=0
 JOBS="$(nproc 2>/dev/null || echo 4)"
 SUMO_SRC=""
+WITH_SERVER=0
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_ON_HINT="20.04"   # distro pack_native_deps.sh publishes from
@@ -57,7 +58,8 @@ while [ $# -gt 0 ]; do
         --mode)      MODE="$2";      shift 2 ;;
         --jobs|-j)   JOBS="$2";      shift 2 ;;
         --sumo-src)  SUMO_SRC="$2";  shift 2 ;;
-        --force)     FORCE=1;        shift ;;
+        --force)       FORCE=1;      shift ;;
+        --with-server) WITH_SERVER=1; shift ;;
         -h|--help)   sed -n '2,40p' "${BASH_SOURCE[0]}"; exit 0 ;;
         *)           die "unknown argument: $1 (try --help)" ;;
     esac
@@ -96,16 +98,17 @@ echo "libsumo/libtraci $SUMO_VERSION ($MODE mode)"
 echo "  install location: $SUMO_LOCATION (from dependencies.yaml)"
 
 # --- already there? -----------------------------------------------------------
+LIB_READY=0
 if [ -f "$SENTINEL" ] && [ "$FORCE" -eq 0 ]; then
     note "already present at $SENTINEL (use --force to rebuild)"
-    exit 0
+    LIB_READY=1
 fi
 
 # --- prebuilt: download the published Linux asset -----------------------------
 # Same rolling, PUBLIC release the Windows .ps1 uses, same .sha256 sidecar
 # convention. The asset is built on the oldest supported distro, so one file
 # serves 20.04/22.04/24.04 (glibc is forward-compatible only).
-if [ "$MODE" = "prebuilt" ]; then
+if [ "$MODE" = "prebuilt" ] && [ "$LIB_READY" -eq 0 ]; then
     ASSET="libsumo-${SUMO_VERSION}-linux-x86_64.zip"
     BASE="https://github.com/${FIXS_DEPS_REPO:-ORNL-Real-Sim/FIXS}/releases/download/${FIXS_DEPS_TAG:-fixs-native-deps}"
     TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
@@ -140,7 +143,7 @@ if [ "$MODE" = "prebuilt" ]; then
     fi
     note "loadability check OK"
     echo "libsumo ready: $LIBSUMO_DIR (prebuilt)"
-    exit 0
+    LIB_READY=1
 fi
 
 # --- toolchain ----------------------------------------------------------------
@@ -204,9 +207,38 @@ cmake -S "$SUMO_SRC" -B "$BUILD_DIR" $GENERATOR \
       -DENABLE_JAVA_BINDINGS=OFF >"$BUILD_DIR.cfg.log" 2>&1 \
       || { tail -20 "$BUILD_DIR.cfg.log"; die "SUMO configure failed (log: $BUILD_DIR.cfg.log)"; }
 
-note "building libtracicpp with $JOBS jobs"
-cmake --build "$BUILD_DIR" --target libtracicpp -j "$JOBS" >"$BUILD_DIR.bld.log" 2>&1 \
-      || { grep -E 'error:' "$BUILD_DIR.bld.log" | head -20; die "libtracicpp build failed (log: $BUILD_DIR.bld.log)"; }
+if [ "$LIB_READY" -eq 0 ]; then
+    note "building libtracicpp with $JOBS jobs"
+    cmake --build "$BUILD_DIR" --target libtracicpp -j "$JOBS" >"$BUILD_DIR.bld.log" 2>&1 \
+          || { grep -E 'error:' "$BUILD_DIR.bld.log" | head -20; die "libtracicpp build failed (log: $BUILD_DIR.bld.log)"; }
+fi
+
+# --- optional: the SUMO SERVER ------------------------------------------------
+# libtraci is only a CLIENT; a co-simulation needs a sumo process to talk to.
+# Neither platform's release ships one, so this builds the PINNED server from
+# the same checkout -- guaranteeing client and server are the same version,
+# which `apt install sumo` cannot (the distro and PPA track other versions).
+# Headless 'sumo' only: sumo-gui would drag in fox/OpenGL for no test benefit.
+if [ "$WITH_SERVER" -eq 1 ]; then
+    if [ -x "$LIBSUMO_DIR/bin/sumo" ] && [ "$FORCE" -eq 0 ]; then
+        note "sumo server already present at $LIBSUMO_DIR/bin/sumo"
+    else
+        note "building the sumo server with $JOBS jobs (slower: this is SUMO itself)"
+        cmake --build "$BUILD_DIR" --target sumo -j "$JOBS" >"$BUILD_DIR.sumo.log" 2>&1 \
+              || { grep -E "error:" "$BUILD_DIR.sumo.log" | head -20; die "sumo build failed (log: $BUILD_DIR.sumo.log)"; }
+        SRV="$SUMO_SRC/bin/sumo"
+        [ -x "$SRV" ] || SRV="$(find "$BUILD_DIR" -name sumo -type f -perm -u+x | head -1)"
+        [ -n "$SRV" ] && [ -x "$SRV" ] || die "sumo binary was not produced"
+        mkdir -p "$LIBSUMO_DIR/bin"
+        cp "$SRV" "$LIBSUMO_DIR/bin/"
+        note "sumo server installed: $LIBSUMO_DIR/bin/sumo"
+    fi
+fi
+
+# Library came from the prebuilt asset; only the server needed building.
+if [ "$LIB_READY" -eq 1 ]; then
+    exit 0
+fi
 
 # --- install ------------------------------------------------------------------
 BUILT_LIB="$SUMO_SRC/bin/libtracicpp.so"

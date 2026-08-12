@@ -413,12 +413,34 @@ int main(int argc, char* argv[]) {
 		exit(-1);
 	}
 #else
-	if (signal(SIGINT,  CtrlHandler) == SIG_ERR ||
-		signal(SIGTERM, CtrlHandler) == SIG_ERR ||
-		signal(SIGHUP,  CtrlHandler) == SIG_ERR)
+	// #65: sigaction WITHOUT SA_RESTART, deliberately -- signal() would be a
+	// one-liner but is wrong here.
+	//
+	// glibc's signal() installs handlers with SA_RESTART, which RESTARTS a
+	// blocking call that a signal interrupts. The handler below only raises
+	// g_shutdown.shutdownRequested; the flag is read by the main loop. So with
+	// SA_RESTART, a TrafficLayer parked in select()/accept() waiting for a
+	// client never returns to the loop, never reads the flag, and ignores
+	// SIGTERM forever -- observed for real: a `timeout 15` run survived for
+	// days holding its port, which then blocked every later run with
+	// EADDRINUSE.
+	//
+	// Clearing SA_RESTART makes the blocking call return EINTR instead, which
+	// is exactly what the recv/select paths already check for
+	// (kSocketErrInterrupted), so the loop reaches the flag and exits.
 	{
-		printf("\nERROR: Could not set control-c handler");
-		exit(-1);
+		struct sigaction sa;
+		memset(&sa, 0, sizeof(sa));
+		sa.sa_handler = CtrlHandler;
+		sigemptyset(&sa.sa_mask);
+		sa.sa_flags = 0;               // NOT SA_RESTART
+		if (sigaction(SIGINT,  &sa, nullptr) != 0 ||
+			sigaction(SIGTERM, &sa, nullptr) != 0 ||
+			sigaction(SIGHUP,  &sa, nullptr) != 0)
+		{
+			printf("\nERROR: Could not set control-c handler");
+			exit(-1);
+		}
 	}
 #endif
 
