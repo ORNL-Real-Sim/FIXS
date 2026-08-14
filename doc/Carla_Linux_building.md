@@ -289,6 +289,98 @@ bash -c 'ulimit -s 131072; exec make launch'            # editor
 make launch-only
 ```
 
+## Part Four: the C++ client SDK that FIXS ships (#65)
+
+`VirCarlaEnv` links the **C++** client, not the Python one. CARLA publishes no
+release assets at all, so that SDK exists only inside a built source tree, at
+`PythonAPI/carla/dependencies/{include,lib}` — which is why FIXS packs and
+publishes it itself:
+
+```bash
+scripts/pack_native_deps.sh --component carla --carla-root ~/carla_0.9.15 --publish
+```
+
+Consumers never build it:
+
+```bash
+scripts/fetch_native_deps.sh --component carla        # ~3 s, SHA-256 verified
+```
+
+### The client does NOT need UE4
+
+`Setup.sh` exports `CC`/`CXX` from `$UE4_ROOT` because the **server** half must
+be built with UE4's clang against libc++. The **client** half is plain
+libstdc++ (`Util/BuildTools/BuildLibCarla.sh` has separate CLIENT and SERVER
+paths, and only SERVER uses `LIBCPP_TOOLCHAIN_FILE`), and CARLA's own
+`Examples/CppClient/Makefile` builds it with a system `g++`. So once the
+third-party dependencies exist in `Build/`, the client rebuilds with the
+distro's compiler and no engine in sight.
+
+### Build it with the OLDEST supported distro's compiler ⚠️
+
+This is the trap, and it cost a published asset. A dev box that builds CARLA
+usually has a **newer GCC installed than the distro ships** — this one is
+Ubuntu 20.04 with `libstdc++6` 13.1.0. UE4's clang-10 then compiles against
+GCC 13's libstdc++ headers, and the result references symbols focal's stock
+`libstdc++.so.6` (10.5.0) does not export:
+
+| symbol | introduced | from |
+|---|---|---|
+| `std::__exception_ptr::exception_ptr::_M_addref` / `_M_release` | GCC 12 | `libcarla_client.a` (boost::asio) |
+| `std::__throw_bad_array_new_length` | GCC 11 | `librpc.a` |
+
+The asset linked on the packing box **and** on 22.04/24.04, and failed to link
+on stock 20.04 — the one distro it exists to serve. `/etc/os-release` says
+20.04 either way, so the distro guard cannot see this.
+
+Rebuild both archives with the baseline compiler (no UE4, no `make setup`; the
+`Build/` dependencies are reused as-is):
+
+```bash
+# 1. LibCarla client, with focal's stock g++-9
+cat > /tmp/tc-gcc9.cmake <<'EOF'
+set(CMAKE_C_COMPILER /usr/bin/gcc-9)
+set(CMAKE_CXX_COMPILER /usr/bin/g++-9)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14 -pthread -fPIC -O3 -DNDEBUG" CACHE STRING "" FORCE)
+EOF
+cmake -S ~/carla_0.9.15 -B /tmp/libcarla-build -G Ninja \
+      -DCMAKE_BUILD_TYPE=Client -DLIBCARLA_BUILD_RELEASE=ON \
+      -DLIBCARLA_BUILD_DEBUG=OFF -DLIBCARLA_BUILD_TEST=OFF \
+      -DCMAKE_TOOLCHAIN_FILE=/tmp/tc-gcc9.cmake \
+      -DCMAKE_INSTALL_PREFIX=/tmp/libcarla-install
+cmake --build /tmp/libcarla-build -j"$(nproc)" && cmake --install /tmp/libcarla-build
+
+# 2. rpclib, the same fork/tag Setup.sh uses, also with g++-9
+git clone -b v2.2.1_c5 https://github.com/carla-simulator/rpclib.git /tmp/rpclib-src
+sed -i s/"3.9.0"/"3.5.0"/g /tmp/rpclib-src/CMakeLists.txt
+cmake -S /tmp/rpclib-src -B /tmp/rpclib-build -G Ninja \
+      -DCMAKE_C_COMPILER=/usr/bin/gcc-9 -DCMAKE_CXX_COMPILER=/usr/bin/g++-9 \
+      -DCMAKE_CXX_FLAGS="-fPIC -std=c++14" -DCMAKE_INSTALL_PREFIX=/tmp/rpclib-install
+cmake --build /tmp/rpclib-build -j"$(nproc)" && cmake --install /tmp/rpclib-build
+
+# 3. drop both into the tree the packer reads
+cp /tmp/libcarla-install/lib/libcarla_client.a /tmp/rpclib-install/lib/librpc.a \
+   ~/carla_0.9.15/PythonAPI/carla/dependencies/lib/
+```
+
+The other shipped archives (Recast, Detour\*, DebugUtils, boost) are clean as
+built — they are C or use no post-GCC-10 libstdc++ entry points.
+
+`pack_native_deps.sh` now enforces all of this: it screens the staged archives
+for those symbol names and then **link-tests the payload inside a stock
+`ubuntu:20.04` container**, which is the only place that can answer the
+question (a static archive carries unversioned names, so probing on the packing
+box passes even when the asset is unusable). With no container runtime it warns
+loudly and packs anyway.
+
+### Boost 1.81, deliberately
+
+`Setup.sh` here is patched from 1.80.0 → 1.81.0 (Issue 1 above). The asset ships
+its own boost headers, so it stays self-consistent even though the Windows SDK
+is on 1.80; `dependencies.yaml` records it under `carla.boost`.
+
+---
+
 ## Summary of fixes (7 issues, on par with the Windows guide)
 
 | # | Stage | Fix |
