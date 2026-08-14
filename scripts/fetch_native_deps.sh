@@ -29,13 +29,33 @@
 #   CommonLib/libsumo/*.h          <- #include <libsumo/libtraci.h> via -ICommonLib
 #   CommonLib/libsumo/bin/libtracicpp.so
 #
-# CommonLib/libsumo is gitignored, so nothing here dirties the working tree.
+# --component carla acquires the CARLA C++ client SDK, which only VirCarlaEnv
+# needs. It is OPTIONAL: TrafficLayer does not use it, and a machine without it
+# simply does not build that target. Modes mirror the .ps1's:
+#
+#   --mode prebuilt  (default) download libcarla-<ver>-linux-x86_64.zip from the
+#                    same rolling release. This is the normal path -- building
+#                    the SDK needs UE4's clang, which most machines and no CI
+#                    runner has.
+#
+#   --mode source    copy include/ + lib/ out of a CARLA source tree that has
+#                    already built the client, exactly as the .ps1 does. Needs
+#                    --carla-root, $CARLA_ROOT or ~/.fixs/carla.json.
+#
+#   CommonLib/libcarla/include/{carla,system}/**
+#   CommonLib/libcarla/lib/*.a
+#
+# Both CommonLib/libsumo and CommonLib/libcarla are gitignored, so nothing here
+# dirties the working tree.
 #
 # Usage:
-#   scripts/fetch_native_deps.sh                     # sumo, source mode
-#   scripts/fetch_native_deps.sh --force             # rebuild even if present
+#   scripts/fetch_native_deps.sh                     # sumo, prebuilt
+#   scripts/fetch_native_deps.sh --force             # re-acquire even if present
 #   scripts/fetch_native_deps.sh --jobs 8
 #   scripts/fetch_native_deps.sh --sumo-src ~/src/sumo   # reuse a checkout
+#   scripts/fetch_native_deps.sh --component carla
+#   scripts/fetch_native_deps.sh --component carla --mode source \
+#       --carla-root ~/carla_0.9.15
 # =============================================================================
 set -euo pipefail
 
@@ -44,6 +64,7 @@ MODE=prebuilt
 FORCE=0
 JOBS="$(nproc 2>/dev/null || echo 4)"
 SUMO_SRC=""
+CARLA_ROOT="${CARLA_ROOT:-}"   # env is a fallback; --carla-root overrides it
 WITH_SERVER=0
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -58,33 +79,173 @@ while [ $# -gt 0 ]; do
         --mode)      MODE="$2";      shift 2 ;;
         --jobs|-j)   JOBS="$2";      shift 2 ;;
         --sumo-src)  SUMO_SRC="$2";  shift 2 ;;
+        --carla-root) CARLA_ROOT="$2"; shift 2 ;;
         --force)       FORCE=1;      shift ;;
         --with-server) WITH_SERVER=1; shift ;;
-        -h|--help)   sed -n '2,40p' "${BASH_SOURCE[0]}"; exit 0 ;;
+        -h|--help)   sed -n '2,60p' "${BASH_SOURCE[0]}"; exit 0 ;;
         *)           die "unknown argument: $1 (try --help)" ;;
     esac
 done
 
-[ "$COMPONENT" = "sumo" ] || die "only --component sumo is supported on Linux today.
-       libcarla is not fetched here because VirCarlaEnv is not part of the Linux
-       build yet (its client ABI is unresolved -- see issue #65, Q1)."
+case "$COMPONENT" in
+    sumo|carla) ;;
+    *) die "unknown --component '$COMPONENT' (expected sumo or carla)" ;;
+esac
+
+# A component's version and install location are declared in dependencies.yaml,
+# never here, so moving a vendor directory or bumping a version is a one-line
+# yaml edit. pack_native_deps.sh reads the same keys, so the packer and the
+# fetcher cannot disagree about what an asset is called or where it goes.
+#
+# tr strips \r as well: dependencies.yaml is CRLF in the repo, and a trailing
+# carriage return would silently poison the git tag and the paths below.
+yaml_key() {
+    awk -v blk="  $1:" '$0 ~ "^" blk {inblk=1; next} /^  [a-z]/{inblk=0} inblk' \
+        "$REPO_ROOT/dependencies.yaml" \
+        | sed -n "s/^[[:space:]]*$2:[[:space:]]*\"\{0,1\}\([^\"]*\)\"\{0,1\}[[:space:]]*$/\1/p" \
+        | head -1 | tr -d '\r'
+}
+
+# The rolling, PUBLIC release both platforms fetch from, and the sidecar
+# convention the Windows .ps1 established: "<sha256>  <name>".
+RELEASE_BASE="https://github.com/${FIXS_DEPS_REPO:-ORNL-Real-Sim/FIXS}/releases/download/${FIXS_DEPS_TAG:-fixs-native-deps}"
+
+# Download <asset> + its .sha256, verify, extract into <dest_parent>. A missing
+# sidecar is fatal: an unverified binary from the internet is worse than none.
+get_asset() {
+    local asset="$1" dest_parent="$2" tmp
+    tmp="$(mktemp -d)"
+    note "downloading $asset"
+    curl -fsSL --retry 3 -o "$tmp/$asset" "$RELEASE_BASE/$asset" || {
+        rm -rf "$tmp"
+        die "could not download $asset from $RELEASE_BASE.
+       If the version in dependencies.yaml was just bumped, the matching asset
+       may not be published yet -- publish it with scripts/pack_native_deps.sh
+       --component $COMPONENT --publish (run on Ubuntu $BUILD_ON_HINT), or use
+       --mode source."
+    }
+    curl -fsSL --retry 3 -o "$tmp/$asset.sha256" "$RELEASE_BASE/$asset.sha256" \
+        || { rm -rf "$tmp"; die "asset downloaded but its .sha256 sidecar is missing; refusing to trust it"; }
+    ( cd "$tmp" && sha256sum -c "$asset.sha256" >/dev/null 2>&1 ) \
+        || { rm -rf "$tmp"; die "SHA-256 mismatch for $asset; refusing to extract"; }
+    note "checksum OK"
+
+    mkdir -p "$dest_parent"
+    if command -v unzip >/dev/null 2>&1; then
+        unzip -qo "$tmp/$asset" -d "$dest_parent" || { rm -rf "$tmp"; die "extract failed"; }
+    elif command -v python3 >/dev/null 2>&1; then
+        python3 -c "import zipfile,sys; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])" \
+            "$tmp/$asset" "$dest_parent" || { rm -rf "$tmp"; die "extract failed"; }
+    else
+        rm -rf "$tmp"
+        die "need 'unzip' or python3 to extract: sudo apt-get install -y unzip"
+    fi
+    rm -rf "$tmp"
+}
+
+# =============================================================================
+# libcarla -- OPTIONAL, only VirCarlaEnv needs it
+# =============================================================================
+fetch_carla() {
+    local version location dir sentinel
+    version="$(yaml_key carla version)"
+    location="$(yaml_key carla location)"
+    [ -n "$version" ]  || die "could not read carla.version from dependencies.yaml"
+    [ -n "$location" ] || die "could not read carla.location from dependencies.yaml"
+
+    dir="$REPO_ROOT/$location"
+    sentinel="$dir/lib/libcarla_client.a"
+
+    echo "libcarla (CARLA client SDK) $version ($MODE mode)"
+    echo "  install location: $location (from dependencies.yaml)"
+
+    if [ -f "$sentinel" ] && [ "$FORCE" -eq 0 ]; then
+        note "already present at $sentinel (use --force to re-acquire)"
+        exit 0
+    fi
+
+    case "$MODE" in
+      prebuilt)
+        # The zip carries a leading libcarla/ directory, so it extracts into the
+        # PARENT of the configured location -- same shape as the libsumo asset,
+        # and as what Expand-Archive produces on Windows.
+        get_asset "libcarla-${version}-linux-x86_64.zip" "$(dirname "$dir")"
+        ;;
+      source)
+        # Same acquisition the Windows .ps1 -Mode source performs: copy the
+        # client artifacts out of a CARLA tree that has already built them.
+        # Unlike the .ps1 this does not copy the whole 468 MB directory -- it
+        # takes the subset the published asset ships, so the two modes produce
+        # the same tree and a bug can only be in one place.
+        local root deps json c candidates=()
+        [ -n "$CARLA_ROOT" ] && candidates+=("$CARLA_ROOT")
+        json="${FIXS_CACHE_DIR:-$HOME/.fixs}/carla.json"
+        if [ -f "$json" ]; then
+            c="$(sed -n 's/.*"carla_root"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$json" | head -1)"
+            [ -n "$c" ] && candidates+=("$c")
+        fi
+        root=""
+        for c in ${candidates+"${candidates[@]}"}; do
+            [ -d "$c/PythonAPI/carla/dependencies/lib" ] && { root="$c"; break; }
+        done
+        # carla.json may name a PACKAGED CARLA (mode: packaged), which ships no
+        # PythonAPI/carla/dependencies at all -- hence the directory test above
+        # rather than trusting the path.
+        [ -n "$root" ] || die "no CARLA source tree with a built client SDK was found.
+       Looked for <root>/PythonAPI/carla/dependencies/lib in:
+         ${candidates[*]:-(nothing configured)}
+       Pass --carla-root <path>, or use the default --mode prebuilt."
+
+        deps="$root/PythonAPI/carla/dependencies"
+        note "copying from $deps"
+        rm -rf "$dir"
+        mkdir -p "$dir/lib" "$dir/include/system"
+        cp -a "$deps/include/carla" "$dir/include/"
+        for c in boost rpc recast; do
+            [ -d "$deps/include/system/$c" ] || die "missing header tree: include/system/$c"
+            cp -a "$deps/include/system/$c" "$dir/include/system/"
+        done
+        for c in libcarla_client.a librpc.a libRecast.a libDetour.a libDetourCrowd.a \
+                 libDetourTileCache.a libDebugUtils.a \
+                 libboost_filesystem.a libboost_system.a libboost_atomic.a; do
+            [ -f "$deps/lib/$c" ] || die "missing archive: lib/$c (was LibCarla built for the CLIENT target?)"
+            cp "$deps/lib/$c" "$dir/lib/"
+        done
+        # Strip OUR COPY (never the CARLA tree) so both modes leave the same
+        # 19 MB tree rather than 213 MB here and 19 MB there. Debug info for
+        # CARLA's internals is not what anyone debugs from FIXS.
+        command -v strip >/dev/null 2>&1 && strip --strip-debug "$dir"/lib/*.a
+        ;;
+      *) die "unknown --mode '$MODE' for carla (expected prebuilt or source)" ;;
+    esac
+
+    # --- verify ---------------------------------------------------------------
+    # Cheap structural checks only; the expensive compile+link gate runs in
+    # pack_native_deps.sh, before an asset can be published at all.
+    [ -f "$sentinel" ]                     || die "acquisition did not produce lib/libcarla_client.a"
+    [ -f "$dir/include/carla/Version.h" ]  || die "acquisition did not produce include/carla/Version.h"
+    local stamp
+    stamp="$(sed -n 's/.*return "\(.*\)";.*/\1/p' "$dir/include/carla/Version.h" | head -1)"
+    case "$stamp" in
+        "$version"*) ;;
+        *) die "the acquired SDK is CARLA $stamp but dependencies.yaml pins $version" ;;
+    esac
+
+    echo "libcarla ready: $dir"
+    echo "  version: $stamp"
+    echo "  archives: $(ls "$dir/lib"/*.a | wc -l), $(du -sh "$dir/lib" | cut -f1)"
+    exit 0
+}
+
+if [ "$COMPONENT" = "carla" ]; then fetch_carla; fi
 
 # --- everything about SUMO comes from dependencies.yaml ----------------------
 # version, upstream URL and install location are all declared there, so nothing
 # about SUMO is hardcoded here: moving the vendor directory or switching the
 # upstream fork is a one-line edit in the yaml, not a code change.
-#
-# tr strips \r as well: dependencies.yaml is CRLF in the repo, and a trailing
-# carriage return would silently poison the git tag and the paths below.
-yaml_sumo_key() {
-    awk '/^  sumo:/{inblk=1; next} /^  [a-z]/{inblk=0} inblk' "$REPO_ROOT/dependencies.yaml" \
-        | sed -n "s/^[[:space:]]*$1:[[:space:]]*\"\{0,1\}\([^\"]*\)\"\{0,1\}[[:space:]]*$/\1/p" \
-        | head -1 | tr -d '\r'
-}
-
-SUMO_VERSION="$(yaml_sumo_key version)"
-SUMO_SOURCE_URL="$(yaml_sumo_key source)"
-SUMO_LOCATION="$(yaml_sumo_key location)"
+SUMO_VERSION="$(yaml_key sumo version)"
+SUMO_SOURCE_URL="$(yaml_key sumo source)"
+SUMO_LOCATION="$(yaml_key sumo location)"
 
 [ -n "$SUMO_VERSION" ]    || die "could not read sumo.version from dependencies.yaml"
 [ -n "$SUMO_SOURCE_URL" ] || die "could not read sumo.source from dependencies.yaml"
@@ -110,31 +271,9 @@ fi
 # serves 20.04/22.04/24.04 (glibc is forward-compatible only).
 if [ "$MODE" = "prebuilt" ] && [ "$LIB_READY" -eq 0 ]; then
     ASSET="libsumo-${SUMO_VERSION}-linux-x86_64.zip"
-    BASE="https://github.com/${FIXS_DEPS_REPO:-ORNL-Real-Sim/FIXS}/releases/download/${FIXS_DEPS_TAG:-fixs-native-deps}"
-    TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
-
-    note "downloading $ASSET"
-    curl -fsSL --retry 3 -o "$TMP/$ASSET" "$BASE/$ASSET" || die "could not download $ASSET from $BASE.
-       If the SUMO version in dependencies.yaml was just bumped, the matching
-       asset may not be published yet -- publish it with
-       scripts/pack_native_deps.sh --publish (run on Ubuntu $BUILD_ON_HINT), or
-       use --mode source to build it locally."
-    curl -fsSL --retry 3 -o "$TMP/$ASSET.sha256" "$BASE/$ASSET.sha256"         || die "asset downloaded but its .sha256 sidecar is missing; refusing to trust it"
-
-    ( cd "$TMP" && sha256sum -c "$ASSET.sha256" >/dev/null 2>&1 )         || die "SHA-256 mismatch for $ASSET; refusing to extract"
-    note "checksum OK"
-
     # The zip carries a leading libsumo/ directory, so extract into the PARENT
     # of the configured location.
-    DEST_PARENT="$(dirname "$LIBSUMO_DIR")"
-    mkdir -p "$DEST_PARENT"
-    if command -v unzip >/dev/null 2>&1; then
-        unzip -qo "$TMP/$ASSET" -d "$DEST_PARENT" || die "extract failed"
-    elif command -v python3 >/dev/null 2>&1; then
-        python3 -c "import zipfile,sys; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])"             "$TMP/$ASSET" "$DEST_PARENT" || die "extract failed"
-    else
-        die "need 'unzip' or python3 to extract: sudo apt-get install -y unzip"
-    fi
+    get_asset "$ASSET" "$(dirname "$LIBSUMO_DIR")"
 
     [ -f "$SENTINEL" ] || die "$ASSET did not contain bin/libtracicpp.so"
     if command -v ldd >/dev/null 2>&1 && ldd "$SENTINEL" 2>/dev/null | grep -q 'not found'; then
