@@ -163,8 +163,11 @@ public:
 	// returns. nullptr = all of them (the original behaviour). A subset lets a
 	// host accept the clients that have to observe its warm-up now and the rest
 	// when the warm-up ends; ClientConnected[] persists, so the second call only
-	// waits for whoever is still missing. Any client that connects early is
-	// accepted regardless of the subset -- it is already at the door.
+	// waits for whoever is still missing. Only the subset's own listening
+	// sockets are watched: taking a connection on a port this call is NOT
+	// waiting for would mark a client connected that nobody is going to serve
+	// -- a readiness probe, say -- and leave the real client stuck unaccepted
+	// in the backlog for the whole warm-up.
 	int acceptClients(std::string errorLogName="", const std::vector<int>* requiredIdx = nullptr);
 
 	// RS_DEBUG master-log target. The host assigns it (TrafficLayer sets it to its

@@ -579,7 +579,12 @@ int SocketHelper::acceptClients(std::string errorLogName, const std::vector<int>
 
 			//add master socket to set  
 
-			for (int iS = 0; iS < N_ACT_CLIENT; iS++) {
+			// Only the sockets this call is waiting for. Accepting whatever else
+			// happens to arrive would take a connection nobody is going to serve
+			// -- a readiness probe on a deferred client's port, say -- and mark
+			// that client connected, after which the real one is left unaccepted
+			// in the backlog for the whole warm-up.
+			for (int iS : required) {
 				FD_SET(selfServerSock[iS], &readfds);
 				if (selfServerSock[iS] > max_sd) {
 					max_sd = selfServerSock[iS];
@@ -615,7 +620,7 @@ int SocketHelper::acceptClients(std::string errorLogName, const std::vector<int>
 
 			//If something happened on the master socket ,  
 		   //then its an incoming connection  
-			for (int iS = 0; iS < N_ACT_CLIENT; iS++) {
+			for (int iS : required) {
 				if (FD_ISSET(selfServerSock[iS], &readfds))
 				{
 					clientAddrLen[iS] = sizeof(clientAddr[iS]);
