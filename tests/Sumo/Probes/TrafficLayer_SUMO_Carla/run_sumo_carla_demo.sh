@@ -201,18 +201,23 @@ fi
 
 # Two ways to pass, and they are different claims: capped means "still healthy
 # when we stopped it", uncapped means "ran the scenario to its end and exited".
-SPAWNS=$(grep -ci 'spawn' vircarlaenv.log 2>/dev/null || echo 0)
+# Count the two OUTCOMES separately. 'grep -ci spawn' also matches
+# "[Warning] Failed to spawn actor", so a run with one refused spawn point
+# reported one MORE vehicle than it placed -- which read as cross-distro
+# non-determinism when three identical runs were compared.
+SPAWNS=$(grep -c 'Spawned Carla actor' vircarlaenv.log 2>/dev/null || echo 0)
+FAILED=$(grep -c 'Failed to spawn' vircarlaenv.log 2>/dev/null || echo 0)
 sleep 1; kill "$TAIL_TL" "$TAIL_VCE" 2>/dev/null
 echo
 if [ -n "$DURATION" ]; then
     if kill -0 "$VCE_PID" 2>/dev/null && [ "$SPAWNS" -gt 0 ]; then
-        echo "RESULT: PASS -- $SPAWNS spawns, still running at the ${DURATION}s cap"
+        echo "RESULT: PASS -- $SPAWNS vehicles spawned ($FAILED refused), still running at the ${DURATION}s cap"
         exit 0
     fi
 elif [ "${VCE_RC:-1}" -eq 0 ] && [ "$SPAWNS" -gt 0 ]; then
-    echo "RESULT: PASS -- $SPAWNS spawns, co-simulation ran to SimulationEndTime and exited cleanly"
+    echo "RESULT: PASS -- $SPAWNS vehicles spawned ($FAILED refused), ran to SimulationEndTime and exited cleanly"
     exit 0
 fi
-echo "RESULT: FAIL -- bridge exit ${VCE_RC:-still running}, $SPAWNS spawns"
+echo "RESULT: FAIL -- bridge exit ${VCE_RC:-still running}, $SPAWNS spawned / $FAILED refused"
 echo "        see vircarlaenv.log / trafficlayer.log / sumo.log in $TEST_DIR"
 exit 1
