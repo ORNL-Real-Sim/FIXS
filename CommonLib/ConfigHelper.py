@@ -44,8 +44,10 @@ class ConfigHelper:
         self.simulation_setup["SelectedTrafficSimulator"] = self.parserString(simulation_node, "SelectedTrafficSimulator", "SUMO")
         self.simulation_setup["TrafficSimulatorIP"] = self.parserString(simulation_node, "TrafficSimulatorIP", "127.0.0.1")
         self.simulation_setup["TrafficSimulatorPort"] = self.parserInteger(simulation_node, "TrafficSimulatorPort", 1337)
-        self.simulation_setup["SimulationMode"] = self.parserInteger(simulation_node, "SimulationMode", 0)
-        self.simulation_setup["SimulationModeParameter"] = self.parserDouble(simulation_node, "SimulationModeParameter", 0)
+        # Warm-up (#86), mirroring ConfigHelper.cpp. Replaced SimulationMode /
+        # SimulationModeParameter; see doc/ConfigSetup.md for the mapping.
+        self.simulation_setup["WarmUpUntilEgoEntry"] = self.parserFlag(simulation_node, "WarmUpUntilEgoEntry", False)
+        self.simulation_setup["WarmUpTime"] = self.parserDouble(simulation_node, "WarmUpTime", 0)
         self.simulation_setup["VehicleMessageField"] = self.parserStringVector(simulation_node, "VehicleMessageField", ["id", "type", "speed", "positionX", "positionY"])
         # Sumo Setup
         sumo_node = config.get("SumoSetup", {})

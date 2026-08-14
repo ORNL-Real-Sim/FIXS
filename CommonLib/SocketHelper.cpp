@@ -325,10 +325,9 @@ void SocketHelper::rsDebugLog(const char* msg) {
 #endif
 
 int SocketHelper::initConnection(std::string errorLogName) {
-	const int RECVCLIENTBUFSIZE = 2048;
-	const int SENDCLIENTBUFSIZE = 8096;
 	// const int RECVSERVERBUFSIZE = 8096;
 	// const int SENDSERVERBUFSIZE = 2048;
+	// (the client buffer sizes moved to acceptClients with the code that uses them)
 
 	if (N_ACT_CLIENT < 1) {
 		AllClientConnected = 1;
@@ -530,11 +529,36 @@ int SocketHelper::initConnection(std::string errorLogName) {
 		}
 	}
 
+	// #86: a host running a warm-up binds and listens NOW -- so every client's
+	// connect() still succeeds immediately and lands in the listen backlog -- but
+	// does not block here waiting for them. It calls acceptClients() itself once
+	// the warm-up ends, which is what lets the warm-up overlap client start-up.
+	if (DeferAcceptClients) {
+		cout << "Sockets listening; waiting for clients is deferred until warm-up completes." << endl;
+		return 0;
+	}
+
+	return acceptClients(errorLogName);
+}
+
+// ===========================================================================
+//  acceptClients -- block until every declared client has connected (and then
+//  VISSIM, when VISSIM is one of the peers).
+//
+//  Split out of initConnection for #86: bind/listen and accept used to be one
+//  indivisible step, which forced TrafficLayer to wait for CarMaker/CARLA to
+//  exist before it could start warming up the traffic simulator. Run
+//  automatically by initConnection unless DeferAcceptClients is set.
+// ===========================================================================
+int SocketHelper::acceptClients(std::string errorLogName) {
+	const int RECVCLIENTBUFSIZE = 2048;
+	const int SENDCLIENTBUFSIZE = 8096;
+
 	//+++++++++
 	// Wait for clients to connections
 	//+++++++++
 	if (ENABLE_CLIENT) {
-		//set of socket descriptors  
+		//set of socket descriptors
 		fd_set readfds;
 
 		int activity;

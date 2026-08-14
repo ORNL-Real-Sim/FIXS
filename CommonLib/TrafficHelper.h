@@ -43,11 +43,14 @@ public:
 	int sendToTrafficSimulator(double simTime, MsgHelper Msg_c);
 	void runOneStepSimulation();
 	int runSimulation(double endTime);
+	// Ids the warm-up watches for (#86) -- the union of both layers' by-id vehicle
+	// subscriptions, copied from ConfigHelper::WarmUpEgoIds in getConfig().
+	std::unordered_set <std::string> warmupEgoId_v;
 	int recvFromTrafficSimulator(double* simTime, MsgHelper& Msg_c);
 
 	int addEgoVehicle(double simTime);
 	int addEgoVehicleFromXY(double simTime, std::string vehicleId, std::string vehicleType, double positionX, double positionY);
-	int checkIfEgoExist(double* simTime);
+	bool isWarmUpEgoInNetwork(double* simTime);
 
 	int getSimulationTime(double* simTime);
 

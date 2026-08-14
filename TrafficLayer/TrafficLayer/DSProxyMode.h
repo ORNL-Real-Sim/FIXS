@@ -5,10 +5,18 @@
 // mainTrafficLayer dispatches to runDSProxyMode and exits when it returns.
 //
 // Stage B+ scope: TrafficLayer drives VISSIM via DSProxy, publishes to
-// the app client (CAV controller), AND relays CAV behavior commands down
-// to the FIXS DriverModel via a second socket. CAV controller sends
-// per-vehicle speedDesired/accelerationDesired; TL routes ego.Pose to
-// DSProxy and non-ego.Intent to DriverModel.
+// the app clients (CAV controller, CarMaker, observers), AND relays CAV
+// behavior commands down to the FIXS DriverModel via a second socket.
+// CAV controller sends per-vehicle speedDesired/accelerationDesired; TL
+// routes ego.Pose to DSProxy and non-ego.Intent to DriverModel.
+//
+// App-socket routing is multi-port: every (subscription, port) tuple in
+// ApplicationSetup.VehicleSubscription becomes its own AppSocketConfig
+// with its own server socket and its own outbound filter
+// (publishesVehicle); the legacy single-client path is the N=1 case.
+// That per-port filter in PHASE 3 is exactly the routing-table pattern
+// the XIL orchestrator refactor (#117) will formalize, so the per-port
+// loop body lifts into the orchestrator as a code-move.
 //
 // Per-tick tick flow follows the seven-phase canonical pattern documented
 // in doc/fixs_tick_flow.md. The DriverModel is treated as a second FIXS-

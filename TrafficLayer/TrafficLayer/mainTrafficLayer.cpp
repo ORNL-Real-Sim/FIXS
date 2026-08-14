@@ -894,13 +894,23 @@ int main(int argc, char* argv[]) {
 		Sock_c.disableWaitClientTrigger();
 
 		if (!ENABLE_VEH_SIMULATOR) {
+			// #86: with a warm-up configured, bind and listen now but do not block
+			// waiting for the clients -- the main loop accepts them when the
+			// warm-up ends. Their connect() still succeeds immediately (the socket
+			// is listening), so nothing on the client side changes; TrafficLayer
+			// just stops waiting for them before it can start warming up.
+			Sock_c.DeferAcceptClients = Config_c.SimulationSetup.WarmUpUntilEgoEntry ||
+				Config_c.SimulationSetup.WarmUpTime > 0;
+
 			if (Sock_c.initConnection(TrafficLayerErrorFile) > 0) {
 				printf("Connect to SUMO failed! Make sure start Traffic Simulator first and start one instance of VISSIM/SUMO \n");
 				exit(-1);
 			}
 
-			for (int i = 0; i < Sock_c.clientSock.size(); i++) {
-				actualClientSock.push_back(Sock_c.clientSock[i]);
+			if (!Sock_c.DeferAcceptClients) {
+				for (int i = 0; i < Sock_c.clientSock.size(); i++) {
+					actualClientSock.push_back(Sock_c.clientSock[i]);
+				}
 			}
 		}
 
@@ -971,10 +981,18 @@ int main(int argc, char* argv[]) {
 
 	PERF_INIT("TrafficLayerPerf.log");
 
-	bool isVeryFirstStep = true; 
+	bool isVeryFirstStep = true;
 
-	bool isEgoExist = false;
-	bool isInitialTimeFinished = false;
+	// Warm-up state (#86). One flag for both triggers: while it is false the FIXS
+	// boundary is closed -- the loop returns to the top before any client I/O, and
+	// the clients have not even been accepted yet.
+	const bool WARMUP_CONFIGURED = Config_c.SimulationSetup.WarmUpUntilEgoEntry ||
+		Config_c.SimulationSetup.WarmUpTime > 0;
+	bool warmUpFinished = !WARMUP_CONFIGURED;
+
+	// Clients are accepted once, after the warm-up. Already true here when
+	// initConnection() accepted them before the loop (no warm-up, no CarMaker).
+	bool clientsAccepted = !ENABLE_VEH_SIMULATOR && !WARMUP_CONFIGURED;
 
 	//while (simTime <= tSimuEnd && ii < nT) {
 	while (!g_shutdown.shutdownRequested) {
@@ -1017,17 +1035,6 @@ int main(int argc, char* argv[]) {
 		PERF_LOG("t=%.2f vehicles_in_network=%d\n", simTime, (int)MsgServer_c.VehDataRecv_um.size());
 #endif
 
-		if (ENABLE_VEH_SIMULATOR && isVeryFirstStep) {
-			if (Sock_c.initConnection(TrafficLayerErrorFile) > 0) {
-				printf("Connect to SUMO failed! Make sure start Traffic Simulator first and start one instance of VISSIM/SUMO \n");
-				exit(-1);
-			}
-
-			for (int i = 0; i < Sock_c.clientSock.size(); i++) {
-				actualClientSock.push_back(Sock_c.clientSock[i]);
-			}
-		}
-
 		if (ENABLE_VERBOSE) {
 			printf("\n===========New time step==============\n");
 			printf("===========SimTime %f==============\n", simTime);
@@ -1042,19 +1049,63 @@ int main(int argc, char* argv[]) {
 			printf("===========SimTime %f==============\n", simTime);
 		}
 
-		// run sumo unitial initial time finished
-		if ((Config_c.SimulationSetup.SimulationMode == 4 || Config_c.SimulationSetup.SimulationMode == 5) && !isInitialTimeFinished) {
-			Traffic_c.runSimulation(Config_c.SimulationSetup.SimulationModeParameter);
-			isInitialTimeFinished = true;
+		// ===================================================================
+		// 			Warm-up gate (#86)
+		// ===================================================================
+		// While the warm-up runs the FIXS boundary is CLOSED: this block returns
+		// to the top of the loop before every client send/recv below, and no
+		// client has been accepted yet, so CARLA's map load and CarMaker's start-up
+		// overlap the warm-up instead of queueing ahead of it.
+		//
+		// The two triggers are exclusive (ConfigHelper enforces it) because they
+		// are different loops: WarmUpTime is a single batch step that observes
+		// nothing on the way, WarmUpUntilEgoEntry has to look between steps.
+		if (!warmUpFinished) {
+			if (Config_c.SimulationSetup.WarmUpTime > 0) {
+				printf("Warm-up: advancing the traffic simulator to t=%.2f with the FIXS boundary closed...\n",
+					Config_c.SimulationSetup.WarmUpTime);
+				Traffic_c.runSimulation(Config_c.SimulationSetup.WarmUpTime);
+				Traffic_c.getSimulationTime(&simTime);
+				printf("Warm-up complete at t=%.2f\n", simTime);
+				warmUpFinished = true;
+			}
+			else if (Traffic_c.isWarmUpEgoInNetwork(&simTime)) {
+				warmUpFinished = true;
+			}
+			else {
+				// Tick again; nothing downstream sees this step.
+				continue;
+			}
 		}
 
-		if ((Config_c.SimulationSetup.SimulationMode == 1 || Config_c.SimulationSetup.SimulationMode == 2) && !isEgoExist) {
-			if (Traffic_c.checkIfEgoExist(&simTime)) {
-				// continue the code to sync VISSIM/SUMO with clients
-				isEgoExist = true;
-			}else{
-				// otherwise just continue running the simulation
-				continue;
+		// ===================================================================
+		// 			Accept the clients (once, after the warm-up)
+		// ===================================================================
+		// Without a warm-up this is a no-op: initConnection() already accepted
+		// before the loop (or, on the CarMaker path, does so here on the first
+		// step exactly as it always has).
+		if (!clientsAccepted) {
+			clientsAccepted = true;
+
+			if (ENABLE_VEH_SIMULATOR) {
+				if (Sock_c.initConnection(TrafficLayerErrorFile) > 0) {
+					printf("Connect to SUMO failed! Make sure start Traffic Simulator first and start one instance of VISSIM/SUMO \n");
+					exit(-1);
+				}
+				for (int i = 0; i < Sock_c.clientSock.size(); i++) {
+					actualClientSock.push_back(Sock_c.clientSock[i]);
+				}
+			}
+			else if (WARMUP_CONFIGURED) {
+				// Bound and listening since before the loop; only the blocking
+				// accept was held back until now.
+				if (Sock_c.acceptClients(TrafficLayerErrorFile) < 0) {
+					printf("Accepting clients after the warm-up failed\n");
+					exit(-1);
+				}
+				for (int i = 0; i < Sock_c.clientSock.size(); i++) {
+					actualClientSock.push_back(Sock_c.clientSock[i]);
+				}
 			}
 		}
 
