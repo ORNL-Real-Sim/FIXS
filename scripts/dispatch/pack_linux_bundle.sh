@@ -199,10 +199,16 @@ else
 fi
 
 # --- zip ------------------------------------------------------------------------
-mkdir -p "$OUT_DIR"
+mkdir -p "$OUT_DIR" || die "cannot create $OUT_DIR"
+# ABSOLUTE from here on: the zip runs from inside the staging directory (so the
+# archive has no leading path), which turns any relative --out-dir into a path
+# relative to THAT. `--out-dir dist` failed with "Could not create output file"
+# while an absolute one worked -- and dist is exactly what CI passes.
+OUT_DIR="$(cd "$OUT_DIR" && pwd)"
 ZIP_PATH="$OUT_DIR/$ZIP_NAME"
 rm -f "$ZIP_PATH"
-( cd "$STAGE" && zip -qr "$ZIP_PATH" . )
+( cd "$STAGE" && zip -qr "$ZIP_PATH" . ) || die "zip failed writing $ZIP_PATH"
+[ -f "$ZIP_PATH" ] || die "zip reported success but $ZIP_PATH does not exist"
 
 # Prove the execute bit survived rather than assuming it: that property is the
 # entire reason this bundle is packed on Linux instead of by Compress-Archive.
