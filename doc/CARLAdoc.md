@@ -35,7 +35,7 @@ which will provide the necessary dependencies for the FIXS-CARLA
 (dispatch step **4c**), driven by a per-machine `~/.fixs/carla.json`:
 
 - **`"mode": "prebuilt"`** *(recommended — no Carla source build needed):* downloads
-  the **public** rolling `fixs-native-deps` release's `libcarla-<carla_version>.zip` (Release subset),
+  the **public** rolling `fixs-native-deps` release's `libcarla-<carla_version>-windows-x86_64.zip` (Release subset),
   verifies its SHA-256, and extracts it into `CommonLib/`. This is the exact artifact
   the release CI uses.
 - **`"mode": "source"`** *(for developers who build Carla from source):* after

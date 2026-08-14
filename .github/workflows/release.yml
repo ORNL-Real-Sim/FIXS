@@ -215,7 +215,7 @@ jobs:
         run: |
           & scripts/dispatch/fetch_native_deps.ps1 -Component sumo
           if ($LASTEXITCODE -ne 0) {
-            Write-Host "::error::libsumo fetch failed - TrafficLayer cannot link without it. Check that libsumo-<ver>.zip is published on the fixs-native-deps release."
+            Write-Host "::error::libsumo fetch failed - TrafficLayer cannot link without it. Check that libsumo-<ver>-windows-x86_64.zip is published on the fixs-native-deps release."
             exit 1
           }
 

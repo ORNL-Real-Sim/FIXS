@@ -59,6 +59,17 @@ TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/fixs-fetch-XXXXXX")"
 cleanup() { rm -rf "$TMP_DIR"; }
 trap cleanup EXIT
 
+# --- Which native runtime belongs on this machine ----------------------------
+# Detected, not assumed: this script also runs under Git Bash / MSYS on Windows,
+# where the Windows asset is the correct one. The tag doubles as the validation
+# selector below, so the two can never disagree.
+case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) PLATFORM_TAG="windows-x86_64" ;;
+    Linux)                PLATFORM_TAG="linux-x86_64"   ;;
+    Darwin)               PLATFORM_TAG="macos-x86_64"   ;;
+    *)                    PLATFORM_TAG="linux-x86_64"   ;;
+esac
+
 json_field() {  # json_field <file> <field> -> first top-level "field":"value"
     grep -o "\"$2\":[[:space:]]*\"[^\"]*\"" "$1" | sed 's/.*"\([^"]*\)"$/\1/' | head -n1
 }
@@ -286,12 +297,71 @@ echo "Fetching the native runtime from the '$DEPS_TAG' release ..."
 DEPS_JSON="$TMP_DIR/native-deps.json"
 "${CURL[@]}" "$API/releases/tags/$DEPS_TAG" -o "$DEPS_JSON" \
     || { echo "[ERROR] Could not read the '$DEPS_TAG' release at $REPO." >&2; exit 1; }
-# Version-named: take whatever the release currently carries, so bumping the SUMO
-# version in dependencies.yaml + publishing the asset is the whole change.
-DEP_URL="$(grep -o '"browser_download_url":[[:space:]]*"[^"]*libsumo-[^"]*\.zip"' "$DEPS_JSON" \
-           | head -n1 | sed 's/.*"\(https[^"]*\)"$/\1/')"
-[[ -n "$DEP_URL" ]] || { echo "[ERROR] no 'libsumo-*.zip' asset on the '$DEPS_TAG' release." >&2; exit 1; }
-echo "  downloading $(basename "$DEP_URL") ..."
+# ---------------------------------------------------------------------------
+# Pick ONE native-runtime asset. See the long note in update_fixs.ps1: this was
+# 'libsumo-[^"]*\.zip | head -n1', unanchored in the middle, so it matched both
+# libsumo-1.22.0.zip and libsumo-1.22.0-linux-x86_64.zip once the Linux port
+# published the latter - and head -n1 silently picked whichever the API listed
+# first. Match exact names, or an ANCHORED version-shaped pattern that a platform
+# suffix cannot satisfy, and treat "more than one" as an error rather than a
+# coin toss.
+# ---------------------------------------------------------------------------
+DEP_URLS=()
+while IFS= read -r _u; do
+    [[ -n "$_u" ]] && DEP_URLS+=("$_u")
+done < <(grep -o '"browser_download_url":[[:space:]]*"[^"]*"' "$DEPS_JSON" \
+         | sed 's/.*"\(https[^"]*\)"$/\1/')
+# Guarded here rather than inside the loop below: under `set -u`, expanding an
+# empty array is itself an error on bash < 4.4, and that crash would replace the
+# real diagnosis ("the release has no assets") with an unbound-variable trace.
+[[ "${#DEP_URLS[@]}" -gt 0 ]] \
+    || { echo "[ERROR] the '$DEPS_TAG' release lists no downloadable assets." >&2; exit 1; }
+
+# BUILD_INFO.txt ships inside the bundle and records the SUMO version it was
+# actually built against. TrafficLayer links a specific libsumocpp.lib, so a
+# runtime from another version loads and then dies at the first libsumo call.
+SUMO_VER="$(sed -n 's/^[[:space:]]*SUMO:[[:space:]]\+\([0-9][0-9.]*\)[[:space:]]*$/\1/p' \
+            "$OUTPUT_DIR/BUILD_INFO.txt" 2>/dev/null | head -n1 || true)"
+
+SELECTED_URL=""
+select_native_asset() {   # <component> <version-or-empty>
+    local comp="$1" ver="$2" url base rx want
+    local -a hits
+    # A pin that matches nothing is fatal, not a hint: quietly installing another
+    # version yields a runtime that does not match the bundle it was built for,
+    # and nothing downstream would catch that.
+    if [[ -n "$ver" ]]; then
+        for want in "$comp-$ver-$PLATFORM_TAG.zip" "$comp-$ver.zip"; do
+            for url in "${DEP_URLS[@]}"; do
+                if [[ "${url##*/}" == "$want" ]]; then SELECTED_URL="$url"; return 0; fi
+            done
+        done
+        echo "[ERROR] this bundle was built against $comp $ver, but the '$DEPS_TAG' release" >&2
+        echo "        carries no $comp-$ver-$PLATFORM_TAG.zip (nor $comp-$ver.zip)." >&2
+        return 1
+    fi
+    for rx in "^${comp}-[0-9][0-9.]*-${PLATFORM_TAG}\.zip$" "^${comp}-[0-9][0-9.]*\.zip$"; do
+        hits=()
+        for url in "${DEP_URLS[@]}"; do
+            base="${url##*/}"
+            [[ "$base" =~ $rx ]] && hits+=("$url")
+        done
+        if [[ "${#hits[@]}" -eq 1 ]]; then SELECTED_URL="${hits[0]}"; return 0; fi
+        if [[ "${#hits[@]}" -gt 1 ]]; then
+            echo "[ERROR] '$DEPS_TAG' carries ${#hits[@]} $comp assets for $PLATFORM_TAG and" >&2
+            printf '        %s\n' "${hits[@]##*/}" >&2
+            echo "        nothing says which to install. Retire the stale one." >&2
+            return 1
+        fi
+    done
+    echo "[ERROR] no $comp asset for $PLATFORM_TAG on the '$DEPS_TAG' release" >&2
+    echo "        (looked for $comp-<ver>-$PLATFORM_TAG.zip, then $comp-<ver>.zip)." >&2
+    return 1
+}
+
+select_native_asset libsumo "$SUMO_VER" || exit 1
+DEP_URL="$SELECTED_URL"
+echo "  downloading ${DEP_URL##*/} ..."
 get_asset "$DEP_URL" "$TMP_DIR/libsumo.zip"
 # Extracting into CommonLib/ reproduces the <component>/bin layout the
 # executables already search; any future runtime asset lands the same way.
@@ -300,13 +370,24 @@ unzip -q -o "$TMP_DIR/libsumo.zip" -d "$OUTPUT_DIR/CommonLib"; unzip_rc=$?
 set -e
 [[ "$unzip_rc" -le 1 ]] || { echo "[ERROR] unzip of the native runtime failed (exit $unzip_rc)." >&2; exit "$unzip_rc"; }
 
+# Validate against the platform we actually selected for. This check used to
+# demand libsumocpp.lib + *.dll unconditionally - Windows artifacts that a Linux
+# runtime can never contain - so a correct Linux install failed here even when the
+# right asset had been fetched. Keying both the selection and the check off
+# $PLATFORM_TAG is what stops them from drifting apart again.
 SUMO_BIN="$OUTPUT_DIR/CommonLib/libsumo/bin"
-n="$(find "$SUMO_BIN" -maxdepth 1 -name '*.dll' 2>/dev/null | wc -l | tr -d '[:space:]')"
-if [[ ! -f "$SUMO_BIN/libsumocpp.lib" || "$n" -eq 0 ]]; then
-    echo "[ERROR] the native runtime extracted but $SUMO_BIN has no libsumocpp.lib / no DLLs." >&2
+if [[ "$PLATFORM_TAG" == windows-* ]]; then
+    sentinel="libsumocpp.lib"; libglob="*.dll"; libword="DLLs"
+else
+    sentinel="libtracicpp.so"; libglob="*.so";  libword="shared libraries"
+fi
+n="$(find "$SUMO_BIN" -maxdepth 1 -name "$libglob" 2>/dev/null | wc -l | tr -d '[:space:]')"
+if [[ ! -f "$SUMO_BIN/$sentinel" || "$n" -eq 0 ]]; then
+    echo "[ERROR] the native runtime extracted but $SUMO_BIN has no $sentinel / no $libword." >&2
+    echo "        Fetched ${DEP_URL##*/} for platform $PLATFORM_TAG." >&2
     exit 1
 fi
-echo "  native runtime ready ($n DLLs)"
+echo "  native runtime ready ($n $libword)"
 
 # --- Version marker --------------------------------------------------------
 # Written LAST and only on success: an incomplete bundle stamped as good would be
