@@ -402,8 +402,13 @@ jobs:
       # 20.04 but carries a newer libstdc++.
       - name: Pack the Linux bundle
         run: |
+          # Empty on a branch with no release channel (any feature branch), and
+          # the packer then derives the label from `git describe` -- which is
+          # what the Windows side does too. Passing a literal 'v0.0.0' fallback
+          # instead produced fixs-build-v0.0.0-linux-x86_64.zip on PR runs, a
+          # version that does not exist and tells a reviewer nothing.
           ./scripts/dispatch/pack_linux_bundle.sh \
-            --version "${{ needs.build-publish.outputs.tag || 'v0.0.0' }}" \
+            --version "${{ needs.build-publish.outputs.tag }}" \
             --out-dir dist
 
       - name: Upload bundle as a workflow artifact (inspect on PRs)
