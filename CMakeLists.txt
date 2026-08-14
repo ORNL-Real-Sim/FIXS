@@ -197,3 +197,94 @@ else()
         target_link_libraries(TrafficLayer PRIVATE stdc++fs)
     endif()
 endif()
+
+# --- VirCarlaEnv ------------------------------------------------------------
+# OPTIONAL, unlike TrafficLayer: it needs the CARLA C++ client SDK, which no
+# distro packages and CARLA publishes nowhere (its releases carry no assets at
+# all). A machine without it should still build TrafficLayer, so a missing SDK
+# is a skip with an explanation, never a configure error.
+#
+#   scripts/fetch_native_deps.sh --component carla
+#
+# As with libsumo, WHERE it lives is declared in dependencies.yaml and read
+# here, so the fetch script and this file cannot disagree.
+set(FIXS_LIBCARLA_RELDIR "CommonLib/libcarla")
+string(REGEX MATCH "\n  carla:[^\n]*\n((  [^\n]*\n|    [^\n]*\n)+)" _m "${_fixs_deps_yaml}")
+if(CMAKE_MATCH_1)
+    string(REGEX MATCH "location:[ \t]*\"([^\"]+)\"" _m2 "${CMAKE_MATCH_1}")
+    if(CMAKE_MATCH_1)
+        set(FIXS_LIBCARLA_RELDIR "${CMAKE_MATCH_1}")
+    endif()
+endif()
+
+set(FIXS_LIBCARLA_DIR "${CMAKE_CURRENT_SOURCE_DIR}/${FIXS_LIBCARLA_RELDIR}" CACHE PATH
+    "Root of the CARLA client SDK (expects include/carla and lib/libcarla_client.a)")
+
+option(FIXS_BUILD_VIRCARLAENV "Build VirCarlaEnv (requires the CARLA client SDK)" ON)
+
+if(FIXS_BUILD_VIRCARLAENV AND NOT EXISTS "${FIXS_LIBCARLA_DIR}/lib/libcarla_client.a")
+    message(STATUS
+        "VirCarlaEnv: SKIPPED -- no CARLA client SDK at ${FIXS_LIBCARLA_DIR}. "
+        "Run scripts/fetch_native_deps.sh --component carla to acquire it.")
+    set(FIXS_BUILD_VIRCARLAENV OFF)
+endif()
+
+if(FIXS_BUILD_VIRCARLAENV)
+    # Second copy of VirCarlaEnv.vcxproj's TU list, guarded by
+    # scripts/check_source_lists.py exactly as TrafficLayer's is.
+    set(VIRCARLAENV_SOURCES
+        CommonLib/ConfigHelper.cpp
+        CommonLib/DataLogger.cpp
+        CommonLib/EgoDriver.cpp
+        CommonLib/MsgHelper.cpp
+        CommonLib/SocketHelper.cpp
+        CommonLib/VirEnvCore.cpp
+        CommonLib/XilGuard.cpp
+        VirCarlaEnv/VirCarlaEnv/CarlaBackend.cpp
+        VirCarlaEnv/VirCarlaEnv/BridgeHelper.cpp
+        VirCarlaEnv/VirCarlaEnv/DebugHelper.cpp
+        VirCarlaEnv/VirCarlaEnv/mainVirCarla.cpp)
+
+    add_executable(VirCarlaEnv ${VIRCARLAENV_SOURCES})
+    target_compile_features(VirCarlaEnv PRIVATE cxx_std_17)
+
+    target_include_directories(VirCarlaEnv PRIVATE
+        "${CMAKE_CURRENT_BINARY_DIR}/generated"          # see TrafficLayer above
+        "${CMAKE_CURRENT_SOURCE_DIR}/CommonLib"
+        "${CMAKE_CURRENT_SOURCE_DIR}/VirCarlaEnv/VirCarlaEnv"
+        "${FIXS_LIBCARLA_DIR}/include")
+    # SYSTEM: boost 1.81 and rpclib are third-party headers that do not compile
+    # warning-free under this project's flags, and they are not ours to fix.
+    target_include_directories(VirCarlaEnv SYSTEM PRIVATE
+        "${FIXS_LIBCARLA_DIR}/include/system")
+
+    # Static archives, listed dependency-first because a static link is
+    # order-sensitive: carla_client pulls rpc, boost::filesystem and the
+    # Recast/Detour navigation code.
+    #
+    # NOT linked, though VirCarlaEnv.vcxproj lists them: libsumocpp/libtracicpp
+    # (no TU in this target references libsumo, libtraci or TrafficHelper),
+    # boost_python310 (nothing uses the Python bindings), and zlib/zlibstatic
+    # (the system libz here). They are vestigial on Windows too.
+    set(_fixs_carla_libs
+        carla_client rpc
+        boost_filesystem boost_system boost_atomic
+        Recast Detour DetourCrowd DetourTileCache DebugUtils)
+    foreach(_lib IN LISTS _fixs_carla_libs)
+        target_link_libraries(VirCarlaEnv PRIVATE "${FIXS_LIBCARLA_DIR}/lib/lib${_lib}.a")
+    endforeach()
+
+    target_link_libraries(VirCarlaEnv PRIVATE yaml-cpp)
+
+    if(WIN32)
+        target_compile_definitions(VirCarlaEnv PRIVATE
+            WIN32 NOMINMAX _CRT_SECURE_NO_WARNINGS _WINSOCK_DEPRECATED_NO_WARNINGS)
+        target_link_libraries(VirCarlaEnv PRIVATE ws2_32 Mswsock AdvApi32 shlwapi)
+    else()
+        find_package(Threads REQUIRED)
+        target_link_libraries(VirCarlaEnv PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
+        if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9.0)
+            target_link_libraries(VirCarlaEnv PRIVATE stdc++fs)
+        endif()
+    endif()
+endif()
