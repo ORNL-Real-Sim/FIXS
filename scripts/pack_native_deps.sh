@@ -55,6 +55,7 @@ COMPONENT=sumo
 CARLA_ROOT="${CARLA_ROOT:-}"    # env is a fallback; --carla-root overrides it
 PUBLISH=0
 ALLOW_ANY_DISTRO=0
+NO_CONTAINER_CHECK=0
 BUILD_ON="20.04"
 
 die()  { echo "ERROR: $*" >&2; exit 1; }
@@ -68,6 +69,7 @@ while [ $# -gt 0 ]; do
         --out-dir)           OUT_DIR="$2"; shift 2 ;;
         --repo)              GH_REPO="$2"; shift 2 ;;
         --allow-any-distro)  ALLOW_ANY_DISTRO=1; shift ;;
+        --no-container-check) NO_CONTAINER_CHECK=1; shift ;;
         -h|--help)           sed -n '2,50p' "${BASH_SOURCE[0]}"; exit 0 ;;
         *) die "unknown argument: $1 (try --help)" ;;
     esac
@@ -112,8 +114,68 @@ fi
 
 command -v zip >/dev/null 2>&1 || die "'zip' not found: sudo apt-get install -y zip"
 
-STAGE="$(mktemp -d)"
-trap 'rm -rf "$STAGE"' EXIT
+STAGE="$(mktemp -d)"     # zipped verbatim -- only payload goes in here
+SCRATCH="$(mktemp -d)"   # probes, logs, anything transient
+trap 'rm -rf "$STAGE" "$SCRATCH"' EXIT
+
+# =============================================================================
+# Symbol-version baseline
+# =============================================================================
+# "Built on $BUILD_ON" is checked above by reading /etc/os-release, which is NOT
+# the same thing as "links against $BUILD_ON's libraries". A developer box that
+# has a newer toolchain installed -- gcc-13 from a PPA is common, and CARLA
+# needs a modern one -- still says VERSION_ID=20.04 while its libstdc++ exports
+# symbols focal never had. An artifact built there fails to LINK on stock focal,
+# and neither the distro check nor the link probe (which runs against the local,
+# newer libstdc++) notices.
+#
+# That is not hypothetical: the first libcarla asset packed here referenced
+# std::__exception_ptr::exception_ptr::_M_addref (gcc 12+) from carla_client and
+# std::__throw_bad_array_new_length (gcc 11+) from rpclib. It linked on the
+# packing box and on 22.04/24.04, and failed on stock 20.04 -- the very distro
+# the asset exists to serve.
+#
+# The check differs by artifact kind, and the difference is not cosmetic:
+#
+#   a SHARED LIBRARY records the symbol VERSION NODES it needs, and the loader
+#   demands exactly those, so reading them off the .so is the whole answer.
+#
+#   a STATIC ARCHIVE records unversioned names; the version is chosen by
+#   whoever links it. Reading versions off a probe binary linked HERE therefore
+#   over-reports -- std::condition_variable::wait binds to GLIBCXX_3.4.30 on
+#   this box and to an older node on focal, and both are correct. What matters
+#   for an archive is whether the NAMES it needs exist on the baseline at all,
+#   which only the baseline can answer: hence the container probe below.
+BASE_GLIBC=2.31           # Ubuntu 20.04
+BASE_GLIBCXX=3.4.28       # libstdc++6 10.x, focal's stock
+BASE_CXXABI=1.3.12
+
+# Highest version required from a symbol-version family (GLIBC/GLIBCXX/CXXABI).
+# Empty when the artifact requires none, which is a pass, not a failure.
+max_required_version() {
+    objdump -p "$1" 2>/dev/null | grep -oE "$2_[0-9][0-9.]*" | sed "s/^$2_//" | sort -V | tail -1
+}
+
+check_baseline_symbols() {
+    local file="$1" what="$2" spec fam base req
+    command -v objdump >/dev/null 2>&1 || { note "objdump not found; skipping symbol-baseline check"; return 0; }
+    for spec in "GLIBC:$BASE_GLIBC" "GLIBCXX:$BASE_GLIBCXX" "CXXABI:$BASE_CXXABI"; do
+        fam="${spec%%:*}"; base="${spec##*:}"
+        req="$(max_required_version "$file" "$fam")"
+        [ -n "$req" ] || continue
+        if [ "$(printf '%s\n%s\n' "$base" "$req" | sort -V | tail -1)" != "$base" ]; then
+            die "$what requires ${fam}_${req}, but Ubuntu $BUILD_ON provides at most ${fam}_${base}.
+       The artifact was linked against a NEWER toolchain than the oldest
+       supported distro has, so it would fail to link or load there -- even
+       though this box reports VERSION_ID=$BUILD_ON.
+       Check what is installed:  dpkg -l | grep libstdc++6
+       Rebuild the payload with that distro's stock compiler (for libcarla:
+       cmake -DCMAKE_BUILD_TYPE=Client with a toolchain file naming g++-9, and
+       rebuild rpclib the same way), or pack inside a stock container."
+        fi
+        note "$what: max ${fam}_${req} <= ${fam}_${base}"
+    done
+}
 
 # =============================================================================
 # libsumo
@@ -143,6 +205,11 @@ pack_sumo() {
         die "libtracicpp.so has unresolved dependencies; refusing to pack"
     fi
     note "loadability check OK ($(ls "$STAGE/libsumo"/*.h | wc -l) headers)"
+
+    # Same exposure as libcarla: this .so is built by the packing box's
+    # compiler, so a newer-than-focal toolchain would produce a library that
+    # cannot load on focal.
+    check_baseline_symbols "$STAGE/libsumo/bin/libtracicpp.so" "libtracicpp.so"
 }
 
 # =============================================================================
@@ -250,7 +317,7 @@ pack_carla() {
 # same CARLA API surface VirCarlaEnv does, so a shipped asset that cannot build
 # VirCarlaEnv cannot pass.
 verify_carla() {
-    local out="$1" probe="$STAGE/probe"
+    local out="$1" probe="$SCRATCH/probe"
     command -v g++ >/dev/null 2>&1 || die "'g++' not found; cannot verify the staged SDK"
     mkdir -p "$probe"
     cat > "$probe/probe.cpp" <<'PROBE'
@@ -303,7 +370,77 @@ PROBE
        toolchain. Rebuild with the client target and re-pack."
     fi
     note "link probe OK (libstdc++ ABI, $(du -h "$probe/probe" | cut -f1) binary)"
+
+    # Cheap always-on screen for the two failures we have actually hit, so a
+    # box without a container runtime is not left with no check at all. It is a
+    # heuristic -- a list of known post-baseline symbols, not a proof -- which
+    # is why the container probe below is the one that decides.
+    local bad
+    # '|| true': a clean payload means grep matches nothing and exits 1, which
+    # set -e would otherwise treat as the script failing at its own success.
+    bad="$(nm -u "$out"/lib/*.a 2>/dev/null \
+           | grep -oE '_M_addref|_M_release|__throw_bad_array_new_length' | sort -u | tr '\n' ' ' || true)"
+    if [ -n "$bad" ]; then
+        die "the staged archives reference libstdc++ symbols newer than Ubuntu $BUILD_ON: $bad
+       They come from an archive compiled against a NEWER libstdc++ than focal's
+       (gcc 11 added __throw_bad_array_new_length, gcc 12 exception_ptr::_M_addref),
+       which links here and fails on stock $BUILD_ON. Rebuild the offending
+       archive with that distro's stock compiler -- see doc/Carla_Linux_building.md."
+    fi
+
+    verify_carla_on_baseline "$out"
     rm -rf "$probe"
+}
+
+# The authoritative check: link the same probe inside a STOCK Ubuntu $BUILD_ON
+# container. Only the baseline itself can answer whether the archives' undefined
+# symbols exist there, and this is the check that caught the first asset -- which
+# passed everything above and still failed to link on stock focal.
+#
+# Skipped, loudly, when no container runtime is available: a machine without one
+# can still pack, it just cannot prove the result. --no-container-check makes
+# that deliberate rather than accidental.
+verify_carla_on_baseline() {
+    local out="$1" engine=""
+    if [ "$NO_CONTAINER_CHECK" -eq 1 ]; then
+        echo "  WARNING: baseline container check SKIPPED (--no-container-check)." >&2
+        return 0
+    fi
+    for e in docker podman; do
+        if command -v "$e" >/dev/null 2>&1 && "$e" info >/dev/null 2>&1; then engine="$e"; break; fi
+    done
+    if [ -z "$engine" ]; then
+        echo "  WARNING: no usable docker/podman, so the staged SDK was NOT link-tested on" >&2
+        echo "           stock Ubuntu $BUILD_ON. The local probe passes even when the asset" >&2
+        echo "           cannot link there, so verify before trusting this artifact." >&2
+        return 0
+    fi
+
+    cat > "$SCRATCH/baseline_probe.sh" <<'BASELINE'
+set -e
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -qq >/dev/null
+apt-get install -y -qq --no-install-recommends build-essential >/dev/null
+cd /stage
+g++ -std=c++17 -pthread -O1 -DNDEBUG -Ilibcarla/include -isystem libcarla/include/system \
+    -c /scratch/probe/probe.cpp -o /tmp/probe.o
+g++ -std=c++17 -pthread -o /tmp/probe /tmp/probe.o -Llibcarla/lib \
+    -Wl,-Bstatic -lcarla_client -lrpc -lboost_filesystem -Wl,-Bdynamic \
+    -Llibcarla/lib -lRecast -lDetour -lDetourCrowd
+BASELINE
+
+    note "verifying on stock Ubuntu $BUILD_ON via $engine (authoritative)"
+    if ! "$engine" run --rm \
+            -v "$STAGE:/stage:ro" \
+            -v "$SCRATCH:/scratch:ro" \
+            "ubuntu:$BUILD_ON" bash /scratch/baseline_probe.sh 2>"$SCRATCH/baseline.log"; then
+        grep -E 'undefined reference|error:' "$SCRATCH/baseline.log" | head -10 >&2
+        die "the staged SDK does not link on stock Ubuntu $BUILD_ON (full log: $STAGE/baseline.log
+       -- copy it before this script exits, the staging directory is temporary).
+       It links HERE only because this box has a newer libstdc++ than focal
+       ships. Rebuild the payload with the baseline compiler."
+    fi
+    note "baseline link OK on stock Ubuntu $BUILD_ON"
 }
 
 if [ "$COMPONENT" = "sumo" ]; then pack_sumo; else pack_carla; fi
