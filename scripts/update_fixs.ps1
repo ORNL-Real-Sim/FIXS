@@ -56,8 +56,42 @@ $VersionFile = Join-Path $OutputDir 'FIXS_VERSION.txt'
 # existed and have no assets at all. Four of the six tags visible today are
 # unusable, and the menu used to offer all six.
 # ---------------------------------------------------------------------------
+# Which platform's artifacts belong on this machine. Defined ABOVE the first
+# consumer on purpose: PowerShell resolves a function's variables at CALL time,
+# so this worked while every call happened to sit below its old definition -- a
+# property no reader should have to verify before moving a function.
+$PlatformTag = 'windows-x86_64'
+
 function Get-BuildAsset($release) {
-    $release.assets | Where-Object { $_.name -like 'fixs-build-*.zip' } | Select-Object -First 1
+    # Two rules, the same ones #306 applied to the native-deps assets, because the
+    # same trap is one level up here. `-like 'fixs-build-*.zip' | Select -First 1`
+    # matches EVERY platform's bundle, so the moment a release carries both
+    # fixs-build-<ver>-windows-x86_64.zip and fixs-build-<ver>-linux-x86_64.zip it
+    # installs whichever GitHub happens to list first -- and '-' (0x2D) sorts
+    # before '.' (0x2E), so that is the Linux one.
+    #
+    #   1. Prefer the platform-qualified name; fall back to the legacy unqualified
+    #      one, which has always meant a Windows bundle, so today's releases keep
+    #      installing with nothing republished.
+    #   2. Never take the first of several. Two candidates means the release is
+    #      ambiguous: say so and stop.
+    $qualified = @($release.assets | Where-Object { $_.name -match "^fixs-build-.*-$([regex]::Escape($PlatformTag))\.zip$" })
+    if ($qualified.Count -eq 1) { return $qualified[0] }
+    if ($qualified.Count -gt 1) {
+        throw ("release '$($release.tag_name)' carries $($qualified.Count) build bundles for " +
+               "$PlatformTag ($($qualified.name -join ', ')); nothing says which to install. " +
+               'Retire the stale one.')
+    }
+    # Legacy: unqualified, and NOT another platform's qualified name.
+    $legacy = @($release.assets | Where-Object {
+        $_.name -match '^fixs-build-.*\.zip$' -and $_.name -notmatch '-(windows|linux|macos)-x86_64\.zip$'
+    })
+    if ($legacy.Count -eq 1) { return $legacy[0] }
+    if ($legacy.Count -gt 1) {
+        throw ("release '$($release.tag_name)' carries $($legacy.Count) unqualified build bundles " +
+               "($($legacy.name -join ', ')); nothing says which to install.")
+    }
+    return $null
 }
 
 function Get-InstallableReleases {
@@ -107,8 +141,6 @@ function Get-Asset {
 #      is ambiguous and this script cannot know which is right; say so and stop.
 #      Silent mis-selection is what made the original bug expensive to find.
 # ---------------------------------------------------------------------------
-$PlatformTag = 'windows-x86_64'
-
 function Get-BundleDepVersion([string]$label) {
     # BUILD_INFO.txt ships INSIDE the bundle and records the versions it was
     # actually built against - a better pin than dependencies.yaml (not shipped)

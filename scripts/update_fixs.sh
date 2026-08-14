@@ -215,9 +215,70 @@ RELEASE_JSON="$TMP_DIR/release.json"
 "${CURL[@]}" "$API/releases/tags/$VERSION" -o "$RELEASE_JSON" \
     || { echo "[ERROR] Could not find FIXS release '$VERSION' at $REPO." >&2; exit 1; }
 
-ASSET_URL="$(grep -o '"browser_download_url":[[:space:]]*"[^"]*"' "$RELEASE_JSON" \
-    | sed 's/.*"\(https[^"]*\)".*/\1/' | grep -E 'fixs-build-.*\.zip$' | head -n1)"
-[[ -n "$ASSET_URL" ]] || { echo "[ERROR] Release '$VERSION' carries no 'fixs-build-*.zip' and cannot be installed." >&2; exit 1; }
+# ---------------------------------------------------------------------------
+# Pick ONE build bundle, by the same two rules #306 applied to the native-deps
+# assets -- because the same trap is one level up here. This was
+# 'fixs-build-.*\.zip$ | head -n1', and the moment a release carries both
+#
+#     fixs-build-v0.9.0-alpha-windows-x86_64.zip
+#     fixs-build-v0.9.0-alpha-linux-x86_64.zip
+#
+# that pattern matches both and head -n1 picks whichever GitHub lists first --
+# installing Linux binaries on Windows, or the reverse, with no complaint. The
+# platform is known ($PLATFORM_TAG); use it.
+#
+#   1. Prefer the platform-qualified name, then fall back to the legacy
+#      unqualified one, so releases published before the split still install.
+#   2. Never take the first of several. Two candidates means the release is
+#      ambiguous: say so and stop.
+# ---------------------------------------------------------------------------
+BUILD_URLS=()
+while IFS= read -r _u; do
+    [[ -n "$_u" ]] && BUILD_URLS+=("$_u")
+done < <(grep -o '"browser_download_url":[[:space:]]*"[^"]*"' "$RELEASE_JSON" \
+         | sed 's/.*"\(https[^"]*\)".*/\1/' | grep -E 'fixs-build-.*\.zip$')
+# Guarded before the loop: expanding an empty array under `set -u` is itself an
+# error on bash < 4.4, and that trace would replace the real diagnosis.
+[[ "${#BUILD_URLS[@]}" -gt 0 ]] \
+    || { echo "[ERROR] Release '$VERSION' carries no 'fixs-build-*.zip' and cannot be installed." >&2; exit 1; }
+
+# Pass 1 takes the platform-qualified name. Pass 2 accepts a legacy unqualified
+# one, but only after excluding every name that carries SOME platform tag --
+# otherwise 'fixs-build-.*\.zip' would match the other platform's bundle and we
+# would be back to picking by luck.
+select_build_asset() {   # uses BUILD_URLS + PLATFORM_TAG, sets ASSET_URL
+    local rx u b
+    local -a hits
+    ASSET_URL=""
+    # The legacy fallback is offered to WINDOWS only. Every unqualified bundle
+    # ever published was built on Windows and holds .exe files, so accepting one
+    # on Linux would install a tree with no runnable binary in it and report
+    # success. Windows keeps installing today's releases untouched.
+    local -a patterns=("^fixs-build-.*-${PLATFORM_TAG}\.zip$")
+    [[ "$PLATFORM_TAG" == "windows-x86_64" ]] && patterns+=("^fixs-build-.*\.zip$")
+    for rx in "${patterns[@]}"; do
+        hits=()
+        for u in "${BUILD_URLS[@]}"; do
+            b="${u##*/}"
+            if [[ "$rx" == "^fixs-build-.*\.zip$" ]]; then
+                case "$b" in *-windows-x86_64.zip|*-linux-x86_64.zip|*-macos-x86_64.zip) continue ;; esac
+            fi
+            [[ "$b" =~ $rx ]] && hits+=("$u")
+        done
+        if [[ "${#hits[@]}" -eq 1 ]]; then ASSET_URL="${hits[0]}"; return 0; fi
+        if [[ "${#hits[@]}" -gt 1 ]]; then
+            echo "[ERROR] Release carries ${#hits[@]} build bundles for $PLATFORM_TAG:" >&2
+            printf '        %s\n' "${hits[@]##*/}" >&2
+            echo "        nothing says which to install. Retire the stale one." >&2
+            return 1
+        fi
+    done
+    echo "[ERROR] no build bundle for $PLATFORM_TAG (looked for" >&2
+    echo "        fixs-build-<ver>-$PLATFORM_TAG.zip, then fixs-build-<ver>.zip):" >&2
+    printf '        %s\n' "${BUILD_URLS[@]##*/}" >&2
+    return 1
+}
+select_build_asset || exit 1
 ASSET_NAME="$(basename "$ASSET_URL")"
 SHA="$(json_field "$RELEASE_JSON" target_commitish)"
 PUBLISHED_AT="$(json_field "$RELEASE_JSON" published_at)"
