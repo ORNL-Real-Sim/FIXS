@@ -4,17 +4,17 @@
 //============================================================================
 #include "DataLogger.h"
 
-#include <windows.h>     // CreateDirectoryA (CommonLib stays C++14: no std::filesystem)
+#include "PlatformCompat.h"   // createDirectory (CommonLib stays C++14: no std::filesystem)
 #include <cstdio>
 
 namespace fixs {
 
-// Best-effort: create every ancestor directory of 'path' (Win32, C++14-safe).
+// Best-effort: create every ancestor directory of 'path' (C++14-safe).
 static void ensureParentDir(const std::string& path) {
     std::string cur;
     for (char c : path) {
         if ((c == '/' || c == '\\') && !cur.empty() && cur.back() != ':')
-            CreateDirectoryA(cur.c_str(), NULL);
+            FIXS::Platform::createDirectory(cur);
         cur.push_back(c);
     }
 }

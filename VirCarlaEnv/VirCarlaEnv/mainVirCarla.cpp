@@ -28,6 +28,7 @@
 #include <carla/Memory.h>
 #include <carla/trafficmanager/TrafficManager.h>
 
+#include "PlatformCompat.h"
 #include "BridgeHelper.h"
 #include "CarlaBackend.h"
 #include "../../CommonLib/VirEnvCore.h"
@@ -302,7 +303,9 @@ int main(int argc, const char* argv[]) {
             // ---- core: recv (only on the 0.1s feed boundary) -> spawn / pose
             //      (batch) / despawn; the refresh interpolates EVERY sub-step ----
             if (core.runStep(simTime, &err) < 0) {
-                if (WSAGetLastError() != WSAEINTR && WSAGetLastError() != WSAEFAULT)
+                const int sockErr = FIXS::Platform::socketErrorCode();
+                if (sockErr != FIXS::Platform::kSocketErrInterrupted &&
+                    sockErr != FIXS::Platform::kSocketErrFault)
                     std::cerr << "co-sim recv/step ended: " << (err ? err : "?") << "\n";
                 break;
             }
@@ -457,7 +460,9 @@ int main(int argc, const char* argv[]) {
             // ---- driver owns the send: once per FIXS feed (pairs with the recv) ----
             if (onFeed && core.ENABLE_REALSIM) {
                 if (core.Sock_c.sendData(core.Sock_c.serverSock[sock0], sock0, (float)simTime, 1, core.Msg_c) < 0) {
-                    if (WSAGetLastError() != WSAEINTR && WSAGetLastError() != WSAEFAULT)
+                    const int sockErr = FIXS::Platform::socketErrorCode();
+                    if (sockErr != FIXS::Platform::kSocketErrInterrupted &&
+                        sockErr != FIXS::Platform::kSocketErrFault)
                         std::cerr << "send to traffic layer failed\n";
                     break;
                 }
