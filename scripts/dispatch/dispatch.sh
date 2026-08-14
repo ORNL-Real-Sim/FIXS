@@ -8,7 +8,8 @@
 #   dispatch.bat step            Linux
 #   -------------------------    ---------------------------------------------
 #   1 external libraries         yes - yaml-cpp, built as part of the CMake tree
-#   2 core components            yes - TrafficLayer
+#   2 core components            yes - TrafficLayer, and VirCarlaEnv with
+#                                      --with-carla
 #   3 VISSIM DriverModel DLLs    no  - VISSIM is Windows-only (rejected at
 #                                      config-parse time by a Linux build)
 #   4 CarMaker / 5 dSPACE / 6 MEX no - licensed Windows toolchains
@@ -16,8 +17,14 @@
 # So this is: check the toolchain -> fetch native deps -> configure -> build ->
 # smoke-test -> summary. Same shape as the .bat, minus what does not apply.
 #
+# VirCarlaEnv is opt-in because its CARLA client SDK is a 30 MB download that
+# only Carla users need; TrafficLayer neither links nor requires it. Once the
+# SDK is present the target builds on every subsequent run without the flag,
+# since CMake simply finds it.
+#
 # Usage:
 #   scripts/dispatch/dispatch.sh                 # full build + smoke checks
+#   scripts/dispatch/dispatch.sh --with-carla    # ... including VirCarlaEnv
 #   scripts/dispatch/dispatch.sh --clean         # wipe build/ first
 #   scripts/dispatch/dispatch.sh --debug         # Debug instead of Release
 #   scripts/dispatch/dispatch.sh --no-deps       # skip fetch_native_deps.sh
@@ -33,15 +40,17 @@ JOBS="$(nproc 2>/dev/null || echo 4)"
 DO_DEPS=1
 DO_SMOKE=1
 DO_CLEAN=0
+WITH_CARLA=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --clean)     DO_CLEAN=1;  shift ;;
-        --debug)     BUILD_TYPE=Debug; shift ;;
-        --no-deps)   DO_DEPS=0;   shift ;;
-        --no-smoke)  DO_SMOKE=0;  shift ;;
-        --jobs|-j)   JOBS="$2";   shift 2 ;;
-        -h|--help)   sed -n '2,27p' "${BASH_SOURCE[0]}"; exit 0 ;;
+        --clean)      DO_CLEAN=1;  shift ;;
+        --debug)      BUILD_TYPE=Debug; shift ;;
+        --no-deps)    DO_DEPS=0;   shift ;;
+        --no-smoke)   DO_SMOKE=0;  shift ;;
+        --with-carla) WITH_CARLA=1; shift ;;
+        --jobs|-j)    JOBS="$2";   shift 2 ;;
+        -h|--help)    sed -n '2,33p' "${BASH_SOURCE[0]}"; exit 0 ;;
         *) echo "unknown argument: $1 (try --help)" >&2; exit 2 ;;
     esac
 done
@@ -85,6 +94,16 @@ if [ "$DO_DEPS" -eq 1 ]; then
         echo "Cannot continue without libtracicpp. See the message above."
         exit 1
     fi
+    # libcarla is optional and only VirCarlaEnv uses it, so a failure here is a
+    # warning: the rest of the build still has everything it needs.
+    if [ "$WITH_CARLA" -eq 1 ]; then
+        if "$REPO_ROOT/scripts/fetch_native_deps.sh" --component carla; then
+            step_ok "Native deps (libcarla)"
+        else
+            step_fail "Native deps (libcarla)"
+            echo "  VirCarlaEnv will be skipped; TrafficLayer is unaffected."
+        fi
+    fi
 else
     echo "===> Native deps: SKIPPED (--no-deps)"
 fi
@@ -118,8 +137,19 @@ else
     exit 1
 fi
 
-WARN_COUNT=$(grep -E 'warning:' "$BLD_LOG" 2>/dev/null | grep -vc 'yaml-cpp')
 BIN="$BUILD_DIR/TrafficLayer"
+CARLA_BIN="$BUILD_DIR/VirCarlaEnv"
+# Configure SKIPS VirCarlaEnv when the SDK is absent, so a missing binary here
+# is the documented case, not a build failure. Say which happened.
+if [ -x "$CARLA_BIN" ]; then
+    step_ok "VirCarlaEnv ($BUILD_TYPE)"
+else
+    echo "===> VirCarlaEnv: SKIPPED (no CARLA client SDK -- see --with-carla)"
+fi
+
+# The third-party headers are the noisy ones and neither is ours to fix:
+# yaml-cpp is vendored, boost/rpclib arrive inside the CARLA SDK.
+WARN_COUNT=$(grep -E 'warning:' "$BLD_LOG" 2>/dev/null | grep -vcE 'yaml-cpp|/libcarla/')
 
 # --- step 3: smoke checks ----------------------------------------------------
 if [ "$DO_SMOKE" -eq 1 ]; then
@@ -142,6 +172,17 @@ if [ "$DO_SMOKE" -eq 1 ]; then
         step_ok "Smoke: VISSIM config rejected"
     fi
     rm -f "$VY"
+
+    # Carla itself is not started here: it needs a GPU, and this script must run
+    # on a headless CI runner. --help proves the binary and its statically
+    # linked CARLA client actually load.
+    if [ -x "$CARLA_BIN" ]; then
+        if "$CARLA_BIN" --help >/dev/null 2>&1; then
+            step_ok "Smoke: VirCarlaEnv --help"
+        else
+            step_fail "Smoke: VirCarlaEnv --help"
+        fi
+    fi
 fi
 
 # --- summary -----------------------------------------------------------------
@@ -155,6 +196,7 @@ else
 fi
 echo "=============================="
 echo "binary:            $BIN"
+[ -x "$CARLA_BIN" ] && echo "                   $CARLA_BIN"
 echo "warnings (FIXS):   $WARN_COUNT"
 echo "logs:              $CFG_LOG"
 echo "                   $BLD_LOG"
