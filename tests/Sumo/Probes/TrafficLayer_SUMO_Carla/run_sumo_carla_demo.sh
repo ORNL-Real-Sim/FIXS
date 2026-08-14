@@ -9,10 +9,16 @@
 # .bat, reached differently in two places -- both because this has to work
 # unattended on a headless box, and next to a CARLA someone else is using:
 #
-#   * it starts HEADLESS sumo, not sumo-gui (which needs fox/OpenGL and a
-#     display), and stages a config with EnableAutoLaunch:false so TrafficLayer
-#     does not try to spawn a GUI itself. The committed config.yaml is never
-#     modified. --gui opts back in.
+#   * it SHOWS both windows when there is a display, exactly as the .bat does
+#     -- a demo you cannot see is a test, not a demo -- and silently drops to
+#     headless sumo + CARLA -RenderOffScreen when $DISPLAY is unset, so the same
+#     script still works over ssh and on a CI runner. --headless forces that;
+#     --gui / --render force the visible side on.
+#
+#     It always stages a config with EnableAutoLaunch:false, though, so
+#     TrafficLayer never spawns a SUMO of its own -- this script owns that
+#     process and needs to be able to stop it. The committed config.yaml is
+#     never modified.
 #
 #   * it starts CARLA on its OWN port (2100), not the conventional 2000, and
 #     stops only the server it started. A box that develops Carla usually has a
@@ -23,10 +29,10 @@
 #
 # Usage:
 #   ./run_sumo_carla_demo.sh                    # everything, 20 s, own server
-#   ./run_sumo_carla_demo.sh --duration 60      # watch it longer
-#   ./run_sumo_carla_demo.sh --render           # windowed, not RenderOffScreen
+#   ./run_sumo_carla_demo.sh --duration 120     # watch it longer
+#   ./run_sumo_carla_demo.sh --headless         # no windows (ssh / CI)
 #   ./run_sumo_carla_demo.sh --carla-port 2000  # attach to a running server
-#   ./run_sumo_carla_demo.sh --config config_l2.yaml --gui
+#   ./run_sumo_carla_demo.sh --config config_l2.yaml
 # =============================================================================
 set -uo pipefail
 
@@ -34,9 +40,15 @@ TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$TEST_DIR/../../../.." && pwd)"
 CONFIG="config.yaml"
 DURATION=20
+# Visible when there is somewhere to draw, headless when there is not. The
+# first version defaulted to headless everywhere and "PASS" was all you ever
+# saw of a co-simulation that had in fact run -- the wrong default for a demo.
+HEADLESS=0
+[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || HEADLESS=1
 USE_GUI=0
 CARLA_PORT=2100          # ours, deliberately not the conventional 2000
-CARLA_ROOT="${CARLA_ROOT:-}"
+ENV_ROOT="${CARLA_ROOT:-}"   # ambient, lowest precedence (see the pick below)
+CLI_ROOT=""                  # --carla-root, highest
 XODR="$REPO_ROOT/tests/Vissim/SimpleEcho/simple_loop.xodr"
 RENDER=0
 STEP_LENGTH=0.1
@@ -46,9 +58,10 @@ while [ $# -gt 0 ]; do
         --config)     CONFIG="$2";     shift 2 ;;
         --duration)   DURATION="$2";   shift 2 ;;
         --carla-port) CARLA_PORT="$2"; shift 2 ;;
-        --carla-root) CARLA_ROOT="$2"; shift 2 ;;
-        --render)     RENDER=1;        shift ;;
-        --gui)        USE_GUI=1;       shift ;;
+        --carla-root) CLI_ROOT="$2";   shift 2 ;;
+        --render)     RENDER=1; HEADLESS=0; shift ;;
+        --gui)        USE_GUI=1; HEADLESS=0; shift ;;
+        --headless)   HEADLESS=1; RENDER=0; USE_GUI=0; shift ;;
         -h|--help)    sed -n '2,33p' "${BASH_SOURCE[0]}"; exit 0 ;;
         *) echo "unknown argument: $1 (try --help)" >&2; exit 2 ;;
     esac
@@ -56,6 +69,13 @@ done
 
 cd "$TEST_DIR" || exit 1
 die() { echo "ERROR: $*" >&2; exit 1; }
+
+if [ "$HEADLESS" -eq 0 ]; then
+    RENDER=1
+    # sumo-gui is a separate binary and a separate package; if it is missing,
+    # show CARLA anyway rather than refusing to run.
+    command -v sumo-gui >/dev/null 2>&1 && USE_GUI=1
+fi
 
 # --- locate the pieces --------------------------------------------------------
 TL="$REPO_ROOT/build/TrafficLayer"
@@ -124,7 +144,7 @@ else
     [ -f "$HOME/.fixs/carla.json" ] && JSON_ROOT="$(sed -n 's/.*"carla_root"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$HOME/.fixs/carla.json" | head -1)"
 
     PICKED=""; REJECTED=""
-    for cand in "$CARLA_ROOT" "$JSON_ROOT" "${CARLA_ROOT:-}"; do
+    for cand in "$CLI_ROOT" "$JSON_ROOT" "$ENV_ROOT"; do
         [ -n "$cand" ] && [ -x "$cand/CarlaUE4.sh" ] || continue
         cver="$(cat "$cand/VERSION" 2>/dev/null | tr -d ' \r\n')"
         if [ -z "$PINNED" ] || [ -z "$cver" ] || [ "$cver" = "$PINNED" ]; then
@@ -139,7 +159,7 @@ else
        Pass --carla-root <dir with CarlaUE4.sh>, put carla_root in
        ~/.fixs/carla.json, or set CARLA_ROOT. To use a server you started
        yourself, pass --carla-port <its port>."
-    CARLA_ROOT="$PICKED"
+    CARLA_ROOT="$PICKED"   # what we actually launch
 
     # RenderOffScreen by default: this must work over ssh and on a headless box.
     # --render gives a window when you actually want to watch it.
