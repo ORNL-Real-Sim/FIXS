@@ -20,8 +20,8 @@
 #     SUMO process), our CARLA port, and any privileged port moved (below).
 #
 # Usage:
-#   ./run_sumo_carla_demo.sh                    # everything, 20 s
-#   ./run_sumo_carla_demo.sh --duration 120     # watch it longer
+#   ./run_sumo_carla_demo.sh                    # runs to SimulationEndTime
+#   ./run_sumo_carla_demo.sh --duration 30      # wall-clock cap, for a smoke run
 #   ./run_sumo_carla_demo.sh --headless         # no windows (ssh / CI)
 #   ./run_sumo_carla_demo.sh --carla-port 2000  # attach to a running server
 # =============================================================================
@@ -30,7 +30,11 @@ set -uo pipefail
 TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$TEST_DIR/../../../.." && pwd)"
 CONFIG="config.yaml"
-DURATION=20
+# Empty = run until the co-simulation ENDS ON ITS OWN, i.e. when SimulationEndTime
+# in the config is reached. --duration is a wall-clock CAP for smoke runs; it was
+# the default once, which meant this script -- not the config -- decided when a
+# demo stopped, and 20 s of a 1000 s scenario looked like the run had been cut off.
+DURATION=""
 CARLA_PORT=2100
 HEADLESS=0; [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || HEADLESS=1
 CARLA_ROOT_ARG=()
@@ -49,6 +53,10 @@ done
 
 cd "$TEST_DIR" || exit 1
 die() { echo "ERROR: $*" >&2; exit 1; }
+
+# Empty if coreutils' stdbuf is missing: the run still works, the live view
+# just lags. Never a reason to refuse to run.
+STDBUF=""; command -v stdbuf >/dev/null 2>&1 && STDBUF="stdbuf -oL -eL"
 
 TL="$REPO_ROOT/build/TrafficLayer"
 VCE="$REPO_ROOT/build/VirCarlaEnv"
@@ -120,6 +128,7 @@ stop() {
     kill -KILL "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
 }
 cleanup() {
+    kill "${TAIL_TL:-}" "${TAIL_VCE:-}" 2>/dev/null
     echo; echo "--- shutting down (bridge first, so it despawns its actors) ---"
     stop "$VCE_PID" VirCarlaEnv; stop "$TL_PID" TrafficLayer; stop "$SUMO_PID" SUMO
     [ "$OWN_CARLA" -eq 1 ] && "$LAUNCH" --port "$CARLA_PORT" --stop
@@ -144,30 +153,66 @@ if [ "$OWN_CARLA" -eq 1 ]; then
     fi
 fi
 
-echo "SUMO $SUMO_BIN | TraCI $TRAFFIC_PORT | CARLA $CARLA_PORT | ${DURATION}s"
+ENDTIME="$(grep -E '^[[:space:]]*SimulationEndTime:' "$CONFIG" | head -1 | tr -d " '\r" | cut -d: -f2)"
+echo "SUMO $SUMO_BIN | TraCI $TRAFFIC_PORT | CARLA $CARLA_PORT"
+if [ -n "$DURATION" ]; then echo "stops: after ${DURATION}s wall clock"
+else echo "stops: at SimulationEndTime=${ENDTIME:-?} sim s"; fi
 echo "[1/3] starting SUMO ..."
 "$SUMO_BIN" -c "$SUMOCFG" --remote-port "$TRAFFIC_PORT" --num-clients 1 --step-length 0.1 --start > sumo.log 2>&1 &
 SUMO_PID=$!
 sleep 2; kill -0 "$SUMO_PID" 2>/dev/null || { tail -20 sumo.log; die "SUMO exited immediately"; }
 
+# stdbuf -oL: a console gives cout/printf LINE buffering, a pipe or file gives
+# 4 KB BLOCK buffering -- which is the whole difference between "Windows shows
+# TrafficLayer's output as it happens" and a log that lags minutes behind. A
+# 1000 s run showed SimTime 700 live while the process was already at 1000.
 echo "[2/3] starting TrafficLayer ..."
-"$TL" -f "$STAGED" > trafficlayer.log 2>&1 &
+$STDBUF "$TL" -f "$STAGED" > trafficlayer.log 2>&1 &
 TL_PID=$!
 sleep 3; kill -0 "$TL_PID" 2>/dev/null || { tail -25 trafficlayer.log; die "TrafficLayer exited immediately"; }
 
-echo "[3/3] running VirCarlaEnv for ${DURATION}s ..."
-"$VCE" -f "$STAGED" -t "$TEST_DIR/traffic_light_table.csv" > vircarlaenv.log 2>&1 &
+echo "[3/3] starting VirCarlaEnv ..."
+$STDBUF "$VCE" -f "$STAGED" -t "$TEST_DIR/traffic_light_table.csv" > vircarlaenv.log 2>&1 &
 VCE_PID=$!
-sleep "$DURATION"
 
-# Read the bridge's own output rather than asserting on CARLA state: by the
-# time we could look, the actors are gone with the run.
-echo; echo "--- VirCarlaEnv (tail) ---"; tail -8 vircarlaenv.log
-SPAWNS=$(grep -ci 'spawn' vircarlaenv.log 2>/dev/null || echo 0)
+# The .bat gets a console per process from `start cmd /k`. The equivalent here
+# is to follow the logs in this one, prefixed so two streams in one terminal
+# stay readable -- and it still works over ssh, where extra windows would not.
+# sed -u for the same reason stdbuf is used above, one layer up: when this
+# script's own stdout is a pipe (a tee, a grep, a CI log), an unbuffered
+# producer feeding a BUFFERED sed is still invisible. A short run wrote 52
+# lines and showed none of them.
+tail -n +1 -f trafficlayer.log 2>/dev/null | sed -u 's/^/[TL ] /' &
+TAIL_TL=$!
+tail -n +1 -f vircarlaenv.log 2>/dev/null | sed -u 's/^/[VCE] /' &
+TAIL_VCE=$!
+
 echo
-if kill -0 "$VCE_PID" 2>/dev/null && [ "$SPAWNS" -gt 0 ]; then
-    echo "RESULT: PASS -- bridge connected, spawned vehicles ($SPAWNS spawn lines), still running at ${DURATION}s"
+if [ -n "$DURATION" ]; then
+    echo "--- running (wall-clock cap ${DURATION}s; Ctrl-C to stop early) ---"
+    sleep "$DURATION"
+else
+    # Wait on the BRIDGE, not on TrafficLayer: VirCarlaEnv is the process that
+    # stops when the scenario ends, and TrafficLayer then follows.
+    echo "--- running until SimulationEndTime (Ctrl-C to stop early) ---"
+    wait "$VCE_PID"
+    VCE_RC=$?
+fi
+
+# Two ways to pass, and they are different claims: capped means "still healthy
+# when we stopped it", uncapped means "ran the scenario to its end and exited".
+SPAWNS=$(grep -ci 'spawn' vircarlaenv.log 2>/dev/null || echo 0)
+sleep 1; kill "$TAIL_TL" "$TAIL_VCE" 2>/dev/null
+echo
+if [ -n "$DURATION" ]; then
+    if kill -0 "$VCE_PID" 2>/dev/null && [ "$SPAWNS" -gt 0 ]; then
+        echo "RESULT: PASS -- $SPAWNS spawns, still running at the ${DURATION}s cap"
+        exit 0
+    fi
+elif [ "${VCE_RC:-1}" -eq 0 ] && [ "$SPAWNS" -gt 0 ]; then
+    echo "RESULT: PASS -- $SPAWNS spawns, co-simulation ran to SimulationEndTime and exited cleanly"
     exit 0
 fi
-echo "RESULT: FAIL -- see vircarlaenv.log / trafficlayer.log / sumo.log in $TEST_DIR"
+echo "RESULT: FAIL -- bridge exit ${VCE_RC:-still running}, $SPAWNS spawns"
+echo "        see vircarlaenv.log / trafficlayer.log / sumo.log in $TEST_DIR"
 exit 1
