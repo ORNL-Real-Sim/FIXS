@@ -51,6 +51,7 @@ Examples:
   python import_map.py --package RP_Ver0529 --package-url https://.../RP_Ver0529_import.zip
 """
 import argparse
+import fnmatch
 import os
 import platform
 import re
@@ -954,13 +955,17 @@ def _resolve_carla(carla_root=None, ue4_root=None, need_source=True):
 
 
 def ensure_map(name, carla_root=None, ue4_root=None, package_url=None,
-               package_dir=None, force=False, prompt_if_exists=False, package_pick=False):
+               package_dir=None, force=False, prompt_if_exists=False,
+               package_pick=False, source_sha=None):
     """Make sure `name` is imported into the (source-build) CARLA, importing it
     if needed. Returns 0 on success; exits with a clear message otherwise.
 
     If the map already exists: `force` re-imports unconditionally; otherwise, when
     `prompt_if_exists` and the session is interactive, the user is asked whether to
-    re-import (re-download + re-cook) - handy for updating a map or testing."""
+    re-import (re-download + re-cook) - handy for updating a map or testing.
+
+    `source_sha` is the digest of the release asset being cooked; it is stamped on
+    the result so a later run can tell which bundle this map came from."""
     carla_root, ue4_root = _resolve_carla(carla_root, ue4_root)
 
     umap = cooked_map_path(carla_root, name)
@@ -1005,6 +1010,10 @@ def ensure_map(name, carla_root=None, ue4_root=None, package_url=None,
     if rc != 0:
         print(f"[import] note: Import.py exited {rc} (CARLA's cook commonly flags non-fatal "
               f"warnings as errors), but the map .umap was written.")
+    # After the restore-on-failure dance above, so the stamp only ever describes
+    # content that actually got cooked - a failed re-import restores the previous
+    # map together with its previous stamp.
+    write_source_sha(cooked_content_dir(carla_root, name), source_sha)
     print(f"[import] done: '{name}' imported -> {umap}")
     return 0
 
@@ -1123,6 +1132,11 @@ def install_precooked(carla_root, name, repo=None, tag=None, entry=None,
     real = install_cooked(carla_root, tar_path, force=force)
     if real != name:
         print(f"[{log}] precooked package provides map '{real}'")
+    # Same stamp as the source path, from the .tar.gz asset instead of the .zip:
+    # a packaged install goes stale exactly the same way a cook does. A local
+    # package leaves it unrecorded, which is the "not checked" state.
+    write_source_sha(cooked_content_dir(carla_root, real, mode="packaged"),
+                     read_source_sha(os.path.dirname(tar_path)))
     return real
 
 
@@ -1767,6 +1781,72 @@ def map_sumo_dir(name):
     return _dir_with_sumocfg(os.path.join(_map_cache_dir(name), "sumo"))
 
 
+# ------------------------------------------------ which bundle produced a map
+
+# A cooked map is identified by a DIRECTORY NAME (resolve_cooked_map), so it has no
+# memory of what produced it. That is fine while both halves of a bundle age
+# together in one cache, and wrong as soon as they do not: the CARLA half is cooked
+# once and kept, while the SUMO half tracks the library. Same map name on both
+# sides, no error anywhere, vehicles placed against geometry that moved.
+#
+# So the map carries the sha256 of the release asset it came from. NOTHING IS
+# HASHED HERE - GitHub already publishes a digest per release asset, so it is
+# queried and copied along. A map with no sha (a local pick, a hand-prepped map,
+# anything imported before this existed) simply is not checked.
+SHA_FILE = ".source_sha"
+
+
+def read_source_sha(directory):
+    """The recorded sha256 of the release asset behind `directory`, or None."""
+    try:
+        with open(os.path.join(directory, SHA_FILE), encoding="utf-8") as f:
+            return f.read().strip() or None
+    except OSError:
+        return None
+
+
+def write_source_sha(directory, sha):
+    """Record it. Best effort: failing to write a note only costs the check."""
+    if not sha or not os.path.isdir(directory):
+        return
+    try:
+        with open(os.path.join(directory, SHA_FILE), "w", encoding="utf-8") as f:
+            f.write(sha.strip() + "\n")
+    except OSError:
+        pass
+
+
+def read_cached_sha(cache_name):
+    """The sha of the bundle cached under ~/.fixs/maps/<cache_name>/, or None."""
+    return read_source_sha(_map_cache_dir(cache_name))
+
+
+def cooked_sha(carla_root, name, mode=None):
+    """The sha stamped on an imported map, or None if it was never recorded."""
+    return read_source_sha(cooked_content_dir(carla_root, name, mode))
+
+
+def release_asset_sha(repo, tag, pattern):
+    """The sha256 GitHub publishes for the release asset matching `pattern`, or
+    None if it cannot be determined (no gh, offline, or a release old enough that
+    the API reports a null digest). Queryable without downloading the asset."""
+    gh = shutil.which("gh")
+    if not gh:
+        return None
+    try:
+        out = subprocess.check_output(
+            [gh, "release", "view", tag, "-R", repo, "--json", "assets",
+             "--jq", '.assets[] | .name + " " + (.digest // "")'],
+            text=True, stderr=subprocess.DEVNULL)
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    for line in out.splitlines():
+        name, _, digest = line.strip().partition(" ")
+        if digest and fnmatch.fnmatch(name, pattern):
+            return digest
+    return None
+
+
 def _download_release_asset(repo, tag, pattern, suffix, force_redownload=False,
                             cache_name=None, what="asset"):
     """Shared body of download_release_zip / download_cooked_tar: return a local
@@ -1790,6 +1870,10 @@ def _download_release_asset(repo, tag, pattern, suffix, force_redownload=False,
             force_redownload = ans.startswith("r")
         if not force_redownload:
             print(f"[import] using cached {path}")
+            # Deliberately NOT backfilled with the release's current sha: a cached
+            # copy may predate the release it came from, so recording today's digest
+            # against yesterday's zip would assert something untrue. Unrecorded is
+            # the honest state, and it only costs the check.
             return path
 
     os.makedirs(tag_dir, exist_ok=True)
@@ -1802,6 +1886,9 @@ def _download_release_asset(repo, tag, pattern, suffix, force_redownload=False,
     got = [f for f in os.listdir(tag_dir) if f.lower().endswith(suffix)]
     if not got:
         sys.exit(f"[import] release '{tag}' has no {what} matching '{pattern}'.")
+    # Note WHICH asset this is, while we still know. The cache dir is named for the
+    # map, not the release, so nothing else here can answer that afterwards.
+    write_source_sha(tag_dir, release_asset_sha(repo, tag, pattern))
     return os.path.join(tag_dir, got[0])
 
 
@@ -1885,7 +1972,8 @@ def pick_and_import(repo, tag_prefix="", carla_root=None, ue4_root=None, force=F
 
     zip_path = local if local else download_release_zip(repo, tag, force_redownload=force)
     return ensure_map(name, carla_root=carla_root, ue4_root=ue4_root,
-                      package_dir=zip_path, force=force)
+                      package_dir=zip_path, force=force,
+                      source_sha=read_source_sha(os.path.dirname(zip_path)))
 
 
 def import_named(name, carla_root=None, ue4_root=None, package_url=None,
@@ -1900,7 +1988,9 @@ def import_named(name, carla_root=None, ue4_root=None, package_url=None,
     carla_root, ue4_root = _resolve_carla(carla_root, ue4_root, need_source=False)
     if _mode() != "packaged":
         return ensure_map(name, carla_root, ue4_root, package_url, package_dir,
-                          force, prompt_if_exists, package_pick)
+                          force, prompt_if_exists, package_pick,
+                          source_sha=(read_source_sha(os.path.dirname(package_dir))
+                                      if package_dir else None))
 
     repo, tag_prefix = resolve_map_source(repo, tag_prefix)
     catalog = fetch_catalog(repo)
