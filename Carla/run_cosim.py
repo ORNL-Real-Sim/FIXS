@@ -2173,6 +2173,10 @@ def await_peer(args):
             args.quality_level = msg.get("quality_level") or args.quality_level
             args.render_offscreen = bool(msg.get("render_offscreen",
                                                  args.render_offscreen))
+            # Stashed rather than acted on here: the map is not resolved until the
+            # preflight, which is where the comparison belongs. Absent from an older
+            # peer, which just means the check does not run.
+            args.peer_map_sha = msg.get("map_sha")
             print(f"[serve] peer asked for map '{args.map}' on port "
                   f"{args.carla_port or DEFAULT_CARLA_PORT}")
             srv.close()
@@ -2223,10 +2227,16 @@ def ask_peer_to_serve(args, target_map):
     if mine != theirs:
         print(f"[peer] WARNING FIXS versions differ - here {mine}, peer {theirs}. "
               f"Mismatched builds is how the two ends come to disagree silently.")
+    import import_map
+    # Which bundle THIS machine's traffic data came from. Sent because only this
+    # machine can know it: the CARLA host would otherwise compare its cooked map
+    # against the library's current release, which is a different question - and
+    # the wrong one whenever this side is running off a cached bundle.
     peer.send(sock, {"t": "SERVE", "map": target_map,
                      "carla_port": args.carla_port,
                      "quality_level": args.quality_level,
-                     "render_offscreen": bool(args.render_offscreen)})
+                     "render_offscreen": bool(args.render_offscreen),
+                     "map_sha": import_map.read_cached_sha(target_map)})
     print(f"[peer] asked {args.carla_host} to serve '{target_map}'; waiting ...")
     waited = 0.0
     while True:
@@ -2374,6 +2384,42 @@ def _fail_peer(why, retryable=False):
         return
     import peer
     peer.fail(sock, why, retryable=retryable)
+
+
+def _check_map_source(args, carla_root, target_map, mode):
+    """Is the map already cooked here the one this run's SUMO data belongs to?
+
+    Only meaningful for an ALREADY-cooked map: a fresh cook stamps whatever it just
+    downloaded, so the two halves agree by construction. The stale case is the quiet
+    one - the CARLA half is cooked once and kept while the SUMO half tracks the
+    library, so an updated map leaves geometry and traffic data one release apart
+    under the same name, with nothing failing.
+
+    Silent unless both sides recorded a sha AND they differ. A map with no sha
+    (local pick, hand-prepped, imported before this existed) is not checked at all
+    rather than nagged about."""
+    import import_map
+    have = import_map.cooked_sha(carla_root, target_map, mode=mode)
+    # What this run's traffic data came from: the peer's, when a traffic machine is
+    # driving us, else this machine's own cached bundle.
+    want = getattr(args, "peer_map_sha", None) or import_map.read_cached_sha(target_map)
+    if not have or not want or have == want:
+        return
+
+    where = "the traffic machine" if getattr(args, "peer_map_sha", None) else "this machine"
+    why = (f"map '{target_map}' was cooked from a different bundle than the one "
+           f"{where} is running (cooked {have}, running {want}). Geometry and "
+           f"traffic data are one release apart, which places vehicles against a "
+           f"road that moved.")
+    if args.serve and not args.allow_map_skew:
+        # Refused rather than warned: under --serve the person who would read a
+        # warning is at the other machine, looking at a different console. The exit
+        # message reaches them as-is - serve_forever turns a sys.exit(str) into the
+        # peer's ERROR reason - so it is phrased to be read from there.
+        sys.exit(f"[cosim] this CARLA host: {why} Re-cook here with --reimport, or "
+                 f"pass --allow-map-skew to run anyway.")
+    print(f"[cosim] WARNING {why}\n"
+          f"        Fix: re-run with --reimport to re-cook it.")
 
 
 def _who_has_port(port):
@@ -3003,6 +3049,10 @@ def main():
     ap.add_argument("--peer-port", type=int, default=None,
                     help="control-channel port (default: CarlaServerPort + 400). Set "
                          "it on BOTH machines if the default is taken.")
+    ap.add_argument("--allow-map-skew", action="store_true",
+                    help="run even when the cooked map came from a different bundle "
+                         "than the SUMO data being run against it. Warned about on a "
+                         "normal run; refused under --serve, which this overrides.")
     ap.add_argument("--peer-wait", type=float, default=120.0,
                     help="traffic host: seconds to keep retrying the CARLA peer "
                          "(default 120), so the two machines can start in any order.")
@@ -3298,6 +3348,8 @@ def main():
     if not args.no_launch and cfg is not None and cfg.get("mode") == "source":
         resolved = None if args.reimport else \
             import_map.resolve_cooked_map(cfg["carla_root"], target_map, mode="source")
+        if resolved is not None:
+            _check_map_source(args, cfg["carla_root"], target_map, "source")
 
         # Already imported? If this was a FRESH source pick (an online release or a
         # local .zip/folder), offer to reimport - re-cook + re-place TLs/signs +
@@ -3338,7 +3390,8 @@ def main():
                            f"this is the slow one (Unreal + shaders)")
                 import_map.ensure_map(real, carla_root=cfg["carla_root"],
                                       ue4_root=cfg.get("ue4_root"),
-                                      package_dir=carla_src, force=args.reimport)
+                                      package_dir=carla_src, force=args.reimport,
+                                      source_sha=import_map.read_cached_sha(target_map))
                 target_map = real
             elif args.auto_import or args.reimport:      # legacy explicit --map + url/config
                 url = args.map_package_url
@@ -3350,7 +3403,8 @@ def main():
                            f"'{target_map}' - this is the slow one (Unreal + shaders)")
                 import_map.ensure_map(target_map, carla_root=cfg["carla_root"],
                                       ue4_root=cfg.get("ue4_root"),
-                                      package_url=url, force=args.reimport)
+                                      package_url=url, force=args.reimport,
+                                      source_sha=import_map.read_cached_sha(target_map))
             else:
                 sys.exit(
                     f"[cosim] map '{target_map}' is not imported into {cfg['carla_root']}.\n"
@@ -3392,6 +3446,8 @@ def main():
     if not args.no_launch and cfg is not None and cfg.get("mode") == "packaged":
         resolved = None if args.reimport else \
             import_map.resolve_cooked_map(cfg["carla_root"], target_map, mode="packaged")
+        if resolved is not None:
+            _check_map_source(args, cfg["carla_root"], target_map, "packaged")
 
         if resolved is None:
             # Say so BEFORE the download. A precooked package is gigabytes, and the
