@@ -645,6 +645,14 @@ def _looks_like_bundle(names):
     return "carla" in tops
 
 
+def _bundle_members(z, sumo_only):
+    """Which entries of a bundle zip to extract: everything, or only `sumo/`."""
+    if not sumo_only:
+        return None                      # extractall's own default
+    return [n for n in z.namelist()
+            if n.replace("\\", "/").split("/", 1)[0] == "sumo"]
+
+
 def open_bundle(src, cache_name=None):
     """Split a map source into its CARLA package and its SUMO scenario.
 
@@ -655,6 +663,9 @@ def open_bundle(src, cache_name=None):
                    (re-extracted only when the zip is newer). `cache_name` (the
                    cooked map name) extracts into ~/.fixs/maps/<cache_name>/, else
                    a sibling `<stem>_unpacked/`. A folder is used in place.
+      - bundle, CLIENT mode -> `(None, <cache>/sumo)`; the CARLA half is not
+                   extracted at all, because a machine with no local CARLA has
+                   nothing to import it into (FIXS#309).
       - legacy CARLA-only zip/folder -> `(src, None)`, unchanged behavior.
     `carla_src` is what to hand `ensure_map`/`stage_package`; `sumo_dir` (or None)
     is where run_cosim finds the `.sumocfg`."""
@@ -671,23 +682,39 @@ def open_bundle(src, cache_name=None):
             unpacked = _map_cache_dir(cache_name) if cache_name else os.path.join(
                 os.path.dirname(os.path.abspath(src)),
                 os.path.splitext(os.path.basename(src))[0] + "_unpacked")
-            carla = os.path.join(unpacked, "carla")
-            # Compare the zip against the extracted carla/ (not `unpacked`, which may
-            # also hold the downloaded bundle.zip in a per-map cache), and clear only
-            # the bundle's own subdirs on re-extract so a sibling bundle.zip is
-            # preserved. props/ is in that list because a prop left behind by an older
-            # bundle would otherwise be installed forever - the same "stale content
-            # nobody notices" failure this whole ticket is about (FIXS#223).
-            if not os.path.isdir(carla) or os.path.getmtime(src) > os.path.getmtime(carla):
+            # A client-mode machine has no local CARLA, so it never imports: the
+            # bundle's carla/ half is written once and read never (368 MB of
+            # roosevelt_full's 370). Skip it. Nothing to record about the omission -
+            # a machine that later gains a CARLA finds no cooked map, so its
+            # preflight re-downloads and extracts the bundle in full.
+            sumo_only = _mode() == "client"
+            # Freshness is judged against a directory we ACTUALLY extract: sentinel
+            # on carla/ while extracting sumo-only would be permanently absent, so
+            # every run would re-extract. `unpacked` itself cannot serve, since in a
+            # per-map cache it also holds the downloaded zip. Clear only the bundle's
+            # own subdirs, so that sibling zip survives - and props/ is in the list
+            # because a prop left behind by an older bundle would otherwise be
+            # installed forever (FIXS#223).
+            landmark = os.path.join(unpacked, "sumo" if sumo_only else "carla")
+            if not os.path.isdir(landmark) or \
+                    os.path.getmtime(src) > os.path.getmtime(landmark):
                 for sub in ("carla", "sumo", "props"):
                     shutil.rmtree(os.path.join(unpacked, sub), ignore_errors=True)
                 os.makedirs(unpacked, exist_ok=True)
-                z.extractall(unpacked)
-                print(f"[import] unpacked bundle -> {unpacked}")
+                z.extractall(unpacked, members=_bundle_members(z, sumo_only))
+                print(f"[import] unpacked {'sumo half of ' if sumo_only else ''}"
+                      f"bundle -> {unpacked}")
         carla = os.path.join(unpacked, "carla")
         sumo = os.path.join(unpacked, "sumo")
-        return (carla if os.path.isdir(carla) else unpacked), \
-               (sumo if os.path.isdir(sumo) else None)
+        if os.path.isdir(carla):
+            carla_src = carla
+        else:
+            # None rather than `unpacked` when the CARLA half was skipped on purpose:
+            # handing back a directory that does not contain a CARLA package would
+            # send an importer off to fail on it. Absent by choice is not the same as
+            # a legacy layout.
+            carla_src = None if sumo_only else unpacked
+        return carla_src, (sumo if os.path.isdir(sumo) else None)
     return src, None
 
 
