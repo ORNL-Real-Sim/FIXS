@@ -410,19 +410,28 @@ class AlpaSimBackend:
             for s in range(nsub):
                 tx = float(fx[k, s, 0]) + ox                    # shift back to global SUMO frame
                 ty = float(fx[k, s, 1]) + oy
+                yaw = float(fh[k, s])
+                spd = float(np.hypot(fv[k, s, 0], fv[k, s, 1]))
+                # NEVER hand a non-finite pose to SUMO: moveToXY with NaN/inf takes
+                # TrafficLayer down with no error message (it died at a fixed sim
+                # time once observation noise was fed in). Fall back to holding the
+                # current pose -- SUMO's own model then takes the vehicle over.
+                if not all(map(np.isfinite, (tx, ty, yaw, spd))):
+                    tx, ty = cx, cy
+                    yaw = float(bev.yaw[i])
+                    spd = 0.0
                 # clamp a garbage token from teleporting the car: cap displacement
-                # from the CURRENT pose to vmax*dt per sub-step (+slack), and speed.
+                # from the CURRENT pose to vmax*dt per sub-step, and speed.
                 dx, dy = tx - cx, ty - cy
                 dist = float(np.hypot(dx, dy))
                 maxd = self.vmax * self.dt * (s + 1)
                 if dist > maxd > 0.0:
                     f = maxd / dist
                     tx, ty = cx + dx * f, cy + dy * f
-                spd = min(float(np.hypot(fv[k, s, 0], fv[k, s, 1])), self.vmax)
                 subs.append(AgentPose(
                     x=tx, y=ty,
-                    heading_deg=math_rad_to_sumo_deg(float(fh[k, s])),
-                    speed=spd,
+                    heading_deg=math_rad_to_sumo_deg(yaw),
+                    speed=min(spd, self.vmax),
                 ))
             self._cache[aid] = subs
             out[aid] = subs[0]

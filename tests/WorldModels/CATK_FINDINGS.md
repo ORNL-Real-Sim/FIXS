@@ -149,6 +149,7 @@ comes from the motion context, not the token.
 | `SamplingTopK` set on the wrong object | the sampler lives on the **SMART instance inside** the CATK wrapper; the old assignment silently created a dead attribute, so "greedy" never took effect | `self.model.model.validation_rollout_sampling.num_k` |
 | signal painted on the wrong lane, unresampled | painted `linkIndex 4` = `fromLane 0` (y=308) while the queue is at y=304.8/301.6 (links 5/6); 2 points on a 113 m lane ⇒ nothing tagged | `controlled_lanes()` — every controlled lane, approach + internal, resampled to 1 m, each with its own linkIndex |
 | garbage-token teleport | CATK occasionally emits 85–130 m/s; `moveToXY` applied it as a ~21 m jump, stranding a car mid-junction | clamp displacement to `vmax*dt` per sub-step |
+| non-finite pose written to SUMO | `moveToXY` with NaN/inf kills **TrafficLayer silently** -- no message in stdout or TrafficLayer.err, SUMO stops being stepped, the GUI just sits there and it looks like the sim is "super slow". Deterministic: died at sim t=34.30 every run once observation noise was fed in | guard every pose for finiteness before returning it; fall back to holding the current pose |
 | unbounded map | inference 74 ms → 3.8 s as agents accumulated | per-group caps (§4) |
 
 **Do not use `SamplingTopK: 1`.** Now that the path works, greedy is deterministic and
