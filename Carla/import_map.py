@@ -1013,7 +1013,7 @@ def ensure_map(name, carla_root=None, ue4_root=None, package_url=None,
     # After the restore-on-failure dance above, so the stamp only ever describes
     # content that actually got cooked - a failed re-import restores the previous
     # map together with its previous stamp.
-    write_source_sha(cooked_content_dir(carla_root, name), source_sha)
+    _write_sha(cooked_content_dir(carla_root, name), source_sha)
     print(f"[import] done: '{name}' imported -> {umap}")
     return 0
 
@@ -1135,8 +1135,8 @@ def install_precooked(carla_root, name, repo=None, tag=None, entry=None,
     # Same stamp as the source path, from the .tar.gz asset instead of the .zip:
     # a packaged install goes stale exactly the same way a cook does. A local
     # package leaves it unrecorded, which is the "not checked" state.
-    write_source_sha(cooked_content_dir(carla_root, real, mode="packaged"),
-                     read_source_sha(os.path.dirname(tar_path)))
+    _write_sha(cooked_content_dir(carla_root, real, mode="packaged"),
+               _read_sha(os.path.dirname(tar_path)))
     return real
 
 
@@ -1796,18 +1796,19 @@ def map_sumo_dir(name):
 SHA_FILE = ".source_sha"
 
 
-def read_source_sha(directory):
-    """The recorded sha256 of the release asset behind `directory`, or None."""
+def _read_sha(directory):
     try:
         with open(os.path.join(directory, SHA_FILE), encoding="utf-8") as f:
             return f.read().strip() or None
     except OSError:
-        return None
+        return None                      # no note is the normal case, not an error
 
 
-def write_source_sha(directory, sha):
-    """Record it. Best effort: failing to write a note only costs the check."""
-    if not sha or not os.path.isdir(directory):
+def _write_sha(directory, sha):
+    """Best effort: an unwritable note costs the check, not the run. Writing
+    NOTHING when there is no sha is the part that matters - an empty note would
+    read back as a value and make two unrelated maps look like a match."""
+    if not sha:
         return
     try:
         with open(os.path.join(directory, SHA_FILE), "w", encoding="utf-8") as f:
@@ -1817,16 +1818,16 @@ def write_source_sha(directory, sha):
 
 
 def read_cached_sha(cache_name):
-    """The sha of the bundle cached under ~/.fixs/maps/<cache_name>/, or None."""
-    return read_source_sha(_map_cache_dir(cache_name))
+    """Which release asset the bundle cached for `cache_name` came from, or None."""
+    return _read_sha(_map_cache_dir(cache_name))
 
 
 def cooked_sha(carla_root, name, mode=None):
-    """The sha stamped on an imported map, or None if it was never recorded."""
-    return read_source_sha(cooked_content_dir(carla_root, name, mode))
+    """Which release asset the imported map `name` was built from, or None."""
+    return _read_sha(cooked_content_dir(carla_root, name, mode))
 
 
-def release_asset_sha(repo, tag, pattern):
+def _release_asset_sha(repo, tag, pattern):
     """The sha256 GitHub publishes for the release asset matching `pattern`, or
     None if it cannot be determined (no gh, offline, or a release old enough that
     the API reports a null digest). Queryable without downloading the asset."""
@@ -1888,7 +1889,7 @@ def _download_release_asset(repo, tag, pattern, suffix, force_redownload=False,
         sys.exit(f"[import] release '{tag}' has no {what} matching '{pattern}'.")
     # Note WHICH asset this is, while we still know. The cache dir is named for the
     # map, not the release, so nothing else here can answer that afterwards.
-    write_source_sha(tag_dir, release_asset_sha(repo, tag, pattern))
+    _write_sha(tag_dir, _release_asset_sha(repo, tag, pattern))
     return os.path.join(tag_dir, got[0])
 
 
@@ -1973,7 +1974,7 @@ def pick_and_import(repo, tag_prefix="", carla_root=None, ue4_root=None, force=F
     zip_path = local if local else download_release_zip(repo, tag, force_redownload=force)
     return ensure_map(name, carla_root=carla_root, ue4_root=ue4_root,
                       package_dir=zip_path, force=force,
-                      source_sha=read_source_sha(os.path.dirname(zip_path)))
+                      source_sha=_read_sha(os.path.dirname(zip_path)))
 
 
 def import_named(name, carla_root=None, ue4_root=None, package_url=None,
@@ -1989,7 +1990,7 @@ def import_named(name, carla_root=None, ue4_root=None, package_url=None,
     if _mode() != "packaged":
         return ensure_map(name, carla_root, ue4_root, package_url, package_dir,
                           force, prompt_if_exists, package_pick,
-                          source_sha=(read_source_sha(os.path.dirname(package_dir))
+                          source_sha=(_read_sha(os.path.dirname(package_dir))
                                       if package_dir else None))
 
     repo, tag_prefix = resolve_map_source(repo, tag_prefix)

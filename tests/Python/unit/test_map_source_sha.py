@@ -20,9 +20,9 @@ A, B = "sha256:aaaa1111", "sha256:bbbb2222"
 
 def test_no_note_is_written_when_there_is_nothing_to_record(tmp_path):
     """An empty note would read back as a value, making two unrelated maps match."""
-    import_map.write_source_sha(str(tmp_path), None)
+    import_map._write_sha(str(tmp_path), None)
     assert not os.path.exists(os.path.join(str(tmp_path), import_map.SHA_FILE))
-    assert import_map.read_source_sha(str(tmp_path)) is None
+    assert import_map._read_sha(str(tmp_path)) is None
 
 
 def test_release_asset_sha_picks_the_right_asset(monkeypatch):
@@ -31,10 +31,10 @@ def test_release_asset_sha_picks_the_right_asset(monkeypatch):
     monkeypatch.setattr(import_map.shutil, "which", lambda _: "gh")
     monkeypatch.setattr(import_map.subprocess, "check_output", lambda *a, **k:
                         f"roosevelt_cooked.tar.gz {B}\nroosevelt.zip {A}\nold.zip \n")
-    assert import_map.release_asset_sha("r", "t", "*.zip") == A
-    assert import_map.release_asset_sha("r", "t", "*.tar.gz") == B
+    assert import_map._release_asset_sha("r", "t", "*.zip") == A
+    assert import_map._release_asset_sha("r", "t", "*.tar.gz") == B
     monkeypatch.setattr(import_map.shutil, "which", lambda _: None)
-    assert import_map.release_asset_sha("r", "t", "*.zip") is None
+    assert import_map._release_asset_sha("r", "t", "*.zip") is None
 
 
 #          cooked  running  peer  serve  allow   expected
