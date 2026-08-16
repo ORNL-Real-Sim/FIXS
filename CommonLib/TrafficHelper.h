@@ -157,6 +157,15 @@ public:
 	bool NEED_NEXT_TLS = false;
 	bool NEED_PRECEDING_VEH = false;
 
+	// #86: how often a step fell back to a per-vehicle TraCI call because the
+	// leader was not in the subscription -- its id (a context-subscribed vehicle
+	// carries no VAR_LEADER) or its speed (leader outside the subscribed set).
+	// Reset every step; non-zero is printed, because a config silently paying the
+	// pre-#86 cost should be visible in the log rather than only under a profiler.
+	long leaderFallbackId = 0;
+	long leaderFallbackSpeed = 0;
+	long leaderFallbackSteps = 0;
+
 	double tSimuEnd = 90000;
 
 
