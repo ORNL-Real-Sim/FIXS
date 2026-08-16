@@ -139,6 +139,26 @@ def source_paths(carla_root, ue4_root):
     return uproject, editor
 
 
+# Carried by every UE4Editor launch FIXS makes. CARLA's CarlaUE4.uproject enables
+# UE4's RenderDocPlugin, and its loader looks for renderdoc.dll in the Engine.ini
+# cvar, then in the registry, then - having found neither, which is the case on
+# every machine without RenderDoc installed - by ASKING: a modal "Locate main
+# RenderDoc executable..." file dialog. It opens at PostConfigInit, long before the
+# engine has a window of its own, and is built through COM - which the game thread
+# has not initialized that early, so the dialog usually fails to be created and the
+# launch is none the wiser. When some module loaded ahead of it did initialize COM,
+# the dialog appears and blocks the game thread until a human cancels it: measured
+# at 138 s on a run nobody was watching, against the 180 s wait_for_port budget,
+# and unbounded on the placers, which give the editor no timeout at all (#311).
+# -DisableFrameTraceCapture makes the loader return before it searches anything.
+#
+# What that gives up is RenderDoc frame capture from a FIXS-launched editor, which
+# no co-sim run uses - capturing a frame means driving the editor by hand anyway.
+# Source builds only: a packaged CarlaUE4.exe never loads the plugin (its module is
+# UncookedOnly), so that path needs nothing.
+EDITOR_LAUNCH_FLAGS = ["-DisableFrameTraceCapture"]
+
+
 # ------------------------------------------------ python interpreter / carla
 # The CARLA + SUMO clients live in a conda env (built from environment.yml). The
 # env name is NOT fixed (it may be `realsim`, `realsim_dev`, ...), so we resolve

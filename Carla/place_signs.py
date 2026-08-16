@@ -70,7 +70,8 @@ def place_signs(name, carla_root=None, ue4_root=None, force=False):
     umap = import_map.cooked_map_path(carla_root, name)
     before = os.path.getmtime(umap) if os.path.isfile(umap) else None
 
-    cmd = [editor, uproject, content_map_path(name), f"-ExecutePythonScript={PLACER}"]
+    cmd = [editor, uproject, content_map_path(name), f"-ExecutePythonScript={PLACER}",
+           *env.EDITOR_LAUNCH_FLAGS]
     print("[signs] placing road signs via the editor (a window opens briefly, "
           "no clicking needed) ...")
     print(f"[signs] {' '.join(cmd)}")

@@ -1132,7 +1132,7 @@ def _carla_command(cfg, port, render_offscreen, quality_level=None, level=None):
         # with "Failed to enter <map>: Can't find file" before the RPC port opens.
         if level:
             cmd.append(level)
-        cmd += ["-game", f"-carla-rpc-port={port}"]
+        cmd += ["-game", f"-carla-rpc-port={port}", *env.EDITOR_LAUNCH_FLAGS]
     if quality_level:
         cmd.append(f"-quality-level={quality_level}")  # Low is much cheaper to render
     if render_offscreen:

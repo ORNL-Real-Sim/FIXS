@@ -67,6 +67,17 @@ def _make_packaged(root):
     return exe
 
 
+def _make_source(tmp_path):
+    """Create a fake source CARLA + UE4 tree; return (carla_root, ue4_root, uproject, editor)."""
+    carla_root = str(tmp_path / "carla")
+    ue4_root = str(tmp_path / "ue4")
+    uproject, editor = env.source_paths(carla_root, ue4_root)
+    for path in (uproject, editor):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        open(path, "w").close()
+    return carla_root, ue4_root, uproject, editor
+
+
 def test_packaged_exe_found(tmp_path):
     root = str(tmp_path / "carla")
     exe = _make_packaged(root)
@@ -105,19 +116,37 @@ def test_carla_command_offscreen_flag(tmp_path):
 
 def test_carla_command_source(tmp_path):
     """Source mode resolves to UE4Editor <uproject> -game."""
-    carla_root = tmp_path / "carla"
-    ue4_root = tmp_path / "ue4"
-    uproject, editor = env.source_paths(str(carla_root), str(ue4_root))
-    os.makedirs(os.path.dirname(uproject), exist_ok=True)
-    os.makedirs(os.path.dirname(editor), exist_ok=True)
-    open(uproject, "w").close()
-    open(editor, "w").close()
+    carla_root, ue4_root, uproject, editor = _make_source(tmp_path)
 
-    cfg = {"mode": "source", "carla_root": str(carla_root), "ue4_root": str(ue4_root)}
+    cfg = {"mode": "source", "carla_root": carla_root, "ue4_root": ue4_root}
     cmd = run_cosim._carla_command(cfg, 2000, render_offscreen=False)
     assert cmd[0] == editor
     assert cmd[1] == uproject
     assert "-game" in cmd
+
+
+def test_carla_command_source_disables_renderdoc_prompt(tmp_path):
+    """Source launches suppress UE4's RenderDoc plugin (#311).
+
+    CARLA's uproject enables RenderDocPlugin, whose loader asks for a renderdoc.dll
+    it cannot find by opening a modal file dialog at startup - which blocks the game
+    thread until a human cancels it. -DisableFrameTraceCapture returns before the
+    search, so the dialog is never reachable.
+    """
+    carla_root, ue4_root, _, _ = _make_source(tmp_path)
+
+    cfg = {"mode": "source", "carla_root": carla_root, "ue4_root": ue4_root}
+    cmd = run_cosim._carla_command(cfg, 2000, render_offscreen=False)
+    assert "-DisableFrameTraceCapture" in cmd
+
+
+def test_carla_command_packaged_carries_no_editor_flags(tmp_path):
+    """A packaged build never loads the plugin (UncookedOnly), so it needs no flag."""
+    root = str(tmp_path / "carla")
+    _make_packaged(root)
+    cfg = {"mode": "packaged", "carla_root": root}
+    cmd = run_cosim._carla_command(cfg, 2000, render_offscreen=False)
+    assert "-DisableFrameTraceCapture" not in cmd
 
 
 def test_carla_command_packaged_missing_raises(tmp_path):

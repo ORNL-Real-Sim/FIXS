@@ -162,7 +162,8 @@ def place_tls(name, tl_table, carla_root=None, ue4_root=None, force=False,
     umap = import_map.cooked_map_path(carla_root, name)
     before = os.path.getmtime(umap) if os.path.isfile(umap) else None
 
-    cmd = [editor, uproject, content_map_path(name), f"-ExecutePythonScript={AUTO_PLACE}"]
+    cmd = [editor, uproject, content_map_path(name), f"-ExecutePythonScript={AUTO_PLACE}",
+           *env.EDITOR_LAUNCH_FLAGS]
     print("[tls] placing traffic lights via the editor (a window opens briefly, "
           "no clicking needed) ...")
     print(f"[tls] {' '.join(cmd)}")
