@@ -3083,6 +3083,30 @@ def main():
                     help="launch CARLA, load the map and HOLD it open, running no "
                          "bridge here - the CARLA half of a two-machine run, driven "
                          "by run_cosim on the traffic machine. Ctrl+C stops it.")
+    # ------------------------------------------------------------------ #
+    # One-shot actions that are not a co-sim run.
+    #
+    # These used to live in each application repo's run_cosim.bat/.sh, which
+    # translated them onto sibling scripts by name: --setup ran
+    # Carla/carla_env_setup.py, --import-map ran Carla/import_map.py --package,
+    # --carla-map became --map. That is engine vocabulary, and every app repo held
+    # a transcription of it in two languages with no test - which is how --setup
+    # carla came to print "unrecognized arguments: carla" and why the Windows and
+    # Linux halves of --update-fixs drifted apart (#238).
+    #
+    # Owning the names here means the front door forwards its whole command line
+    # untouched and has no flag list to keep in sync (#313).
+    # ------------------------------------------------------------------ #
+    ap.add_argument("--setup", nargs="?", const="carla", default=None,
+                    metavar="TARGET", choices=["carla"],
+                    help="configure a simulator on this machine and exit "
+                         "(default and only target today: carla)")
+    ap.add_argument("--import-map", dest="import_map", nargs="?", const="",
+                    default=None, metavar="MAP",
+                    help="install a map from the map library and exit. With no MAP, "
+                         "lists what is published and asks")
+    ap.add_argument("--carla-map", dest="carla_map", default=None, metavar="NAME",
+                    help=argparse.SUPPRESS)   # accepted alias of --map; see below
     ap.add_argument("--reconfigure", action="store_true",
                     help="re-run CARLA env setup before launching (pick a different CARLA)")
     ap.add_argument("--update-python", action="store_true",
@@ -3126,6 +3150,16 @@ def main():
                          "and waits for you to press Play (overrides SumoSetup.AutoStart)")
     args = ap.parse_args()
 
+    # --carla-map is the name a USER meets: "map" alone is ambiguous once SUMO has
+    # a network and CARLA has a level. Accepted as an alias rather than translated
+    # in a wrapper, so both spellings reach the same code and neither can drift.
+    # Conflicting values are an error, not a silent precedence rule.
+    if args.carla_map is not None:
+        if args.map is not None and args.map != args.carla_map:
+            ap.error(f"--map {args.map} and --carla-map {args.carla_map} disagree; "
+                     f"they are the same setting, so pass one of them.")
+        args.map = args.carla_map
+
     # Resolved before anything reads the endpoint, so --doctor, --version and the
     # run itself all see one setting rather than two spellings of it.
     resolve_peer(args)
@@ -3146,6 +3180,29 @@ def main():
     # front door. Handled before everything else for the same reason.
     if args.update_python:
         return env.update_python()
+
+    # --setup and --import-map hand the rest of the work to the module that owns it
+    # and stop. Dispatched in-process rather than by spawning `python <sibling>.py`:
+    # where the sibling lives stops being something any caller has to know, which is
+    # what lets the front door forward its command line blindly.
+    #
+    # --setup sits with --update-python, above the re-exec, for the same reason: it
+    # exists to BUILD the env, so running it under the env it is about to create is
+    # backwards, and a config pointing at a broken interpreter could never be
+    # repaired from the front door.
+    if args.setup is not None:
+        return env.run_setup()
+    if args.import_map is not None:
+        # The cook needs the configured env's carla client, so get onto that
+        # interpreter first. This relaunches run_cosim with the same command line
+        # and lands right back here, on the right python.
+        env.reexec_under_configured(__file__, tag="import")
+        import import_map
+        # "" is `--import-map` with no name - the form that lists the library and
+        # asks. A name is what import_map spells --package. An explicit argv, not
+        # sys.argv: ours holds run_cosim's flags, which import_map's parser has
+        # never heard of.
+        return import_map.main(["--package", args.import_map] if args.import_map else [])
 
     # --doctor and --version answer a question and stop. Neither touches a map, a
     # setup or a server, so they are safe to run at any time - including while a

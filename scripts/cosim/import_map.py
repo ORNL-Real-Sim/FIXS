@@ -52,6 +52,7 @@ Examples:
 """
 import argparse
 import fnmatch
+import json
 import os
 import platform
 import re
@@ -2061,27 +2062,71 @@ def _app_root():
     return fixs_paths.app_root(os.path.dirname(os.path.abspath(__file__)))
 
 
+def _map_source_from_manifest():
+    """{'map_repo': ..., 'map_tag_prefix': ...} from the app manifest's "maps"
+    block, or {} if there is no manifest or it declares none.
+
+    The manifest is the one file an integration writes (#313), so the map library
+    is named there alongside the apps that use it. Read through app_catalog so the
+    lookup order - $FIXS_APPS_JSON, fixs.json, apps/apps.json - is defined once.
+    A missing, unreadable or malformed manifest must not stop a map import - it
+    just means falling through to fixs_sources.txt and then to the built-in
+    default. Only those failures are caught, deliberately: a broad `except` here
+    would also swallow a typo in this function and report it as "no maps block",
+    which is a bug that looks exactly like working config."""
+    import app_catalog
+
+    path = app_catalog.catalog_path()
+    if not os.path.isfile(path):
+        return {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            doc = json.load(f)
+    except (OSError, ValueError):
+        return {}                                # app_catalog already warns about it
+    maps = (doc or {}).get("maps") if isinstance(doc, dict) else None
+    if not isinstance(maps, dict):
+        return {}
+    out = {}
+    if maps.get("repo"):
+        out["map_repo"] = str(maps["repo"]).strip()
+    if "tag_prefix" in maps:
+        out["map_tag_prefix"] = str(maps.get("tag_prefix") or "")
+    return out
+
+
 def resolve_map_source(repo=None, tag_prefix=None):
-    """Resolve (repo, tag_prefix) for the map picker. Precedence: an explicit value
-    (CLI) wins, else the root fixs_sources.txt (map_repo / map_tag_prefix), else the
-    built-in default. Lets the hosting repo change in one config line, no wrappers
-    to edit."""
+    """Resolve (repo, tag_prefix) for the map picker.
+
+    Precedence: an explicit value (CLI) wins, then the app manifest's "maps" block,
+    then the legacy root fixs_sources.txt, then the built-in default. The hosting
+    repo therefore changes in one config line and no wrapper needs editing.
+
+    fixs_sources.txt is kept underneath because repos integrated before #313 have
+    one committed and nothing forces them to convert; a repo that writes a "maps"
+    block simply stops needing it."""
     cfg = {}
     src = os.path.join(_app_root(), "fixs_sources.txt")
     if os.path.isfile(src):
         cfg = read_map_config(src)
+    cfg.update(_map_source_from_manifest())      # manifest outranks the legacy file
     repo = repo or cfg.get("map_repo") or DEFAULT_MAP_REPO
     if tag_prefix is None:
         tag_prefix = cfg.get("map_tag_prefix", DEFAULT_MAP_TAG_PREFIX)
     return repo, tag_prefix
 
 
-def main():
-    # First act: get onto the interpreter carla.json names. This is started as
-    # `python Carla/import_map.py` from whatever shell the user has open, so without
-    # this the cook runs under whatever python is on PATH - a different env than the
-    # one run_cosim uses, from the same machine and the same config.
-    env.reexec_under_configured(__file__, tag="import")
+def main(argv=None):
+    # First act: get onto the interpreter carla.json names. Run directly, this is
+    # started as `python cosim/import_map.py` from whatever shell the user has open,
+    # so without this the cook runs under whatever python is on PATH - a different
+    # env than the one run_cosim uses, from the same machine and the same config.
+    #
+    # An explicit argv means run_cosim's --import-map is calling us in-process, and
+    # it has already switched interpreters. Re-execing here would relaunch THIS file
+    # with run_cosim's command line, which our parser has never heard of.
+    if argv is None:
+        env.reexec_under_configured(__file__, tag="import")
 
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -2109,7 +2154,7 @@ def main():
     ap.add_argument("--ue4-root", default=None, help="override the saved ue4_root")
     ap.add_argument("--force", action="store_true",
                     help="re-import even if already present (no prompt)")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
     mc = read_map_config(args.map_config) if args.map_config else {}
 
