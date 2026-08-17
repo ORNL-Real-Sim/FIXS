@@ -68,7 +68,19 @@ if not exist "%ROOT%FIXS\FIXS_VERSION.txt" (
     ) else (
         echo [FIXS] FIXS is not installed here - fetching it first ...
     )
-    call :fetch_fixs ""
+    REM INSTALL THE DECLARED PIN, not "whatever the picker defaults to". A repo that
+    REM says which engine it runs has already made the choice, and an automatic
+    REM bootstrap is not the moment to reopen it - nobody asked to choose, they
+    REM asked to run. Passing the pin also makes this ONE lookup of one release by
+    REM tag instead of listing every release to draw a menu whose default is the pin
+    REM anyway: fewer calls, and it still works when the releases INDEX is down but
+    REM the release itself is fine (seen live: GitHub 504 on /releases?per_page=30
+    REM while /releases/tags/<tag> served normally).
+    REM
+    REM No pin -> empty -> the picker, which is right there: the repo expressed no
+    REM preference, so the choice genuinely has to be made. --update-fixs with no
+    REM argument also still opens it, because that IS someone asking to choose.
+    call :fetch_fixs "%FIXS_VERSION%"
     if errorlevel 1 (
         echo [FIXS] setup failed - see above. Not continuing.
         pause

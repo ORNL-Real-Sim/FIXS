@@ -158,7 +158,20 @@ if [[ ! -f "$ROOT/FIXS/FIXS_VERSION.txt" ]]; then
     else
         echo "[FIXS] FIXS is not installed here - fetching it first ..."
     fi
-    fetch_fixs || { echo "[FIXS] setup failed - see above. Not continuing." >&2; exit 1; }
+    # INSTALL THE DECLARED PIN, not "whatever the picker defaults to". A repo that
+    # says which engine it runs has already made the choice, and an automatic
+    # bootstrap is not the moment to reopen it - nobody asked to choose, they asked
+    # to run. Passing the pin as --version also makes this a single lookup of one
+    # release by tag, instead of listing every release to draw a menu whose default
+    # is the pin anyway: fewer calls, and it still works when the releases INDEX is
+    # unavailable but the release itself is fine (seen live, GitHub 504 on
+    # /releases?per_page=30 while /releases/tags/<tag> served normally).
+    #
+    # No pin -> empty -> the picker, which is correct there: the repo has expressed
+    # no preference, so the choice genuinely has to be made. `--update-fixs` with no
+    # argument also still opens it, because that IS someone asking to choose.
+    fetch_fixs "${FIXS_VERSION:-}" \
+        || { echo "[FIXS] setup failed - see above. Not continuing." >&2; exit 1; }
 fi
 
 # Every run, not only after a fetch: a repo can arrive at an installed FIXS/ some
