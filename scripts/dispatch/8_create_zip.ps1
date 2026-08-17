@@ -136,10 +136,9 @@ try {
         Write-Host "  + environment.yml"
     }
 
-    # Ship the self-contained Carla/ co-sim component (sumo/ runtime + utils/ +
-    # run_cosim), minus the carla wheel. Consumers (e.g. FIXS_Applications'
-    # roosevelt_sumo_carla) fetch Carla/ from this release zip. Test-only files
-    # and the .ps1 build tooling under scripts/ stay source-side.
+    # Ship the CARLA component (sumo/ runtime + utils/ + the placers), minus the
+    # carla wheel. Test-only files and the .ps1 build tooling under scripts/ stay
+    # source-side.
     $CarlaSrc = Join-Path $RepoRoot 'Carla'
     if (Test-Path $CarlaSrc) {
         $carlaDest = Join-Path $StagingDir 'Carla'
@@ -150,6 +149,28 @@ try {
         Get-ChildItem -Path $carlaDest -Recurse -Directory -Filter '__pycache__' -ErrorAction SilentlyContinue |
             Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
         Write-Host "  + Carla/ co-sim component"
+    }
+
+    # Ship the renderer-agnostic co-sim entry points, hoisted out of scripts/ so
+    # the bundle reads FIXS/cosim/ rather than FIXS/scripts/cosim/ (#313). Same
+    # remapping idea as CarMaker/ -> carmaker/ above.
+    #
+    # Named subdirectories, not a scripts/*.py glob: scripts/ also holds the build
+    # and release tooling, which must NOT ship - and update_fixs.{sh,ps1} in
+    # particular has to stay exactly where it is, because every front door ever
+    # committed downloads it from that path on raw.githubusercontent. An explicit
+    # list also means a new .py dropped into scripts/ cannot ship by accident.
+    foreach ($component in @('cosim')) {
+        $src = Join-Path $RepoRoot "scripts\$component"
+        if (-not (Test-Path $src)) { continue }
+        $dest = Join-Path $StagingDir $component
+        New-Item -ItemType Directory -Path $dest -Force | Out-Null
+        Get-ChildItem -Path $src | ForEach-Object {
+            Copy-Item -Path $_.FullName -Destination $dest -Recurse -Force
+        }
+        Get-ChildItem -Path $dest -Recurse -Directory -Filter '__pycache__' -ErrorAction SilentlyContinue |
+            Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Host "  ~ scripts/$component/ -> $component/"
     }
 
     Compress-Archive -Path "$StagingDir\*" -DestinationPath $ZipPath -CompressionLevel Optimal

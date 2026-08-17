@@ -295,6 +295,23 @@ jobs:
           } else {
             Write-Host "VirtualEnvironment.lib absent (expected on the current/main train)."
           }
+          # Assert the LAYOUT, not just that files exist. 8_create_zip.ps1 remaps
+          # scripts/cosim/ to cosim/ on the way in (#313), and a bundle that lost
+          # that hoist would unpack a FIXS/ whose entry points are one directory
+          # deeper than every front door expects - failing at run time, in the
+          # consumer's repo, with an error that names nothing about packaging.
+          # This is the #238 failure mode: packaging drift found by a user.
+          $zipTest = Join-Path $env:RUNNER_TEMP 'ziptest'
+          Remove-Item $zipTest -Recurse -Force -ErrorAction SilentlyContinue
+          Expand-Archive -Path $zip.FullName -DestinationPath $zipTest -Force
+          foreach ($must in @('cosim\run_cosim.py', 'cosim\app_catalog.py',
+                              'Carla\run_cosim.py', 'environment.yml')) {
+            if (-not (Test-Path (Join-Path $zipTest $must))) {
+              Write-Error "Packaged zip is missing $must - bundle layout is wrong."
+              exit 1
+            }
+          }
+          Write-Host "Bundle layout OK: cosim/ hoisted, Carla/ shims present, sentinel at root."
 
       - name: Upload packaged zip as a workflow artifact (inspect on PRs)
         if: steps.detect.outputs.should_build == 'true'
