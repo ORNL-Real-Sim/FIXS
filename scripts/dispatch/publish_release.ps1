@@ -66,7 +66,23 @@ FIXS Build - $date
 - Branch: $branch
 - Commit: $commit ($msg)
 - Zip: $ZipName
+- Front door: FIXS.bat / FIXS.sh (download either to integrate a new repo)
 "@
+
+# The front door ships as a LOOSE asset alongside the zip, so integrating a new
+# repo is one download at a predictable URL:
+#
+#   https://github.com/<owner>/FIXS/releases/latest/download/FIXS.bat
+#
+# That is the whole first step - drop it in, run it, and it installs the engine
+# it came from. Uploaded from source rather than from the zip because the point
+# is to be reachable BEFORE anyone has the zip.
+$FrontDoor = @()
+foreach ($f in @('FIXS.bat', 'FIXS.sh')) {
+    $p = Join-Path $RepoRoot "scriptsrontdoor\$f"
+    if (Test-Path $p) { $FrontDoor += $p }
+    else { Write-Warning "scripts/frontdoor/$f is missing - not publishing it." }
+}
 
 # Anchor releases to the built commit; without --target a new tag defaults to
 # the repo's default branch (main). Falls back to HEAD when run outside CI.
@@ -87,7 +103,7 @@ if ($Rolling -or $Tag -eq 'latest') {
     if (-not $Title) {
         $Title = if ($Tag -eq 'latest') { 'Latest Dev Build' } else { "Rolling build: $Tag" }
     }
-    gh release create $Tag $ZipPath @targetArgs `
+    gh release create $Tag $ZipPath @FrontDoor @targetArgs `
         --prerelease `
         --title $Title `
         --notes $notes
@@ -103,14 +119,15 @@ if ($Rolling -or $Tag -eq 'latest') {
     }
 
     if (-not $Title) { $Title = "FIXS $Tag" }
-    gh release create $Tag $ZipPath @targetArgs `
+    gh release create $Tag $ZipPath @FrontDoor @targetArgs `
         --title $Title `
         --notes $notes
 }
 
 if ($LASTEXITCODE -eq 0) {
     Write-Host "Published successfully."
-    Write-Host "Consumers install this with: run_cosim.bat --update-fixs $Tag (or ./run_cosim.sh)"
+    Write-Host "Consumers install this with: FIXS.bat --update-fixs $Tag (or ./FIXS.sh)"
+    Write-Host "A new repo starts with just the FIXS.bat/FIXS.sh asset on this release."
 } else {
     Write-Error "Failed to publish release."
     exit 1

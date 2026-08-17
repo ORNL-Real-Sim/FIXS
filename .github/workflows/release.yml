@@ -305,13 +305,25 @@ jobs:
           Remove-Item $zipTest -Recurse -Force -ErrorAction SilentlyContinue
           Expand-Archive -Path $zip.FullName -DestinationPath $zipTest -Force
           foreach ($must in @('cosim\run_cosim.py', 'cosim\app_catalog.py',
-                              'Carla\run_cosim.py', 'environment.yml')) {
+                              'cosim\env_setup.py', 'Carla\run_cosim.py',
+                              'frontdoor\FIXS.bat', 'frontdoor\FIXS.sh',
+                              'environment.yml')) {
             if (-not (Test-Path (Join-Path $zipTest $must))) {
               Write-Error "Packaged zip is missing $must - bundle layout is wrong."
               exit 1
             }
           }
-          Write-Host "Bundle layout OK: cosim/ hoisted, Carla/ shims present, sentinel at root."
+          # The build tooling must NOT ship. update_fixs.* in particular has to stay
+          # source-side at its frozen raw.githubusercontent path; a copy inside the
+          # bundle would be a second one to keep in sync, which is the whole failure
+          # mode #313 exists to remove.
+          foreach ($never in @('scripts', 'dispatch', 'update_fixs.ps1', 'update_fixs.sh')) {
+            if (Test-Path (Join-Path $zipTest $never)) {
+              Write-Error "Packaged zip contains $never - build tooling must stay source-side."
+              exit 1
+            }
+          }
+          Write-Host "Bundle layout OK: cosim/ + frontdoor/ hoisted, Carla/ shims present, no build tooling."
 
       - name: Upload packaged zip as a workflow artifact (inspect on PRs)
         if: steps.detect.outputs.should_build == 'true'

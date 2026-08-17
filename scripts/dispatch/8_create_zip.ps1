@@ -151,16 +151,22 @@ try {
         Write-Host "  + Carla/ co-sim component"
     }
 
-    # Ship the renderer-agnostic co-sim entry points, hoisted out of scripts/ so
-    # the bundle reads FIXS/cosim/ rather than FIXS/scripts/cosim/ (#313). Same
-    # remapping idea as CarMaker/ -> carmaker/ above.
+    # Ship the renderer-agnostic co-sim entry points and the front door, hoisted
+    # out of scripts/ so the bundle reads FIXS/cosim/ and FIXS/frontdoor/ rather
+    # than FIXS/scripts/... (#313). Same remapping idea as CarMaker/ -> carmaker/
+    # above.
+    #
+    # frontdoor/ is a REFERENCE copy, not something anything runs from inside the
+    # bundle: a repo's own FIXS.bat/FIXS.sh sits beside FIXS/, and compares its
+    # contract marker against this copy so an out-of-date front door says so
+    # instead of failing obscurely.
     #
     # Named subdirectories, not a scripts/*.py glob: scripts/ also holds the build
     # and release tooling, which must NOT ship - and update_fixs.{sh,ps1} in
     # particular has to stay exactly where it is, because every front door ever
     # committed downloads it from that path on raw.githubusercontent. An explicit
     # list also means a new .py dropped into scripts/ cannot ship by accident.
-    foreach ($component in @('cosim')) {
+    foreach ($component in @('cosim', 'frontdoor')) {
         $src = Join-Path $RepoRoot "scripts\$component"
         if (-not (Test-Path $src)) { continue }
         $dest = Join-Path $StagingDir $component
