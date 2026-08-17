@@ -1,9 +1,13 @@
 name: Release (public core)
 
-# Automated release pipeline for #191 / #57 - two rolling channels, one workflow:
+# Automated release pipeline for #191 / #57 - one workflow, one rolling channel
+# per release train, resolved by convention rather than by a table here:
 #
-#   push -> main          publishes the 'latest' prerelease   (current train)
-#   push -> dev_v0.9.0    publishes the 'alpha_v0.9.0' prerelease (0.9.0 train)
+#   push -> main          publishes the 'latest' prerelease        (current train)
+#   push -> dev_vX.Y.Z    publishes the 'vX.Y.Z-alpha' prerelease  (that train)
+#
+# scripts/dispatch/release_channel.ps1 owns that mapping; everything downstream
+# (zip label, the local describe tag, publish_release.ps1) reads it from there.
 #
 # On pull requests it builds + packages only (NO publish) as a build gate.
 #
@@ -22,10 +26,19 @@ on:
         description: 'Publish the built zip to this branch''s rolling prerelease'
         type: boolean
         default: false
+  # Globbed, not listed, so a new train is a branch name and nothing else - which
+  # is the rule scripts/dispatch/release_channel.ps1 already states ("dev_v0.10.0
+  # gets its v0.10.0-alpha channel the day the branch is created"). That was only
+  # ever true of the CHANNEL; the trigger stayed a literal list, so dev_v0.10.0
+  # built nothing and PRs targeting it ran no build gate at all.
+  #
+  # Publishing stays guarded independently: release_channel.ps1 sets a channel only
+  # for an exact dev_vX.Y.Z, so a branch like dev_v0.10.0_wip builds and never
+  # publishes.
   pull_request:
-    branches: [dev, main, dev_v0.9.0]
+    branches: [dev, main, 'dev_v*']
   push:
-    branches: [main, dev_v0.9.0]
+    branches: [main, 'dev_v*']
 
 permissions:
   contents: write        # create/update the rolling release + tag on publish
