@@ -1,5 +1,17 @@
 #include "TrafficHelper.h"
 #include "FixsProtocol.h"   // fixs::kFeedPeriodS - one FIXS exchange == one traffic step
+
+namespace {
+// #86 diagnostics, not state: how many vehicles per reporting window still
+// needed a DIRECT TraCI query for their leader instead of reading it out of the
+// subscription. Reported every 3000 steps so a config quietly querying every
+// vehicle -- i.e. paying the pre-#86 cost -- is visible in the log rather than
+// only under a profiler. File scope, because nothing outside this file has any
+// business knowing; TrafficHelper is instantiated once per process.
+long nLeaderIdQueried = 0;
+long nLeaderSpeedQueried = 0;
+long nStepsSinceLeaderReport = 0;
+}   // namespace
 #include <stdexcept>
 
 
@@ -1537,7 +1549,10 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 					veh.precedingVehicleSpeed = leadIt->second.speed;
 				}
 				else {
-					leaderFallbackSpeed++;
+					// Leader is not itself subscribed -- usually one that
+					// entered this step, so it has no results yet. Ask SUMO,
+					// exactly as every vehicle did before #86.
+					nLeaderSpeedQueried++;
 					veh.precedingVehicleSpeed = SUMO_TRACI_NAMESPACE::Vehicle::getSpeed(
 						veh.precedingVehicleId);
 				}
@@ -1545,17 +1560,17 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 			// Reported as a periodic total, never per step. A step-by-step print
 			// is both noise (6481 lines in one run) and a syscall in the hot loop
 			// -- it would show up as the very cost this change removes.
-			leaderFallbackSteps++;
-			if (leaderFallbackSteps >= 3000) {
-				if (leaderFallbackId > 0 || leaderFallbackSpeed > 0) {
+			nStepsSinceLeaderReport++;
+			if (nStepsSinceLeaderReport >= 3000) {
+				if (nLeaderIdQueried > 0 || nLeaderSpeedQueried > 0) {
 					printf("leader lookups: %ld id and %ld speed fallbacks over the "
 						"last %ld steps (a leader that is not itself subscribed -- "
 						"usually one that entered this step -- still needs asking)\n",
-						leaderFallbackId, leaderFallbackSpeed, leaderFallbackSteps);
+						nLeaderIdQueried, nLeaderSpeedQueried, nStepsSinceLeaderReport);
 				}
-				leaderFallbackId = 0;
-				leaderFallbackSpeed = 0;
-				leaderFallbackSteps = 0;
+				nLeaderIdQueried = 0;
+				nLeaderSpeedQueried = 0;
+				nStepsSinceLeaderReport = 0;
 			}
 		}
 
@@ -1864,11 +1879,13 @@ void TrafficHelper::parserSumoSubscription(libsumo::TraCIResults VehDataSubscrib
 		}
 		if (!gotSubscribedLeader) {
 			// The value was ABSENT or an unexpected type -- not "no leader".
+			// Ask SUMO directly: same call as before #86, same answer, just a
+			// round-trip instead of free.
 			// Absent means this vehicle came from a CONTEXT subscription (the
 			// container is subscribed, not the vehicle, so it carries no
 			// VAR_LEADER); unexpected type means a future SUMO returns the pair
 			// differently.
-			leaderFallbackId++;
+			nLeaderIdQueried++;
 			pair<string, double> leaderIdNGap = SUMO_TRACI_NAMESPACE::Vehicle::getLeader(
 				vehId, Config_c->SumoSetup.PrecedingVehicleLookahead);
 			CurVehData.precedingVehicleId = get<0>(leaderIdNGap);
