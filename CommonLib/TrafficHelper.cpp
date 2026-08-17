@@ -257,7 +257,12 @@ void TrafficHelper::connectionSetup(string trafficIp, int trafficPort, int nClie
 	VehDataSubscribeList.push_back(libsumo::VAR_SPEED_FACTOR);
 	// get next speed limit
 	// handle it at beginning when this vehicle enters
-	VehDataSubscribeList.push_back(libsumo::VAR_VIA);
+	// #86: subscribed but never read -- parserSumoSubscription has no
+	// VehDataSubscribeTraciResults[VAR_VIA] anywhere, so SUMO serialises a string
+	// list per vehicle per step that is then discarded. Commented rather than
+	// deleted: it is one of the few upcoming-route variables, and whoever wants
+	// it back should see that it used to be here.
+	//VehDataSubscribeList.push_back(libsumo::VAR_VIA);
 	// next link
 	// retrieved as part of the speed limit information
 	

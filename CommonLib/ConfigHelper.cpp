@@ -364,13 +364,20 @@ int ConfigHelper::getConfig(string configName) {
 			printf("\nWARNING (#86): WarmUpServePorts is set but no warm-up is configured; "
 				"it has no effect.\n\n");
 		}
+		// BOTH layers: XilSetup declares its own subscriptions (parsed separately,
+		// see getVehSubscriptionList above), so scanning ApplicationSetup alone
+		// would reject a valid XIL-only scenario -- and reject it fatally.
 		std::unordered_set<int> declared;
-		for (auto& sub : ApplicationSetup.VehicleSubscription)
-			for (int p : std::get<3>(sub)) declared.insert(p);
-		for (auto& sub : ApplicationSetup.SignalSubscription)
-			for (int p : std::get<3>(sub)) declared.insert(p);
-		for (auto& sub : ApplicationSetup.DetectorSubscription)
-			for (int p : std::get<3>(sub)) declared.insert(p);
+		auto collectPorts = [&declared](const auto& subs) {
+			for (auto& sub : subs)
+				for (int p : std::get<3>(sub)) declared.insert(p);
+		};
+		collectPorts(ApplicationSetup.VehicleSubscription);
+		collectPorts(ApplicationSetup.SignalSubscription);
+		collectPorts(ApplicationSetup.DetectorSubscription);
+		collectPorts(XilSetup.VehicleSubscription);
+		collectPorts(XilSetup.SignalSubscription);
+		collectPorts(XilSetup.DetectorSubscription);
 		for (int p : SimulationSetup.WarmUpServePorts) {
 			if (declared.find(p) == declared.end()) {
 				printf("\nERROR (#86): WarmUpServePorts lists port %d, which no subscription "
