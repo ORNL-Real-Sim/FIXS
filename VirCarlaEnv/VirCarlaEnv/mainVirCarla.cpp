@@ -12,6 +12,7 @@
 #include <iostream>
 #include <fstream>
 #include <string>
+#include <algorithm>
 #include <unordered_set>
 #include <cmath>
 #include <chrono>
@@ -129,6 +130,42 @@ int main(int argc, const char* argv[]) {
     const bool   useWireActuation = (cs.EgoL0Driver == "Actuation" || cs.EgoL0Driver == "actuation");
     const double kMaxSteerRad = 0.7;   // must match the client's DriveCommand steer scaling
     const std::string egoId = cs.EgoId;
+
+    // DOES THIS BRIDGE OWN THE EGO? This must be the SAME predicate TrafficLayer
+    // uses for carlaOwnsId (TrafficHelper.cpp), because the two processes are
+    // deciding one thing together and a disagreement has no arbiter.
+    //
+    // It used to be `egoMode >= 1` here against
+    // `EnableExternalControl && id in InterestedIds` there, and with
+    // EnableExternalControl false the two answered differently. What followed was
+    // not a degraded run, it was an incoherent one: TrafficLayer kept the ego on
+    // SUMO kinematics and published its pose for rendering, this bridge used that
+    // pose once as a spawn seed and then dropped every later one (VirEnvCore skips
+    // egoId_), and a physics ego free-ran with no anchor while SUMO planned its
+    // traffic around a car that was somewhere else entirely. Measured on
+    // mlk_eco_driving: the two egos tracked to 0.7 m for 30 s, then background
+    // vehicle 3.73 -- routed around the SUMO ego 2.9 m away -- was teleported
+    // through the physics body at 10.34 m/s from 1.56 m. The ego took +2.2 m of z
+    // and a 186 deg heading swing and sat wedged 10.2 m off-route for the
+    // remaining 33 s, still being advised 5.3 m/s. Separation ended at 124.8 m.
+    //
+    // With them agreeing, EnableExternalControl: false means what this scenario's
+    // config always said it meant -- the CONTROL run: no physics ego, no driver,
+    // no advisory, egoId_ empty, so the core mirrors the traffic simulator's ego
+    // like any other vehicle. That is L0, whatever EgoMode says. Co-simulation
+    // only earns its cost through coupling, and with neither direction coupled
+    // this was two simulations sharing a clock.
+    const bool carlaOwnsEgo = (egoMode >= 1) && enableExternalControl
+        && (std::find(cs.InterestedIds.begin(), cs.InterestedIds.end(), egoId)
+            != cs.InterestedIds.end());
+    if (egoMode >= 1 && !carlaOwnsEgo) {
+        std::cout << "EgoMode " << egoMode << " is inactive: "
+                  << (!enableExternalControl
+                        ? "EnableExternalControl is false"
+                        : "the ego id is not in InterestedIds")
+                  << ", so the traffic simulator keeps the ego and this bridge "
+                     "mirrors it (L0 control run).\n";
+    }
     // WHO CREATES THE EGO -- decided by whether EgoSpawnPose is configured:
     //
     //   pose given   this bridge creates it, before the co-sim loop, at that pose.
@@ -147,7 +184,7 @@ int main(int argc, const char* argv[]) {
     // trigger is visible to the only component running during it, and the traffic
     // simulator's ego keeps a real route -- which is what keeps its next-signal
     // information, and any controller planning on it, meaningful.
-    const bool deferEgoSpawn = (egoMode >= 1 && cs.EgoSpawnPose.size() < 4);
+    const bool deferEgoSpawn = (carlaOwnsEgo && cs.EgoSpawnPose.size() < 4);
 
     std::unordered_set<std::string> interestedIds(cs.InterestedIds.begin(), cs.InterestedIds.end());
 
@@ -201,7 +238,7 @@ int main(int argc, const char* argv[]) {
         // EgoMode 0: Carla renders every vehicle incl. the SUMO-driven ego ("").
         // EgoMode >=1: Carla OWNS the ego -- the core must never spawn/teleport the
         // SUMO echo of it (SUMO's copy is the injected shadow of this Carla actor).
-        core.egoId_                    = (egoMode >= 1) ? egoId : "";
+        core.egoId_                    = carlaOwnsEgo ? egoId : "";
         core.egoType_                  = "";
         core.trafficLayerIP_           = cs.CarlaClientIP;
         core.vehDataPort_              = cs.CarlaClientPort;
@@ -290,11 +327,11 @@ int main(int argc, const char* argv[]) {
         // first, THEN create the TM + sync + autopilot. TM must be synchronous in
         // a synchronous world; world.Tick() then drives TM's SynchronousTick
         // automatically (in-process TM instance).
-        if (egoMode >= 1 && useFallbackDriver && cs.EgoRoutePoints.empty()) {
+        if (carlaOwnsEgo && useFallbackDriver && cs.EgoRoutePoints.empty()) {
             std::cerr << "EgoMode " << egoMode << " (Pursuit) needs EgoRoutePoints\n";
             return -1;
         }
-        if (egoMode >= 1 && !deferEgoSpawn) {
+        if (carlaOwnsEgo && !deferEgoSpawn) {
             virenv::Pose sp;
             sp.x = cs.EgoSpawnPose[0]; sp.y = cs.EgoSpawnPose[1];
             sp.z = cs.EgoSpawnPose[2]; sp.headingDeg = cs.EgoSpawnPose[3];
@@ -314,7 +351,7 @@ int main(int argc, const char* argv[]) {
         // over FIXS -- read off the ego's received record (ego.speedDesired), which an
         // advisory client (e.g. py_ego_speed_advisor.py) feeds through TrafficLayer's
         // sequential-client path. No controller attached -> falls back to EgoTargetSpeed.
-        if (egoMode >= 2)
+        if (carlaOwnsEgo && egoMode >= 2)
             std::cout << "L2: external speed advisory via FIXS (ego.speedDesired) -- driver: "
                       << (useFallbackDriver ? "EgoDriver" : "TM") << "\n";
         double lastAdvisory = cs.EgoTargetSpeed;   // most-recent commanded desired speed (for the driver/log)
@@ -383,7 +420,7 @@ int main(int argc, const char* argv[]) {
             // Set the driver target BEFORE it runs this tick. applyEgoControl routes
             // it to native TM (SetDesiredSpeed) or the EgoDriver fallback (override);
             // it persists across sub-steps until the next feed refreshes it.
-            if (egoMode >= 2 && !useWireActuation) {
+            if (carlaOwnsEgo && egoMode >= 2 && !useWireActuation) {
                 const bool onFeedNow = fixs::onFeedBoundary(simTime, 1e-6);
                 if (onFeedNow) {
                     // the external controller's advisory rides on the ego's received
@@ -410,7 +447,7 @@ int main(int argc, const char* argv[]) {
                 }
             }
             // fallback module drives per-tick; native TM drives inside world.Tick()
-            if (egoMode >= 1 && useFallbackDriver) backend.driveEgoFallback(cs.EgoTargetSpeed);
+            if (carlaOwnsEgo && useFallbackDriver) backend.driveEgoFallback(cs.EgoTargetSpeed);
             if (poseLog.is_open()) {       // A/B: log the applied Carla pose per SUMO id
                 for (const auto& kv : core.mappedVehicles()) {
                     const carla::geom::Transform* tf = backend.lastAppliedPose(kv.second);
@@ -437,7 +474,7 @@ int main(int argc, const char* argv[]) {
             // Mirrored (teleported) vehicles only. A physics-driven ego
             // (EgoMode >= 1) has no pre-tick answer: its pose is produced BY the
             // tick, so it keeps the post-tick snap below and keeps its lag.
-            if (spectatorFollow && !(egoMode >= 1 && centeredViewId == egoId)
+            if (spectatorFollow && !(carlaOwnsEgo && centeredViewId == egoId)
                 && interestedIds.count(centeredViewId)) {
                 const auto& mappedPre = core.mappedVehicles();
                 auto cit = mappedPre.find(centeredViewId);
@@ -463,7 +500,7 @@ int main(int argc, const char* argv[]) {
             if (onFeed) backend.auditZAlignment();
 
             // ---- POST-tick L0+: the Carla-driven ego -> FIXS (TL injects into SUMO)
-            if (egoMode >= 1) {
+            if (carlaOwnsEgo) {
                 virenv::EgoState es;
                 if (backend.readEgoState(egoId, es)) {
             if (onFeed && core.ENABLE_REALSIM) {
@@ -525,18 +562,8 @@ int main(int argc, const char* argv[]) {
                                       << " mirroredTwin=" << core.mappedVehicles().count(egoId)
                                       << " pos=(" << es.x << ", " << es.y << ", " << es.z << ")\n";
                         }
-                        // Also log the SUMO-VIEW ego (what SUMO reports back this feed) on the
-                        // SAME clock as the Carla view, so a plot compares them directly. It's
-                        // the ego ~2 ticks stale (Carla is a step ahead + SUMO getPosition is
-                        // n-1); logged as id "ego_sumo".
-                        if (dataLog.isOpen()) {
-                            auto itSumo = core.Msg_c.VehDataRecv_um.find(egoId);
-                            if (itSumo != core.Msg_c.VehDataRecv_um.end()) {
-                                VehFullData_t dsumo = itSumo->second;
-                                dsumo.id = "ego_sumo";
-                                dataLog.logVehicle(simTime, dsumo);
-                            }
-                        }
+                        // (the SUMO-view row is logged once per feed below, for BOTH
+                        // modes -- see the "ego_sumo" block after the readback loop)
                     }
                     if (spectatorFollow && egoId == centeredViewId && backend.egoActor()) {
                         carla::geom::Transform eTf = backend.egoActor()->GetTransform();
@@ -552,24 +579,56 @@ int main(int argc, const char* argv[]) {
             // the PRE-tick block above (#254).
             const auto& mapped = core.mappedVehicles();
             for (const std::string& iid : interestedIds) {
-                if (egoMode >= 1 && iid == egoId) continue;   // ego handled above (never mapped)
+                if (carlaOwnsEgo && iid == egoId) continue;   // ego handled above (never mapped)
                 auto mit = mapped.find(iid);
                 if (mit == mapped.end()) continue;
                 carla::SharedPtr<carla::client::Vehicle> actor = backend.actorOf(mit->second);
                 if (!actor) continue;
                 carla::geom::Transform cTf = actor->GetTransform();
 
-                if (enableExternalControl && onFeed) {
+                // OBSERVING is not COUPLING. The record is built and LOGGED on every
+                // feed; only the push back into FIXS is gated on external control.
+                //
+                // This matters most in the control run, where this loop is the only
+                // thing that sees the ego: with EnableExternalControl false the ego
+                // is mirrored rather than Carla-driven, so it comes through here
+                // instead of the owned-ego block above. Logging it is how the mirror
+                // gets verified -- the Carla and SUMO rows should agree to within the
+                // ~2-tick staleness, and a real gap between them IS the bug worth
+                // catching. A comparison that is expected to read zero is exactly the
+                // one you want recorded, because nothing else would notice it drift.
+                if (onFeed) {
                     carla::geom::Vector3D ext = actor->GetBoundingBox().extent;
                     carla::geom::Vector3D vel = actor->GetVelocity();
                     carla::geom::Transform sTf = BridgeHelper::map_transfrom_Carla_to_Sumo(cTf, ext);
                     VehFullData_t d;
                     d.id = iid; d.type = "ego";
+                    d.speed = (float)std::sqrt(vel.x * vel.x + vel.y * vel.y);
                     d.speedDesired = (float)std::sqrt(vel.x * vel.x + vel.y * vel.y);
                     d.positionX = sTf.location.x; d.positionY = sTf.location.y; d.positionZ = sTf.location.z;
                     d.heading = sTf.rotation.yaw; d.grade = (float)(sTf.rotation.pitch * M_PI / 180.0);
-                    core.Msg_c.VehDataSend_um[core.Sock_c.serverSock[sock0]].push_back(d);
+                    if (enableExternalControl)
+                        core.Msg_c.VehDataSend_um[core.Sock_c.serverSock[sock0]].push_back(d);
                     if (dataLog.isOpen() && logWanted(d.id)) dataLog.logVehicle(simTime, d);
+                }
+            }
+
+            // ---- the SUMO-VIEW ego, once per feed, in BOTH modes ----------------
+            // What SUMO reports back this feed, on the SAME clock as the Carla row
+            // above, so the two are directly comparable: id "ego_sumo". It is the
+            // ego ~2 ticks stale (Carla is a step ahead and SUMO getPosition is n-1).
+            //
+            // Deliberately NOT gated on who owns the ego. Whether Carla drives it or
+            // mirrors it, the pair is what makes the file readable: in the control
+            // run the two rows should agree and a gap means the mirror is broken; in
+            // L2 they separate by the plant, which is the measurement. Same columns
+            // either way, so runs from the two modes diff directly.
+            if (onFeed && dataLog.isOpen()) {
+                auto itSumo = core.Msg_c.VehDataRecv_um.find(egoId);
+                if (itSumo != core.Msg_c.VehDataRecv_um.end()) {
+                    VehFullData_t dsumo = itSumo->second;
+                    dsumo.id = "ego_sumo";
+                    if (logWanted(dsumo.id)) dataLog.logVehicle(simTime, dsumo);
                 }
             }
 
@@ -602,7 +661,7 @@ int main(int argc, const char* argv[]) {
         }
 
         if (dataLog.isOpen()) { std::cout << "DataLogger closed: " << dataLog.path() << "\n"; dataLog.close(); }
-        if (egoMode >= 1) backend.destroyEgo();
+        if (carlaOwnsEgo) backend.destroyEgo();
         settings = world.GetSettings();
         if (settings.synchronous_mode) {
             settings.synchronous_mode = false;
