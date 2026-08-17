@@ -135,6 +135,7 @@ import os
 import sys
 
 import carla_env_setup as env
+import fixs_paths
 
 SCHEMA = 1
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -149,9 +150,10 @@ GENERIC = "_generic"
 # Locations
 # --------------------------------------------------------------------------- #
 def app_root():
-    """The application repo root: two levels up from this file
-    (<repo>/FIXS/Carla/app_catalog.py -> <repo>). Mirrors import_map._app_root()."""
-    return os.path.dirname(os.path.dirname(HERE))
+    """The application repo root: the directory containing FIXS/. Anchored on the
+    FIXS root rather than counted up from this file, so it survives a move.
+    Mirrors import_map._app_root()."""
+    return fixs_paths.app_root(HERE)
 
 
 def catalog_path(root=None):

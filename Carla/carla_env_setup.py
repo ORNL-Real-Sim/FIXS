@@ -36,9 +36,14 @@ import shutil
 import subprocess
 import sys
 
+import fixs_paths
+
 HERE = os.path.dirname(os.path.abspath(__file__))
-# the canonical conda spec ships at the FIXS root (one level up from Carla/).
-ENV_YML = os.path.normpath(os.path.join(HERE, "..", "environment.yml"))
+# The canonical conda spec ships at the FIXS root. Found by walking up to the file
+# itself rather than by counting directories up from here, so it stays correct
+# whether this module is running from a source checkout or from an unpacked
+# release - the two put it at different depths. See fixs_paths.
+ENV_YML = fixs_paths.env_yml(HERE)
 
 CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".fixs")
 CONFIG_PATH = os.path.join(CONFIG_DIR, "carla.json")

@@ -38,6 +38,7 @@ import urllib.request
 
 import app_catalog
 import carla_env_setup as env
+import fixs_paths
 import run_profile
 
 # Flush every line as it is printed. Redirected to a file or a pipe - which is how
@@ -51,9 +52,14 @@ except AttributeError:                               # pragma: no cover - old py
     pass
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SYNC = os.path.join(HERE, "sumo", "run_synchronization", "run_synchronization.py")
-FIXS_ROOT = os.path.dirname(HERE)          # FIXS/Carla -> FIXS (the fetched bundle root)
-APP_ROOT = os.path.dirname(FIXS_ROOT)      # FIXS -> the app dir (holds initialize.{sh,ps1})
+# Anchored on environment.yml, not on this file's depth: the source checkout and
+# the unpacked release put this module at different nesting levels. See fixs_paths.
+FIXS_ROOT = fixs_paths.fixs_root(HERE)     # the FIXS bundle root
+APP_ROOT = fixs_paths.app_root(HERE)       # the app dir that holds FIXS/
+# The CARLA component keeps its own folder in the bundle; reach into it from the
+# root rather than from HERE, which is no longer inside it.
+CARLA_DIR = os.path.join(FIXS_ROOT, "Carla")
+SYNC = os.path.join(CARLA_DIR, "sumo", "run_synchronization", "run_synchronization.py")
 
 # Defaults for the native stack's two ports, used ONLY to seed a freshly generated
 # scenario yaml and as the fallback when one cannot be read. The yaml is the single
@@ -227,7 +233,7 @@ def maybe_update_fixs(no_check=False, interactive=None):
             # argv was already split, so python took the tail of its own path as the
             # script to run. subprocess quotes the vector properly on both OSes, and
             # is what env.reexec_under_configured already uses for the same reason.
-            cmd = [sys.executable, os.path.join(HERE, "run_cosim.py")] + sys.argv[1:]
+            cmd = [sys.executable, os.path.abspath(__file__)] + sys.argv[1:]
             sys.exit(subprocess.call(cmd))
         print("[cosim] update did not complete; continuing with the current bundle.")
     except Exception as e:
@@ -1480,7 +1486,7 @@ def resolve_tl_table(sumocfg, force=False, cache_name=None):
         print(f"[cosim] TL table: cached generated {out}")
         return out
     try:
-        sys.path.insert(0, os.path.join(HERE, "utils"))
+        sys.path.insert(0, os.path.join(CARLA_DIR, "utils"))
         import extract_sumo_tls_as_table as gen
         os.makedirs(cache, exist_ok=True)
         gen.generate_table(net, out)

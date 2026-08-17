@@ -63,6 +63,7 @@ import tempfile
 import zipfile
 
 import carla_env_setup as env
+import fixs_paths
 
 
 def _mode(mode=None):
@@ -2054,10 +2055,10 @@ DEFAULT_MAP_TAG_PREFIX = "map-"
 
 
 def _app_root():
-    """The application repo root that holds fixs_sources.txt: two levels up from
-    this file (<repo>/FIXS/Carla/import_map.py -> <repo>)."""
-    here = os.path.dirname(os.path.abspath(__file__))
-    return os.path.dirname(os.path.dirname(here))
+    """The application repo root that holds the manifest and fixs_sources.txt: the
+    directory containing FIXS/. Anchored on the FIXS root rather than counted up
+    from this file, so it survives a move. Mirrors app_catalog.app_root()."""
+    return fixs_paths.app_root(os.path.dirname(os.path.abspath(__file__)))
 
 
 def resolve_map_source(repo=None, tag_prefix=None):
