@@ -1,17 +1,6 @@
 #include "TrafficHelper.h"
 #include "FixsProtocol.h"   // fixs::kFeedPeriodS - one FIXS exchange == one traffic step
 
-namespace {
-// #86 diagnostics, not state: how many vehicles per reporting window still
-// needed a DIRECT TraCI query for their leader instead of reading it out of the
-// subscription. Reported every 3000 steps so a config quietly querying every
-// vehicle -- i.e. paying the pre-#86 cost -- is visible in the log rather than
-// only under a profiler. File scope, because nothing outside this file has any
-// business knowing; TrafficHelper is instantiated once per process.
-long nLeaderIdQueried = 0;
-long nLeaderSpeedQueried = 0;
-long nStepsSinceLeaderReport = 0;
-}   // namespace
 #include <stdexcept>
 
 
@@ -1552,11 +1541,14 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 					// Leader is not itself subscribed -- usually one that
 					// entered this step, so it has no results yet. Ask SUMO,
 					// exactly as every vehicle did before #86.
+#ifdef RS_DEBUG
 					nLeaderSpeedQueried++;
+#endif
 					veh.precedingVehicleSpeed = SUMO_TRACI_NAMESPACE::Vehicle::getSpeed(
 						veh.precedingVehicleId);
 				}
 			}
+#ifdef RS_DEBUG
 			// Reported as a periodic total, never per step. A step-by-step print
 			// is both noise (6481 lines in one run) and a syscall in the hot loop
 			// -- it would show up as the very cost this change removes.
@@ -1572,6 +1564,7 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 				nLeaderSpeedQueried = 0;
 				nStepsSinceLeaderReport = 0;
 			}
+#endif
 		}
 
 		// !!!temporary fix
@@ -1885,7 +1878,9 @@ void TrafficHelper::parserSumoSubscription(libsumo::TraCIResults VehDataSubscrib
 			// container is subscribed, not the vehicle, so it carries no
 			// VAR_LEADER); unexpected type means a future SUMO returns the pair
 			// differently.
+#ifdef RS_DEBUG
 			nLeaderIdQueried++;
+#endif
 			pair<string, double> leaderIdNGap = SUMO_TRACI_NAMESPACE::Vehicle::getLeader(
 				vehId, Config_c->SumoSetup.PrecedingVehicleLookahead);
 			CurVehData.precedingVehicleId = get<0>(leaderIdNGap);
