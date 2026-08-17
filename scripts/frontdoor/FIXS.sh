@@ -40,17 +40,26 @@ DEFAULT_REPO="ORNL-Real-Sim/FIXS"
 # engine is installed. fixs_sources.txt is still honoured for repos integrated
 # before fixs.json existed.
 # ---------------------------------------------------------------------------
-json_field() {   # json_field <file> <block> <key>
+# An ABSENT key is a normal answer, not a failure - most of these are optional.
+# grep exits 1 when it matches nothing, and under `set -e` with pipefail that
+# would abort the whole script at the assignment, silently and with rc=1. So each
+# reader swallows its own miss and returns the empty string.
+json_field() {   # json_field <file> <block> <key>  -> value, or ""
+    local out=""
     [[ -f "$1" ]] || return 0
-    tr -d '\n' < "$1" \
+    out="$(tr -d '\n' < "$1" \
         | grep -o "\"$2\"[[:space:]]*:[[:space:]]*{[^}]*}" \
         | grep -o "\"$3\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" \
-        | head -n1 | sed 's/.*"\([^"]*\)"$/\1/'
+        | head -n1 | sed 's/.*"\([^"]*\)"$/\1/')" || out=""
+    printf '%s' "$out"
 }
 
-txt_field() {    # txt_field <file> <key>   (legacy fixs_sources.txt)
+txt_field() {    # txt_field <file> <key> -> value, or ""   (legacy fixs_sources.txt)
+    local out=""
     [[ -f "$1" ]] || return 0
-    sed -n "s/^[[:space:]]*$2[[:space:]]*=[[:space:]]*//p" "$1" | head -n1 | tr -d '[:space:]'
+    out="$(sed -n "s/^[[:space:]]*$2[[:space:]]*=[[:space:]]*//p" "$1" \
+        | head -n1 | tr -d '[:space:]')" || out=""
+    printf '%s' "$out"
 }
 
 MANIFEST="$ROOT/fixs.json"
@@ -114,7 +123,7 @@ seed_manifest() {
     [[ -f "$MANIFEST" ]] && return 0
     [[ -f "$LEGACY"   ]] && return 0     # an older integration already has its config
     local ver
-    ver="$(sed -n '1s/ .*//p' "$ROOT/FIXS/FIXS_VERSION.txt" 2>/dev/null)"
+    ver="$(sed -n '1s/ .*//p' "$ROOT/FIXS/FIXS_VERSION.txt" 2>/dev/null)" || ver=""
     [[ -n "$ver" ]] || return 0
     cat > "$MANIFEST" <<JSON
 {
@@ -150,15 +159,20 @@ if [[ ! -f "$ROOT/FIXS/FIXS_VERSION.txt" ]]; then
         echo "[FIXS] FIXS is not installed here - fetching it first ..."
     fi
     fetch_fixs || { echo "[FIXS] setup failed - see above. Not continuing." >&2; exit 1; }
-    seed_manifest
 fi
+
+# Every run, not only after a fetch: a repo can arrive at an installed FIXS/ some
+# other way - migrating off run_cosim.sh, or a colleague's copy - and it should
+# still end up with its pin recorded. Returns immediately once a manifest (or a
+# legacy fixs_sources.txt) exists, so this costs one stat on every later run.
+seed_manifest
 
 # Say so when this file is older than the engine it just installed. It is never
 # overwritten in place: a running shell reads its own script incrementally, and
 # this file is also the repo's committed entry point. Re-downloading is the fix.
 SHIPPED="$ROOT/FIXS/frontdoor/FIXS.sh"
 if [[ -f "$SHIPPED" ]]; then
-    want="$(sed -n 's/^# FIXS_FRONTDOOR: *\([0-9]*\).*/\1/p' "$SHIPPED" | head -n1)"
+    want="$(sed -n 's/^# FIXS_FRONTDOOR: *\([0-9]*\).*/\1/p' "$SHIPPED" | head -n1)" || want=""
     if [[ -n "$want" && "$want" != "$FRONTDOOR_CONTRACT" ]]; then
         echo "[FIXS] this FIXS.sh is contract v$FRONTDOOR_CONTRACT; the installed"
         echo "[FIXS] build expects v$want. Copy FIXS/frontdoor/FIXS.sh over it."

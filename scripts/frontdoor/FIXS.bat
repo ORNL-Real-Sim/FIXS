@@ -74,9 +74,13 @@ if not exist "%ROOT%FIXS\FIXS_VERSION.txt" (
         pause
         exit /b 1
     )
-    call :seed_manifest
 )
 
+REM Every run, not only after a fetch: a repo can arrive at an installed FIXS\ some
+REM other way - migrating off run_cosim.bat, or a colleague's copy - and it should
+REM still end up with its pin recorded. Returns immediately once a manifest (or a
+REM legacy fixs_sources.txt) exists, so this costs one stat on every later run.
+call :seed_manifest
 call :check_contract
 call :findpy || exit /b 1
 
