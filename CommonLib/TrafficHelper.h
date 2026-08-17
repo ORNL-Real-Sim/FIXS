@@ -157,11 +157,19 @@ public:
 	bool NEED_NEXT_TLS = false;
 	bool NEED_PRECEDING_VEH = false;
 
-	// #86: how often a step fell back to a per-vehicle TraCI call because the
-	// leader was not in the subscription -- its id (a context-subscribed vehicle
-	// carries no VAR_LEADER) or its speed (leader outside the subscribed set).
-	// Reset every step; non-zero is printed, because a config silently paying the
-	// pre-#86 cost should be visible in the log rather than only under a profiler.
+	// #86: how many per-vehicle TraCI calls a reporting window still had to make
+	// because the leader was not in the subscription -- its id (a
+	// context-subscribed vehicle carries no VAR_LEADER) or its speed (the leader
+	// is outside the subscribed set, usually one that entered this step).
+	//
+	// Counts, not data: they start at 0 because "no fallbacks" is the normal
+	// state and the reporting test is `> 0`. The -1-means-unavailable convention
+	// applies to the VehFullData_t fields on the wire (precedingVehicleDistance,
+	// precedingVehicleSpeed), where a consumer must tell "no leader" from
+	// "leader at 0 m" -- a tally has no such ambiguity.
+	//
+	// Reported every 3000 steps, so a config silently paying the pre-#86 cost is
+	// visible in the log rather than only under a profiler.
 	long leaderFallbackId = 0;
 	long leaderFallbackSpeed = 0;
 	long leaderFallbackSteps = 0;

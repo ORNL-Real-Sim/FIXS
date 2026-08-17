@@ -1848,19 +1848,26 @@ void TrafficHelper::parserSumoSubscription(libsumo::TraCIResults VehDataSubscrib
 		// (eclipse-sumo/sumo#15962 is about giving these values proper handling), so
 		// a cast that does not land falls back to asking rather than silently
 		// reporting "no leader" - which would quietly degrade car-following.
-		bool haveLeader = false;
+		// NOT "does this vehicle have a leader" -- "did we get the subscribed
+		// value". A vehicle with no leader HAS the value: SUMO sends ("", -1),
+		// which lands in the branch below and costs no round-trip. Measured:
+		// VAR_LEADER present for 464371 of 464371 vehicles, id fallbacks 0/step
+		// while ~30 of 161 vehicles per step have no leader.
+		bool gotSubscribedLeader = false;
 		auto leaderIt = VehDataSubscribeTraciResults.find(libsumo::VAR_LEADER);
 		if (leaderIt != VehDataSubscribeTraciResults.end() && leaderIt->second) {
 			if (auto rp = std::dynamic_pointer_cast<libsumo::TraCIRoadPosition>(leaderIt->second)) {
 				CurVehData.precedingVehicleId = rp->edgeID;
 				CurVehData.precedingVehicleDistance = rp->pos;
-				haveLeader = true;
+				gotSubscribedLeader = true;
 			}
 		}
-		if (!haveLeader) {
-			// No VAR_LEADER: this vehicle came from a CONTEXT subscription (the
-			// container is subscribed, not the vehicle), or a future SUMO returns
-			// the pair as some other type.
+		if (!gotSubscribedLeader) {
+			// The value was ABSENT or an unexpected type -- not "no leader".
+			// Absent means this vehicle came from a CONTEXT subscription (the
+			// container is subscribed, not the vehicle, so it carries no
+			// VAR_LEADER); unexpected type means a future SUMO returns the pair
+			// differently.
 			leaderFallbackId++;
 			pair<string, double> leaderIdNGap = SUMO_TRACI_NAMESPACE::Vehicle::getLeader(
 				vehId, Config_c->SumoSetup.PrecedingVehicleLookahead);
