@@ -615,8 +615,43 @@ int main(int argc, const char* argv[]) {
 
             // ---- the SUMO-VIEW ego, once per feed, in BOTH modes ----------------
             // What SUMO reports back this feed, on the SAME clock as the Carla row
-            // above, so the two are directly comparable: id "ego_sumo". It is the
-            // ego ~2 ticks stale (Carla is a step ahead and SUMO getPosition is n-1).
+            // above, so the two are directly comparable: id "ego_sumo".
+            //
+            // These two rows are NOT the same quantity, and the difference is a
+            // sampling offset, not a lag -- this is a synchronous co-sim and the
+            // mirrored ego is teleported TO the SUMO pose, so it has no dynamics to
+            // fall behind with. "ego_sumo" is the received record; "ego" is the
+            // actor read back AFTER world.Tick(), and with CarlaTimeStep < the feed
+            // the core places it on an interpolated blend (VirEnvCore step 6), so it
+            // is generally a point SUMO never reported.
+            //
+            // An older comment here claimed "~2 ticks stale". That was wrong by
+            // about 4.5x. Measured over 2097 control-run feeds (mlk_eco_driving,
+            // EnableExternalControl false, CarlaTimeStep 0.05):
+            //
+            //   median separation 0.000 m; 1216/2097 ticks below 1 mm
+            //   sep ~= 0.0446 * v - 0.004  -> a fixed 0.045 s offset, i.e. ONE
+            //     Carla sub-step, not two feed periods
+            //   the per-band ratio is flat: 0.039 / 0.045 / 0.042 / 0.045 s across
+            //     0.1-2, 2-5, 5-10 and 10-16 m/s, and exactly 0.000 below 0.1 m/s
+            //   shifting the series by whole feeds makes it WORSE (mean 0.205 at
+            //     lag 0, 0.264 at lag 1), confirming the offset is sub-feed
+            //
+            // The one 3.2 m excursion is NOT this effect and not a defect: it is a
+            // single tick (1 of 2097) where SUMO's ego changed lane. Decomposed
+            // against its own heading the jump is +0.280 m along-track -- exactly
+            // the 0.290 m it travels at 2.902 m/s -- and +3.199 m LATERAL with the
+            // heading unchanged by 0.003 deg. That is one lane width, sideways, in
+            // one step: SUMO's default (non-sublane) lane-change model, which
+            // mlk_eco_driving selects deliberately with --lateral-resolution 0
+            // because it is the traffic Example_Results was produced with. The very
+            // next tick reads 0.000 again.
+            //
+            // So the expected value of this comparison is 0.045 s * speed, with
+            // one-lane-width spikes at lane changes. Read it that way: anything
+            // that does not fit that shape -- a bias at zero speed, growth over
+            // time, or a step that does not recover on the next tick -- is a real
+            // mirror fault.
             //
             // Deliberately NOT gated on who owns the ego. Whether Carla drives it or
             // mirrors it, the pair is what makes the file readable: in the control
