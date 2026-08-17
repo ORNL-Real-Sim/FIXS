@@ -565,7 +565,12 @@ int main(int argc, char* argv[]) {
 	vector <int> selfServerPortUserInput = {};
 
 	vector <int> vissimSock;
+	// Index-stable: actualClientSock[iC] pairs with selfServerPortUserInput[iC]
+	// for every declared client, whether or not it is connected yet. activeIdx
+	// lists the ones currently being served, ascending -- which is also the
+	// sequential-overlay order a later client depends on.
 	vector <int> actualClientSock;
+	vector <int> activeIdx;
 
 	// config Traffic Layer setup variables
 	if (Config_c.SimulationSetup.EnableRealSim) {
@@ -849,9 +854,35 @@ int main(int argc, char* argv[]) {
 				exit(-1);
 			}
 
+			actualClientSock.assign(Sock_c.clientSock.size(), 0);
 			if (!Sock_c.DeferAcceptClients) {
-				for (int i = 0; i < Sock_c.clientSock.size(); i++) {
-					actualClientSock.push_back(Sock_c.clientSock[i]);
+				for (int i = 0; i < (int)Sock_c.clientSock.size(); i++) {
+					actualClientSock[i] = Sock_c.clientSock[i];
+					activeIdx.push_back(i);
+				}
+			}
+			else if (!Config_c.SimulationSetup.WarmUpServePorts.empty()) {
+				// These clients have to OBSERVE the warm-up (see WarmUpServePorts):
+				// accept them now, blocking as TrafficLayer did before warm-ups
+				// existed, and serve them from the first step. Everyone else is
+				// accepted when the warm-up ends.
+				vector<int> servedIdx;
+				for (int i = 0; i < (int)selfServerPortUserInput.size() &&
+				                i < (int)Sock_c.clientSock.size(); i++) {
+					for (int p : Config_c.SimulationSetup.WarmUpServePorts) {
+						if (selfServerPortUserInput[i] == p) { servedIdx.push_back(i); break; }
+					}
+				}
+				if (!servedIdx.empty()) {
+					if (Sock_c.acceptClients(TrafficLayerErrorFile, &servedIdx) < 0) {
+						printf("Accepting the warm-up clients failed\n");
+						exit(-1);
+					}
+					for (int i : servedIdx) {
+						actualClientSock[i] = Sock_c.clientSock[i];
+						activeIdx.push_back(i);
+						printf("Serving port %d through the warm-up.\n", selfServerPortUserInput[i]);
+					}
 				}
 			}
 		}
@@ -1017,10 +1048,16 @@ int main(int argc, char* argv[]) {
 			else if (Traffic_c.isWarmUpEgoInNetwork(&simTime)) {
 				warmUpFinished = true;
 			}
-			else {
+			else if (activeIdx.empty()) {
 				// Tick again; nothing downstream sees this step.
 				continue;
 			}
+			// else: some clients must OBSERVE the warm-up (WarmUpServePorts), so
+			// fall through and run the ordinary exchange for them. What they see
+			// is a feed identical to a run with no warm-up at all -- which is the
+			// point: a controller that learns the road by watching it cannot be
+			// handed the road already in motion and be expected to agree with a
+			// run that watched it from the start.
 		}
 
 		// ===================================================================
@@ -1028,8 +1065,10 @@ int main(int argc, char* argv[]) {
 		// ===================================================================
 		// Without a warm-up this is a no-op: initConnection() already accepted
 		// before the loop (or, on the CarMaker path, does so here on the first
-		// step exactly as it always has).
-		if (!clientsAccepted) {
+		// step exactly as it always has). With one, it waits until the warm-up is
+		// actually over -- otherwise the clients that were meant to sit it out
+		// would be pulled in on its first step.
+		if (!clientsAccepted && warmUpFinished) {
 			clientsAccepted = true;
 
 			if (ENABLE_VEH_SIMULATOR) {
@@ -1037,19 +1076,40 @@ int main(int argc, char* argv[]) {
 					printf("Connect to SUMO failed! Make sure start Traffic Simulator first and start one instance of VISSIM/SUMO \n");
 					exit(-1);
 				}
-				for (int i = 0; i < Sock_c.clientSock.size(); i++) {
-					actualClientSock.push_back(Sock_c.clientSock[i]);
+				// Index-stable, and ascending: actualClientSock[iC] must keep pairing
+				// with selfServerPortUserInput[iC], and the sequential overlay depends
+				// on the order. Anyone served through the warm-up is already in here.
+				actualClientSock.assign(Sock_c.clientSock.size(), 0);
+				activeIdx.clear();
+				for (int i = 0; i < (int)Sock_c.clientSock.size(); i++) {
+					actualClientSock[i] = Sock_c.clientSock[i];
+					activeIdx.push_back(i);
 				}
 			}
 			else if (WARMUP_CONFIGURED) {
 				// Bound and listening since before the loop; only the blocking
-				// accept was held back until now.
-				if (Sock_c.acceptClients(TrafficLayerErrorFile) < 0) {
+				// accept was held back until now -- and only for the clients that
+				// sat the warm-up out. Asking for the ones already served would
+				// block in select() on a listening socket no one is going to
+				// connect to again, which hangs the handover at ego entry.
+				vector<int> pending;
+				for (int i = 0; i < (int)Sock_c.clientSock.size(); i++) {
+					if (find(activeIdx.begin(), activeIdx.end(), i) == activeIdx.end())
+						pending.push_back(i);
+				}
+				if (!pending.empty() &&
+				    Sock_c.acceptClients(TrafficLayerErrorFile, &pending) < 0) {
 					printf("Accepting clients after the warm-up failed\n");
 					exit(-1);
 				}
-				for (int i = 0; i < Sock_c.clientSock.size(); i++) {
-					actualClientSock.push_back(Sock_c.clientSock[i]);
+				// Index-stable, and ascending: actualClientSock[iC] must keep pairing
+				// with selfServerPortUserInput[iC], and the sequential overlay depends
+				// on the order. Anyone served through the warm-up is already in here.
+				actualClientSock.assign(Sock_c.clientSock.size(), 0);
+				activeIdx.clear();
+				for (int i = 0; i < (int)Sock_c.clientSock.size(); i++) {
+					actualClientSock[i] = Sock_c.clientSock[i];
+					activeIdx.push_back(i);
 				}
 			}
 		}
@@ -1134,7 +1194,7 @@ int main(int argc, char* argv[]) {
 				MsgClient_c.clearSendStorage();
 				MsgClient_c.clearRecvStorage();   // #174 sequential: B (client-return bucket) starts empty this tick
 
-				for (unsigned int iC = 0; iC < actualClientSock.size(); iC++) {
+				for (int iC : activeIdx) {
 				//for (unsigned int iC = actualClientSock.size()-1; iC > 0; iC--) {
 					//!!!! NEED TO DISTRIBUTE MsgServer_c data to MsgClient_c
 					//!!!! MsgServer_c VehDataRecv_um TlsDataRecvAll_v DetDataRecvAll_v ==>>> MsgClient_c VehDataSend_v[iclient]  VehIdSend_v[iclient] DetDataSend_v[iclient] TlsDataSend_v[iclient]

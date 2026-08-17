@@ -10,6 +10,7 @@ path and fake CARLA/UE4 trees, so they run on any computer. Run with:
 """
 import os
 import platform
+import shutil
 import sys
 
 import pytest
@@ -66,6 +67,17 @@ def _make_packaged(root):
     return exe
 
 
+def _make_source(tmp_path):
+    """Create a fake source CARLA + UE4 tree; return (carla_root, ue4_root, uproject, editor)."""
+    carla_root = str(tmp_path / "carla")
+    ue4_root = str(tmp_path / "ue4")
+    uproject, editor = env.source_paths(carla_root, ue4_root)
+    for path in (uproject, editor):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        open(path, "w").close()
+    return carla_root, ue4_root, uproject, editor
+
+
 def test_packaged_exe_found(tmp_path):
     root = str(tmp_path / "carla")
     exe = _make_packaged(root)
@@ -104,19 +116,37 @@ def test_carla_command_offscreen_flag(tmp_path):
 
 def test_carla_command_source(tmp_path):
     """Source mode resolves to UE4Editor <uproject> -game."""
-    carla_root = tmp_path / "carla"
-    ue4_root = tmp_path / "ue4"
-    uproject, editor = env.source_paths(str(carla_root), str(ue4_root))
-    os.makedirs(os.path.dirname(uproject), exist_ok=True)
-    os.makedirs(os.path.dirname(editor), exist_ok=True)
-    open(uproject, "w").close()
-    open(editor, "w").close()
+    carla_root, ue4_root, uproject, editor = _make_source(tmp_path)
 
-    cfg = {"mode": "source", "carla_root": str(carla_root), "ue4_root": str(ue4_root)}
+    cfg = {"mode": "source", "carla_root": carla_root, "ue4_root": ue4_root}
     cmd = run_cosim._carla_command(cfg, 2000, render_offscreen=False)
     assert cmd[0] == editor
     assert cmd[1] == uproject
     assert "-game" in cmd
+
+
+def test_carla_command_source_disables_renderdoc_prompt(tmp_path):
+    """Source launches suppress UE4's RenderDoc plugin (#311).
+
+    CARLA's uproject enables RenderDocPlugin, whose loader asks for a renderdoc.dll
+    it cannot find by opening a modal file dialog at startup - which blocks the game
+    thread until a human cancels it. -DisableFrameTraceCapture returns before the
+    search, so the dialog is never reachable.
+    """
+    carla_root, ue4_root, _, _ = _make_source(tmp_path)
+
+    cfg = {"mode": "source", "carla_root": carla_root, "ue4_root": ue4_root}
+    cmd = run_cosim._carla_command(cfg, 2000, render_offscreen=False)
+    assert "-DisableFrameTraceCapture" in cmd
+
+
+def test_carla_command_packaged_carries_no_editor_flags(tmp_path):
+    """A packaged build never loads the plugin (UncookedOnly), so it needs no flag."""
+    root = str(tmp_path / "carla")
+    _make_packaged(root)
+    cfg = {"mode": "packaged", "carla_root": root}
+    cmd = run_cosim._carla_command(cfg, 2000, render_offscreen=False)
+    assert "-DisableFrameTraceCapture" not in cmd
 
 
 def test_carla_command_packaged_missing_raises(tmp_path):
@@ -133,11 +163,74 @@ def test_python_can_import_self():
     assert not env._python_can_import(sys.executable, ("a_module_that_does_not_exist_xyz",))
 
 
-def test_conda_candidates_includes_current():
+def test_python_candidates_includes_current():
     """Candidate discovery always includes the current interpreter, all real."""
-    cands = env._conda_candidates()
+    cands = env._python_candidates()
     assert os.path.normcase(sys.executable) in {os.path.normcase(c) for c in cands}
     assert all(os.path.isfile(c) for c in cands)
+
+
+def test_python_candidates_deduped_by_real_path():
+    """One binary reached under several names (conda's bin/python -> bin/python3)
+    is offered once, not once per name."""
+    reals = [os.path.normcase(os.path.realpath(c)) for c in env._python_candidates()]
+    assert len(reals) == len(set(reals))
+
+
+def test_python_candidates_offer_system_python():
+    """A system interpreter on PATH is a candidate: on Linux it is frequently the
+    only one that can import traci/sumolib (apt puts them in dist-packages)."""
+    sys_py = shutil.which("python3") or shutil.which("python")
+    if not sys_py:
+        pytest.skip("no python/python3 on PATH")
+    reals = {os.path.normcase(os.path.realpath(c)) for c in env._python_candidates()}
+    assert os.path.normcase(os.path.realpath(sys_py)) in reals
+
+
+def test_interpreter_kind_env_private_base_and_system_shared(tmp_path, monkeypatch):
+    """A named conda env is FIXS-private; the base env under the same root and
+    anything outside conda are shared (so installs into them are gated)."""
+    root = tmp_path / "miniconda3"
+    named = env._env_python(str(root / "envs" / "realsim"))
+    base = env._env_python(str(root))
+    for p in (named, base):
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        open(p, "w").close()
+    monkeypatch.setattr(env, "_conda_roots", lambda: [str(root)])
+
+    label, shared = env._interpreter_kind(named)
+    assert "realsim" in label and shared is False
+    label, shared = env._interpreter_kind(base)
+    assert "BASE" in label and shared is True
+    label, shared = env._interpreter_kind(str(tmp_path / "usr" / "bin" / "python3"))
+    assert label == "SYSTEM python" and shared is True
+
+
+def test_confirm_install_gates_shared_interpreter(monkeypatch, capsys):
+    """A private env installs unasked. A shared one must be confirmed, warns why,
+    and declines when there is no console to answer on."""
+    monkeypatch.setattr(env, "_interpreter_kind", lambda py: ("conda env 'realsim'", False))
+    assert env._confirm_install("py", "carla==0.9.15") is True
+
+    monkeypatch.setattr(env, "_interpreter_kind", lambda py: ("SYSTEM python", True))
+    monkeypatch.setattr("builtins.input", lambda *_: "y")
+    assert env._confirm_install("py", "carla==0.9.15") is True
+    monkeypatch.setattr("builtins.input", lambda *_: "")
+    assert env._confirm_install("py", "carla==0.9.15") is False
+    assert "WARNING" in capsys.readouterr().out
+
+    def _no_console(*_):
+        raise EOFError
+    monkeypatch.setattr("builtins.input", _no_console)
+    assert env._confirm_install("py", "carla==0.9.15") is False
+
+
+def test_confirm_install_question_always_asks(monkeypatch):
+    """An explicit question is put even to a private env - that is how the source
+    build's client/server-match reinstall stays opt-in."""
+    monkeypatch.setattr(env, "_interpreter_kind", lambda py: ("conda env 'realsim'", False))
+    monkeypatch.setattr("builtins.input", lambda *_: "n")
+    assert env._confirm_install("py", "wheel", "reinstall? [y/N]: ") is False
 
 
 def test_find_source_wheel_prefers_tag(tmp_path):

@@ -51,6 +51,7 @@ Examples:
   python import_map.py --package RP_Ver0529 --package-url https://.../RP_Ver0529_import.zip
 """
 import argparse
+import fnmatch
 import os
 import platform
 import re
@@ -644,6 +645,14 @@ def _looks_like_bundle(names):
     return "carla" in tops
 
 
+def _bundle_members(z, sumo_only):
+    """Which entries of a bundle zip to extract: everything, or only `sumo/`."""
+    if not sumo_only:
+        return None                      # extractall's own default
+    return [n for n in z.namelist()
+            if n.replace("\\", "/").split("/", 1)[0] == "sumo"]
+
+
 def open_bundle(src, cache_name=None):
     """Split a map source into its CARLA package and its SUMO scenario.
 
@@ -654,6 +663,9 @@ def open_bundle(src, cache_name=None):
                    (re-extracted only when the zip is newer). `cache_name` (the
                    cooked map name) extracts into ~/.fixs/maps/<cache_name>/, else
                    a sibling `<stem>_unpacked/`. A folder is used in place.
+      - bundle, CLIENT mode -> `(None, <cache>/sumo)`; the CARLA half is not
+                   extracted at all, because a machine with no local CARLA has
+                   nothing to import it into (FIXS#309).
       - legacy CARLA-only zip/folder -> `(src, None)`, unchanged behavior.
     `carla_src` is what to hand `ensure_map`/`stage_package`; `sumo_dir` (or None)
     is where run_cosim finds the `.sumocfg`."""
@@ -670,23 +682,39 @@ def open_bundle(src, cache_name=None):
             unpacked = _map_cache_dir(cache_name) if cache_name else os.path.join(
                 os.path.dirname(os.path.abspath(src)),
                 os.path.splitext(os.path.basename(src))[0] + "_unpacked")
-            carla = os.path.join(unpacked, "carla")
-            # Compare the zip against the extracted carla/ (not `unpacked`, which may
-            # also hold the downloaded bundle.zip in a per-map cache), and clear only
-            # the bundle's own subdirs on re-extract so a sibling bundle.zip is
-            # preserved. props/ is in that list because a prop left behind by an older
-            # bundle would otherwise be installed forever - the same "stale content
-            # nobody notices" failure this whole ticket is about (FIXS#223).
-            if not os.path.isdir(carla) or os.path.getmtime(src) > os.path.getmtime(carla):
+            # A client-mode machine has no local CARLA, so it never imports: the
+            # bundle's carla/ half is written once and read never (368 MB of
+            # roosevelt_full's 370). Skip it. Nothing to record about the omission -
+            # a machine that later gains a CARLA finds no cooked map, so its
+            # preflight re-downloads and extracts the bundle in full.
+            sumo_only = _mode() == "client"
+            # Freshness is judged against a directory we ACTUALLY extract: sentinel
+            # on carla/ while extracting sumo-only would be permanently absent, so
+            # every run would re-extract. `unpacked` itself cannot serve, since in a
+            # per-map cache it also holds the downloaded zip. Clear only the bundle's
+            # own subdirs, so that sibling zip survives - and props/ is in the list
+            # because a prop left behind by an older bundle would otherwise be
+            # installed forever (FIXS#223).
+            landmark = os.path.join(unpacked, "sumo" if sumo_only else "carla")
+            if not os.path.isdir(landmark) or \
+                    os.path.getmtime(src) > os.path.getmtime(landmark):
                 for sub in ("carla", "sumo", "props"):
                     shutil.rmtree(os.path.join(unpacked, sub), ignore_errors=True)
                 os.makedirs(unpacked, exist_ok=True)
-                z.extractall(unpacked)
-                print(f"[import] unpacked bundle -> {unpacked}")
+                z.extractall(unpacked, members=_bundle_members(z, sumo_only))
+                print(f"[import] unpacked {'sumo half of ' if sumo_only else ''}"
+                      f"bundle -> {unpacked}")
         carla = os.path.join(unpacked, "carla")
         sumo = os.path.join(unpacked, "sumo")
-        return (carla if os.path.isdir(carla) else unpacked), \
-               (sumo if os.path.isdir(sumo) else None)
+        if os.path.isdir(carla):
+            carla_src = carla
+        else:
+            # None rather than `unpacked` when the CARLA half was skipped on purpose:
+            # handing back a directory that does not contain a CARLA package would
+            # send an importer off to fail on it. Absent by choice is not the same as
+            # a legacy layout.
+            carla_src = None if sumo_only else unpacked
+        return carla_src, (sumo if os.path.isdir(sumo) else None)
     return src, None
 
 
@@ -954,13 +982,17 @@ def _resolve_carla(carla_root=None, ue4_root=None, need_source=True):
 
 
 def ensure_map(name, carla_root=None, ue4_root=None, package_url=None,
-               package_dir=None, force=False, prompt_if_exists=False, package_pick=False):
+               package_dir=None, force=False, prompt_if_exists=False,
+               package_pick=False, source_sha=None):
     """Make sure `name` is imported into the (source-build) CARLA, importing it
     if needed. Returns 0 on success; exits with a clear message otherwise.
 
     If the map already exists: `force` re-imports unconditionally; otherwise, when
     `prompt_if_exists` and the session is interactive, the user is asked whether to
-    re-import (re-download + re-cook) - handy for updating a map or testing."""
+    re-import (re-download + re-cook) - handy for updating a map or testing.
+
+    `source_sha` is the digest of the release asset being cooked; it is stamped on
+    the result so a later run can tell which bundle this map came from."""
     carla_root, ue4_root = _resolve_carla(carla_root, ue4_root)
 
     umap = cooked_map_path(carla_root, name)
@@ -1005,6 +1037,10 @@ def ensure_map(name, carla_root=None, ue4_root=None, package_url=None,
     if rc != 0:
         print(f"[import] note: Import.py exited {rc} (CARLA's cook commonly flags non-fatal "
               f"warnings as errors), but the map .umap was written.")
+    # After the restore-on-failure dance above, so the stamp only ever describes
+    # content that actually got cooked - a failed re-import restores the previous
+    # map together with its previous stamp.
+    _write_sha(cooked_content_dir(carla_root, name), source_sha)
     print(f"[import] done: '{name}' imported -> {umap}")
     return 0
 
@@ -1123,6 +1159,11 @@ def install_precooked(carla_root, name, repo=None, tag=None, entry=None,
     real = install_cooked(carla_root, tar_path, force=force)
     if real != name:
         print(f"[{log}] precooked package provides map '{real}'")
+    # Same stamp as the source path, from the .tar.gz asset instead of the .zip:
+    # a packaged install goes stale exactly the same way a cook does. A local
+    # package leaves it unrecorded, which is the "not checked" state.
+    _write_sha(cooked_content_dir(carla_root, real, mode="packaged"),
+               _read_sha(os.path.dirname(tar_path)))
     return real
 
 
@@ -1767,6 +1808,73 @@ def map_sumo_dir(name):
     return _dir_with_sumocfg(os.path.join(_map_cache_dir(name), "sumo"))
 
 
+# ------------------------------------------------ which bundle produced a map
+
+# A cooked map is identified by a DIRECTORY NAME (resolve_cooked_map), so it has no
+# memory of what produced it. That is fine while both halves of a bundle age
+# together in one cache, and wrong as soon as they do not: the CARLA half is cooked
+# once and kept, while the SUMO half tracks the library. Same map name on both
+# sides, no error anywhere, vehicles placed against geometry that moved.
+#
+# So the map carries the sha256 of the release asset it came from. NOTHING IS
+# HASHED HERE - GitHub already publishes a digest per release asset, so it is
+# queried and copied along. A map with no sha (a local pick, a hand-prepped map,
+# anything imported before this existed) simply is not checked.
+SHA_FILE = ".source_sha"
+
+
+def _read_sha(directory):
+    try:
+        with open(os.path.join(directory, SHA_FILE), encoding="utf-8") as f:
+            return f.read().strip() or None
+    except OSError:
+        return None                      # no note is the normal case, not an error
+
+
+def _write_sha(directory, sha):
+    """Best effort: an unwritable note costs the check, not the run. Writing
+    NOTHING when there is no sha is the part that matters - an empty note would
+    read back as a value and make two unrelated maps look like a match."""
+    if not sha:
+        return
+    try:
+        with open(os.path.join(directory, SHA_FILE), "w", encoding="utf-8") as f:
+            f.write(sha.strip() + "\n")
+    except OSError:
+        pass
+
+
+def read_cached_sha(cache_name):
+    """Which release asset the bundle cached for `cache_name` came from, or None."""
+    return _read_sha(_map_cache_dir(cache_name))
+
+
+def cooked_sha(carla_root, name, mode=None):
+    """Which release asset the imported map `name` was built from, or None."""
+    return _read_sha(cooked_content_dir(carla_root, name, mode))
+
+
+def _release_asset_sha(repo, tag, pattern):
+    """The sha256 GitHub publishes for the release asset matching `pattern`, or
+    None if it cannot be determined (no gh, offline, or a release old enough that
+    the API reports a null digest). Queryable without downloading the asset."""
+    gh = shutil.which("gh")
+    if not gh:
+        return None
+    try:
+        out = subprocess.check_output(
+            [gh, "release", "view", tag, "-R", repo, "--json", "assets",
+             "--jq", '.assets[] | .name + " " + (.digest // "")'],
+            text=True, stderr=subprocess.DEVNULL)
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    for line in out.splitlines():
+        name, _, digest = line.strip().partition(" ")
+        if digest and fnmatch.fnmatch(name, pattern):
+            return digest
+    return None
+
+
 def _download_release_asset(repo, tag, pattern, suffix, force_redownload=False,
                             cache_name=None, what="asset"):
     """Shared body of download_release_zip / download_cooked_tar: return a local
@@ -1790,6 +1898,10 @@ def _download_release_asset(repo, tag, pattern, suffix, force_redownload=False,
             force_redownload = ans.startswith("r")
         if not force_redownload:
             print(f"[import] using cached {path}")
+            # Deliberately NOT backfilled with the release's current sha: a cached
+            # copy may predate the release it came from, so recording today's digest
+            # against yesterday's zip would assert something untrue. Unrecorded is
+            # the honest state, and it only costs the check.
             return path
 
     os.makedirs(tag_dir, exist_ok=True)
@@ -1802,6 +1914,9 @@ def _download_release_asset(repo, tag, pattern, suffix, force_redownload=False,
     got = [f for f in os.listdir(tag_dir) if f.lower().endswith(suffix)]
     if not got:
         sys.exit(f"[import] release '{tag}' has no {what} matching '{pattern}'.")
+    # Note WHICH asset this is, while we still know. The cache dir is named for the
+    # map, not the release, so nothing else here can answer that afterwards.
+    _write_sha(tag_dir, _release_asset_sha(repo, tag, pattern))
     return os.path.join(tag_dir, got[0])
 
 
@@ -1885,7 +2000,8 @@ def pick_and_import(repo, tag_prefix="", carla_root=None, ue4_root=None, force=F
 
     zip_path = local if local else download_release_zip(repo, tag, force_redownload=force)
     return ensure_map(name, carla_root=carla_root, ue4_root=ue4_root,
-                      package_dir=zip_path, force=force)
+                      package_dir=zip_path, force=force,
+                      source_sha=_read_sha(os.path.dirname(zip_path)))
 
 
 def import_named(name, carla_root=None, ue4_root=None, package_url=None,
@@ -1900,7 +2016,9 @@ def import_named(name, carla_root=None, ue4_root=None, package_url=None,
     carla_root, ue4_root = _resolve_carla(carla_root, ue4_root, need_source=False)
     if _mode() != "packaged":
         return ensure_map(name, carla_root, ue4_root, package_url, package_dir,
-                          force, prompt_if_exists, package_pick)
+                          force, prompt_if_exists, package_pick,
+                          source_sha=(_read_sha(os.path.dirname(package_dir))
+                                      if package_dir else None))
 
     repo, tag_prefix = resolve_map_source(repo, tag_prefix)
     catalog = fetch_catalog(repo)

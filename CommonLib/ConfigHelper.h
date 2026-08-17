@@ -81,6 +81,25 @@ struct SimulationSetup_t {
 
 	double WarmUpTime;
 
+	// Client ports that must be SERVED THROUGH the warm-up instead of joining
+	// when it ends. Empty (the default) = the original behaviour: the boundary is
+	// closed to everyone.
+	//
+	// This has to be declared because it cannot be derived. Whether a client can
+	// skip the warm-up is a property of ITS OWN state, and nothing FIXS can see
+	// distinguishes the two kinds: a renderer and a signal-aware controller are
+	// both just a subscription with a port. A controller that learns the signal
+	// timing by watching it change (any actuated network -- SUMO's NEMA logics
+	// expose no phase countdown at all) arrives blind if the boundary was closed
+	// to it, and then plans the first approach on a nominal guess. A renderer or
+	// an XIL box loses nothing by joining late, which is the whole point of the
+	// warm-up. Only the scenario author knows which is which.
+	//
+	// A served client is accepted BEFORE the warm-up starts (so TrafficLayer
+	// blocks for it, as it did before warm-ups existed); everyone else is
+	// accepted when the warm-up ends.
+	std::vector<int> WarmUpServePorts;
+
 	std::string TrafficLayerIP;
 
 	int TrafficLayerPort;

@@ -1,5 +1,6 @@
 #include "TrafficHelper.h"
 #include "FixsProtocol.h"   // fixs::kFeedPeriodS - one FIXS exchange == one traffic step
+
 #include <stdexcept>
 
 
@@ -257,7 +258,12 @@ void TrafficHelper::connectionSetup(string trafficIp, int trafficPort, int nClie
 	VehDataSubscribeList.push_back(libsumo::VAR_SPEED_FACTOR);
 	// get next speed limit
 	// handle it at beginning when this vehicle enters
-	VehDataSubscribeList.push_back(libsumo::VAR_VIA);
+	// #86: subscribed but never read -- parserSumoSubscription has no
+	// VehDataSubscribeTraciResults[VAR_VIA] anywhere, so SUMO serialises a string
+	// list per vehicle per step that is then discarded. Commented rather than
+	// deleted: it is one of the few upcoming-route variables, and whoever wants
+	// it back should see that it used to be here.
+	//VehDataSubscribeList.push_back(libsumo::VAR_VIA);
 	// next link
 	// retrieved as part of the speed limit information
 	
@@ -1293,6 +1299,15 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 			vector <string> vehDepartedAll_v = SUMO_TRACI_NAMESPACE::Simulation::getDepartedIDList();
 			for (const string& vid : vehDepartedAll_v) {
 				SUMO_TRACI_NAMESPACE::Vehicle::subscribe(vid, VehDataSubscribeList, 0, tSimuEnd);
+				// #86: subscribe the leader too, so it arrives in the same batch as
+				// everything else. Without this, parserSumoSubscription pays a
+				// getLeader round-trip PER VEHICLE PER STEP - measured at 161/step on
+				// the MLK corridor, 34.7 us each. Only when a precedingVehicle* field
+				// is actually forwarded; the subscription is issued once, on entry.
+				if (NEED_PRECEDING_VEH) {
+					SUMO_TRACI_NAMESPACE::Vehicle::subscribeLeader(
+						vid, Config_c->SumoSetup.PrecedingVehicleLookahead, 0, tSimuEnd);
+				}
 			}
 		}
 
@@ -1524,6 +1539,57 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 			//nVehSend = tempVehIdSend_v.size();
 		}
 
+
+		// #86 pass 2: the leader's SPEED. Deliberately not done in
+		// parserSumoSubscription: the leader may be parsed after the vehicle that
+		// needs it, so a lookup there would depend on hash iteration order - the
+		// same vehicle could get a real speed on one run and a fallback on the
+		// next. Here every vehicle is parsed, so the map is complete.
+		//
+		// The leader is itself a subscribed vehicle in the ordinary case, so its
+		// speed is already in hand and costs nothing. Only a leader outside the
+		// subscribed set (context-mode configs, or one beyond the subscribed
+		// region) needs asking, and that is counted so a config paying the old
+		// cost is visible in the log instead of only under a profiler.
+		if (NEED_PRECEDING_VEH) {
+			for (auto& it : VehDataRecv_um_tmp) {
+				VehFullData_t& veh = it.second;
+				if (veh.hasPrecedingVehicle == 0) {
+					continue;
+				}
+				auto leadIt = VehDataRecv_um_tmp.find(veh.precedingVehicleId);
+				if (leadIt != VehDataRecv_um_tmp.end()) {
+					veh.precedingVehicleSpeed = leadIt->second.speed;
+				}
+				else {
+					// Leader is not itself subscribed -- usually one that
+					// entered this step, so it has no results yet. Ask SUMO,
+					// exactly as every vehicle did before #86.
+#ifdef RS_DEBUG
+					nLeaderSpeedQueried++;
+#endif
+					veh.precedingVehicleSpeed = SUMO_TRACI_NAMESPACE::Vehicle::getSpeed(
+						veh.precedingVehicleId);
+				}
+			}
+#ifdef RS_DEBUG
+			// Reported as a periodic total, never per step. A step-by-step print
+			// is both noise (6481 lines in one run) and a syscall in the hot loop
+			// -- it would show up as the very cost this change removes.
+			nStepsSinceLeaderReport++;
+			if (nStepsSinceLeaderReport >= 3000) {
+				if (nLeaderIdQueried > 0 || nLeaderSpeedQueried > 0) {
+					printf("leader lookups: %ld id and %ld speed fallbacks over the "
+						"last %ld steps (a leader that is not itself subscribed -- "
+						"usually one that entered this step -- still needs asking)\n",
+						nLeaderIdQueried, nLeaderSpeedQueried, nStepsSinceLeaderReport);
+				}
+				nLeaderIdQueried = 0;
+				nLeaderSpeedQueried = 0;
+				nStepsSinceLeaderReport = 0;
+			}
+#endif
+		}
 
 		// !!!temporary fix
 		// if doing vehicle simulator, e.g., CarMaker, only send limited number of vehicles
@@ -1799,13 +1865,56 @@ void TrafficHelper::parserSumoSubscription(libsumo::TraCIResults VehDataSubscrib
 	CurVehData.hasPrecedingVehicle = 0;
 	CurVehData.precedingVehicleSpeed = -1.0;
 	if (NEED_PRECEDING_VEH) {
-		pair<string, double> leaderIdNSpeed = SUMO_TRACI_NAMESPACE::Vehicle::getLeader(
-			vehId, Config_c->SumoSetup.PrecedingVehicleLookahead);
-		CurVehData.precedingVehicleId = get<0>(leaderIdNSpeed);
-		CurVehData.precedingVehicleDistance = get<1>(leaderIdNSpeed);
+		// The leader rides in this vehicle's own subscription (subscribeLeader,
+		// issued on entry), so the common path costs no round-trip at all.
+		//
+		// Unpacking needs care. libtraci has no VAR_LEADER case in its compound
+		// reader, so it falls through to a generic rule: a two-element compound of
+		// (string, double) is wrapped in a TraCIRoadPosition, edgeID = the string,
+		// pos = the double. For a leader that is exactly (id, gap) - a misleading
+		// type name carrying the right data. Verified against getLeader over 464371
+		// samples on SUMO 1.22: 0 id mismatches, max gap error 0.0. Identical on
+		// 1.23 and 1.27.1.
+		//
+		// That mapping is an implementation detail, not a documented contract
+		// (eclipse-sumo/sumo#15962 is about giving these values proper handling), so
+		// a cast that does not land falls back to asking rather than silently
+		// reporting "no leader" - which would quietly degrade car-following.
+		// NOT "does this vehicle have a leader" -- "did we get the subscribed
+		// value". A vehicle with no leader HAS the value: SUMO sends ("", -1),
+		// which lands in the branch below and costs no round-trip. Measured:
+		// VAR_LEADER present for 464371 of 464371 vehicles, id fallbacks 0/step
+		// while ~30 of 161 vehicles per step have no leader.
+		bool gotSubscribedLeader = false;
+		auto leaderIt = VehDataSubscribeTraciResults.find(libsumo::VAR_LEADER);
+		if (leaderIt != VehDataSubscribeTraciResults.end() && leaderIt->second) {
+			if (auto rp = std::dynamic_pointer_cast<libsumo::TraCIRoadPosition>(leaderIt->second)) {
+				CurVehData.precedingVehicleId = rp->edgeID;
+				CurVehData.precedingVehicleDistance = rp->pos;
+				gotSubscribedLeader = true;
+			}
+		}
+		if (!gotSubscribedLeader) {
+			// The value was ABSENT or an unexpected type -- not "no leader".
+			// Ask SUMO directly: same call as before #86, same answer, just a
+			// round-trip instead of free.
+			// Absent means this vehicle came from a CONTEXT subscription (the
+			// container is subscribed, not the vehicle, so it carries no
+			// VAR_LEADER); unexpected type means a future SUMO returns the pair
+			// differently.
+#ifdef RS_DEBUG
+			nLeaderIdQueried++;
+#endif
+			pair<string, double> leaderIdNGap = SUMO_TRACI_NAMESPACE::Vehicle::getLeader(
+				vehId, Config_c->SumoSetup.PrecedingVehicleLookahead);
+			CurVehData.precedingVehicleId = get<0>(leaderIdNGap);
+			CurVehData.precedingVehicleDistance = get<1>(leaderIdNGap);
+		}
 		if (CurVehData.precedingVehicleId.compare("") != 0) {
 			CurVehData.hasPrecedingVehicle = 1;
-			CurVehData.precedingVehicleSpeed = SUMO_TRACI_NAMESPACE::Vehicle::getSpeed(CurVehData.precedingVehicleId);
+			// precedingVehicleSpeed is filled by fillPrecedingVehicleSpeed() once
+			// every vehicle has been parsed: the leader may be parsed AFTER this
+			// one, so resolving it here would depend on hash iteration order.
 		}
 	}
 
