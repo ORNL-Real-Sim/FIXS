@@ -637,41 +637,38 @@ int main(int argc, const char* argv[]) {
             // What SUMO reports back this feed, on the SAME clock as the Carla row
             // above, so the two are directly comparable: id "ego_sumo".
             //
-            // These two rows are NOT the same quantity, and the difference is a
-            // sampling offset, not a lag -- this is a synchronous co-sim and the
-            // mirrored ego is teleported TO the SUMO pose, so it has no dynamics to
-            // fall behind with. "ego_sumo" is the received record; "ego" is the
-            // actor read back AFTER world.Tick(), and with CarlaTimeStep < the feed
-            // the core places it on an interpolated blend (VirEnvCore step 6), so it
-            // is generally a point SUMO never reported.
+            // EXPECT THESE TWO TO BE EQUAL. This is a synchronous co-sim and, in the
+            // control run, the mirrored ego is teleported TO the SUMO pose -- it has
+            // no dynamics of its own to fall behind with. So the pair is a genuine
+            // check, and its expected value is zero, not "close".
             //
-            // An older comment here claimed "~2 ticks stale". That was wrong by
-            // about 4.5x. Measured over 2097 control-run feeds (mlk_eco_driving,
-            // EnableExternalControl false, CarlaTimeStep 0.05):
+            // Two wrong explanations were written here before, both from reading
+            // rather than measuring, and both are worth remembering as the shape of
+            // the mistake:
+            //   "the ego ~2 ticks stale"     -- there is no lag to be stale by
+            //   "a 0.045 s sampling offset"  -- 0.0446 was an AVERAGE over a bimodal
+            //                                   population, so it described no tick
             //
-            //   median separation 0.000 m; 1216/2097 ticks below 1 mm
-            //   sep ~= 0.0446 * v - 0.004  -> a fixed 0.045 s offset, i.e. ONE
-            //     Carla sub-step, not two feed periods
-            //   the per-band ratio is flat: 0.039 / 0.045 / 0.042 / 0.045 s across
-            //     0.1-2, 2-5, 5-10 and 10-16 m/s, and exactly 0.000 below 0.1 m/s
-            //   shifting the series by whole feeds makes it WORSE (mean 0.205 at
-            //     lag 0, 0.264 at lag 1), confirming the offset is sub-feed
+            // What was really happening: flushBatch() used the async ApplyBatch, so
+            // the pose commands raced world.Tick() and sometimes lost. Measured on
+            // 2061 moving control-run feeds -- 42.75% of them held the PREVIOUS
+            // feed's pose exactly (sep/speed 0.1000 s median, i.e. one whole feed),
+            // the other 57% were bit-exact, and nothing in between. A bimodal 0/0.1
+            // split, which is a lost race, not an offset. It also produced the lone
+            // 3.2 m excursion: that stale feed happened to be the one SUMO changed
+            // lane in, so the gap was a whole lane width (+3.199 m lateral, +0.280 m
+            // along-track, heading unchanged) rather than the usual 0.1 s of travel.
+            // Fixed by taking ORNL-Real-Sim/FIXS#267 (ApplyBatchSync + the camera in
+            // the same batch); see that commit for why both halves are needed.
             //
-            // The one 3.2 m excursion is NOT this effect and not a defect: it is a
-            // single tick (1 of 2097) where SUMO's ego changed lane. Decomposed
-            // against its own heading the jump is +0.280 m along-track -- exactly
-            // the 0.290 m it travels at 2.902 m/s -- and +3.199 m LATERAL with the
-            // heading unchanged by 0.003 deg. That is one lane width, sideways, in
-            // one step: SUMO's default (non-sublane) lane-change model, which
-            // mlk_eco_driving selects deliberately with --lateral-resolution 0
-            // because it is the traffic Example_Results was produced with. The very
-            // next tick reads 0.000 again.
+            // Re-measured after the fix, full 650 s control run, 6430 moving feeds:
+            //   mean 0.0000 m, median 0.0000, p99 0.0001, MAX 0.0003 m
+            //   stale feeds 0.00%   (was 42.75%, max 3.2108 m)
+            // 0.3 mm is float32 on the wire, not motion.
             //
-            // So the expected value of this comparison is 0.045 s * speed, with
-            // one-lane-width spikes at lane changes. Read it that way: anything
-            // that does not fit that shape -- a bias at zero speed, growth over
-            // time, or a step that does not recover on the next tick -- is a real
-            // mirror fault.
+            // So: this comparison should read ZERO. Anything else -- any nonzero at
+            // all, at any speed, at a lane change or not -- is a real mirror fault.
+            // Do not explain it away as staleness or sampling; that is twice now.
             //
             // Deliberately NOT gated on who owns the ego. Whether Carla drives it or
             // mirrors it, the pair is what makes the file readable: in the control
