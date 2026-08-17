@@ -209,6 +209,10 @@ int ConfigHelper::getConfig(string configName) {
 	else {
 		SimulationSetup.WarmUpTime = 0;
 	}
+	SimulationSetup.WarmUpServePorts.clear();
+	if (node["WarmUpServePorts"]) {
+		parserIntegerVector(node, "WarmUpServePorts", SimulationSetup.WarmUpServePorts);
+	}
 	if (node["VehicleMessageField"]) {
 		parserStringVector(node, "VehicleMessageField", SimulationSetup.VehicleMessageField);
 	}
@@ -349,6 +353,40 @@ int ConfigHelper::getConfig(string configName) {
 		printf("\tso the warm-up could never end. Subscribe the ego by id, or use "
 			"WarmUpTime instead.\n\n");
 		exit(-1);
+	}
+
+	// WarmUpServePorts only means anything with a warm-up, and every port in it
+	// has to be a client this scenario actually declares -- a typo would
+	// otherwise read as "serve nobody", i.e. exactly the failure the key exists
+	// to prevent, and it would look like the key simply did not work.
+	if (!SimulationSetup.WarmUpServePorts.empty()) {
+		if (!SimulationSetup.WarmUpUntilEgoEntry && SimulationSetup.WarmUpTime <= 0) {
+			printf("\nWARNING (#86): WarmUpServePorts is set but no warm-up is configured; "
+				"it has no effect.\n\n");
+		}
+		// BOTH layers: XilSetup declares its own subscriptions (parsed separately,
+		// see getVehSubscriptionList above), so scanning ApplicationSetup alone
+		// would reject a valid XIL-only scenario -- and reject it fatally.
+		std::unordered_set<int> declared;
+		auto collectPorts = [&declared](const auto& subs) {
+			for (auto& sub : subs)
+				for (int p : std::get<3>(sub)) declared.insert(p);
+		};
+		collectPorts(ApplicationSetup.VehicleSubscription);
+		collectPorts(ApplicationSetup.SignalSubscription);
+		collectPorts(ApplicationSetup.DetectorSubscription);
+		collectPorts(XilSetup.VehicleSubscription);
+		collectPorts(XilSetup.SignalSubscription);
+		collectPorts(XilSetup.DetectorSubscription);
+		for (int p : SimulationSetup.WarmUpServePorts) {
+			if (declared.find(p) == declared.end()) {
+				printf("\nERROR (#86): WarmUpServePorts lists port %d, which no subscription "
+					"in this configuration uses.\n", p);
+				printf("\tIt would be served by nobody, which is indistinguishable from the "
+					"key having no effect.\n\n");
+				exit(-1);
+			}
+		}
 	}
 
 	if (SimulationSetup.WarmUpTime >= SimulationSetup.SimulationEndTime) {

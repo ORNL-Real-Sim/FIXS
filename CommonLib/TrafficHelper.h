@@ -157,6 +157,21 @@ public:
 	bool NEED_NEXT_TLS = false;
 	bool NEED_PRECEDING_VEH = false;
 
+#ifdef RS_DEBUG
+	// #86: how many vehicles per reporting window still needed a DIRECT TraCI
+	// query for their leader instead of reading it out of the subscription.
+	// A direct query is Vehicle::getLeader / getSpeed -- the same call every
+	// vehicle made before #86, so the answer is identical; only the transport
+	// differs. Counts, hence the n prefix and a 0 start.
+	//
+	// Reported every 3000 steps: a config that quietly queries every vehicle is
+	// paying the pre-#86 cost, which is invisible otherwise -- the output is
+	// still correct, only slower. Build with -p:RS_DEBUG=1 to see it.
+	long nLeaderIdQueried = 0;
+	long nLeaderSpeedQueried = 0;
+	long nStepsSinceLeaderReport = 0;
+#endif
+
 	double tSimuEnd = 90000;
 
 
