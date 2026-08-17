@@ -22,6 +22,11 @@ from __future__ import annotations
 import argparse
 import sys
 
+# carla_env_setup moved out of this folder (#313); make it importable
+# before the flat import below.
+import _cosim_path  # noqa: E402
+_cosim_path.ensure()
+
 import carla_env_setup as env
 
 # Get onto the interpreter carla.json names BEFORE importing carla. This script is

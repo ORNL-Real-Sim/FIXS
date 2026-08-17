@@ -16,9 +16,13 @@ import sys
 import pytest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-# the co-sim runtime lives at the repo root: FIXS_root/Carla
-CARLA = os.path.normpath(os.path.join(HERE, "..", "..", "..", "Carla"))
+# Two folders since #313: the CARLA component stayed at FIXS_root/Carla,
+# the renderer-agnostic co-sim modules moved to FIXS_root/scripts/cosim.
+ROOT = os.path.normpath(os.path.join(HERE, "..", "..", ".."))
+CARLA = os.path.join(ROOT, "Carla")
+COSIM = os.path.join(ROOT, "scripts", "cosim")
 sys.path.insert(0, CARLA)
+sys.path.insert(0, COSIM)
 
 import carla_env_setup as env  # noqa: E402
 import run_cosim  # noqa: E402  (imports carla_env_setup; does NOT import the carla wheel)
