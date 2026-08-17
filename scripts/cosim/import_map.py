@@ -2051,8 +2051,17 @@ def import_named(name, carla_root=None, ue4_root=None, package_url=None,
     return 0
 
 
-DEFAULT_MAP_REPO = "ORNL-Real-Sim/FIXS_Applications"
-DEFAULT_MAP_TAG_PREFIX = "map-"
+# The map library FIXS ships knowing about. A consuming repo therefore declares
+# nothing to get the published maps offered to it - which is the point: the
+# library is FIXS's to know, not every application repo's to configure.
+#
+# It used to default to ORNL-Real-Sim/FIXS_Applications with a 'map-' tag prefix,
+# from when maps were released alongside that one application repo. Maps moved to
+# their own repo, tagged by location with no prefix, and every consumer has been
+# overriding this pair ever since - so the default was wrong for everyone who
+# noticed and silently wrong for anyone who did not.
+DEFAULT_MAP_REPO = "ORNL-Real-Sim/Digital-Twin-Library"
+DEFAULT_MAP_TAG_PREFIX = ""
 
 
 def _app_root():

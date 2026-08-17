@@ -2006,6 +2006,29 @@ def _apply_cli(rec, args):
     # summary kept deriving line 5 from the yaml, so --carla-host looked ignored.
 
 
+def _declare_app(map_name=None):
+    """Walk the user through declaring an application, and return its id.
+
+    Lives here rather than in app_catalog because it needs what the run knows -
+    the map already chosen, and which engine release this repo is pinned to for
+    seeding a manifest that does not exist yet. Failures are reported and swallowed:
+    not managing to declare an app must never take a co-sim down with it."""
+    try:
+        import app_setup
+        # The BARE tag and repo, not _fixs_version()'s "<tag> (<published_at>)"
+        # display form - this seeds fixs.fixs.version, which the front door feeds
+        # straight back to the updater as a release tag.
+        tag, repo = _fixs_tag_repo()
+        return app_setup.run_wizard(app_catalog.app_root(), map_name=map_name,
+                                    repo=repo, version=tag)
+    except (OSError, ValueError) as exc:
+        print(f"[apps] could not declare the application: {exc}")
+        return None
+    except KeyboardInterrupt:
+        print("\n[apps] cancelled.")
+        return None
+
+
 def _disable_quickedit():
     """Turn off the Windows console's QuickEdit mode for this run.
 
@@ -2583,7 +2606,13 @@ def _edit_slots(slots, rec, ctx, cfg, apps, catalog, repo, tag_prefix, args=None
         if slot not in slots:
             continue
         if slot == "app":
-            app = app_catalog.choose_app(apps, current=rec.get("app")) if apps else None
+            # The map is settled before this row is reached (SLOT_KEYS order), so
+            # the wizard can offer it and never has to ask "which map?" itself.
+            app = app_catalog.choose_app(
+                apps, current=rec.get("app"),
+                add_app=lambda: _declare_app(rec.get("map")))
+            if app and app["id"] not in {a["id"] for a in apps}:
+                apps[:] = app_catalog.load_catalog()   # a new one was just written
             rec["app"] = app["id"] if app else None
             _bind_app(rec, apps, ctx)
             if app:
@@ -2592,9 +2621,16 @@ def _edit_slots(slots, rec, ctx, cfg, apps, catalog, repo, tag_prefix, args=None
                     print(f"[cosim]   {app['note']}")
                 # App defaults sit under the CLI and the saved setup, above the
                 # built-ins - so switching app brings its preferred engine with it.
-                for key in ("engine", "sumo_gui"):
-                    if app["defaults"].get(key) is not None:
-                        rec[key] = app["defaults"][key]
+                #
+                # engine only. sumo_gui is the SAVED SETUP's to own and nobody
+                # else's: it is one line in the review menu, it means exactly
+                # "sumo-gui or sumo", and a user who turned the window off did so
+                # on purpose. An app seeding it would undo that the first time you
+                # switched apps - the same silent-reversal this file already had
+                # via the front door's injected --sumo-gui. Nothing declares it
+                # today, so no manifest changes meaning.
+                if app["defaults"].get("engine") is not None:
+                    rec["engine"] = app["defaults"]["engine"]
         elif slot == "map":
             app = ctx.get("app")
             if rec.get("app") != was["app"]:
@@ -3105,6 +3141,9 @@ def main():
                     default=None, metavar="MAP",
                     help="install a map from the map library and exit. With no MAP, "
                          "lists what is published and asks")
+    ap.add_argument("--add-app", dest="add_app", action="store_true",
+                    help="declare an application in this repo's fixs.json and exit "
+                         "(the run setup's 'app' row offers this too)")
     ap.add_argument("--carla-map", dest="carla_map", default=None, metavar="NAME",
                     help=argparse.SUPPRESS)   # accepted alias of --map; see below
     ap.add_argument("--reconfigure", action="store_true",
@@ -3192,6 +3231,11 @@ def main():
     # repaired from the front door.
     if args.setup is not None:
         return env.run_setup()
+    if args.add_app:
+        # No re-exec: this only reads the repo and writes json, so it must work
+        # before the env is built - declaring an app is something you do while
+        # setting a repo up, not after.
+        return 0 if _declare_app(args.map) else 1
     if args.import_map is not None:
         # The cook needs the configured env's carla client, so get onto that
         # interpreter first. This relaunches run_cosim with the same command line

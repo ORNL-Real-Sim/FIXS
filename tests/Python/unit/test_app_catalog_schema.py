@@ -151,40 +151,12 @@ def test_env_override_wins_over_both(tmp_path, monkeypatch):
     assert app_catalog.catalog_path(root) == r"D:\elsewhere\manifest.json"
 
 
-@pytest.mark.parametrize("declared_dir, tail", [
-    ("apps/mlk_eco_driving", ("apps", "mlk_eco_driving")),   # the familiar layout
-    ("src/controllers/eco", ("src", "controllers", "eco")),  # arbitrary depth
-    ("controller", ("controller",)),                         # beside the manifest
-])
-def test_schema2_dir_is_a_path_relative_to_the_manifest(tmp_path, declared_dir, tail):
-    """The generalization: no directory called apps/ is required anywhere."""
-    root = str(tmp_path / "generic_repo")
-    _write(os.path.join(root, "fixs.json"),
-           {"schema": 2, "apps": [{"id": "eco", "dir": declared_dir}]})
-    app, = app_catalog.load_catalog(root)
-    assert app_catalog.app_dir(app, root) == os.path.join(root, *tail)
-
-
-def test_schema2_dir_defaults_to_the_id_beside_the_manifest(tmp_path):
-    root = str(tmp_path / "generic_repo")
-    _write(os.path.join(root, "fixs.json"), {"schema": 2, "apps": [{"id": "eco"}]})
-    app, = app_catalog.load_catalog(root)
-    assert app_catalog.app_dir(app, root) == os.path.join(root, "eco")
-
-
-def test_schema2_without_declared_schema_infers_from_filename(tmp_path):
-    """A hand-written fixs.json needs no boilerplate 'schema' line."""
-    root = str(tmp_path / "generic_repo")
-    _write(os.path.join(root, "fixs.json"),
-           {"apps": [{"id": "eco", "dir": "src/controllers/eco"}]})
-    app, = app_catalog.load_catalog(root)
-    assert app_catalog.app_dir(app, root) == \
-        os.path.join(root, "src", "controllers", "eco")
 
 
 def test_declared_schema_wins_over_the_filename(tmp_path):
-    """schema 1 written into fixs.json still resolves the schema-1 way, so the
-    two forms are independent of where they are written."""
+    """schema 1 written into fixs.json still resolves the schema-1 way -
+    including keeping `launch` optional - so the two forms stay independent of
+    which file they are written in."""
     root = str(tmp_path / "mixed_repo")
     _write(os.path.join(root, "fixs.json"),
            {"schema": 1, "apps": [{"id": "eco", "dir": "eco"}]})
@@ -192,30 +164,17 @@ def test_declared_schema_wins_over_the_filename(tmp_path):
     assert app_catalog.app_dir(app, root) == os.path.join(root, "apps", "eco")
 
 
-def test_find_app_matches_the_folder_basename_under_schema2(tmp_path):
-    """`--app eco` has to find a folder declared as src/controllers/eco."""
-    root = str(tmp_path / "generic_repo")
-    _write(os.path.join(root, "fixs.json"),
-           {"schema": 2, "apps": [{"id": "eco_driving", "dir": "src/controllers/eco"}]})
-    apps = app_catalog.load_catalog(root)
-    assert app_catalog.find_app(apps, "eco")["id"] == "eco_driving"
-    assert app_catalog.find_app(apps, "eco_driving")["id"] == "eco_driving"
-    assert app_catalog.find_app(apps, "src/controllers/eco")["id"] == "eco_driving"
-
-
-# --------------------------------------------------------------------------- #
-# unknown schemas
-# --------------------------------------------------------------------------- #
-def test_unknown_schema_warns_once_and_still_loads(tmp_path, capsys):
-    root = str(tmp_path / "future_repo")
-    _write(os.path.join(root, "fixs.json"), {"schema": 99, "apps": [{"id": "eco"}]})
-    apps = app_catalog.load_catalog(root)
-    assert [a["id"] for a in apps] == ["eco"]        # advisory, never fatal
-    out = capsys.readouterr().out
-    assert "schema 99" in out and "not one this FIXS knows" in out
-
-
 def test_missing_manifest_is_not_an_error(tmp_path):
     """App awareness is an enhancement, not a precondition - a repo with no
     manifest at all runs generic, which is what a fresh integration does."""
     assert app_catalog.load_catalog(str(tmp_path / "empty_repo")) == []
+
+
+def test_unknown_schema_warns_once_and_still_loads(tmp_path, capsys):
+    root = str(tmp_path / "future_repo")
+    _write(os.path.join(root, "fixs.json"),
+           {"schema": 99, "apps": [{"launch": "a/run_eco"}]})
+    apps = app_catalog.load_catalog(root)
+    assert [a["id"] for a in apps] == ["eco"]        # advisory, never fatal
+    out = capsys.readouterr().out
+    assert "schema 99" in out and "not one this FIXS knows" in out
