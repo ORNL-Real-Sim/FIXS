@@ -42,7 +42,7 @@ read from the saved config and dispatched on, not used to refuse:
 
 run_cosim's preflight calls the same `install_precooked`, so the two front doors
 cannot disagree about what a packaged build can install. carla_root / ue4_root
-default to the saved env config (~/.fixs/carla.json) written by carla_env_setup.py.
+default to the saved env config (~/.fixs/carla.json) written by env_setup.py.
 
 Examples:
   # pick which published version to import (lists releases tagged map-*):
@@ -62,7 +62,7 @@ import tarfile
 import tempfile
 import zipfile
 
-import carla_env_setup as env
+import env_setup as env
 import fixs_paths
 
 

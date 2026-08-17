@@ -24,7 +24,7 @@ COSIM = os.path.join(ROOT, "scripts", "cosim")
 sys.path.insert(0, CARLA)
 sys.path.insert(0, COSIM)
 
-import carla_env_setup as env  # noqa: E402
+import env_setup as env  # noqa: E402
 import run_cosim  # noqa: E402  (imports carla_env_setup; does NOT import the carla wheel)
 import import_map  # noqa: E402  (stdlib + carla_env_setup; no carla wheel)
 import place_tls  # noqa: E402  (stdlib + carla_env_setup; no carla wheel)

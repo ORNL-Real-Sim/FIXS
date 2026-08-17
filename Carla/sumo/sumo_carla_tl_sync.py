@@ -10,11 +10,11 @@ import argparse
 # standalone tool (Carla/README.md), so it starts on whatever python is on PATH, and
 # on the wrong one the imports below fail by naming a module rather than the env.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-# carla_env_setup moved out of Carla/ (#313); the insert above only reaches the
-# CARLA component, so ask it where the co-sim modules went.
+# env_setup (was carla_env_setup) moved out of Carla/ (#313). The insert above
+# only reaches the CARLA component, so ask where the co-sim modules went.
 import _cosim_path  # noqa: E402
 _cosim_path.ensure()
-import carla_env_setup as env  # noqa: E402
+import env_setup as env  # noqa: E402
 if __name__ == "__main__":
     env.reexec_under_configured(__file__, tag="tlsync")
 

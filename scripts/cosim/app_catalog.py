@@ -171,7 +171,7 @@ import json
 import os
 import sys
 
-import carla_env_setup as env
+import env_setup as env
 import fixs_paths
 
 # Manifest schemas this FIXS understands. 2 is the generic form (fixs.json, app

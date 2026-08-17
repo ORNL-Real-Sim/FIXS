@@ -2,7 +2,7 @@
 
 Every entry point needs these two directories, and each one used to derive them
 from its own nesting depth - `os.path.dirname(HERE)` in run_cosim, `HERE/".."` in
-carla_env_setup, `dirname(dirname(here))` in import_map. Three copies of one fact,
+env_setup, `dirname(dirname(here))` in import_map. Three copies of one fact,
 each of which silently becomes wrong when a file moves.
 
 They agreed only by coincidence: the co-sim scripts sat at `<fixs>/Carla/` in a

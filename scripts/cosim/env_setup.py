@@ -1,5 +1,10 @@
 """
-carla_env_setup.py - one-time (or reconfigure) CARLA environment setup.
+env_setup.py - the python environment, and one-time (or reconfigure) CARLA setup.
+
+Named for the environment rather than for CARLA (it was carla_env_setup.py until
+#313): the env half is the part EVERY entry point depends on, including on a
+traffic-only machine with no CARLA installed at all, because everything re-execs
+through reexec_under_configured before it does anything else.
 
 Prompts for the CARLA flavour and folder(s), validates them, and saves the choice
 to ~/.fixs/carla.json. run_cosim.py reads that config and launches seamlessly; if
@@ -16,9 +21,9 @@ Three flavours:
 Run this any time to switch CARLA (packaged <-> source build, or a different
 install/version):
 
-    python carla_env_setup.py                  # interactive
-    python carla_env_setup.py --show           # print the current config
-    python carla_env_setup.py --update-python  # rebind the env, keep the CARLA paths
+    python cosim/env_setup.py                  # interactive
+    python cosim/env_setup.py --show           # print the current config
+    python cosim/env_setup.py --update-python  # rebind the env, keep the CARLA paths
 
 Everything that runs a co-sim runs under the interpreter recorded here - see
 reexec_under_configured, which every entry point calls first, so which script you

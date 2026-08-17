@@ -1,15 +1,15 @@
 """
 run_cosim.py - cross-platform SUMO <-> CARLA co-simulation launcher.
 
-Reads the per-machine CARLA env saved by carla_env_setup.py (~/.fixs/carla.json),
+Reads the per-machine CARLA env saved by env_setup.py (~/.fixs/carla.json),
 launches that CARLA (packaged build or source editor, OS-aware), waits for the RPC
 port, loads the target map, and runs the SUMO <-> CARLA synchronization. Works on
 Windows and Linux.
 
 The very first time this runs on a fresh clone there is no saved config, so it
-auto-invokes carla_env_setup.run_setup() to ask which CARLA to use and remember
+auto-invokes env_setup.run_setup() to ask which CARLA to use and remember
 it; every run afterwards is seamless. To switch CARLA later, run
-`python carla_env_setup.py`, or pass --reconfigure here.
+`python env_setup.py`, or pass --reconfigure here.
 
 Examples:
   # first run prompts for CARLA, then launches and runs; later runs are seamless:
@@ -37,7 +37,7 @@ import traceback
 import urllib.request
 
 import app_catalog
-import carla_env_setup as env
+import env_setup as env
 import fixs_paths
 import run_profile
 
@@ -1077,7 +1077,7 @@ def resolve_carla_env(reconfigure=False):
 
 
 # ensure_runtime and maybe_reexec used to live here, as run_cosim's private copies.
-# Both now belong to carla_env_setup, the module that owns carla.json:
+# Both now belong to env_setup, the module that owns carla.json:
 # env.ensure_runtime because --update-python needs the same work on demand and a
 # second copy is how a repair path and an update path drift apart, and
 # env.reexec_under_configured because every entry point - import_map, place_tls,
@@ -1123,14 +1123,14 @@ def _carla_command(cfg, port, render_offscreen, quality_level=None, level=None):
         if exe is None:
             raise FileNotFoundError(
                 f"No CarlaUE4 launcher under {cfg['carla_root']}. "
-                "Re-run carla_env_setup.py (or --reconfigure) to fix the path.")
+                "Re-run env_setup.py (or --reconfigure) to fix the path.")
         cmd = [exe, f"-carla-rpc-port={port}"]
     else:  # source build, launched through the Unreal editor in -game mode
         uproject, editor = env.source_paths(cfg["carla_root"], cfg["ue4_root"])
         if not os.path.isfile(editor) or not os.path.isfile(uproject):
             raise FileNotFoundError(
                 f"Source CARLA not found (editor={editor}, uproject={uproject}). "
-                "Re-run carla_env_setup.py (or --reconfigure) to fix the paths.")
+                "Re-run env_setup.py (or --reconfigure) to fix the paths.")
         cmd = [editor, uproject]
         # Boot straight into the map we are about to drive. Without this the engine
         # browses to the project's GameDefaultMap, which is a per-build setting we
@@ -1991,8 +1991,12 @@ def _apply_cli(rec, args):
         rec["config_scope"] = "map"
     if args.engine is not None:
         rec["engine"] = args.engine
-    if args.sumo_gui is not None:
-        rec["sumo_gui"] = args.sumo_gui
+    # --sumo-gui / --no-sumo-gui is NOT overlaid: it overrides this run only, and
+    # _rec_to_args puts it back on args afterwards. Persisting it here was a real
+    # bug rather than a style choice - the one-click launchers passed --sumo-gui on
+    # every invocation, so it wrote True into the saved setup every time and a user
+    # who chose headless in the menu (edit_sumo) had that choice silently undone at
+    # the next launch. The GUI is a per-run convenience; the menu owns the setup.
     # --carla-tick, --fast and the CARLA endpoint (--peer / --carla-host /
     # --carla-port) are NOT overlaid here: they belong to the scenario yaml, and
     # they are written through to it - the endpoint by _push_cli_endpoint below,
@@ -2797,7 +2801,11 @@ def _rec_to_args(rec, args):
     args.app = rec.get("app")
     args.map = rec.get("map")
     args.config = rec.get("config")
-    args.sumo_gui = bool(rec.get("sumo_gui", True))
+    # The saved choice, unless this run explicitly asked otherwise. Tri-state, so
+    # "not passed" (None) is distinguishable from "--no-sumo-gui" (False) - and an
+    # explicit flag changes only this run, never the stored setup (see _apply_cli).
+    args.sumo_gui = bool(rec.get("sumo_gui", True)) if args.sumo_gui is None \
+        else bool(args.sumo_gui)
 
 
 def default_config(staged, map_name, setup_app_id, current=None):
@@ -3090,9 +3098,10 @@ def main():
                     help="frame the whole network instead of one intersection")
     ap.add_argument("--spectator-junction", default=None,
                     help="frame this junction id (default: the busiest intersection)")
-    # Tri-state for the same reason as --step-length: the one-click launchers always
-    # pass --sumo-gui, so a plain store_true would make "headless" unsaveable in a
-    # run profile. None = not specified, fill from the profile.
+    # Tri-state: None = not specified, use the saved setup. A plain store_true
+    # would be indistinguishable from "not asked for" and would force the GUI on
+    # every run. The front door no longer injects --sumo-gui at all (#313) - the
+    # setup's own default is True, so there was never anything to inject.
     ap.add_argument("--sumo-gui", dest="sumo_gui", action="store_true", default=None,
                     help="run SUMO with its GUI (default)")
     ap.add_argument("--no-sumo-gui", dest="sumo_gui", action="store_false",

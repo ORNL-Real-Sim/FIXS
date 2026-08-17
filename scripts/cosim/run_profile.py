@@ -59,7 +59,7 @@ import os
 from datetime import datetime
 
 import app_catalog
-import carla_env_setup as env
+import env_setup as env
 
 SCHEMA = 2
 # Identity used in a setup's `app` field when no application is selected.
