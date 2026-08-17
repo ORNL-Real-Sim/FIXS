@@ -29,6 +29,11 @@ import app_catalog
 # large, uninteresting, or not source.
 SKIP_DIRS = {"FIXS", ".git", "__pycache__", "node_modules", ".venv", "venv",
              "RealSim_tmp", "build", "dist", ".idea", ".vscode"}
+# The front door is not an application. Skipping the FIXS/ directory is not
+# enough: FIXS.bat and FIXS.sh sit at the repo root beside the launchers we DO
+# want, and offering "1) FIXS" as the thing to run is both wrong and the kind of
+# wrong someone accepts because it is the only option on the list.
+SKIP_STEMS = {"fixs"}
 SCAN_DEPTH = 4          # deep enough for projects/<name>/<variant>/, shallow enough to be quick
 
 
@@ -53,13 +58,19 @@ def find_launchers(root, declared=()):
             d for d in dirnames if d not in SKIP_DIRS and not d.startswith(".")]
         for name in filenames:
             stem, ext = os.path.splitext(name)
-            if ext.lower() not in (".bat", ".sh"):
+            if ext.lower() not in (".bat", ".sh") or stem.lower() in SKIP_STEMS:
                 continue
             p = os.path.join(dirpath, name)
             relp = os.path.relpath(os.path.splitext(p)[0], root).replace("\\", "/")
-            if relp not in taken:
+            # `launch` is shlex-split, so whitespace in the path would be read as
+            # "program, then an argument". Such a file cannot be declared as-is.
+            if relp not in taken and not _has_space(relp):
                 found.add(relp)
     return sorted(found)
+
+
+def _has_space(path):
+    return any(c.isspace() for c in path)
 
 
 def _both_halves(root, launch):
@@ -292,10 +303,20 @@ def run_wizard(root, map_name=None, repo=None, version=None):
             print(f"   {i:>2}) {f:<52} {halves}")
         if len(found) > 20:
             print(f"       ... and {len(found) - 20} more (choose 'n' to type a path)")
-        ans = _ask(f"[apps] Which one? [1-{min(len(found), 20)}], "
-                   f"or Enter to create a new launcher: ")
-        if ans.isdigit() and 1 <= int(ans) <= min(len(found), 20):
-            launch = found[int(ans) - 1]
+        top = min(len(found), 20)
+        while True:
+            ans = _ask(f"[apps] Which one? [1-{top}], "
+                       f"or Enter to create a new launcher: ")
+            if not ans:
+                break                       # deliberate: fall through to scaffolding
+            if ans.isdigit() and 1 <= int(ans) <= top:
+                launch = found[int(ans) - 1]
+                break
+            # Do NOT fall through silently. Typing a path here is the obvious
+            # mistake, and treating it as "none of these" would then re-ask for the
+            # same path one prompt later - which reads as the wizard ignoring you.
+            print(f"[apps] '{ans}' is not one of 1-{top}. Enter a number, or press "
+                  f"Enter to create a new launcher.")
     else:
         print("\n[apps] No launcher scripts found in this repo yet.")
 
@@ -303,12 +324,25 @@ def run_wizard(root, map_name=None, repo=None, version=None):
     if scaffolding:
         # The reason this module exists: hand over the FIXS_* contract in the file
         # where it is needed, instead of leaving it to be found in the docs.
-        launch = _ask("[apps] Path for the new launcher, relative to the repo and\n"
-                      "       WITHOUT an extension (e.g. projects/autolab/run_ctrl): ")
-        launch = launch.replace("\\", "/").strip("/")
-        if not launch:
-            print("[apps] nothing entered; not declaring an application.")
-            return None
+        while True:
+            launch = _ask(
+                "[apps] Path for the new launcher, relative to the repo and\n"
+                "       WITHOUT an extension (e.g. projects/autolab/run_ctrl): ")
+            launch = launch.replace("\\", "/").strip("/")
+            if not launch:
+                print("[apps] nothing entered; not declaring an application.")
+                return None
+            if _has_space(launch):
+                # `launch` is shlex-split so the app can pass itself arguments;
+                # a space in the PATH would silently become an argument boundary.
+                print("[apps] no spaces, please - the launch string is split on "
+                      "them so an app can pass itself arguments.")
+                continue
+            if os.path.splitext(launch)[1].lower() in (".bat", ".sh"):
+                launch = os.path.splitext(launch)[0]
+                print(f"[apps] dropping the extension: '{launch}' names BOTH halves, "
+                      f"so one entry works on either platform.")
+            break
 
     default_title = app_catalog._derive_id(launch, app_catalog.SCHEMA) or "app"
     title = _ask(f"[apps] Name it, for the menu [{default_title}]: ", default_title)

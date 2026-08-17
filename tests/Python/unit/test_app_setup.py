@@ -231,3 +231,54 @@ def test_wizard_warns_when_only_one_platform_half_exists(tmp_path, monkeypatch, 
     app_setup.run_wizard(root)
     out = capsys.readouterr().out
     assert "only the .bat half" in out
+
+
+# --------------------------------------------------------------------------- #
+# things a real repo throws at it
+# --------------------------------------------------------------------------- #
+def test_the_front_door_is_not_offered_as_an_application(tmp_path):
+    """FIXS.bat/FIXS.sh sit at the repo root beside real launchers. Offering
+    '1) FIXS' is both wrong and the kind of wrong someone accepts because it is
+    the only entry on the list."""
+    root = _repo(tmp_path, ["run_mine"])
+    io.open(os.path.join(root, "FIXS.bat"), "w").write("")
+    io.open(os.path.join(root, "FIXS.sh"), "w").write("")
+    assert app_setup.find_launchers(root) == ["run_mine"]
+
+
+def test_a_launcher_with_a_space_is_not_offered(tmp_path):
+    """`launch` is shlex-split so an app can pass itself arguments, so a space in
+    the path would silently become an argument boundary."""
+    root = _repo(tmp_path, ["run_ok"])
+    io.open(os.path.join(root, "Demo controller.sh"), "w").write("")
+    assert app_setup.find_launchers(root) == ["run_ok"]
+
+
+def test_a_typed_path_at_the_pick_prompt_is_rejected_not_swallowed(
+        tmp_path, monkeypatch, capsys):
+    """Typing a path where a number belongs used to fall through to 'create a new
+    launcher', which then asked for that same path again - reading as the wizard
+    ignoring the answer."""
+    root = _repo(tmp_path, ["a/run_one"])
+    monkeypatch.setenv("FIXS_APPS_JSON", os.path.join(root, "fixs.json"))
+    _answers(monkeypatch, "projects/demo/run_ctrl", "1", "Demo", "", "y")
+    assert app_setup.run_wizard(root) == "one"
+    assert "is not one of 1-1" in capsys.readouterr().out
+
+
+def test_a_typed_extension_is_dropped(tmp_path, monkeypatch, capsys):
+    root = _repo(tmp_path)
+    monkeypatch.setenv("FIXS_APPS_JSON", os.path.join(root, "fixs.json"))
+    _answers(monkeypatch, "projects/demo/run_ctrl.bat", "Demo", "", "y")
+    app_setup.run_wizard(root)
+    app, = app_catalog.load_catalog(root)
+    assert app["launch"] == "projects/demo/run_ctrl"      # both halves, one entry
+    assert "dropping the extension" in capsys.readouterr().out
+
+
+def test_a_spaced_path_is_refused_then_accepted(tmp_path, monkeypatch, capsys):
+    root = _repo(tmp_path)
+    monkeypatch.setenv("FIXS_APPS_JSON", os.path.join(root, "fixs.json"))
+    _answers(monkeypatch, "Demo controller", "projects/demo/run_ctrl", "Demo", "", "y")
+    assert app_setup.run_wizard(root) == "ctrl"
+    assert "no spaces" in capsys.readouterr().out
