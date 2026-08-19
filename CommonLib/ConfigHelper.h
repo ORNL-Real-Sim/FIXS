@@ -231,6 +231,30 @@ struct CarlaSetup_t {
 	//   "TM"      -> native Carla Traffic Manager autopilot (needs a routable map)
 	//   "Pursuit" -> the SDK-free EgoDriver module (map-agnostic fallback)
 	std::string EgoL0Driver;
+
+	// #305 THE CONFIG SURFACE. EgoMode and EgoL0Driver above stay as the internal
+	// representation; these two keys are what a scenario writes, and when present
+	// they derive EgoMode, EgoL0Driver AND EnableExternalControl together -- so the
+	// three can no longer contradict one another, which is exactly what they did.
+	//
+	// They answer two genuinely independent questions:
+	//
+	//   EgoDynamics -- WHAT COMPUTES THE EGO'S MOTION
+	//     "traffic" : the traffic simulator does; Carla teleports the ego in
+	//     "carla"   : Carla PhysX does
+	//     "xil"     : an XIL plant does; Carla teleports the ego in  [not implemented]
+	//
+	//   EgoActuationSource -- WHO PRODUCES THE PEDALS/STEER IT RUNS ON
+	//     "carlaTM"  : Carla's Traffic Manager, in-process
+	//     "internal" : the built-in EgoDriver module (pure pursuit on EgoRoutePoints)
+	//     "external" : taken off the ego's FIXS record, i.e. from a controller client
+	//
+	// L0 vs L2 is deliberately NOT a value here. Both are "carla" plus a driver;
+	// they differ only in whether a controller is wired in upstream on a lower
+	// port. That is topology, and the config has no business claiming to know it.
+	std::string EgoDynamics;
+	std::string EgoActuationSource;
+
 	std::string EgoId;                 // FIXS id of the Carla-driven ego (mode >= 1)
 	std::string EgoSumoType;           // SUMO vType used when TL injects the ego
 	std::string EgoBlueprint;          // Carla blueprint for the ego actor
