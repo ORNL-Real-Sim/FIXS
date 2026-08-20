@@ -51,34 +51,37 @@ def main():
 
     step_count = 0
     try:
-        # One iteration is one tick. The reply is sent for us at the end of each
-        # iteration -- including iterations that skip the body -- and the loop
-        # ends when TrafficLayer signals shutdown.
-        for sim_time in fixs.steps():
+        # One sync() is one tick: it sends what this client commanded and waits
+        # for the next tick. It returns None once TrafficLayer signals shutdown.
+        while True:
+            sim_time = fixs.sync()
+            if sim_time is None:
+                break
             step_count += 1
+
+            vehicles = fixs.vehicle.getAll()
 
             # Track vehicle visibility (after warmup) for the subscription repro
             if step_count > args.warmup:
-                if len(fixs.vehicle) > max_vehicles:
-                    max_vehicles = len(fixs.vehicle)
-                for veh_data in fixs.vehicle:
-                    distinct_ids.add(veh_data.id.strip())
+                if len(vehicles) > max_vehicles:
+                    max_vehicles = len(vehicles)
+                distinct_ids.update(vehicles)
 
             # Decide how many vehicles to echo back. In real XIL the client (CarMaker)
             # returns only the ego pose, so TrafficLayer's RECEIVE path is only ever
             # exercised with ~1 vehicle. --max-echo caps the echo to mirror that; echoing
             # ALL received vehicles (max_echo=0) stresses a receive-many path that
             # production never uses and can deadlock the round-trip at higher counts.
-            fixs.echo_all(limit=args.max_echo)
+            fixs.echoAll(limit=args.max_echo)
 
             if fixs.verbose:
-                print(f'\n--- Step {step_count} | Time: {sim_time:.2f}s | State: {fixs.state} ---')
-                print(f'Received {len(fixs.vehicle)} vehicles:')
-                for veh_data in fixs.vehicle:
-                    print(f'  Vehicle ID: {veh_data.id.strip()}, Speed: {veh_data.speed:.2f} m/s, '
+                print(f'\n--- Step {step_count} | Time: {sim_time:.2f}s ---')
+                print(f'Received {len(vehicles)} vehicles:')
+                for veh_id, veh_data in vehicles.items():
+                    print(f'  Vehicle ID: {veh_id}, Speed: {veh_data.speed:.2f} m/s, '
                           f'Pos: ({veh_data.positionX:.2f}, {veh_data.positionY:.2f})')
             elif step_count % 100 == 0:
-                print(f'Step {step_count} | Time: {sim_time:.2f}s | Vehicles: {len(fixs.vehicle)}')
+                print(f'Step {step_count} | Time: {sim_time:.2f}s | Vehicles: {len(vehicles)}')
 
             # Stop after the requested number of steps (used by the automated repro)
             if args.steps and step_count >= args.steps:
@@ -93,6 +96,8 @@ def main():
         print(f'\nError occurred: {e}', file=sys.stderr)
         import traceback
         traceback.print_exc()
+    finally:
+        fixs.close()
 
     # Machine-readable summary for the automated subscription comparison (#176)
     if args.report:

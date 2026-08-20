@@ -26,37 +26,45 @@ EGO_ID = 'egoCm123'
 
 
 def main():
-    fixs.connect(os.path.join(os.path.dirname(__file__), 'config.yaml'), ego=EGO_ID)
+    # ego= is not passed: the id comes from the config's VehicleSubscription,
+    # so fixs.ego is whatever this client subscribed to.
+    fixs.connect(os.path.join(os.path.dirname(__file__), 'config.yaml'))
 
     step_count = 0
     try:
-        # One iteration is one tick. The reply is sent for us at the end of each
-        # iteration, and the loop ends when TrafficLayer signals shutdown --
-        # which this client previously had no way to notice.
-        for sim_time in fixs.steps():
+        # One sync() is one tick: it sends what this client commanded and waits
+        # for the next tick. It returns None once TrafficLayer signals shutdown
+        # -- which this client previously had no way to notice.
+        while True:
+            sim_time = fixs.sync()
+            if sim_time is None:
+                break
             step_count += 1
 
-            if fixs.ego is not None:
-                print(f't={sim_time:7.2f}s  ego next TLS: {fixs.ego.signalLightId or "(none)":>10}'
-                      f'  {_COLOR.get(fixs.ego.signalLightColor, fixs.ego.signalLightColor):>10}'
-                      f'  dist={fixs.ego.signalLightDistance:8.2f} m  head={fixs.ego.signalLightHeadId}')
+            vehicles = fixs.vehicle.getAll()
+            ego = fixs.ego.getAll().get(EGO_ID)
+
+            if ego is not None:
+                print(f't={sim_time:7.2f}s  ego next TLS: {ego.signalLightId or "(none)":>10}'
+                      f'  {_COLOR.get(ego.signalLightColor, ego.signalLightColor):>10}'
+                      f'  dist={ego.signalLightDistance:8.2f} m  head={ego.signalLightHeadId}')
 
             # Echo the whole feed back, which is what this client is for.
-            fixs.echo_all()
+            fixs.echoAll()
 
             if fixs.verbose:
-                print(f'\n--- Step {step_count} | Time: {sim_time:.2f}s | State: {fixs.state} ---')
-                print(f'Received {len(fixs.vehicle)} vehicles:')
-                if fixs.ego is not None:
-                    print(f'  Vehicle ID: {fixs.ego.id.strip()}, Speed: {fixs.ego.speed:.2f} m/s, '
-                          f'Pos: ({fixs.ego.positionX:.2f}, {fixs.ego.positionY:.2f})')
-                    print(f'    Traffic Light - ID: {fixs.ego.signalLightId}, '
-                          f'Head: {fixs.ego.signalLightHeadId}, '
-                          f'Distance: {fixs.ego.signalLightDistance:.2f} m, '
-                          f'Color: {fixs.ego.signalLightColor}')
-                print(f'Echoed {len(fixs.vehicle)} vehicles back to server')
+                print(f'\n--- Step {step_count} | Time: {sim_time:.2f}s ---')
+                print(f'Received {len(vehicles)} vehicles:')
+                if ego is not None:
+                    print(f'  Vehicle ID: {EGO_ID}, Speed: {ego.speed:.2f} m/s, '
+                          f'Pos: ({ego.positionX:.2f}, {ego.positionY:.2f})')
+                    print(f'    Traffic Light - ID: {ego.signalLightId}, '
+                          f'Head: {ego.signalLightHeadId}, '
+                          f'Distance: {ego.signalLightDistance:.2f} m, '
+                          f'Color: {ego.signalLightColor}')
+                print(f'Echoed {len(vehicles)} vehicles back to server')
             elif step_count % 100 == 0:
-                print(f'Step {step_count} | Time: {sim_time:.2f}s | Vehicles: {len(fixs.vehicle)}')
+                print(f'Step {step_count} | Time: {sim_time:.2f}s | Vehicles: {len(vehicles)}')
 
     except KeyboardInterrupt:
         print('\nShutting down client...', file=sys.stderr)
@@ -66,6 +74,7 @@ def main():
         traceback.print_exc()
     finally:
         print('Closing connection...', file=sys.stderr)
+        fixs.close()
 
 
 if __name__ == '__main__':
