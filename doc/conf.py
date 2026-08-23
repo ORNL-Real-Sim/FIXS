@@ -36,6 +36,11 @@ myst_enable_extensions = [
 # (e.g., `[Section](#section-name)`) remain stable across RTD builds.
 myst_heading_anchors = 5
 
+# Self-contained pages copied verbatim into the build output. These are not Sphinx
+# sources (no .rst/.md suffix), so they must be listed here for relative links from
+# the Markdown docs to resolve on Read the Docs as well as in the repo.
+html_extra_path = ["AxleDynoCarMakerCoupling_slides.html"]
+
 #Options for HTML output
 html_theme = "sphinx_rtd_theme"
 html_theme_options = {

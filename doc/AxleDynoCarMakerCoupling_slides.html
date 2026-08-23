@@ -1,0 +1,681 @@
+<title>Axle Dyno &harr; CarMaker Coupling</title>
+
+<style>
+:root{
+  --paper:#F4F6F7;
+  --panel:#FFFFFF;
+  --ink:#111820;
+  --ink-2:#4A5764;
+  --ink-3:#78838F;
+  --rule:#C7CED5;
+  --grid:#E4E8EC;
+  --hw:#A9611A;
+  --hw-soft:#F2E4D3;
+  --model:#1B646D;
+  --model-soft:#D9E9EA;
+  --warn:#933723;
+  --warn-soft:#F3DED8;
+
+  --font-display:Bahnschrift,"DIN Alternate","DIN Condensed","Roboto Condensed","Arial Narrow",ui-sans-serif,sans-serif;
+  --font-body:"Segoe UI","Helvetica Neue",ui-sans-serif,system-ui,sans-serif;
+  --font-mono:"Cascadia Mono",Consolas,"SF Mono",ui-monospace,"Roboto Mono",monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --paper:#0C1116;
+    --panel:#141C24;
+    --ink:#E7ECF1;
+    --ink-2:#A2AEBA;
+    --ink-3:#75818E;
+    --rule:#2B3540;
+    --grid:#1B232B;
+    --hw:#DFA05A;
+    --hw-soft:#3A2B18;
+    --model:#63B6BE;
+    --model-soft:#153336;
+    --warn:#D57C63;
+    --warn-soft:#3B211A;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#0C1116; --panel:#141C24; --ink:#E7ECF1; --ink-2:#A2AEBA; --ink-3:#75818E;
+  --rule:#2B3540; --grid:#1B232B;
+  --hw:#DFA05A; --hw-soft:#3A2B18; --model:#63B6BE; --model-soft:#153336;
+  --warn:#D57C63; --warn-soft:#3B211A;
+}
+:root[data-theme="light"]{
+  --paper:#F4F6F7; --panel:#FFFFFF; --ink:#111820; --ink-2:#4A5764; --ink-3:#78838F;
+  --rule:#C7CED5; --grid:#E4E8EC;
+  --hw:#A9611A; --hw-soft:#F2E4D3; --model:#1B646D; --model-soft:#D9E9EA;
+  --warn:#933723; --warn-soft:#F3DED8;
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--paper); color:var(--ink);
+  font-family:var(--font-body); font-size:16px; line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+}
+.deck{scroll-snap-type:y proximity}
+.slide{
+  scroll-snap-align:start;
+  border-bottom:1px solid var(--rule);
+  padding:clamp(2.5rem,6vw,5rem) clamp(1.1rem,5vw,3rem);
+}
+.wrap{max-width:1080px; margin:0 auto; display:flex; flex-direction:column; gap:1.6rem}
+
+.eyebrow{
+  display:flex; align-items:baseline; gap:.9rem;
+  font-family:var(--font-mono); font-size:.72rem; letter-spacing:.14em;
+  text-transform:uppercase; color:var(--ink-3);
+}
+.eyebrow .num{color:var(--hw); font-weight:700}
+.eyebrow .num::after{content:" / 09"; color:var(--ink-3); font-weight:400}
+
+h1,h2{
+  font-family:var(--font-display); font-variation-settings:'wght' 700,'wdth' 85;
+  font-weight:700; text-wrap:balance; margin:0; line-height:1.08;
+  letter-spacing:.005em;
+}
+h1{font-size:clamp(2.2rem,6.5vw,4rem)}
+h2{font-size:clamp(1.55rem,3.6vw,2.35rem)}
+.lede{font-size:clamp(1rem,1.6vw,1.16rem); color:var(--ink-2); max-width:62ch; margin:0}
+p{margin:0; max-width:68ch}
+p+p{margin-top:.7rem}
+
+figure{margin:0; display:flex; flex-direction:column; gap:.8rem}
+.plate{
+  background:var(--panel); border:1px solid var(--rule); border-radius:2px;
+  padding:clamp(.8rem,2.5vw,1.6rem); overflow-x:auto;
+  background-image:linear-gradient(var(--grid) 1px,transparent 1px),
+                   linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+  background-size:22px 22px;
+}
+.plate svg{display:block; width:100%; min-width:660px; height:auto}
+figcaption{
+  font-family:var(--font-mono); font-size:.76rem; line-height:1.55;
+  color:var(--ink-3); max-width:78ch;
+}
+
+svg text{font-family:var(--font-mono); fill:var(--ink)}
+.t-lbl{font-size:13px; font-weight:700; letter-spacing:.06em}
+.t-sig{font-size:12.5px}
+.t-note{font-size:11.5px; fill:var(--ink-3)}
+.t-eq{font-size:13px}
+.t-hd{font-family:var(--font-display); font-variation-settings:'wght' 700,'wdth' 85; font-size:15px; letter-spacing:.08em}
+
+.legend{display:flex; flex-wrap:wrap; gap:1.1rem; font-family:var(--font-mono); font-size:.74rem; color:var(--ink-2)}
+.legend span{display:inline-flex; align-items:center; gap:.45rem}
+.sw{width:13px; height:13px; border-radius:2px; flex:none}
+
+.cols{display:grid; grid-template-columns:repeat(auto-fit,minmax(255px,1fr)); gap:1.1rem}
+.card{
+  background:var(--panel); border:1px solid var(--rule);
+  border-left:3px solid var(--rule); border-radius:2px; padding:1.05rem 1.15rem;
+  display:flex; flex-direction:column; gap:.45rem;
+}
+.card.hw{border-left-color:var(--hw)}
+.card.model{border-left-color:var(--model)}
+.card.warn{border-left-color:var(--warn)}
+.card h3{
+  font-family:var(--font-display); font-variation-settings:'wght' 700,'wdth' 85;
+  font-size:1rem; margin:0; letter-spacing:.03em;
+}
+.card p{font-size:.9rem; color:var(--ink-2); max-width:none}
+code,kbd{font-family:var(--font-mono); font-size:.87em; color:var(--ink)}
+.eq{
+  font-family:var(--font-mono); font-size:.85rem; line-height:1.75;
+  background:var(--panel); border:1px solid var(--rule); border-radius:2px;
+  padding:.9rem 1.05rem; overflow-x:auto; white-space:pre; color:var(--ink);
+}
+.eq b{color:var(--hw); font-weight:700}
+.eq i{color:var(--model); font-style:normal; font-weight:700}
+
+table{border-collapse:collapse; font-size:.87rem; width:100%; font-variant-numeric:tabular-nums}
+th,td{text-align:left; padding:.5rem .8rem; border-bottom:1px solid var(--rule)}
+th{font-family:var(--font-mono); font-size:.7rem; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-3); font-weight:400}
+td:not(:first-child){font-family:var(--font-mono)}
+.scroller{overflow-x:auto}
+
+.tag{
+  font-family:var(--font-mono); font-size:.68rem; letter-spacing:.1em; text-transform:uppercase;
+  padding:.16rem .5rem; border-radius:2px; align-self:flex-start;
+}
+.tag.ok{background:var(--model-soft); color:var(--model)}
+.tag.watch{background:var(--warn-soft); color:var(--warn)}
+
+a{color:var(--hw)}
+:focus-visible{outline:2px solid var(--hw); outline-offset:3px}
+@media (prefers-reduced-motion:reduce){*{animation:none!important; transition:none!important}}
+</style>
+
+<div class="deck">
+
+<svg width="0" height="0" aria-hidden="true" focusable="false" style="position:absolute">
+  <defs>
+    <marker id="ah-hw" markerWidth="9" markerHeight="7" refX="8.4" refY="3.5" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L9,3.5 L0,7 Z" fill="var(--hw)"/></marker>
+    <marker id="ah-model" markerWidth="9" markerHeight="7" refX="8.4" refY="3.5" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L9,3.5 L0,7 Z" fill="var(--model)"/></marker>
+    <marker id="ah-ink" markerWidth="9" markerHeight="7" refX="8.4" refY="3.5" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L9,3.5 L0,7 Z" fill="var(--ink)"/></marker>
+    <marker id="ah-rule" markerWidth="9" markerHeight="7" refX="8.4" refY="3.5" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L9,3.5 L0,7 Z" fill="var(--rule)"/></marker>
+    <marker id="ah-warn" markerWidth="9" markerHeight="7" refX="8.4" refY="3.5" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L9,3.5 L0,7 Z" fill="var(--warn)"/></marker>
+  </defs>
+</svg>
+
+
+<!-- 01 ─────────────────────────────────────────────── -->
+<section class="slide">
+  <div class="wrap">
+    <div class="eyebrow"><span class="num">01</span><span>FIXS &middot; XIL bench &middot; dev_v0.9.0</span></div>
+    <h1>Axle Dyno &harr; CarMaker Coupling</h1>
+    <p class="lede">How the working implementation exchanges torque and speed with CarMaker across a single scalar per corner &mdash; where the one-step delay comes from, why the loop is stable, and what the architecture cannot tell you about itself.</p>
+    <div class="eq">w<sub>i</sub>[k] = w<sub>i</sub>[k&minus;1] + (K&middot;Ts / I<sub>i</sub>) &middot; ( <b>Taxl<sub>i</sub>[k]</b> + <i>Ttire<sub>i</sub>[k]</i> )
+
+K = 1     Ts = 0.001 s     I<sub>i</sub> = CarMaker parameter  Wheel.&lt;i&gt;.I</div>
+    <div class="legend">
+      <span><i class="sw" style="background:var(--hw)"></i>hardware &middot; measured &middot; physical</span>
+      <span><i class="sw" style="background:var(--model)"></i>CarMaker &middot; computed</span>
+      <span><i class="sw" style="background:var(--ink)"></i>our Simulink bypass</span>
+    </div>
+  </div>
+</section>
+
+<!-- 02 ─────────────────────────────────────────────── -->
+<section class="slide">
+  <div class="wrap">
+    <div class="eyebrow"><span class="num">02</span><span>State ownership</span></div>
+    <h2>One wheel-spin integrator exists in the whole system</h2>
+    <p class="lede">CarMaker&rsquo;s went out with the PowerTrain module. The hardware&rsquo;s physical spin is servo-slaved. Ours is the only one &mdash; which is why nothing can diverge.</p>
+
+    <figure>
+      <div class="plate">
+        <svg viewBox="0 0 1000 330" role="img" aria-labelledby="d2t">
+          <title id="d2t">Three domains: hardware owns the powertrain as a torque source, Simulink owns the wheel spin state, CarMaker owns body, tire and road</title>
+          <rect x="30" y="66" width="252" height="168" rx="2" fill="var(--hw-soft)" stroke="var(--hw)" stroke-width="1.5"/>
+          <text class="t-hd" x="46" y="94" fill="var(--hw)">HARDWARE</text>
+          <text class="t-sig" x="46" y="122">powertrain</text>
+          <text class="t-note" x="46" y="142">a torque source only</text>
+          <line x1="46" y1="158" x2="266" y2="158" stroke="var(--hw)" stroke-width="1" opacity=".45"/>
+          <text class="t-note" x="46" y="180">owns no integrated state:</text>
+          <text class="t-note" x="46" y="198">its shaft speed is forced</text>
+          <text class="t-note" x="46" y="216">by the servo</text>
+
+          <rect x="374" y="66" width="252" height="168" rx="2" fill="none" stroke="var(--ink)" stroke-width="2.5"/>
+          <text class="t-hd" x="390" y="94">SIMULINK &mdash; OURS</text>
+          <text class="t-sig" x="390" y="122">wheel spin  w</text>
+          <text class="t-note" x="390" y="142">Backward Euler, Ts = 1 ms</text>
+          <line x1="390" y1="158" x2="610" y2="158" stroke="var(--ink)" stroke-width="1" opacity=".35"/>
+          <text class="t-note" x="390" y="180" fill="var(--hw)">THE ONLY INTEGRATOR</text>
+          <text class="t-note" x="390" y="198">for this state, anywhere</text>
+          <text class="t-note" x="390" y="216">in the system</text>
+
+          <rect x="718" y="66" width="252" height="168" rx="2" fill="var(--model-soft)" stroke="var(--model)" stroke-width="1.5"/>
+          <text class="t-hd" x="734" y="94" fill="var(--model)">CARMAKER</text>
+          <text class="t-sig" x="734" y="122">body &middot; suspension</text>
+          <text class="t-sig" x="734" y="142">tire &middot; road</text>
+          <line x1="734" y1="158" x2="954" y2="158" stroke="var(--model)" stroke-width="1" opacity=".45"/>
+          <text class="t-note" x="734" y="180">PowerTrain module</text>
+          <text class="t-note" x="734" y="198">removed &mdash; so its wheel</text>
+          <text class="t-note" x="734" y="216">spin DOF is gone too</text>
+
+          <line x1="282" y1="112" x2="366" y2="112" stroke="var(--hw)" stroke-width="2" marker-end="url(#ah-hw)"/>
+          <text class="t-sig" x="290" y="103" fill="var(--hw)">Taxl</text>
+          <line x1="366" y1="196" x2="282" y2="196" stroke="var(--hw)" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#ah-hw)"/>
+          <text class="t-note" x="288" y="187" fill="var(--hw)">w_cmd &rarr; servo</text>
+
+          <line x1="626" y1="112" x2="710" y2="112" stroke="var(--model)" stroke-width="2" marker-end="url(#ah-model)"/>
+          <text class="t-sig" x="634" y="103" fill="var(--model)">rotv</text>
+          <line x1="710" y1="196" x2="626" y2="196" stroke="var(--model)" stroke-width="2" marker-end="url(#ah-model)"/>
+          <text class="t-sig" x="630" y="187" fill="var(--model)">Trq_T2W</text>
+
+          <text class="t-note" x="30" y="270">Reference: CM DriveLine performs this integration natively &mdash; RefMan Fig. 16.83 &ldquo;Integration of rotation speeds&rdquo;.</text>
+          <text class="t-note" x="30" y="290">We rebuilt that block with the same inertia parameter, matching IPG&rsquo;s own UserPowerTrain.mdl reference model.</text>
+          <text class="t-note" x="30" y="310" fill="var(--hw)">Consequence: CM&rsquo;s tire slip is computed from exactly the number that commands the dyno &mdash; consistent by construction, not by tracking.</text>
+        </svg>
+      </div>
+    </figure>
+  </div>
+</section>
+
+<!-- 03 ─────────────────────────────────────────────── -->
+<section class="slide">
+  <div class="wrap">
+    <div class="eyebrow"><span class="num">03</span><span>Signal flow</span></div>
+    <h2>What crosses the cut at step k</h2>
+    <p class="lede">The actual dyno shaft speed never reaches CarMaker. It is seen only by the dyno&rsquo;s internal speed-tracking controller.</p>
+
+    <figure>
+      <div class="plate">
+        <svg viewBox="0 0 1000 360" role="img" aria-labelledby="d3t">
+          <title id="d3t">Signal flow: hardware sends measured axle torque, Simulink integrates, sends commanded speed to the dyno and the same value to CarMaker, which returns tire torque</title>
+
+          <rect x="40" y="120" width="200" height="110" rx="2" fill="var(--hw-soft)" stroke="var(--hw)" stroke-width="1.5"/>
+          <text class="t-hd" x="56" y="150" fill="var(--hw)">DYNO + VEHICLE</text>
+          <text class="t-note" x="56" y="176">internal speed servo</text>
+          <text class="t-note" x="56" y="196">tracks w_cmd</text>
+          <text class="t-note" x="56" y="216" fill="var(--warn)">w_act stays in here</text>
+
+          <rect x="390" y="96" width="240" height="158" rx="2" fill="none" stroke="var(--ink)" stroke-width="2.5"/>
+          <text class="t-hd" x="406" y="126">SIMULINK</text>
+          <text class="t-eq" x="406" y="158">w[k] = w[k&minus;1]</text>
+          <text class="t-eq" x="424" y="180">+ (Ts/I) &middot;</text>
+          <text class="t-eq" x="424" y="202">( Taxl[k]</text>
+          <text class="t-eq" x="424" y="224">+ Trq_T2W[k] )</text>
+
+          <rect x="780" y="120" width="180" height="110" rx="2" fill="var(--model-soft)" stroke="var(--model)" stroke-width="1.5"/>
+          <text class="t-hd" x="796" y="150" fill="var(--model)">CARMAKER</text>
+          <text class="t-note" x="796" y="176">tire &rarr; body</text>
+          <text class="t-note" x="796" y="196">&rarr; road</text>
+
+          <line x1="240" y1="146" x2="382" y2="146" stroke="var(--hw)" stroke-width="2.5" marker-end="url(#ah-hw)"/>
+          <text class="t-sig" x="252" y="137" fill="var(--hw)">Taxl[k]  measured</text>
+          <text class="t-note" x="252" y="166">= T_drive &minus; T_brake</text>
+
+          <line x1="382" y1="212" x2="240" y2="212" stroke="var(--hw)" stroke-width="2.5" stroke-dasharray="6 4" marker-end="url(#ah-hw)"/>
+          <text class="t-sig" x="256" y="203" fill="var(--hw)">w_cmd[k] = w[k]</text>
+
+          <line x1="630" y1="146" x2="772" y2="146" stroke="var(--model)" stroke-width="2.5" marker-end="url(#ah-model)"/>
+          <text class="t-sig" x="642" y="137" fill="var(--model)">rotv = w[k]</text>
+          <text class="t-note" x="642" y="166">Trq_Drive = Taxl[k]</text>
+
+          <line x1="772" y1="212" x2="630" y2="212" stroke="var(--model)" stroke-width="2.5" marker-end="url(#ah-model)"/>
+          <text class="t-sig" x="646" y="203" fill="var(--model)">Trq_T2W[k]</text>
+
+          <line x1="40" y1="284" x2="960" y2="284" stroke="var(--rule)" stroke-width="1"/>
+          <text class="t-note" x="40" y="308" fill="var(--hw)">Zeroed by us: all CM brake torque, Trq_Supp2WC, Trq_Supp2Bdy1, Trq_Supp2BdyEng.</text>
+          <text class="t-note" x="40" y="328">Trq_Drive therefore has no live consumer &mdash; in this build it is bookkeeping only. The one dynamically active</text>
+          <text class="t-note" x="40" y="348">hardware&rarr;CM signal is <tspan fill="var(--model)">rotv</tspan>: CarMaker sees the resultant of Taxl and Ttire, never Taxl itself.</text>
+        </svg>
+      </div>
+    </figure>
+  </div>
+</section>
+
+<!-- 04 ─────────────────────────────────────────────── -->
+<section class="slide">
+  <div class="wrap">
+    <div class="eyebrow"><span class="num">04</span><span>Timing &middot; the key diagram</span></div>
+    <h2>Where the one-step delay actually lives</h2>
+    <p class="lede">The tire&rsquo;s slip&rarr;force map is memoryless. The delay is not in the tire &mdash; it is in the shared variable, because Tire is scheduled before PowerTrain and <code>Rim_rotv</code> is written only once per cycle.</p>
+
+    <figure>
+      <div class="plate">
+        <svg viewBox="0 0 1000 400" role="img" aria-labelledby="d4t">
+          <title id="d4t">Timeline of CarMaker's main cycle showing the Tire module reading Rim_rotv before the PowerTrain module writes it, creating a one-step delay</title>
+
+          <text class="t-note" x="40" y="34">CarMaker main cycle &mdash; Programmer&rsquo;s Guide Listing 1.2. Fixed-step Backward Euler: the sequence runs exactly once per step.</text>
+
+          <text class="t-note" x="60" y="72">cycle k&minus;1</text>
+          <text class="t-note" x="392" y="72" fill="var(--hw)">cycle k</text>
+          <text class="t-note" x="812" y="72">cycle k+1</text>
+
+          <rect x="40" y="84" width="130" height="56" rx="2" fill="none" stroke="var(--rule)" stroke-width="1.5" stroke-dasharray="4 3"/>
+          <text class="t-note" x="56" y="117">&hellip; PowerTrain</text>
+
+          <rect x="186" y="84" width="130" height="56" rx="2" fill="var(--model-soft)" stroke="var(--model)" stroke-width="1.5"/>
+          <text class="t-sig" x="228" y="117" fill="var(--model)">Body</text>
+
+          <rect x="332" y="84" width="128" height="56" rx="2" fill="var(--model-soft)" stroke="var(--model)" stroke-width="2"/>
+          <text class="t-sig" x="376" y="117" fill="var(--model)">Tire</text>
+
+          <rect x="464" y="84" width="76" height="56" rx="2" fill="var(--model-soft)" stroke="var(--model)" stroke-width="1.5"/>
+          <text class="t-note" x="478" y="117" fill="var(--model)">Brake</text>
+
+          <rect x="544" y="84" width="150" height="56" rx="2" fill="none" stroke="var(--ink)" stroke-width="2.5"/>
+          <text class="t-sig" x="558" y="110">PowerTrain</text>
+          <text class="t-note" x="558" y="130" fill="var(--hw)">= OUR BLOCK</text>
+
+          <rect x="698" y="84" width="106" height="56" rx="2" fill="var(--model-soft)" stroke="var(--model)" stroke-width="1.5"/>
+          <text class="t-sig" x="726" y="117" fill="var(--model)">Body</text>
+
+          <rect x="826" y="84" width="130" height="56" rx="2" fill="none" stroke="var(--rule)" stroke-width="1.5" stroke-dasharray="4 3"/>
+          <text class="t-note" x="854" y="117">Tire &hellip;</text>
+
+          <line x1="332" y1="70" x2="804" y2="70" stroke="var(--hw)" stroke-width="1.5"/>
+          <line x1="332" y1="64" x2="332" y2="76" stroke="var(--hw)" stroke-width="1.5"/>
+          <line x1="804" y1="64" x2="804" y2="76" stroke="var(--hw)" stroke-width="1.5"/>
+
+          <text class="t-note" x="40" y="238">shared variable</text>
+          <text class="t-sig" x="40" y="258" fill="var(--hw)">Rim_rotv</text>
+
+          <path d="M170,300 L226,300 L226,268 L590,268 L590,236 L956,236"
+                fill="none" stroke="var(--hw)" stroke-width="2.5"/>
+          <text class="t-note" x="240" y="288">holds w[k&minus;1]</text>
+          <text class="t-note" x="604" y="256">holds w[k]</text>
+          <text class="t-note" x="118" y="318">w[k&minus;2]</text>
+
+          <line x1="396" y1="140" x2="396" y2="268" stroke="var(--model)" stroke-width="1.5" stroke-dasharray="4 4"/>
+          <circle cx="396" cy="268" r="4.5" fill="var(--model)"/>
+          <text class="t-note" x="404" y="180" fill="var(--model)">READ</text>
+          <text class="t-note" x="404" y="198" fill="var(--model)">gets w[k&minus;1]</text>
+
+          <line x1="590" y1="140" x2="590" y2="236" stroke="var(--ink)" stroke-width="1.5" stroke-dasharray="4 4"/>
+          <circle cx="590" cy="236" r="4.5" fill="var(--ink)"/>
+          <text class="t-note" x="598" y="180">WRITE</text>
+          <text class="t-note" x="598" y="198">emits w[k]</text>
+
+          <rect x="396" y="330" width="194" height="26" rx="2" fill="var(--hw-soft)" stroke="var(--hw)" stroke-width="1.5"/>
+          <text class="t-sig" x="410" y="348" fill="var(--hw)">this gap IS the z&#8315;&#185;</text>
+          <line x1="396" y1="276" x2="396" y2="330" stroke="var(--hw)" stroke-width="1" stroke-dasharray="3 3"/>
+          <line x1="590" y1="244" x2="590" y2="330" stroke="var(--hw)" stroke-width="1" stroke-dasharray="3 3"/>
+
+          <text class="t-note" x="640" y="348">A memoryless block fed a stale input still produces a delayed output.</text>
+        </svg>
+      </div>
+      <figcaption>The delay is also <em>required</em>: if the tire were memoryless and read w[k], then w[k] = w[k&minus;1] + (Ts/I)(Taxl[k] + f(w[k])) is implicit in w[k] &mdash; an algebraic loop needing iteration, which real-time code cannot do. Either the tire&rsquo;s relaxation states break the loop, or this scheduling delay does.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- 05 ─────────────────────────────────────────────── -->
+<section class="slide">
+  <div class="wrap">
+    <div class="eyebrow"><span class="num">05</span><span>Two integrations</span></div>
+    <h2>The wheel integration is not after PowerTrain &mdash; it <em>is</em> PowerTrain</h2>
+    <p class="lede">These are routinely conflated. They happen at different points in the sequence and are owned by different parties.</p>
+
+    <div class="cols">
+      <div class="card hw">
+        <span class="tag ok">A &middot; ours</span>
+        <h3>Wheel spin&ensp;<code>w<sub>i</sub></code></h3>
+        <p>Happens <strong>at the PowerTrain slot</strong>. CM natively does it in the DriveLine &mdash; &ldquo;Integration of rotation speeds&rdquo;, RefMan Fig.&nbsp;16.83. In our build, our Simulink block <em>is</em> this step.</p>
+      </div>
+      <div class="card model">
+        <span class="tag ok">B &middot; CarMaker</span>
+        <h3>Body &amp; suspension DOFs</h3>
+        <p>Happens at <code>Body Frame</code>, <strong>after</strong> PowerTrain. This is the one that follows us. Figure&nbsp;1.23 brackets the whole vehicle-model evaluation as &ldquo;One integration step&rdquo;.</p>
+      </div>
+    </div>
+
+    <div class="eq">Tire          reads  Rim_rotv = w[k&minus;1],  emits Trq_T2W[k]      (memoryless map)
+Brake
+PowerTrain    <b>INTEGRATION A</b>:  w[k] = w[k&minus;1] + (Ts/I)(Taxl[k] + Trq_T2W[k])
+Body Frame    <i>INTEGRATION B</i>:  advances chassis / suspension states</div>
+
+    <div class="cols">
+      <div class="card">
+        <h3>CM&rsquo;s solver is Backward Euler</h3>
+        <p>Programmer&rsquo;s Guide, verbatim: <em>&ldquo;Since the solver used in CarMaker is backwards-euler, the user needs to choose this option. Due to the better compatibility, vibrations are no longer an issue.&rdquo;</em> Our <code>K&middot;Ts&middot;z/(z&minus;1)</code> matches CM&rsquo;s own solver &mdash; not just IPG&rsquo;s reference model.</p>
+      </div>
+      <div class="card warn">
+        <span class="tag watch">the one rule</span>
+        <h3>Add no further delay</h3>
+        <p>The module ordering supplies exactly one step, free. Any <code>Memory</code>, <code>Unit&nbsp;Delay</code> or rate transition on the path <code>Trq_T2W &rarr; integrator &rarr; rotv</code> makes d&nbsp;=&nbsp;2, costing a further &Delta;&zeta; &asymp; 0.14.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 06 ─────────────────────────────────────────────── -->
+<section class="slide">
+  <div class="wrap">
+    <div class="eyebrow"><span class="num">06</span><span>Inside the tire</span></div>
+    <h2>Almost stateless &mdash; and the exception is what saves you</h2>
+
+    <figure>
+      <div class="plate">
+        <svg viewBox="0 0 1000 380" role="img" aria-labelledby="d6t">
+          <title id="d6t">Tire model inputs, four internal stages, and outputs, showing that only the relaxation stage carries state</title>
+
+          <text class="t-hd" x="40" y="40" fill="var(--model)">INPUTS</text>
+          <text class="t-sig" x="40" y="70">P_v0_W[0..2]</text>
+          <text class="t-note" x="40" y="88">contact-point velocity</text>
+          <text class="t-sig" x="40" y="118" fill="var(--hw)">Rim_rotv</text>
+          <text class="t-note" x="40" y="136" fill="var(--hw)">&larr; our w[k&minus;1] enters here</text>
+          <text class="t-sig" x="40" y="166">Frc_W[2] = Fz</text>
+          <text class="t-sig" x="40" y="192">InclinAngle</text>
+          <text class="t-sig" x="40" y="218">muRoad</text>
+          <text class="t-sig" x="40" y="244">Rim_turnv</text>
+          <text class="t-note" x="40" y="272" fill="var(--warn)">no torque input exists</text>
+
+          <line x1="244" y1="60" x2="290" y2="60" stroke="var(--model)" stroke-width="2" marker-end="url(#ah-model)"/>
+          <line x1="244" y1="118" x2="290" y2="118" stroke="var(--hw)" stroke-width="2.5" marker-end="url(#ah-hw)"/>
+          <line x1="244" y1="176" x2="290" y2="176" stroke="var(--model)" stroke-width="2" marker-end="url(#ah-model)"/>
+          <line x1="244" y1="234" x2="290" y2="234" stroke="var(--model)" stroke-width="2" marker-end="url(#ah-model)"/>
+
+          <rect x="298" y="36" width="404" height="52" rx="2" fill="none" stroke="var(--rule)" stroke-width="1.5"/>
+          <text class="t-note" x="312" y="56">1 &middot; kinematics &rarr; slip</text>
+          <text class="t-sig" x="312" y="78">s = (Rim_rotv&middot;rBelt_eff &minus; vx) / |&hellip;|    alpha = atan(vy/|vx|)</text>
+
+          <rect x="298" y="100" width="404" height="66" rx="2" fill="var(--hw-soft)" stroke="var(--hw)" stroke-width="2"/>
+          <text class="t-note" x="312" y="120" fill="var(--hw)">1.5 &middot; RELAXATION &mdash; THE ONLY STATE</text>
+          <text class="t-sig" x="312" y="142">du/dt, dv/dt  (EQ 383-384)   tau = sigma / |Vcx|</text>
+          <text class="t-note" x="312" y="158">2&ndash;3 states per wheel &middot; only if USE_MODE &ge; +10</text>
+
+          <rect x="298" y="178" width="404" height="52" rx="2" fill="none" stroke="var(--rule)" stroke-width="1.5"/>
+          <text class="t-note" x="312" y="198">2 &middot; pure-slip forces &mdash; algebraic</text>
+          <text class="t-sig" x="312" y="220">Fx0(s)      Fy0(alpha)</text>
+
+          <rect x="298" y="242" width="404" height="66" rx="2" fill="var(--model-soft)" stroke="var(--model)" stroke-width="2"/>
+          <text class="t-note" x="312" y="262" fill="var(--model)">3 &middot; COMBINED SLIP &mdash; algebraic</text>
+          <text class="t-sig" x="312" y="284">Fx = Gx(alpha) &middot; Fx0(s)      EQ 352</text>
+          <text class="t-sig" x="312" y="302">Fy = Gy(s) &middot; Fy0(alpha)      EQ 360</text>
+
+          <rect x="298" y="320" width="404" height="44" rx="2" fill="none" stroke="var(--rule)" stroke-width="1.5"/>
+          <text class="t-note" x="312" y="339">4 &middot; spin-axis moment &mdash; algebraic</text>
+          <text class="t-sig" x="312" y="358">Trq_T2W  &ne;  &minus;r&middot;Fx   &mdash;  also carries TrqRR (SAE J2452)</text>
+
+          <line x1="710" y1="62" x2="756" y2="62" stroke="var(--rule)" stroke-width="2" marker-end="url(#ah-rule)"/>
+          <line x1="710" y1="342" x2="756" y2="342" stroke="var(--model)" stroke-width="2.5" marker-end="url(#ah-model)"/>
+
+          <text class="t-hd" x="764" y="40" fill="var(--model)">OUTPUTS</text>
+          <text class="t-sig" x="764" y="70">Slp  Alpha</text>
+          <text class="t-sig" x="764" y="96">TurnSlp</text>
+          <text class="t-sig" x="764" y="122">vBelt</text>
+          <text class="t-sig" x="764" y="148">rBelt_eff</text>
+          <text class="t-sig" x="764" y="174">Frc_W  Fx Fy Fz</text>
+          <text class="t-sig" x="764" y="200">Trq_W  Mx My Mz</text>
+          <text class="t-sig" x="764" y="348" fill="var(--model)">Trq_T2W</text>
+
+          <text class="t-note" x="764" y="240">Fz is an INPUT,</text>
+          <text class="t-note" x="764" y="258">not a state: CPI models</text>
+          <text class="t-note" x="764" y="276">carry no vertical</text>
+          <text class="t-note" x="764" y="294">dynamics.</text>
+        </svg>
+      </div>
+      <figcaption>The relaxation states are exactly what set the ~45&nbsp;Hz mode on the next slide. Without them the tire is an instantaneous spring from rotv to torque and the delayed loop is far less forgiving. Model.USE_MODE 11/12 gives that stateless version.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- 07 ─────────────────────────────────────────────── -->
+<section class="slide">
+  <div class="wrap">
+    <div class="eyebrow"><span class="num">07</span><span>Longitudinal &harr; lateral</span></div>
+    <h2>The bench is longitudinal-only, but the load it sees is lateral-aware</h2>
+
+    <figure>
+      <div class="plate">
+        <svg viewBox="0 0 1000 330" role="img" aria-labelledby="d7t">
+          <title id="d7t">Three coupling paths between longitudinal and lateral inside CarMaker's tire and body</title>
+
+          <rect x="40" y="60" width="150" height="52" rx="2" fill="none" stroke="var(--hw)" stroke-width="2.5"/>
+          <text class="t-sig" x="56" y="83" fill="var(--hw)">our w[k]</text>
+          <text class="t-note" x="56" y="101" fill="var(--hw)">&rarr; vBelt &rarr; s</text>
+
+          <rect x="40" y="196" width="150" height="52" rx="2" fill="none" stroke="var(--model)" stroke-width="1.5"/>
+          <text class="t-sig" x="56" y="219" fill="var(--model)">steer, yaw</text>
+          <text class="t-note" x="56" y="237" fill="var(--model)">&rarr; vy(P) &rarr; alpha</text>
+
+          <rect x="330" y="46" width="200" height="80" rx="2" fill="var(--hw-soft)" stroke="var(--hw)" stroke-width="1.5"/>
+          <text class="t-sig" x="346" y="72">Fx = Gx(alpha)&middot;Fx0(s)</text>
+          <text class="t-note" x="346" y="94">longitudinal force,</text>
+          <text class="t-note" x="346" y="112">de-rated by sideslip</text>
+
+          <rect x="330" y="182" width="200" height="80" rx="2" fill="var(--model-soft)" stroke="var(--model)" stroke-width="1.5"/>
+          <text class="t-sig" x="346" y="208">Fy = Gy(s)&middot;Fy0(alpha)</text>
+          <text class="t-note" x="346" y="230">lateral force,</text>
+          <text class="t-note" x="346" y="248">de-rated by long. slip</text>
+
+          <line x1="190" y1="86" x2="322" y2="86" stroke="var(--hw)" stroke-width="2.5" marker-end="url(#ah-hw)"/>
+          <line x1="190" y1="222" x2="322" y2="222" stroke="var(--model)" stroke-width="2" marker-end="url(#ah-model)"/>
+
+          <path d="M430,126 L430,176" fill="none" stroke="var(--hw)" stroke-width="2.5" marker-end="url(#ah-hw)"/>
+          <text class="t-sig" x="440" y="146" fill="var(--hw)">A</text>
+          <text class="t-note" x="456" y="146">s &rarr; Gy(s)</text>
+          <text class="t-note" x="456" y="163">Fy de-rated</text>
+
+          <path d="M394,182 L394,132" fill="none" stroke="var(--warn)" stroke-width="3" marker-end="url(#ah-warn)"/>
+          <text class="t-sig" x="330" y="152" fill="var(--warn)">C</text>
+
+          <rect x="612" y="46" width="180" height="80" rx="2" fill="none" stroke="var(--warn)" stroke-width="2.5"/>
+          <text class="t-sig" x="628" y="72" fill="var(--warn)">Trq_T2W</text>
+          <text class="t-note" x="628" y="94">back into our</text>
+          <text class="t-note" x="628" y="112">integrator</text>
+
+          <line x1="530" y1="86" x2="604" y2="86" stroke="var(--warn)" stroke-width="3" marker-end="url(#ah-warn)"/>
+
+          <rect x="612" y="182" width="180" height="80" rx="2" fill="none" stroke="var(--rule)" stroke-width="1.5"/>
+          <text class="t-sig" x="628" y="208">Fz &mdash; load transfer</text>
+          <text class="t-note" x="628" y="230">pitch &rarr; understeer</text>
+          <text class="t-note" x="628" y="248">balance shifts</text>
+          <line x1="530" y1="222" x2="604" y2="222" stroke="var(--rule)" stroke-width="2" marker-end="url(#ah-rule)"/>
+          <text class="t-sig" x="556" y="214">B</text>
+
+          <path d="M702,182 L702,132" fill="none" stroke="var(--rule)" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#ah-rule)"/>
+
+          <text class="t-note" x="820" y="76" fill="var(--warn)">PATH C is the one</text>
+          <text class="t-note" x="820" y="94" fill="var(--warn)">that reaches the</text>
+          <text class="t-note" x="820" y="112" fill="var(--warn)">hardware.</text>
+          <text class="t-note" x="820" y="204">Path B partly</text>
+          <text class="t-note" x="820" y="222">suppressed here:</text>
+          <text class="t-note" x="820" y="240">Trq_Supp2WC = 0</text>
+
+          <line x1="40" y1="288" x2="960" y2="288" stroke="var(--rule)" stroke-width="1"/>
+          <text class="t-note" x="40" y="312">In a corner the same axle torque produces a different wheel acceleration &mdash; cornering reaches the bench through the torque, with no lateral signal crossing the interface.</text>
+        </svg>
+      </div>
+      <figcaption>All three paths depend on Model.USE_MODE selecting combined slip (3 / 4, i.e. 13 / 14 / 15 with transient). At USE_MODE 11 or 12, Fx is independent of alpha and paths A and C do not exist at all.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- 08 ─────────────────────────────────────────────── -->
+<section class="slide">
+  <div class="wrap">
+    <div class="eyebrow"><span class="num">08</span><span>Stability</span></div>
+    <h2>A ~45 Hz mode whose damping grows with speed</h2>
+    <p class="lede">Wheel inertia against tire relaxation gives a second-order system. Its natural frequency is speed-independent; its damping is proportional to speed. The one-step delay subtracts a fixed amount.</p>
+
+    <div class="eq">wn   = r &middot; sqrt( Cs / (I&middot;sigma) )   &asymp; 286 rad/s &asymp; <b>45 Hz</b>   &mdash; independent of speed
+zeta = vx / (2&middot;sigma&middot;wn)          &asymp; vx / 28.6          &mdash; proportional to speed
+delay cost                          &asymp; wn&middot;Ts/2 = <b>0.143</b>       &mdash; fixed</div>
+
+    <figure>
+      <div class="plate">
+        <svg viewBox="0 0 1000 340" role="img" aria-labelledby="d8t">
+          <title id="d8t">Chart of damping ratio against vehicle speed, showing the physical damping line, the line after the one-step delay, and the exposed band between 2 and 4.1 metres per second</title>
+
+          <rect x="96" y="40" width="740" height="220" fill="none" stroke="var(--rule)" stroke-width="1"/>
+          <line x1="96" y1="150" x2="836" y2="150" stroke="var(--rule)" stroke-width="1" stroke-dasharray="3 3"/>
+          <line x1="96" y1="205" x2="836" y2="205" stroke="var(--rule)" stroke-width="1" stroke-dasharray="3 3"/>
+          <line x1="96" y1="95" x2="836" y2="95" stroke="var(--rule)" stroke-width="1" stroke-dasharray="3 3"/>
+
+          <text class="t-note" x="60" y="264">0.0</text>
+          <text class="t-note" x="60" y="209">0.2</text>
+          <text class="t-note" x="60" y="154">0.4</text>
+          <text class="t-note" x="60" y="99">0.6</text>
+          <text class="t-note" x="60" y="45">0.8</text>
+          <text class="t-note" x="30" y="150" transform="rotate(-90 30 150)">damping  zeta</text>
+
+          <text class="t-note" x="90" y="282">0</text>
+          <text class="t-note" x="212" y="282">5</text>
+          <text class="t-note" x="336" y="282">10</text>
+          <text class="t-note" x="460" y="282">15</text>
+          <text class="t-note" x="584" y="282">20</text>
+          <text class="t-note" x="708" y="282">25</text>
+          <text class="t-note" x="828" y="282">30</text>
+          <text class="t-note" x="740" y="304">vehicle speed  vx  [m/s]</text>
+
+          <rect x="145" y="40" width="47" height="220" fill="var(--warn-soft)"/>
+          <rect x="96" y="40" width="49" height="220" fill="var(--model-soft)"/>
+
+          <line x1="96" y1="260" x2="836" y2="72" stroke="var(--model)" stroke-width="2.5" stroke-dasharray="7 4"/>
+          <line x1="197" y1="260" x2="836" y2="107" stroke="var(--hw)" stroke-width="3"/>
+
+          <text class="t-sig" x="640" y="72" fill="var(--model)">zeta physical</text>
+          <text class="t-sig" x="640" y="132" fill="var(--hw)">zeta after 1-step delay</text>
+
+          <text class="t-note" x="100" y="60">CM stand-</text>
+          <text class="t-note" x="100" y="76">still model</text>
+          <text class="t-note" x="100" y="92">below</text>
+          <text class="t-note" x="100" y="108">2.0 m/s</text>
+
+          <text class="t-note" x="150" y="60" fill="var(--warn)">exposed</text>
+          <text class="t-note" x="150" y="76" fill="var(--warn)">band</text>
+          <text class="t-note" x="150" y="92" fill="var(--warn)">2 &ndash; 4.1</text>
+
+          <line x1="96" y1="260" x2="836" y2="260" stroke="var(--ink)" stroke-width="1.5"/>
+        </svg>
+      </div>
+      <figcaption>The mode is physical &mdash; it is the tire/wheel torsional resonance a real vehicle has. The delay only removes damping from it. Below 2.0&nbsp;m/s CarMaker switches to its stand-still tire model (StandStill.vMax), so the normal slip model never runs in the worst region. The residual 2&ndash;4.1&nbsp;m/s band is covered on the bench by switching the dyno to torque mode with commanded Ttire = 0 during stopping.</figcaption>
+    </figure>
+
+    <div class="scroller">
+      <table>
+        <thead><tr><th>vx [m/s]</th><th>zeta physical</th><th>zeta after delay</th><th>verdict</th></tr></thead>
+        <tbody>
+          <tr><td>20</td><td>0.70</td><td>0.56</td><td>well damped</td></tr>
+          <tr><td>10</td><td>0.35</td><td>0.21</td><td>fine</td></tr>
+          <tr><td>5</td><td>0.175</td><td>0.03</td><td>marginal</td></tr>
+          <tr><td>2</td><td>0.070</td><td>&minus;0.07</td><td>handled by mode switch</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- 09 ─────────────────────────────────────────────── -->
+<section class="slide">
+  <div class="wrap">
+    <div class="eyebrow"><span class="num">09</span><span>Verdict</span></div>
+    <h2>Why it works, and the two things it cannot tell you</h2>
+
+    <div class="cols">
+      <div class="card model">
+        <span class="tag ok">why it works</span>
+        <h3>One integrator</h3>
+        <p>Model/plant divergence needs two states drifting apart. There is one. CM&rsquo;s tire slip is computed from exactly the number that commands the dyno.</p>
+      </div>
+      <div class="card model">
+        <span class="tag ok">why it works</span>
+        <h3>IPG&rsquo;s sanctioned bypass</h3>
+        <p>Backward Euler at 1&nbsp;ms with <code>Wheel.&lt;i&gt;.I</code> read from CM parameters &mdash; block-for-block identical to <code>UserPowerTrain.mdl</code>, and matching CM&rsquo;s own solver.</p>
+      </div>
+      <div class="card model">
+        <span class="tag ok">why it works</span>
+        <h3>Bounded, not divergent</h3>
+        <p>A 2&nbsp;N&middot;m torque bias yields 1&times;10<sup>&minus;4</sup> slip offset and ~0.24&nbsp;m/s speed offset &mdash; the tire supplies restoring slip stiffness, the body supplies road-load drag.</p>
+      </div>
+    </div>
+
+    <div class="cols">
+      <div class="card warn">
+        <span class="tag watch">blind spot</span>
+        <h3>The servo error is invisible</h3>
+        <p>CM never sees <code>w_act</code>. If the servo saturates, we integrate a torque measured at the wrong operating point. Nothing rings, nothing diverges &mdash; the sim quietly becomes a different vehicle. <strong>Log <code>w_act &minus; w_cmd</code> and alarm on it.</strong></p>
+      </div>
+      <div class="card warn">
+        <span class="tag watch">blind spot</span>
+        <h3>Taxl cannot be validated against CM</h3>
+        <p>CarMaker never sees <code>Taxl</code> dynamically, so a torque-measurement error surfaces only as that ~0.24&nbsp;m/s bias &mdash; indistinguishable from a dozen modelling choices. Calibration must be established on the bench.</p>
+      </div>
+    </div>
+
+    <div class="cols">
+      <div class="card">
+        <h3>Still open</h3>
+        <p><code>Model.USE_MODE</code> in the tire file &mdash; it decides both whether combined slip exists (paths A/C) and which stability analysis applies. Expected 13&nbsp;/&nbsp;14&nbsp;/&nbsp;15. Also <code>Cs</code>, for the 45&nbsp;Hz figure.</p>
+      </div>
+      <div class="card">
+        <h3>Recorded simplifications</h3>
+        <p>All CM brake torque zeroed (real braking arrives inside <code>Taxl</code>). <code>Trq_Supp2WC</code>, <code>Trq_Supp2Bdy1</code>, <code>Trq_Supp2BdyEng</code> zeroed &mdash; no drive-torque squat or engine-mount reaction.</p>
+      </div>
+      <div class="card">
+        <h3>Full detail</h3>
+        <p>See <code>doc/AxleDynoCarMakerCoupling.md</code> for the k-indexed equations, the source citations, and the open-item register.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+</div>
