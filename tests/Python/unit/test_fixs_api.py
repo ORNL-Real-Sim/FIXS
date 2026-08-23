@@ -1,8 +1,8 @@
 """Simulator-free tests for the fixs client API (#316).
 
 These cover the rules the API exists to enforce -- what may be written, what
-gets returned, and what happens on a tick the application skips -- using a fake
-socket in place of TrafficLayer, so they run anywhere.
+gets returned, and what happens when recv/send are used out of order -- using a
+fake socket in place of TrafficLayer, so they run anywhere.
 """
 import os
 
@@ -67,8 +67,8 @@ def test_get_takes_a_list_and_skips_absent_ids():
 
 
 def test_get_rejects_a_bare_string():
-    """A string is iterable, so silently accepting one would return per-character
-    lookups and an empty dict rather than an error."""
+    """A string is iterable, so accepting one would do per-character lookups
+    and return an empty dict rather than an error."""
     view = fixs._VehicleView([_adopted(id='ego')])
     with pytest.raises(TypeError) as excinfo:
         view.get('ego')
@@ -114,10 +114,16 @@ def test_missing_config_is_reported_by_path():
     assert 'no_such_config.yaml' in str(excinfo.value)
 
 
-def test_sync_before_connect_raises():
+def test_recv_before_connect_raises():
     fixs.close()
     with pytest.raises(fixs.NotConnected):
-        fixs.sync()
+        fixs.recv()
+
+
+def test_send_before_connect_raises():
+    fixs.close()
+    with pytest.raises(fixs.NotConnected):
+        fixs.send()
 
 
 def test_detector_says_it_is_not_decoded():
@@ -163,7 +169,7 @@ def test_unknown_port_lists_what_is_declared():
 
 
 # ---------------------------------------------------------------------------
-# The reply rules, against a fake TrafficLayer
+# recv / send, against a fake TrafficLayer
 # ---------------------------------------------------------------------------
 
 FIELDS = ['id', 'speed', 'speedDesired']
@@ -225,7 +231,6 @@ def _install(ticks, egoIds=('ego',), shutdown=True):
     fixs._sock = FakeSocket(ticks, FIELDS)
     fixs._egoIds = list(egoIds)
     fixs._armed = False
-    fixs._echoLimit = None
     return fixs._sock
 
 
@@ -233,14 +238,15 @@ def _veh(vehID, speed=1.0):
     return VehData(id=vehID, speed=speed)
 
 
-def _drain():
+def _drain(vehIDs=None):
     """Run the loop the way a client does, returning the tick times."""
     times = []
     while True:
-        t = fixs.sync()
+        t = fixs.recv()
         if t is None:
             return times
         times.append(t)
+        fixs.send(vehIDs() if callable(vehIDs) else vehIDs)
 
 
 def _recordCount(message):
@@ -258,8 +264,7 @@ def _recordCount(message):
     return count
 
 
-def test_skipped_tick_still_replies():
-    """A body that does nothing is warm-up; TrafficLayer must still be answered."""
+def test_every_tick_is_answered():
     sock = _install([(1, 0.1, [_veh('ego')]), (1, 0.2, [_veh('ego')])])
     assert _drain() == [pytest.approx(0.1), pytest.approx(0.2)]
     assert len(sock.sent) == 2
@@ -268,64 +273,80 @@ def test_skipped_tick_still_replies():
 def test_reply_carries_only_commanded_records_by_default():
     sock = _install([(1, 0.1, [_veh('ego', 5.0), _veh('other', 6.0)])])
     while True:
-        if fixs.sync() is None:
+        if fixs.recv() is None:
             break
         fixs.vehicle.setSpeedDesired('ego', 9.0)
+        fixs.send()
     assert len(sock.sent) == 1
     # One record on the wire, not two: the untouched vehicle is not returned.
     assert _recordCount(sock.sent[0]) == 1
 
 
 def test_setter_writes_the_value_that_goes_out():
-    sock = _install([(1, 0.1, [_veh('ego', 5.0)])])
+    _install([(1, 0.1, [_veh('ego', 5.0)])])
     while True:
-        if fixs.sync() is None:
+        if fixs.recv() is None:
             break
         fixs.vehicle.setSpeedDesired('ego', 9.0)
         assert fixs.vehicle.getAll()['ego'].speedDesired == 9.0
+        fixs.send()
 
 
 def test_setter_on_an_absent_id_raises():
     """A typo would otherwise do nothing, silently, for the whole run."""
     _install([(1, 0.1, [_veh('ego')])])
-    fixs.sync()
+    fixs.recv()
     with pytest.raises(KeyError) as excinfo:
         fixs.vehicle.setSpeedDesired('egoo', 1.0)
     assert 'ego' in str(excinfo.value)
-    _drain()
+    fixs.close()
 
 
 def test_ego_view_holds_only_declared_ids():
     _install([(1, 0.1, [_veh('ego'), _veh('other')])], egoIds=('ego',))
-    fixs.sync()
+    fixs.recv()
     assert fixs.ego.getIDList() == ['ego']
     assert sorted(fixs.vehicle.getIDList()) == ['ego', 'other']
-    _drain()
+    fixs.close()
 
 
 def test_multiple_egos_are_supported():
     _install([(1, 0.1, [_veh('e1'), _veh('e2'), _veh('bg')])], egoIds=('e1', 'e2'))
-    fixs.sync()
+    fixs.recv()
     assert sorted(fixs.ego.getIDList()) == ['e1', 'e2']
-    _drain()
+    fixs.close()
 
 
-def test_echo_all_returns_the_whole_feed():
+def test_send_with_ids_returns_those_records_unchanged():
     sock = _install([(1, 0.1, [_veh('ego', 5.0), _veh('other', 6.0)])])
-    while True:
-        if fixs.sync() is None:
-            break
-        fixs.echoAll()
+    _drain(lambda: fixs.vehicle.getIDList())
     assert _recordCount(sock.sent[0]) == 2
 
 
-def test_echo_all_limit_caps_the_reply():
+def test_send_with_a_slice_caps_the_reply():
+    sock = _install([(1, 0.1, [_veh('ego'), _veh('a'), _veh('b')])])
+    _drain(lambda: fixs.vehicle.getIDList()[:1])
+    assert _recordCount(sock.sent[0]) == 1
+
+
+def test_send_ids_are_additive_to_commands():
+    """Listing ids must not drop what the setters marked."""
     sock = _install([(1, 0.1, [_veh('ego'), _veh('a'), _veh('b')])])
     while True:
-        if fixs.sync() is None:
+        if fixs.recv() is None:
             break
-        fixs.echoAll(limit=1)
-    assert _recordCount(sock.sent[0]) == 1
+        fixs.vehicle.setSpeedDesired('b', 3.0)
+        fixs.send(['ego'])
+    assert _recordCount(sock.sent[0]) == 2
+
+
+def test_send_rejects_a_bare_string():
+    sock = _install([(1, 0.1, [_veh('ego')])])
+    fixs.recv()
+    with pytest.raises(TypeError):
+        fixs.send('ego')
+    fixs.close()
+    assert len(sock.sent) == 1          # close() still answered the tick
 
 
 def test_empty_tick_replies_with_no_records():
@@ -347,21 +368,33 @@ def test_shutdown_ends_the_loop_without_replying():
     assert len(sock.sent) == 1          # the shutdown tick is not answered
 
 
-def test_close_flushes_the_held_reply():
-    """Breaking out of the loop must not strand TrafficLayer mid-tick.
-
-    This is what `--steps N` does in simple_echo_client: the old client replied
-    to step N and then broke, so the reply has to survive the break.
-    """
-    sock = _install([(1, 0.1, [_veh('ego')]), (1, 0.2, [_veh('ego')])])
-    fixs.sync()
-    assert len(sock.sent) == 0          # nothing sent yet for this tick
+def test_recv_without_send_raises_naming_the_tick():
+    """A missed send stalls TrafficLayer; say so instead of hanging."""
+    _install([(1, 0.1, [_veh('ego')]), (1, 0.2, [_veh('ego')])])
+    fixs.recv()
+    with pytest.raises(fixs.ProtocolError) as excinfo:
+        fixs.recv()
+    assert '0.10' in str(excinfo.value)
     fixs.close()
-    assert len(sock.sent) == 1          # ... until close flushes it
+
+
+def test_send_without_recv_raises():
+    _install([(1, 0.1, [_veh('ego')])])
+    with pytest.raises(fixs.ProtocolError):
+        fixs.send()
+
+
+def test_close_answers_an_unsent_tick_as_a_safety_net():
+    """Applications should call send() themselves; close() covers a crash."""
+    sock = _install([(1, 0.1, [_veh('ego')]), (1, 0.2, [_veh('ego')])])
+    fixs.recv()
+    assert len(sock.sent) == 0
+    fixs.close()
+    assert len(sock.sent) == 1
 
 
 def test_close_is_idempotent():
     _install([(1, 0.1, [])])
-    fixs.sync()
+    fixs.recv()
     fixs.close()
     fixs.close()

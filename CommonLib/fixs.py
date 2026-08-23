@@ -6,12 +6,13 @@ A Python application talks to TrafficLayer like this::
 
     fixs.connect('config.yaml')
     while True:
-        simTime = fixs.sync()
+        simTime = fixs.recv()
         if simTime is None:                       # TrafficLayer has shut down
             break
         ego = fixs.ego.getAll().get('ego')
         if ego is not None:
             fixs.vehicle.setSpeedDesired('ego', plan(ego.speed))
+        fixs.send()
 
 Everything the co-simulation protocol requires -- connecting and retrying,
 framing, replying exactly once per tick, replying even when there is nothing to
@@ -38,11 +39,12 @@ its getters but its SUBSCRIPTIONS -- ``subscribe()`` plus
 ``getAllSubscriptionResults()`` -- which is the shape used here: declare fields
 in the yaml, receive them in bulk, read them off a record.
 
-``fixs.sync()`` is named for the same reason. TraCI's ``simulationStep()``
-advances the simulator's clock; this does not. TrafficLayer owns the clock. One
-call sends the commands you set and waits for the next tick to arrive.
+There is deliberately no ``simulationStep``. TraCI's advances the simulator's
+clock; nothing here does -- TrafficLayer owns the clock. ``recv()`` waits for
+the next tick it is given and ``send()`` answers it, so the two directions are
+two calls that each do what their name says.
 
-Views are rebound on every ``sync()``:
+Views are rebound on every ``recv()``:
 
     fixs.vehicle        every vehicle in this tick's feed
     fixs.ego            only the ids this client declared (see connect(ego=...))
@@ -65,9 +67,9 @@ from CommonLib.SocketHelper import SocketHelper
 from CommonLib.VehDataMsgDefs import VehData
 
 __all__ = [
-    'connect', 'sync', 'close', 'echoAll', 'getFields', 'getTime',
+    'connect', 'recv', 'send', 'close', 'getFields', 'getTime',
     'vehicle', 'ego', 'trafficlight', 'verbose',
-    'Vehicle', 'FixsError', 'NotConnected', 'FieldsMissing',
+    'Vehicle', 'FixsError', 'NotConnected', 'ProtocolError', 'FieldsMissing',
 ]
 
 
@@ -77,6 +79,16 @@ class FixsError(Exception):
 
 class NotConnected(FixsError):
     """Raised when the API is used before connect() or after close()."""
+
+
+class ProtocolError(FixsError):
+    """Raised when recv/send are called out of order.
+
+    TrafficLayer does not advance until every subscriber has answered, so a
+    tick that is received and never answered stalls the whole co-simulation.
+    Rather than let that surface as an unexplained hang on the next recv(),
+    it is reported here, naming the tick that was left unanswered.
+    """
 
 
 class FieldsMissing(FixsError):
@@ -244,7 +256,6 @@ _helper: typing.Optional[SocketHelper] = None
 _sock: typing.Optional[socket.socket] = None
 _egoIds: typing.List[str] = []
 _commanded: typing.Set[str] = set()
-_echoLimit: typing.Optional[int] = None
 
 # The tick currently held awaiting its reply.
 _armed: bool = False
@@ -387,12 +398,18 @@ def _openSocket(host, port, connectTimeout, recvTimeout):
 
 
 def close():
-    """Send any held reply, then close. Safe to call more than once."""
-    global _sock, _helper, _egoIds, _armed, _received, _echoLimit
+    """Close the connection. Safe to call more than once.
+
+    A tick that was received and never answered is answered here as a safety
+    net -- TrafficLayer is blocked waiting for it, so leaving without a reply
+    stalls the whole co-simulation. Applications should not rely on this: call
+    send() in the loop body, where you can see it.
+    """
+    global _sock, _helper, _egoIds, _armed, _received
     if _armed and _sock is not None:
         try:
-            _sendReply()
-        except OSError:
+            send()
+        except (OSError, FixsError):
             pass                # peer already gone; nothing to deliver
     if _sock is not None:
         try:
@@ -404,7 +421,6 @@ def close():
     _egoIds = []
     _armed = False
     _received = []
-    _echoLimit = None
 
 
 def getFields():
@@ -422,60 +438,38 @@ def getTime():
 # The tick
 # ---------------------------------------------------------------------------
 
-def echoAll(limit=0):
-    """(integer) -> None -- return every vehicle received, not only commanded ones.
+def recv():
+    """() -> double | None -- receive the next tick.
 
-    The default reply carries only the records this client actually commanded:
-    returning ~200 untouched records every tick doubles upstream volume to say
-    nothing.
-
-    Echo clients are the exception -- returning the whole feed is the behaviour
-    under test. ``limit`` caps how many go back (0 = all); a cap of 1 mirrors
-    real XIL, where the client returns only the ego pose.
-
-    Applies to the current tick only.
-    """
-    global _echoLimit
-    _requireConnection()
-    _echoLimit = limit
-
-
-def sync():
-    """() -> double | None -- send this tick's commands, receive the next tick.
-
-    Returns the new simulation time, or ``None`` once TrafficLayer signals
-    shutdown, so the usual shape is::
+    Returns its simulation time, or ``None`` once TrafficLayer signals shutdown,
+    so the loop is::
 
         while True:
-            simTime = fixs.sync()
+            simTime = fixs.recv()
             if simTime is None:
                 break
+            ...
+            fixs.send()
 
-    One call is one exchange, which is what makes the protocol's rules hold
-    without the application maintaining them:
-
-    * Every received tick is answered exactly once -- there is no way to receive
-      without having sent, because it is the same call.
-    * A tick with nothing to say still answers, with a record-less message.
-      TrafficLayer does not advance until every subscriber has replied.
-    * Shutdown ends the loop. TrafficLayer signals it with state 0, which a
-      hand-written loop has to notice and typically does not -- the reference
-      controller echoes it straight back and runs on until a time bound.
+    Raises :class:`ProtocolError` if the previous tick was never answered.
+    TrafficLayer does not advance until every subscriber has replied, so a
+    missing send() otherwise surfaces as an unexplained hang here.
 
     NOTE this does not advance the simulator. TrafficLayer owns the clock; see
-    the module docstring on why it is not called ``simulationStep``.
+    the module docstring on why there is no ``simulationStep``.
     """
     _requireConnection()
-    global vehicle, ego, trafficlight, _armed, _received
-    global _simState, _simTime, _echoLimit
+    global vehicle, ego, trafficlight, _armed, _received, _simState, _simTime
 
     if _armed:
-        _sendReply()
+        raise ProtocolError(
+            f'tick {_simTime:.2f} was received but never answered. Call '
+            f'fixs.send() before fixs.recv().'
+        )
 
     _helper.clear_data()
     simState, simTime = _helper.recv_data(_sock)
     if simState == 0:
-        _armed = False
         vehicle, ego = _VehicleView(), _VehicleView()
         trafficlight = _TrafficLightView()
         return None
@@ -491,25 +485,52 @@ def sync():
 
     _simState, _simTime = simState, simTime
     _commanded.clear()
-    _echoLimit = None
     _armed = True
     return simTime
 
 
-def _sendReply():
-    """Put the held tick's answer on the wire."""
-    global _armed
-    if _echoLimit is not None:
-        sendList = _received if _echoLimit == 0 else _received[:_echoLimit]
-    else:
-        sendList = [r for r in _received if r.id.strip() in _commanded]
+def send(vehIDs=None):
+    """(list) -> None -- answer the tick now.
 
-    # A tick with nothing to say sends a header and no records. That is a real
-    # message -- it is what tells TrafficLayer this client is done and the tick
-    # may advance -- and it is what the reference echo clients have always sent
-    # on an empty feed. Do NOT substitute a placeholder record: it would put a
-    # vehicle with an empty id and zeroed fields on the wire every idle tick,
-    # which over a long run is most of the traffic.
+    Without an argument the reply carries exactly the records commanded through
+    the setters, which is what a controller wants: returning ~200 untouched
+    records every tick doubles upstream volume to say nothing.
+
+    ``vehIDs`` adds records to return UNCHANGED, on top of whatever was
+    commanded -- additive, so it cannot silently drop a command. That is what an
+    echo client or protocol probe needs; an application generally does not,
+    because TrafficLayer overlays a returned record onto later clients' feed and
+    an unchanged one replaces a record with itself.
+
+    A tick with nothing to say still sends: a header and no records. That is a
+    real message -- it is what tells TrafficLayer this client is done and the
+    tick may advance.
+    """
+    _requireConnection()
+    global _armed
+    if not _armed:
+        raise ProtocolError(
+            'there is no tick to answer. Call fixs.recv() first, and call '
+            'fixs.send() exactly once per tick received.'
+        )
+
+    if vehIDs is None:
+        wanted = _commanded
+    else:
+        if isinstance(vehIDs, str):
+            raise TypeError(
+                f'send() takes a list of ids, not a single string. '
+                f'Use send([{vehIDs!r}]).'
+            )
+        wanted = _commanded | set(vehIDs)
+
+    # Filter the received list rather than the id-keyed view, so records go back
+    # in the order they arrived and a repeated id is not collapsed.
+    sendList = [r for r in _received if r.id.strip() in wanted]
+
+    # Do NOT substitute a placeholder record when sendList is empty: it would
+    # put a vehicle with an empty id and zeroed fields on the wire every idle
+    # tick, which over a long run is most of the traffic.
     _helper.vehicle_data_send_list.extend(sendList)
     _helper.sendData(_simState, _simTime, _sock)
     _armed = False

@@ -32,11 +32,10 @@ def main():
 
     step_count = 0
     try:
-        # One sync() is one tick: it sends what this client commanded and waits
-        # for the next tick. It returns None once TrafficLayer signals shutdown
-        # -- which this client previously had no way to notice.
+        # recv() takes the next tick, send() answers it. recv() returns None at
+        # shutdown -- which this client previously had no way to notice.
         while True:
-            sim_time = fixs.sync()
+            sim_time = fixs.recv()
             if sim_time is None:
                 break
             step_count += 1
@@ -49,8 +48,6 @@ def main():
                       f'  {_COLOR.get(ego.signalLightColor, ego.signalLightColor):>10}'
                       f'  dist={ego.signalLightDistance:8.2f} m  head={ego.signalLightHeadId}')
 
-            # Echo the whole feed back, which is what this client is for.
-            fixs.echoAll()
 
             if fixs.verbose:
                 print(f'\n--- Step {step_count} | Time: {sim_time:.2f}s ---')
@@ -65,6 +62,9 @@ def main():
                 print(f'Echoed {len(vehicles)} vehicles back to server')
             elif step_count % 100 == 0:
                 print(f'Step {step_count} | Time: {sim_time:.2f}s | Vehicles: {len(vehicles)}')
+
+            # Echo the whole feed back, which is what this client is for.
+            fixs.send(fixs.vehicle.getIDList())
 
     except KeyboardInterrupt:
         print('\nShutting down client...', file=sys.stderr)

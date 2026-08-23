@@ -51,10 +51,11 @@ def main():
 
     step_count = 0
     try:
-        # One sync() is one tick: it sends what this client commanded and waits
-        # for the next tick. It returns None once TrafficLayer signals shutdown.
+        # recv() takes the next tick, send() answers it. TrafficLayer does not
+        # advance until every subscriber has answered, so every tick received
+        # gets exactly one send().
         while True:
-            sim_time = fixs.sync()
+            sim_time = fixs.recv()
             if sim_time is None:
                 break
             step_count += 1
@@ -72,7 +73,9 @@ def main():
             # exercised with ~1 vehicle. --max-echo caps the echo to mirror that; echoing
             # ALL received vehicles (max_echo=0) stresses a receive-many path that
             # production never uses and can deadlock the round-trip at higher counts.
-            fixs.echoAll(limit=args.max_echo)
+            echo_ids = fixs.vehicle.getIDList()
+            if args.max_echo > 0:
+                echo_ids = echo_ids[:args.max_echo]
 
             if fixs.verbose:
                 print(f'\n--- Step {step_count} | Time: {sim_time:.2f}s ---')
@@ -82,6 +85,8 @@ def main():
                           f'Pos: ({veh_data.positionX:.2f}, {veh_data.positionY:.2f})')
             elif step_count % 100 == 0:
                 print(f'Step {step_count} | Time: {sim_time:.2f}s | Vehicles: {len(vehicles)}')
+
+            fixs.send(echo_ids)
 
             # Stop after the requested number of steps (used by the automated repro)
             if args.steps and step_count >= args.steps:
