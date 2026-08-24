@@ -26,6 +26,12 @@ Real-Sim Documentation
    CARLAdoc
 
 .. toctree::
+   :maxdepth: 2
+   :caption: XIL Bench
+
+   xil/AxleDynoCarMakerCoupling
+
+.. toctree::
    :maxdepth: 3
    :caption: Tutorials
 
