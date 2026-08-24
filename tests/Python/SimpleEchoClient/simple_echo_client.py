@@ -60,7 +60,7 @@ def main():
         while True:
             fixs.recv()
             step_count += 1
-            sim_time = fixs.getTime()
+            sim_time = fixs.sim.time
 
             veh_ids = fixs.vehicle.getIDList()
 

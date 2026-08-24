@@ -45,10 +45,15 @@ The closest TraCI analogue is its SUBSCRIPTIONS -- ``subscribe()`` plus
 ``simulationStep`` either: TraCI's advances the simulator's clock, and nothing
 here does, because TrafficLayer owns the clock.
 
-Views are rebound on every ``recv()``:
+Three attributes are rebound on every ``recv()``:
 
-    fixs.vehicle        every vehicle in this tick's feed
-    fixs.trafficlight   this tick's signal states
+    fixs.sim            this moment's scalars -- fixs.sim.time, fixs.sim.state
+    fixs.vehicle        every vehicle in this moment's feed
+    fixs.trafficlight   this moment's signal states
+
+``fixs.sim`` is a record for the same reason vehicles are: the header's values
+arrive together, so they come back together. Growth is a field on it rather than
+another module-level function, which is why there is no ``getTime()``.
 
 Holding a record across ticks is safe: every tick decodes fresh objects, so
 ``previous = fixs.vehicle.getAll()`` keeps that tick's values rather than
@@ -70,8 +75,8 @@ from CommonLib.VehDataMsgDefs import VehData
 
 __all__ = [
     'connect', 'recv', 'send', 'close',
-    'getTime', 'getFields', 'getEgoIDList',
-    'vehicle', 'trafficlight',
+    'getFields', 'getEgoIDList',
+    'sim', 'vehicle', 'trafficlight',
     'Vehicle', 'Shutdown', 'FixsError', 'NotConnected', 'ProtocolError',
 ]
 
@@ -280,6 +285,44 @@ class _View:
                 f'{", ".join(sorted(self._byId)) or "none"}>')
 
 
+class _Sim:
+    """This moment's scalar status, as ``fixs.sim``.
+
+    A record rather than a set of getters, for the same reason vehicle data is:
+    the values arrive together in the message header, so exposing them one
+    function at a time would make the function count track the status count.
+    Anything added later is a field here.
+    """
+
+    __slots__ = ('_time', '_state', '_unavailable')
+
+    def __init__(self, time=0.0, state=0, unavailable=None):
+        self._time = time
+        self._state = state
+        self._unavailable = unavailable
+
+    def _require(self):
+        if self._unavailable is not None:
+            raise ProtocolError(self._unavailable)
+
+    @property
+    def time(self):
+        """double -- simulation time of this moment."""
+        self._require()
+        return self._time
+
+    @property
+    def state(self):
+        """integer -- the simulation state word TrafficLayer sent."""
+        self._require()
+        return self._state
+
+    def __repr__(self):
+        if self._unavailable is not None:
+            return f'<no sim data: {self._unavailable}>'
+        return f'<sim t={self._time:.2f} state={self._state}>'
+
+
 class _VehicleView(_View):
     _KIND = 'vehicle'
 
@@ -296,6 +339,7 @@ _NOT_CONNECTED = 'no tick data: not connected -- call fixs.connect() first'
 _NO_TICK_YET = 'no tick data: nothing received yet -- call fixs.recv() first'
 _SHUTDOWN = 'no tick data: TrafficLayer has shut down'
 
+sim: _Sim = _Sim(unavailable=_NOT_CONNECTED)
 vehicle: _VehicleView = _VehicleView(unavailable=_NOT_CONNECTED)
 trafficlight: _TrafficLightView = _TrafficLightView(unavailable=_NOT_CONNECTED)
 
@@ -348,7 +392,7 @@ def connect(configPath=None, *, port=None, host=None, ego=None,
         answered, so a deadline here fires when some OTHER client stalls.
     """
     global _helper, _sock, _egoIds, _declaredFields
-    global vehicle, trafficlight, _noTick
+    global sim, vehicle, trafficlight, _noTick
 
     if _sock is not None:
         close()
@@ -379,6 +423,7 @@ def connect(configPath=None, *, port=None, host=None, ego=None,
     _helper = SocketHelper(config_helper=config, msg_helper=msgHelper)
     _sock = _openSocket(host, int(port), connectTimeout, recvTimeout)
     _noTick = _NO_TICK_YET
+    sim = _Sim(unavailable=_NO_TICK_YET)
     vehicle = _VehicleView(unavailable=_NO_TICK_YET)
     trafficlight = _TrafficLightView(unavailable=_NO_TICK_YET)
     atexit.register(close)          # an unanswered tick must still go out
@@ -450,7 +495,7 @@ def close():
     on this: call send() in the loop body, where it is visible.
     """
     global _sock, _helper, _egoIds, _armed, _received
-    global vehicle, trafficlight, _noTick, _declaredFields
+    global sim, vehicle, trafficlight, _noTick, _declaredFields
     if _armed and _sock is not None:
         try:
             send()
@@ -468,6 +513,7 @@ def close():
     _received = []
     _declaredFields = None
     _noTick = _NOT_CONNECTED
+    sim = _Sim(unavailable=_NOT_CONNECTED)
     vehicle = _VehicleView(unavailable=_NOT_CONNECTED)
     trafficlight = _TrafficLightView(unavailable=_NOT_CONNECTED)
 
@@ -488,17 +534,6 @@ def getEgoIDList():
     return list(_egoIds)
 
 
-def getTime():
-    """() -> double -- simulation time of the tick currently held.
-
-    Raises :class:`ProtocolError` when no tick is held; returning 0.0 there
-    would be indistinguishable from a simulation that starts at zero.
-    """
-    if _noTick is not None:
-        raise ProtocolError(_noTick)
-    return _simTime
-
-
 # ---------------------------------------------------------------------------
 # The tick
 # ---------------------------------------------------------------------------
@@ -506,9 +541,9 @@ def getTime():
 def recv():
     """() -> None -- receive the next tick.
 
-    Receiving is all it does. The tick's data is read through the views and
-    :func:`getTime`, so nothing is encoded in a return value that would have to
-    change shape as more status is exposed::
+    Receiving is all it does. The moment's data is read through ``fixs.sim`` and
+    the views, so nothing is encoded in a return value that would have to change
+    shape as more status is exposed::
 
         try:
             while True:
@@ -524,7 +559,7 @@ def recv():
         would otherwise surface as an unexplained hang here.
     """
     _requireConnection()
-    global vehicle, trafficlight, _armed, _received, _simState, _simTime
+    global sim, vehicle, trafficlight, _armed, _received, _simState, _simTime
     global _noTick
 
     if _armed:
@@ -536,6 +571,10 @@ def recv():
     _helper.clear_data()
     simState, simTime = _helper.recv_data(_sock)
     if simState == 0:
+        # The views refuse after shutdown -- reporting vehicles when there is no
+        # tick would be a lie. fixs.sim keeps answering, because the time the run
+        # reached is a fact, and reporting it is the natural thing to do in the
+        # `except fixs.Shutdown:` block.
         _noTick = _SHUTDOWN
         vehicle = _VehicleView(unavailable=_SHUTDOWN)
         trafficlight = _TrafficLightView(unavailable=_SHUTDOWN)
@@ -551,6 +590,7 @@ def recv():
         key=lambda r: (r.name or '').strip())
 
     _simState, _simTime = simState, simTime
+    sim = _Sim(time=simTime, state=simState)
     _noTick = None
     _armed = True
 

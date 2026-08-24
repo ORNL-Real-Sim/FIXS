@@ -219,7 +219,7 @@ def _drain(vehIDs=None):
     try:
         while True:
             fixs.recv()
-            times.append(fixs.getTime())
+            times.append(fixs.sim.time)
             fixs.send(vehIDs() if callable(vehIDs) else vehIDs)
     except fixs.Shutdown:
         return times
@@ -313,7 +313,7 @@ def test_views_refuse_to_answer_when_no_tick_is_held():
     for call in (lambda: fixs.vehicle.getAll(),
                  lambda: fixs.vehicle.get('ego'),
                  lambda: fixs.vehicle.getIDList(),
-                 lambda: fixs.getTime()):
+                 lambda: fixs.sim.time):
         with pytest.raises(fixs.ProtocolError):
             call()
 
@@ -441,6 +441,18 @@ def test_shutdown_raises_and_the_tick_is_not_answered():
     sock = _install([(1, 0.1, [_veh('ego')]), (0, 0.2, [])], shutdown=False)
     assert _drain() == [pytest.approx(0.1)]
     assert len(sock.sent) == 1          # the shutdown tick is not answered
+
+
+def test_sim_still_answers_after_shutdown():
+    """The time the run reached is a fact; the vehicle list would be a lie."""
+    _install([(1, 0.1, [_veh('ego')])])
+    fixs.recv()
+    fixs.send()
+    with pytest.raises(fixs.Shutdown):
+        fixs.recv()
+    assert fixs.sim.time == pytest.approx(0.1)     # last value, still available
+    with pytest.raises(fixs.ProtocolError):
+        fixs.vehicle.getAll()
 
 
 def test_shutdown_is_not_a_fixserror():
