@@ -196,8 +196,10 @@ def mono_block(slide, x, y, w, h, rows):
     tf.margin_left = inch(0.16)
     tf.margin_top = inch(0.10)
     for i, (t, c, b) in enumerate(rows):
+        # paragraph 0 of an autoshape defaults to CENTER, so set it explicitly
         line(tf, t, font=F_MONO, size=11, color=c, bold=b,
-             space_before=0 if i == 0 else 2, first=(i == 0))
+             space_before=0 if i == 0 else 2, first=(i == 0),
+             align=PP_ALIGN.LEFT)
     return sh
 
 
