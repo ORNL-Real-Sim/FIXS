@@ -40,13 +40,12 @@ def main():
 
     step_count = 0
     try:
-        # recv() takes the next tick, send() answers it. recv() returns None at
-        # shutdown -- which this client previously had no way to notice.
+        # recv() takes the next tick, send() answers it. recv() raises Shutdown
+        # when the run ends -- which this client previously had no way to notice.
         while True:
-            sim_time = fixs.recv()
-            if sim_time is None:
-                break
+            fixs.recv()
             step_count += 1
+            sim_time = fixs.getTime()
 
             veh_ids = fixs.vehicle.getIDList()
             ego = fixs.vehicle.get(EGO_ID)
@@ -73,6 +72,8 @@ def main():
             # Echo the whole feed back, which is what this client is for.
             fixs.send(veh_ids)
 
+    except fixs.Shutdown:
+        print('\nServer signalled shutdown. Exiting.', file=sys.stderr)
     except KeyboardInterrupt:
         print('\nShutting down client...', file=sys.stderr)
     except Exception as e:

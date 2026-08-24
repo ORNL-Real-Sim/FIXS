@@ -5,16 +5,17 @@ A Python application talks to TrafficLayer like this::
     from CommonLib import fixs          # or `import fixs` once it is on the path
 
     fixs.connect('config.yaml')
-    while True:
-        simTime = fixs.recv()                     # data arrives here
-        if simTime is None:                       # TrafficLayer has shut down
-            break
+    try:
+        while True:
+            fixs.recv()                           # data arrives here
 
-        ego = fixs.vehicle.get('ego')
-        if ego is not None:
-            ego.set(speedDesired=plan(ego.speed))
+            ego = fixs.vehicle.get('ego')
+            if ego is not None:
+                ego.set(speedDesired=plan(ego.speed))
 
-        fixs.send()                               # goes on the wire here
+            fixs.send()                           # goes on the wire here
+    except fixs.Shutdown:
+        pass
 
 Everything the co-simulation protocol requires -- connecting and retrying,
 framing, answering exactly once per tick, answering even when there is nothing
@@ -71,8 +72,18 @@ __all__ = [
     'connect', 'recv', 'send', 'close',
     'getTime', 'getFields', 'getEgoIDList',
     'vehicle', 'trafficlight',
-    'Vehicle', 'FixsError', 'NotConnected', 'ProtocolError',
+    'Vehicle', 'Shutdown', 'FixsError', 'NotConnected', 'ProtocolError',
 ]
+
+
+class Shutdown(Exception):
+    """Raised by recv() when TrafficLayer signals the end of the run.
+
+    Not a FixsError: the run ending is not a failure, and a client with a broad
+    ``except fixs.FixsError`` around its loop should not swallow it. This is the
+    same shape as StopIteration -- an expected end of sequence, reported as an
+    exception because the only sane response is to unwind.
+    """
 
 
 class FixsError(Exception):
@@ -493,21 +504,24 @@ def getTime():
 # ---------------------------------------------------------------------------
 
 def recv():
-    """() -> double | None -- receive the next tick.
+    """() -> None -- receive the next tick.
 
-    Returns its simulation time, or ``None`` once TrafficLayer signals shutdown,
-    so the loop is::
+    Receiving is all it does. The tick's data is read through the views and
+    :func:`getTime`, so nothing is encoded in a return value that would have to
+    change shape as more status is exposed::
 
-        while True:
-            simTime = fixs.recv()
-            if simTime is None:
-                break
-            ...
-            fixs.send()
+        try:
+            while True:
+                fixs.recv()
+                ...
+                fixs.send()
+        except fixs.Shutdown:
+            pass
 
-    Raises :class:`ProtocolError` if the previous tick was never answered.
-    TrafficLayer does not advance until every subscriber has replied, so a
-    missing send() would otherwise surface as an unexplained hang here.
+    :raises Shutdown: TrafficLayer has ended the run.
+    :raises ProtocolError: the previous tick was never answered. TrafficLayer
+        does not advance until every subscriber has replied, so a missing send()
+        would otherwise surface as an unexplained hang here.
     """
     _requireConnection()
     global vehicle, trafficlight, _armed, _received, _simState, _simTime
@@ -525,7 +539,7 @@ def recv():
         _noTick = _SHUTDOWN
         vehicle = _VehicleView(unavailable=_SHUTDOWN)
         trafficlight = _TrafficLightView(unavailable=_SHUTDOWN)
-        return None
+        raise Shutdown('TrafficLayer has ended the run')
 
     _received = _helper.vehicle_data_receive_list
     for record in _received:
@@ -539,7 +553,6 @@ def recv():
     _simState, _simTime = simState, simTime
     _noTick = None
     _armed = True
-    return simTime
 
 
 def send(vehIDs=None):

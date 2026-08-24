@@ -58,10 +58,9 @@ def main():
         # advance until every subscriber has answered, so every tick received
         # gets exactly one send().
         while True:
-            sim_time = fixs.recv()
-            if sim_time is None:
-                break
+            fixs.recv()
             step_count += 1
+            sim_time = fixs.getTime()
 
             veh_ids = fixs.vehicle.getIDList()
 
@@ -94,6 +93,8 @@ def main():
                 print(f'\nReached requested {args.steps} steps. Exiting.', file=sys.stderr)
                 break
 
+    except fixs.Shutdown:
+        print('\nServer signalled shutdown. Exiting.', file=sys.stderr)
     except KeyboardInterrupt:
         print('\nShutting down client...', file=sys.stderr)
     except ConnectionResetError:

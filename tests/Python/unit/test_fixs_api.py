@@ -216,12 +216,13 @@ def _veh(vehID, speed=1.0):
 def _drain(vehIDs=None):
     """Run the loop the way a client does, returning the tick times."""
     times = []
-    while True:
-        t = fixs.recv()
-        if t is None:
-            return times
-        times.append(t)
-        fixs.send(vehIDs() if callable(vehIDs) else vehIDs)
+    try:
+        while True:
+            fixs.recv()
+            times.append(fixs.getTime())
+            fixs.send(vehIDs() if callable(vehIDs) else vehIDs)
+    except fixs.Shutdown:
+        return times
 
 
 def _recordCount(message, fields=None):
@@ -247,11 +248,13 @@ def test_every_tick_is_answered():
 
 def test_reply_carries_only_commanded_records_by_default():
     sock = _install([(1, 0.1, [_veh('ego', 5.0), _veh('other', 6.0)])])
-    while True:
-        if fixs.recv() is None:
-            break
-        fixs.vehicle.get('ego').set(speedDesired=9.0)
-        fixs.send()
+    try:
+        while True:
+            fixs.recv()
+            fixs.vehicle.get('ego').set(speedDesired=9.0)
+            fixs.send()
+    except fixs.Shutdown:
+        pass
     assert len(sock.sent) == 1
     # One record on the wire, not two: the untouched vehicle is not returned.
     assert _recordCount(sock.sent[0]) == 1
@@ -259,12 +262,14 @@ def test_reply_carries_only_commanded_records_by_default():
 
 def test_setter_writes_the_value_that_goes_out():
     _install([(1, 0.1, [_veh('ego', 5.0)])])
-    while True:
-        if fixs.recv() is None:
-            break
-        fixs.vehicle.get('ego').set(speedDesired=9.0)
-        assert fixs.vehicle.get('ego').speedDesired == 9.0
-        fixs.send()
+    try:
+        while True:
+            fixs.recv()
+            fixs.vehicle.get('ego').set(speedDesired=9.0)
+            assert fixs.vehicle.get('ego').speedDesired == 9.0
+            fixs.send()
+    except fixs.Shutdown:
+        pass
 
 
 def test_absent_id_reads_as_none():
@@ -318,7 +323,8 @@ def test_views_refuse_to_answer_after_shutdown():
     fixs.recv()
     assert fixs.vehicle.getIDList() == ['ego']
     fixs.send()
-    assert fixs.recv() is None                    # shutdown tick
+    with pytest.raises(fixs.Shutdown):
+        fixs.recv()
     with pytest.raises(fixs.ProtocolError) as excinfo:
         fixs.vehicle.getAll()
     assert 'shut down' in str(excinfo.value)
@@ -399,11 +405,13 @@ def test_send_with_a_slice_caps_the_reply():
 def test_send_ids_are_additive_to_commands():
     """Listing ids must not drop what the setters marked."""
     sock = _install([(1, 0.1, [_veh('ego'), _veh('a'), _veh('b')])])
-    while True:
-        if fixs.recv() is None:
-            break
-        fixs.vehicle.get('b').set(speedDesired=3.0)
-        fixs.send(['ego'])
+    try:
+        while True:
+            fixs.recv()
+            fixs.vehicle.get('b').set(speedDesired=3.0)
+            fixs.send(['ego'])
+    except fixs.Shutdown:
+        pass
     assert _recordCount(sock.sent[0]) == 2
 
 
@@ -429,10 +437,15 @@ def test_empty_tick_replies_with_no_records():
     assert _recordCount(sock.sent[0]) == 0
 
 
-def test_shutdown_ends_the_loop_without_replying():
+def test_shutdown_raises_and_the_tick_is_not_answered():
     sock = _install([(1, 0.1, [_veh('ego')]), (0, 0.2, [])], shutdown=False)
     assert _drain() == [pytest.approx(0.1)]
     assert len(sock.sent) == 1          # the shutdown tick is not answered
+
+
+def test_shutdown_is_not_a_fixserror():
+    """A broad `except fixs.FixsError` must not swallow the end of a run."""
+    assert not issubclass(fixs.Shutdown, fixs.FixsError)
 
 
 def test_recv_without_send_raises_naming_the_tick():
