@@ -29,7 +29,7 @@ Real-Sim Documentation
    :maxdepth: 2
    :caption: XIL Bench
 
-   AxleDynoCarMakerCoupling
+   xil/AxleDynoCarMakerCoupling
 
 .. toctree::
    :maxdepth: 3

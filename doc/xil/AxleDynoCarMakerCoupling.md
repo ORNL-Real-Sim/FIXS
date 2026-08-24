@@ -1,10 +1,26 @@
 # Axle Dyno &harr; CarMaker Coupling
 
-Slide version of this material: [`AxleDynoCarMakerCoupling_slides.html`](AxleDynoCarMakerCoupling_slides.html)
-(self-contained, open in a browser).
-
 Status: **Step 1 — document the working implementation.** No CARLA content yet.
 CM version referenced: 13.1.3.
+
+**Slide versions of this material** sit beside this file in `doc/xil/`. They are
+repo-side deliverables rather than Sphinx pages, so they are not linked from the
+rendered documentation:
+
+| File | Use |
+|---|---|
+| `AxleDynoCarMakerCoupling_slides.html` | self-contained; open in any browser, light/dark aware |
+| `AxleDynoCarMakerCoupling.pptx` | native editable PowerPoint shapes — for presenting |
+| `make_slides_pptx.py` | regenerates the `.pptx`. **Edit this, not the binary** |
+
+The `.pptx` is a build product checked in for convenience. A binary does not diff, so
+treat `make_slides_pptx.py` as the source of truth and regenerate rather than
+hand-editing, unless the change is genuinely one-off presentation polish:
+
+```
+pip install python-pptx
+python doc/xil/make_slides_pptx.py
+```
 
 ---
 
