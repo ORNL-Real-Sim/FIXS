@@ -55,6 +55,15 @@ Three attributes are rebound on every ``recv()``:
 arrive together, so they come back together. Growth is a field on it rather than
 another module-level function, which is why there is no ``getTime()``.
 
+On a namespace, **attributes are declared and constant; methods query this
+moment**. ``fixs.vehicle.fields`` is fixed for the connection;
+``fixs.vehicle.getIDList()`` changes on every ``recv()``. That is also why the
+declared field list lives on the namespace it describes rather than in a
+connection-wide bag: MsgHelper already anticipates per-type field lists
+(set_traffic_light_message_field, set_detector_message_field -- both currently
+dead, with no config key driving them), so ``fixs.trafficlight.fields`` can
+appear later without anything moving.
+
 Holding a record across ticks is safe: every tick decodes fresh objects, so
 ``previous = fixs.vehicle.getAll()`` keeps that tick's values rather than
 aliasing something about to be overwritten.
@@ -75,7 +84,6 @@ from CommonLib.VehDataMsgDefs import VehData
 
 __all__ = [
     'connect', 'recv', 'send', 'close',
-    'getFields', 'getEgoIDList',
     'sim', 'vehicle', 'trafficlight',
     'Vehicle', 'Shutdown', 'FixsError', 'NotConnected', 'ProtocolError',
 ]
@@ -246,8 +254,12 @@ class _View:
 
     _KIND = 'record'
 
-    def __init__(self, records=(), key=lambda r: r.id.strip(), unavailable=None):
+    def __init__(self, records=(), key=lambda r: r.id.strip(), unavailable=None,
+                 fields=None):
         self._byId = {key(r): r for r in records}
+        #: Declared for the connection, so it outlives any one moment and is
+        #: readable even when no tick is held.
+        self._fields = fields
         # Set when there is no tick to report. Answering "empty" in that state
         # would read as a quiet tick rather than as no tick at all.
         self._unavailable = unavailable
@@ -325,6 +337,36 @@ class _Sim:
 
 class _VehicleView(_View):
     _KIND = 'vehicle'
+
+    def __init__(self, records=(), key=lambda r: r.id.strip(), unavailable=None,
+                 fields=None, egoIDs=None):
+        super().__init__(records, key, unavailable, fields)
+        self._egoIDs = egoIDs
+
+    @property
+    def fields(self):
+        """list[string] -- SimulationSetup.VehicleMessageField for this connection.
+
+        Read-only. Both ends decode by the same list, so changing it mid-run
+        would desync the stream on the next record rather than reconfigure
+        anything; a runtime change needs a renegotiation the protocol does not
+        have.
+        """
+        if self._fields is None:
+            raise NotConnected('call fixs.connect(...) first')
+        return list(self._fields)
+
+    @property
+    def egoIDs(self):
+        """list[string] -- the ids this client declared.
+
+        The subscription's ``attribute.id`` list, so it is configuration rather
+        than data and does not change between ticks. Whether one is in the feed
+        right now is ``fixs.vehicle.get(vehID) is not None``.
+        """
+        if self._egoIDs is None:
+            raise NotConnected('call fixs.connect(...) first')
+        return list(self._egoIDs)
 
 
 class _TrafficLightView(_View):
@@ -424,7 +466,8 @@ def connect(configPath=None, *, port=None, host=None, ego=None,
     _sock = _openSocket(host, int(port), connectTimeout, recvTimeout)
     _noTick = _NO_TICK_YET
     sim = _Sim(unavailable=_NO_TICK_YET)
-    vehicle = _VehicleView(unavailable=_NO_TICK_YET)
+    vehicle = _VehicleView(unavailable=_NO_TICK_YET,
+                           fields=_declaredFields, egoIDs=_egoIds)
     trafficlight = _TrafficLightView(unavailable=_NO_TICK_YET)
     atexit.register(close)          # an unanswered tick must still go out
     return host, int(port)
@@ -518,22 +561,6 @@ def close():
     trafficlight = _TrafficLightView(unavailable=_NOT_CONNECTED)
 
 
-def getFields():
-    """() -> list[string] -- the VehicleMessageField list this connection decodes."""
-    _requireConnection()
-    return list(_helper.msg_helper.vehicle_msg_field)
-
-
-def getEgoIDList():
-    """() -> list[string] -- the ids this client declared.
-
-    Configuration, not data: this is the subscription's ``attribute.id`` list
-    and does not change between ticks. Whether a given id is in the feed right
-    now is ``fixs.vehicle.get(vehID) is not None``.
-    """
-    return list(_egoIds)
-
-
 # ---------------------------------------------------------------------------
 # The tick
 # ---------------------------------------------------------------------------
@@ -576,7 +603,8 @@ def recv():
         # reached is a fact, and reporting it is the natural thing to do in the
         # `except fixs.Shutdown:` block.
         _noTick = _SHUTDOWN
-        vehicle = _VehicleView(unavailable=_SHUTDOWN)
+        vehicle = _VehicleView(unavailable=_SHUTDOWN,
+                               fields=_declaredFields, egoIDs=_egoIds)
         trafficlight = _TrafficLightView(unavailable=_SHUTDOWN)
         raise Shutdown('TrafficLayer has ended the run')
 
@@ -584,7 +612,7 @@ def recv():
     for record in _received:
         record.__class__ = Vehicle      # adopt in place: no copy, no re-decode
         object.__setattr__(record, '_written', frozenset())
-    vehicle = _VehicleView(_received)
+    vehicle = _VehicleView(_received, fields=_declaredFields, egoIDs=_egoIds)
     trafficlight = _TrafficLightView(
         _helper.traffic_light_data_receive_list,
         key=lambda r: (r.name or '').strip())

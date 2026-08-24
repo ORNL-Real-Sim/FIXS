@@ -68,6 +68,16 @@ def test_get_returns_the_record_or_none():
     assert view.get('nope') is None
 
 
+def test_declared_values_are_read_only_and_copied():
+    """fields cannot be changed mid-run: both ends decode by the same list."""
+    view = fixs._VehicleView(fields=['id', 'speed'], egoIDs=['ego'])
+    with pytest.raises(AttributeError):
+        view.fields = ['id']
+    view.fields.clear()
+    assert view.fields == ['id', 'speed']
+    assert view.egoIDs == ['ego']
+
+
 def test_getall_returns_a_copy():
     view = fixs._VehicleView([_adopted(id='ego')])
     view.getAll().clear()
@@ -377,7 +387,7 @@ def test_declared_ids_are_configuration_not_this_tick():
     """getEgoIDList is the subscription's list, whether or not they are present."""
     _install([(1, 0.1, [_veh('other')])], egoIds=('ego',))
     fixs.recv()
-    assert fixs.getEgoIDList() == ['ego']
+    assert fixs.vehicle.egoIDs == ['ego']
     assert fixs.vehicle.getIDList() == ['other']
     assert fixs.vehicle.get('ego') is None
     fixs.close()
@@ -386,7 +396,7 @@ def test_declared_ids_are_configuration_not_this_tick():
 def test_multiple_egos_are_supported():
     _install([(1, 0.1, [_veh('e1'), _veh('e2'), _veh('bg')])], egoIds=('e1', 'e2'))
     fixs.recv()
-    assert sorted(fixs.getEgoIDList()) == ['e1', 'e2']
+    assert sorted(fixs.vehicle.egoIDs) == ['e1', 'e2']
     fixs.close()
 
 
