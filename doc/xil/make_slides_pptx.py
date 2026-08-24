@@ -159,7 +159,7 @@ def plain_line(slide, x1, y1, x2, y2, *, color=RULE, width=1.0, dash=None):
 
 
 def caption(slide, text, *, y=6.62, color=INK_3, size=9.5, font=F_MONO):
-    tf = textbox(slide, 0.62, y, 12.1, 0.6)
+    tf = textbox(slide, 0.62, y, 12.1, 0.22)
     line(tf, text, font=font, size=size, color=color, first=True)
 
 
@@ -271,31 +271,31 @@ def slide_02(prs):
 
     # hardware -> simulink
     arrow(s, 3.77, 2.42, 4.66, 2.42, color=HW, width=2.5)
-    tf = textbox(s, 3.80, 2.12, 1.6, 0.24)
-    line(tf, "Taxl[k]", font=F_MONO, size=10, color=HW, bold=True, first=True)
-    tf = textbox(s, 3.80, 2.62, 1.7, 0.5)
-    line(tf, "measured axle", font=F_MONO, size=8.5, color=INK_3, first=True)
-    line(tf, "torque [Nm]", font=F_MONO, size=8.5, color=INK_3)
+    tf = textbox(s, 3.78, 2.14, 0.88, 0.22, align=PP_ALIGN.CENTER)
+    line(tf, "Taxl[k]", font=F_MONO, size=9.5, color=HW, bold=True, first=True)
+    tf = textbox(s, 3.78, 2.48, 0.88, 0.22, align=PP_ALIGN.CENTER)
+    line(tf, "[Nm]", font=F_MONO, size=8.5, color=INK_3, first=True)
 
     # simulink -> hardware
     arrow(s, 4.66, 3.42, 3.77, 3.42, color=HW, width=2.5, dash=DASH)
-    tf = textbox(s, 3.80, 3.50, 1.8, 0.5)
-    line(tf, "w[k] as speed", font=F_MONO, size=8.5, color=HW, first=True)
-    line(tf, "command [rad/s]", font=F_MONO, size=8.5, color=HW)
+    tf = textbox(s, 3.78, 3.14, 0.88, 0.22, align=PP_ALIGN.CENTER)
+    line(tf, "w[k]", font=F_MONO, size=9.5, color=HW, bold=True, first=True)
+    tf = textbox(s, 3.78, 3.48, 0.88, 0.22, align=PP_ALIGN.CENTER)
+    line(tf, "[rad/s]", font=F_MONO, size=8.5, color=INK_3, first=True)
 
     # simulink -> carmaker
     arrow(s, 8.62, 2.42, 9.51, 2.42, color=MODEL, width=2.5)
-    tf = textbox(s, 8.65, 2.12, 1.6, 0.24)
-    line(tf, "w[k]", font=F_MONO, size=10, color=MODEL, bold=True, first=True)
-    tf = textbox(s, 8.65, 2.62, 1.8, 0.5)
-    line(tf, "written to rotv", font=F_MONO, size=8.5, color=INK_3, first=True)
-    line(tf, "[rad/s]", font=F_MONO, size=8.5, color=INK_3)
+    tf = textbox(s, 8.63, 2.14, 0.88, 0.22, align=PP_ALIGN.CENTER)
+    line(tf, "w[k]", font=F_MONO, size=9.5, color=MODEL, bold=True, first=True)
+    tf = textbox(s, 8.63, 2.48, 0.88, 0.22, align=PP_ALIGN.CENTER)
+    line(tf, "[rad/s]", font=F_MONO, size=8.5, color=INK_3, first=True)
 
     # carmaker -> simulink
     arrow(s, 9.51, 3.42, 8.62, 3.42, color=MODEL, width=2.5)
-    tf = textbox(s, 8.65, 3.50, 1.8, 0.5)
-    line(tf, "Trq_T2W[k]", font=F_MONO, size=9, color=MODEL, bold=True, first=True)
-    line(tf, "tire torque [Nm]", font=F_MONO, size=8.5, color=INK_3)
+    tf = textbox(s, 8.63, 3.14, 0.88, 0.22, align=PP_ALIGN.CENTER)
+    line(tf, "Trq_T2W", font=F_MONO, size=9, color=MODEL, bold=True, first=True)
+    tf = textbox(s, 8.63, 3.48, 0.88, 0.22, align=PP_ALIGN.CENTER)
+    line(tf, "[Nm]", font=F_MONO, size=8.5, color=INK_3, first=True)
 
     plain_line(s, 0.62, 4.30, 12.72, 4.30, color=RULE)
 
@@ -335,263 +335,269 @@ def slide_03(prs):
                   "Everything from here on answers one question: how is Trq_T2W[k] produced. "
                   "Start with when CarMaker computes it.")
 
-    # bracket marking the integration step
-    plain_line(s, 0.72, 1.94, 0.72, 4.86, color=HW, width=2.0)
-    plain_line(s, 0.72, 1.94, 0.94, 1.94, color=HW, width=2.0)
-    plain_line(s, 0.72, 4.86, 0.94, 4.86, color=HW, width=2.0)
-    tf = textbox(s, 0.36, 2.20, 2.4, 0.24)
-    line(tf, "ONE INTEGRATION STEP", font=F_MONO, size=8.5, color=HW, bold=True, first=True)
-    tf = textbox(s, 0.36, 2.42, 2.4, 0.24)
-    line(tf, "Ts = 1 ms", font=F_MONO, size=8.5, color=HW, first=True)
+    # ---- the time axis on the far left: this IS the integration step ----
+    TOP, BOT = 2.06, 6.10
+    plain_line(s, 1.42, TOP, 12.72, TOP, color=HW, width=1.5)
+    plain_line(s, 1.42, BOT, 12.72, BOT, color=HW, width=1.5)
+    arrow(s, 1.42, TOP, 1.42, BOT, color=HW, width=2.5)
 
-    tf = textbox(s, 1.10, 1.90, 5.0, 0.24)
+    tf = textbox(s, 0.62, TOP - 0.13, 0.78, 0.26)
+    line(tf, "t = k-1", font=F_MONO, size=10, color=HW, bold=True, first=True)
+    tf = textbox(s, 9.30, TOP - 0.28, 3.4, 0.26, align=PP_ALIGN.RIGHT)
+    line(tf, "wheel speed = w[k-1]", font=F_MONO, size=10, color=HW, bold=True, first=True)
+
+    tf = textbox(s, 0.62, BOT - 0.13, 0.78, 0.26)
+    line(tf, "t = k", font=F_MONO, size=10, color=HW, bold=True, first=True)
+    tf = textbox(s, 9.30, BOT - 0.28, 3.4, 0.26, align=PP_ALIGN.RIGHT)
+    line(tf, "wheel speed = w[k]", font=F_MONO, size=10, color=HW, bold=True, first=True)
+
+    tf = textbox(s, 0.62, 3.70, 0.72, 1.0)
+    line(tf, "ONE", font=F_MONO, size=9, color=HW, bold=True, first=True)
+    line(tf, "STEP", font=F_MONO, size=9, color=HW, bold=True)
+    line(tf, "1 ms", font=F_MONO, size=9, color=HW)
+
+    # ---- the module sequence ----
+    X, WD = 1.90, 5.30
+    tf = textbox(s, X, 2.20, 5.0, 0.24)
     line(tf, "Vehicle", font=F_MONO, size=11, color=INK, bold=True, first=True)
-    for i, sub in enumerate(["Steering", "Suspension kinematics & compliance",
-                             "Aerodynamics", "Suspension forces"]):
-        tf = textbox(s, 1.44, 2.14 + i * 0.24, 5.0, 0.24)
-        line(tf, sub, font=F_MONO, size=10, color=INK_2, first=True)
+    tf = textbox(s, X + 0.30, 2.46, 6.0, 0.24)
+    line(tf, "Steering / Suspension K&C / Aerodynamics / Suspension forces",
+         font=F_MONO, size=9.5, color=INK_2, first=True)
 
-    tire = box(s, 1.28, 3.16, 3.55, 0.62, fill=MODEL_SOFT, edge=MODEL, width=2.0)
+    tire = box(s, X, 2.80, WD, 0.56, fill=MODEL_SOFT, edge=MODEL, width=2.0)
     tf = tire.text_frame
     line(tf, "Tire", font=F_MONO, size=11, color=MODEL, bold=True, first=True)
-    line(tf, "reads the wheel speed as it stands", font=F_MONO, size=9, color=INK_2, space_before=2)
+    line(tf, "uses w[k-1], emits Trq_T2W[k]", font=F_MONO, size=9.5, color=INK_2, space_before=2)
 
-    tf = textbox(s, 1.10, 3.92, 5.0, 0.24)
+    tf = textbox(s, X, 3.48, 5.0, 0.24)
     line(tf, "Brake", font=F_MONO, size=11, color=INK, bold=True, first=True)
 
-    pt = box(s, 1.28, 4.22, 3.55, 0.62, fill=None, edge=INK, width=2.5)
+    pt = box(s, X, 3.80, WD, 0.86, fill=HW_SOFT, edge=HW, width=2.5)
     tf = pt.text_frame
     p = tf.paragraphs[0]
     r = p.add_run(); r.text = "PowerTrain"
     r.font.name, r.font.size, r.font.bold = F_MONO, Pt(11), True
     r.font.color.rgb = INK
-    r = p.add_run(); r.text = "     <- our block"
+    r = p.add_run(); r.text = "     our block"
     r.font.name, r.font.size = F_MONO, Pt(9)
     r.font.color.rgb = HW
-    line(tf, "advances the wheel speed state", font=F_MONO, size=9, color=INK_2, space_before=2)
+    line(tf, "w[k] = w[k-1] + (Ts / I) * ( Taxl[k] + Trq_T2W[k] )",
+         font=F_MONO, size=10, color=INK, bold=True, space_before=3)
 
-    bf = box(s, 1.28, 4.98, 3.55, 0.36, fill=MODEL_SOFT, edge=MODEL, width=1.5)
+    bf = box(s, X, 4.82, WD, 0.56, fill=MODEL_SOFT, edge=MODEL, width=2.0)
     tf = bf.text_frame
+    line(tf, "Body Frame", font=F_MONO, size=11, color=MODEL, bold=True, first=True)
+    line(tf, "chassis, suspension and vehicle speed", font=F_MONO, size=9.5, color=INK_2, space_before=2)
+
+    for y0, y1 in ((3.36, 3.44), (3.72, 3.76), (4.66, 4.78)):
+        arrow(s, X + WD / 2, y0, X + WD / 2, y1, color=RULE, width=2.0)
+
+    # ---- the two state advances, called out ----
+    arrow(s, X + WD, 4.23, X + WD + 0.42, 4.23, color=HW, width=2.5)
+    adv = box(s, X + WD + 0.48, 3.94, 4.58, 0.58, fill=None, edge=HW, width=2.0)
+    tf = adv.text_frame
     tf.vertical_anchor = MSO_ANCHOR.MIDDLE
-    line(tf, "Body Frame   advances the chassis states",
-         font=F_MONO, size=9.5, color=MODEL, bold=True, first=True)
+    line(tf, "THE WHEEL SPEED ADVANCES HERE", font=F_MONO, size=10.5,
+         color=HW, bold=True, first=True)
 
-    arrow(s, 3.05, 3.78, 3.05, 4.16, color=RULE, width=2.0)
-    arrow(s, 3.05, 4.84, 3.05, 4.92, color=RULE, width=2.0)
+    arrow(s, X + WD, 5.10, X + WD + 0.42, 5.10, color=MODEL, width=2.0)
+    adv2 = box(s, X + WD + 0.48, 4.86, 4.58, 0.48, fill=None, edge=MODEL, width=1.5)
+    tf = adv2.text_frame
+    tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+    line(tf, "the chassis states advance here", font=F_MONO, size=10,
+         color=MODEL, bold=True, first=True)
 
-    arrow(s, 4.83, 3.47, 5.40, 3.47, color=MODEL, width=2.0)
-    rb = box(s, 5.46, 3.16, 3.30, 0.62, fill=None, edge=MODEL, width=1.5)
-    tf = rb.text_frame
-    line(tf, "uses  w[k-1]", font=F_MONO, size=10.5, color=MODEL, bold=True, first=True)
-    line(tf, "emits Trq_T2W[k]", font=F_MONO, size=10.5, color=MODEL, bold=True, space_before=2)
+    caption(s, "The whole sequence is one step of the solver. The wheel speed keeps the value w[k-1] "
+               "right up to the PowerTrain box, so the tire, which runs", y=6.34, color=HW)
+    caption(s, "earlier, necessarily uses w[k-1]. That is what advancing an ODE state means, not a "
+               "delay we added: CarMaker's own powertrain does the same.", y=6.56)
 
-    arrow(s, 4.83, 4.53, 5.40, 4.53, color=INK, width=2.5)
-    eb = box(s, 5.46, 4.22, 4.60, 0.62, fill=HW_SOFT, edge=HW, width=2.0)
-    tf = eb.text_frame
-    line(tf, "w[k] = w[k-1] + (Ts / I) *", font=F_MONO, size=10.5, color=INK, first=True)
-    line(tf, "           ( Taxl[k] + Trq_T2W[k] )", font=F_MONO, size=10.5, color=INK, space_before=2)
-
-    caption(s, "The tire is evaluated before the wheel speed is advanced, so it uses the value the "
-               "state holds at the start of the step.", y=5.56, color=HW)
-    caption(s, "That is what advancing an ODE state means. It is not a delay added by our bypass: "
-               "CarMaker's own powertrain does the same thing.", y=5.80)
-
-    labelled_box(s, 0.62, 6.10, 3.85, 1.06, "Two states advance here",
-                 ["Wheel speed at the PowerTrain slot,", "chassis afterwards at Body Frame."],
-                 fill=None, edge=MODEL, head_color=MODEL, width=1.25)
-    labelled_box(s, 4.72, 6.10, 3.85, 1.06, "Backward Euler",
-                 ["CarMaker's own solver; ours matches.", "Single stage, so this runs once per step."],
+    labelled_box(s, 0.62, 6.80, 5.95, 0.52, "Backward Euler",
+                 ["CarMaker's own solver; ours matches. Single stage, one pass."],
                  fill=None, edge=RULE, head_color=INK, width=1.25)
-    labelled_box(s, 8.82, 6.10, 3.90, 1.06, "Do not add another step",
-                 ["A Memory block or rate transition on", "Trq_T2W -> integrator -> rotv costs damping."],
+    labelled_box(s, 6.77, 6.80, 5.95, 0.52, "Do not add a second step",
+                 ["A Memory block or rate transition in the loop costs damping."],
                  fill=WARN_SOFT, edge=WARN, head_color=WARN, width=1.5)
+
     return s
 
 
 def slide_04(prs):
     s = new_slide(prs, 4, "How", "What the tire model does with the wheel speed",
-                  "The bench supplies one quantity: the wheel rotational speed. Follow it down "
-                  "through the tire model to the torque that comes back.")
+                  "Slip is the gap between our wheel speed and CarMaker's vehicle speed. "
+                  "Everything the tire produces follows from that one comparison.")
 
-    labelled_box(s, 0.62, 1.94, 5.55, 0.86, "FROM THE BENCH",
-                 ["w[k-1]  ->  Rim_rotv", "the wheel rotational speed, and nothing else"],
+    labelled_box(s, 0.62, 1.90, 5.55, 0.74, "OUR WHEEL SPEED",
+                 ["w[k-1] -> Rim_rotv, from the bench"],
                  fill=HW_SOFT, edge=HW, head_color=HW, width=2.0)
-    labelled_box(s, 7.17, 1.94, 5.55, 0.86, "FROM CARMAKER'S BODY MODEL",
-                 ["P_v0_W · Fz · camber · muRoad", "contact-point velocity, load, friction"],
+    labelled_box(s, 7.17, 1.90, 5.55, 0.74, "CARMAKER'S VEHICLE SPEED",
+                 ["vx at the contact point, plus Fz and friction"],
                  fill=MODEL_SOFT, edge=MODEL, head_color=MODEL, width=1.5)
 
-    plain_line(s, 3.40, 2.80, 3.40, 3.00, color=HW, width=2.5)
-    plain_line(s, 9.95, 2.80, 9.95, 3.00, color=MODEL, width=2.0)
-    plain_line(s, 3.40, 3.00, 9.95, 3.00, color=RULE, width=2.0)
-    arrow(s, 6.67, 3.00, 6.67, 3.20, color=RULE, width=2.5)
+    plain_line(s, 3.40, 2.64, 3.40, 2.84, color=HW, width=2.5)
+    plain_line(s, 9.95, 2.64, 9.95, 2.84, color=MODEL, width=2.0)
+    plain_line(s, 3.40, 2.84, 9.95, 2.84, color=RULE, width=2.0)
+    arrow(s, 6.67, 2.84, 6.67, 3.02, color=RULE, width=2.5)
 
-    stage = box(s, 0.62, 3.26, 12.10, 0.90, fill=None, edge=RULE, width=1.5)
-    tf = stage.text_frame
+    slip = box(s, 1.30, 3.08, 10.74, 0.84, fill=None, edge=RULE, width=1.5)
+    tf = slip.text_frame
     p = tf.paragraphs[0]
-    for txt, col, bold, sz in (("1   SLIP        ", INK, True, 10.5),
+    for txt, col, bold, sz in (("1   SLIP   ", INK, True, 10.5),
                                ("longitudinal   ", HW, True, 10),
-                               ("s = ( w · rBelt_eff - vx ) / |…|      ", INK, False, 10),
-                               ("<- the bench sets this", HW, False, 9)):
+                               ("s = ( w · rBelt_eff  -  vx ) / |…|", INK, False, 10)):
         r = p.add_run(); r.text = txt
         r.font.name, r.font.size, r.font.bold = F_MONO, Pt(sz), bold
         r.font.color.rgb = col
     p2 = tf.add_paragraph(); p2.space_before = Pt(2)
-    for txt, col, bold, sz in (("                lateral        ", MODEL, True, 10),
-                               ("alpha = atan( vy / |vx| )             ", INK, False, 10),
-                               ("<- steering and body yaw", MODEL, False, 9)):
+    for txt, col, bold, sz in (("           lateral        ", MODEL, True, 10),
+                               ("alpha = atan( vy / |vx| )", INK, False, 10)):
         r = p2.add_run(); r.text = txt
         r.font.name, r.font.size, r.font.bold = F_MONO, Pt(sz), bold
         r.font.color.rgb = col
-    line(tf, "Both come from one contact-point velocity vector, split into its two components.",
+    line(tf, "how much faster the tread is moving than the road under it, and at what angle",
          font=F_MONO, size=9, color=INK_3, space_before=3)
 
-    arrow(s, 6.67, 4.16, 6.67, 4.34, color=RULE, width=2.5)
+    arrow(s, 6.67, 3.92, 6.67, 4.08, color=RULE, width=2.5)
 
-    relax = box(s, 0.62, 4.40, 12.10, 0.76, fill=HW_SOFT, edge=HW, width=2.0)
+    relax = box(s, 1.30, 4.14, 10.74, 0.56, fill=HW_SOFT, edge=HW, width=2.0)
     tf = relax.text_frame
-    p = tf.paragraphs[0]
-    for txt, col, bold, sz in (("2   RELAXATION  ", HW, True, 10.5),
-                               ("tau = sigma / vx    sigma ~ 0.05 m      ", INK, False, 10),
-                               ("the tire's only ODE states", HW, False, 9)):
-        r = p.add_run(); r.text = txt
-        r.font.name, r.font.size, r.font.bold = F_MONO, Pt(sz), bold
-        r.font.color.rgb = col
-    line(tf, "The carcass takes a rolling distance to build force, so slip is low-passed before it "
-             "becomes force. Everything else here is algebraic.",
-         font=F_MONO, size=9, color=INK_3, space_before=3)
-
-    arrow(s, 6.67, 5.16, 6.67, 5.34, color=RULE, width=2.5)
-
-    forces = box(s, 0.62, 5.40, 12.10, 0.90, fill=MODEL_SOFT, edge=MODEL, width=2.0)
-    tf = forces.text_frame
-    p = tf.paragraphs[0]
-    for txt, col, bold, sz in (("3   FORCES      ", MODEL, True, 10.5),
-                               ("Fx = Gx(alpha) · Fx0(s)      ", INK, False, 10),
-                               ("longitudinal force, reduced by cornering", INK_3, False, 9)):
-        r = p.add_run(); r.text = txt
-        r.font.name, r.font.size, r.font.bold = F_MONO, Pt(sz), bold
-        r.font.color.rgb = col
-    p2 = tf.add_paragraph(); p2.space_before = Pt(2)
-    for txt, col, bold, sz in (("                Fy = Gy(s)     · Fy0(alpha)  ", INK, False, 10),
-                               ("lateral force, reduced by driving or braking", INK_3, False, 9)):
-        r = p2.add_run(); r.text = txt
-        r.font.name, r.font.size, r.font.bold = F_MONO, Pt(sz), bold
-        r.font.color.rgb = col
-    line(tf, "Gx and Gy are the friction ellipse: one contact patch, one friction budget, so the two "
-             "directions take from each other.",
-         font=F_MONO, size=9, color=INK_3, space_before=3)
-
-    arrow(s, 6.67, 6.30, 6.67, 6.48, color=RULE, width=2.5)
-
-    trq = box(s, 0.62, 6.54, 12.10, 0.44, fill=None, edge=WARN, width=2.5)
-    tf = trq.text_frame
     tf.vertical_anchor = MSO_ANCHOR.MIDDLE
     p = tf.paragraphs[0]
-    for txt, col, bold, sz in (("4   SPIN-AXIS TORQUE   ", WARN, True, 10.5),
-                               ("Trq_T2W = -r · Fx  +  rolling resistance      ", INK, False, 10),
-                               ("-> back to our integrator", WARN, True, 9)):
+    for txt, col, bold, sz in (("2   RELAXATION   ", HW, True, 10.5),
+                               ("the carcass takes about 5 cm of rolling to build force, so slip is "
+                                "low-passed  ", INK, False, 9.5),
+                               ("(the tire's only states)", HW, False, 9)):
         r = p.add_run(); r.text = txt
         r.font.name, r.font.size, r.font.bold = F_MONO, Pt(sz), bold
         r.font.color.rgb = col
+
+    arrow(s, 6.67, 4.70, 6.67, 4.86, color=RULE, width=2.5)
+
+    forces = box(s, 1.30, 4.92, 10.74, 0.84, fill=MODEL_SOFT, edge=MODEL, width=2.0)
+    tf = forces.text_frame
+    p = tf.paragraphs[0]
+    for txt, col, bold, sz in (("3   FORCES   ", MODEL, True, 10.5),
+                               ("Fx = Gx(alpha) · Fx0(s)      ", INK, False, 10),
+                               ("longitudinal, reduced by cornering", INK_3, False, 9)):
+        r = p.add_run(); r.text = txt
+        r.font.name, r.font.size, r.font.bold = F_MONO, Pt(sz), bold
+        r.font.color.rgb = col
+    p2 = tf.add_paragraph(); p2.space_before = Pt(2)
+    for txt, col, bold, sz in (("             Fy = Gy(s)     · Fy0(alpha)  ", INK, False, 10),
+                               ("lateral, reduced by driving or braking", INK_3, False, 9)):
+        r = p2.add_run(); r.text = txt
+        r.font.name, r.font.size, r.font.bold = F_MONO, Pt(sz), bold
+        r.font.color.rgb = col
+    line(tf, "one contact patch, one friction budget, so the two directions take from each other",
+         font=F_MONO, size=9, color=INK_3, space_before=3)
+
+    # Fx splits two ways: torque back to us, force into the vehicle body
+    arrow(s, 3.60, 5.76, 3.60, 6.04, color=WARN, width=2.5)
+    arrow(s, 9.80, 5.76, 9.80, 6.04, color=MODEL, width=2.5)
+
+    t1 = box(s, 1.30, 6.10, 4.60, 0.62, fill=None, edge=WARN, width=2.5)
+    tf = t1.text_frame
+    line(tf, "4a   TO US", font=F_MONO, size=10, color=WARN, bold=True, first=True)
+    line(tf, "Trq_T2W = -r · Fx  ->  our integrator", font=F_MONO, size=10, color=INK, space_before=2)
+
+    t2 = box(s, 7.44, 6.10, 4.60, 0.62, fill=None, edge=MODEL, width=2.5)
+    tf = t2.text_frame
+    line(tf, "4b   TO THE VEHICLE", font=F_MONO, size=10, color=MODEL, bold=True, first=True)
+    line(tf, "Fx pushes the body  ->  CarMaker sets vx", font=F_MONO, size=10, color=INK, space_before=2)
+
+    # the vx return path, drawn round the right-hand side back into stage 1
+    plain_line(s, 12.04, 6.41, 12.45, 6.41, color=MODEL, width=2.0, dash=DASH)
+    plain_line(s, 12.45, 6.41, 12.45, 3.50, color=MODEL, width=2.0, dash=DASH)
+    arrow(s, 12.45, 3.50, 12.08, 3.50, color=MODEL, width=2.0, dash=DASH)
+    tf = textbox(s, 12.52, 4.62, 0.78, 0.7)
+    line(tf, "vx", font=F_MONO, size=9, color=MODEL, bold=True, first=True)
+    line(tf, "next", font=F_MONO, size=9, color=MODEL, bold=True)
+    line(tf, "step", font=F_MONO, size=9, color=MODEL, bold=True)
+
+    caption(s, "The bench sets the wheel speed. CarMaker sets the vehicle speed, by integrating these "
+               "same tire forces on the vehicle mass at Body Frame.", y=6.90, color=HW)
+    caption(s, "Neither one is imposed on the other. They meet only in the slip calculation, which "
+               "is the whole coupling.", y=7.12)
     return s
 
 
 def slide_05(prs):
-    s = new_slide(prs, 5, "What can go wrong", "The wheel can oscillate against the tire",
-                  "The wheel has inertia. The tire sits between it and the road and acts like a "
-                  "spring. That is an oscillator, and it exists on any real vehicle.")
+    s = new_slide(prs, 5, "What can go wrong",
+                  "The computed wheel speed can start to oscillate",
+                  "This is the one failure mode worth knowing. It shows up in the logs, "
+                  "and the dyno is then commanded to chase the wobble.")
 
-    tf = textbox(s, 0.62, 1.96, 4.0, 0.26)
-    line(tf, "WHAT OSCILLATES", font=F_DISPLAY, size=13, color=INK, bold=True, first=True)
+    tf = textbox(s, 0.62, 1.94, 6.0, 0.26)
+    line(tf, "1  WHAT YOU WOULD SEE", font=F_DISPLAY, size=14, color=WARN, bold=True, first=True)
 
-    wheel = s.shapes.add_shape(MSO_SHAPE.DONUT, inch(0.90), inch(2.34), inch(1.50), inch(1.50))
-    wheel.shadow.inherit = False
-    wheel.fill.background()
-    wheel.line.color.rgb = INK
-    wheel.line.width = Pt(2.5)
-    tf = textbox(s, 1.40, 2.98, 0.5, 0.26, align=PP_ALIGN.CENTER)
-    line(tf, "I", font=F_MONO, size=13, color=INK, bold=True, first=True)
-    tf = textbox(s, 0.72, 3.92, 2.0, 0.24)
-    line(tf, "wheel rocks back", font=F_MONO, size=9, color=HW, first=True)
-    line(tf, "and forth", font=F_MONO, size=9, color=HW)
+    tf = textbox(s, 0.62, 2.26, 4.10, 0.80)
+    for t in ["rotv and Trq_T2W wobbling at tens of hertz,",
+              "on top of the speed the vehicle should be",
+              "holding. Because rotv is also the dyno",
+              "command, the real shaft is told to chase it."]:
+        line(tf, t, font=F_MONO, size=9.5, color=INK_2,
+             first=t.startswith("rotv and"))
 
-    spring = s.shapes.add_shape(MSO_SHAPE.LIGHTNING_BOLT, inch(2.52), inch(2.90),
-                                inch(1.20), inch(0.40))
-    spring.shadow.inherit = False
-    spring.fill.background()
-    spring.line.color.rgb = MODEL
-    spring.line.width = Pt(2.0)
-    tf = textbox(s, 2.46, 2.56, 1.6, 0.24)
-    line(tf, "tire carcass", font=F_MONO, size=9, color=MODEL, first=True)
-    tf = textbox(s, 2.46, 3.36, 1.7, 0.24)
-    line(tf, "acts as a spring", font=F_MONO, size=9, color=MODEL, first=True)
-
-    plain_line(s, 3.92, 2.66, 3.92, 3.58, color=INK, width=3.0)
-    tf = textbox(s, 4.02, 2.98, 0.8, 0.24)
-    line(tf, "road", font=F_MONO, size=9, color=INK_3, first=True)
-
-    tf = textbox(s, 0.62, 4.34, 4.6, 1.1)
-    for t in ["The carcass has to flex before it can pass",
-              "force to the road. CarMaker gives that flex a",
-              "length: about 5 cm of rolling. A compliance is",
-              "a spring, and a spring against the wheel",
-              "inertia is an oscillator."]:
-        line(tf, t, font=F_MONO, size=9.5, color=INK_2, first=(t.startswith("The carcass")))
-
-    plain_line(s, 5.50, 1.90, 5.50, 5.60, color=RULE, width=1.0)
-
-    tf = textbox(s, 5.80, 1.96, 6.9, 0.26)
-    line(tf, "WHERE THE DAMPING COMES FROM", font=F_DISPLAY, size=13, color=INK, bold=True, first=True)
-    tf = textbox(s, 5.80, 2.28, 6.9, 0.9)
-    line(tf, "As the tire rolls it continuously lays down fresh rubber and renews its grip.",
-         font=F_MONO, size=9.5, color=INK_2, first=True)
-    line(tf, "That is what settles the oscillation.", font=F_MONO, size=9.5, color=INK_2)
-    line(tf, "Faster rolling renews it faster, so damping grows with speed.",
-         font=F_MONO, size=9.5, color=HW, bold=True, space_before=4)
-    line(tf, "At a standstill there is none at all.", font=F_MONO, size=9.5, color=HW, bold=True)
-
-    tf = textbox(s, 5.80, 3.52, 6.9, 0.26)
-    line(tf, "WHAT THE INTEGRATION STEP COSTS", font=F_DISPLAY, size=13, color=INK, bold=True, first=True)
-    tf = textbox(s, 5.80, 3.84, 6.9, 1.0)
-    line(tf, "The tire is evaluated once per step, from the wheel speed as it stood at",
-         font=F_MONO, size=9.5, color=INK_2, first=True)
-    line(tf, "the start of it. That always removes a small, fixed amount of damping.",
-         font=F_MONO, size=9.5, color=INK_2)
-    line(tf, "At road speed there is plenty to spare. Down near walking pace there is",
-         font=F_MONO, size=9.5, color=WARN, space_before=4)
-    line(tf, "not, and the trace can ring.", font=F_MONO, size=9.5, color=WARN)
-
-    tf = textbox(s, 5.80, 5.02, 6.9, 0.26)
-    line(tf, "EXAMPLE — rotv OR Trq_T2W DURING A SLOW CRAWL",
-         font=F_DISPLAY, size=12, color=INK_3, bold=True, first=True)
-    # healthy trace
-    pts = [(5.90, 5.48), (6.60, 5.48), (6.80, 5.42), (7.00, 5.52), (7.20, 5.47), (8.10, 5.48)]
+    tf = textbox(s, 0.62, 3.18, 4.0, 0.24)
+    line(tf, "rotv during a slow crawl", font=F_MONO, size=9, color=INK_3, first=True)
+    pts = [(0.70, 3.72), (1.50, 3.72), (1.70, 3.66), (1.90, 3.76), (2.10, 3.70), (2.90, 3.72)]
     for a, b in zip(pts, pts[1:]):
         plain_line(s, a[0], a[1], b[0], b[1], color=MODEL, width=2.0)
-    tf = textbox(s, 8.20, 5.36, 1.0, 0.24)
+    tf = textbox(s, 3.00, 3.60, 1.0, 0.24)
     line(tf, "healthy", font=F_MONO, size=9, color=MODEL, first=True)
-    # ringing trace
-    rp = [(9.30, 5.48), (9.70, 5.48), (9.82, 5.14), (9.94, 5.78), (10.06, 5.26),
-          (10.18, 5.66), (10.30, 5.38), (10.42, 5.56), (10.54, 5.46), (11.20, 5.48)]
+
+    rp = [(0.70, 4.34), (1.30, 4.34), (1.42, 4.02), (1.54, 4.64), (1.66, 4.14),
+          (1.78, 4.54), (1.90, 4.26), (2.02, 4.44), (2.14, 4.34), (2.90, 4.34)]
     for a, b in zip(rp, rp[1:]):
         plain_line(s, a[0], a[1], b[0], b[1], color=WARN, width=2.0)
-    tf = textbox(s, 11.30, 5.36, 1.2, 0.24)
-    line(tf, "ringing", font=F_MONO, size=9, color=WARN, bold=True, first=True)
+    tf = textbox(s, 3.00, 4.22, 1.4, 0.24)
+    line(tf, "oscillating", font=F_MONO, size=9, color=WARN, bold=True, first=True)
 
-    caption(s, "This oscillation is physical, not a modelling artefact. A real car has it: it is the "
-               "same mechanism behind brake judder and ABS chatter.", y=5.86)
+    plain_line(s, 4.90, 1.90, 4.90, 5.70, color=RULE, width=1.0)
 
-    labelled_box(s, 0.62, 6.14, 3.85, 1.04, "Why we do not see it",
-                 ["Below 2 m/s CarMaker switches to its", "stand-still tire model, and we put the dyno",
-                  "in torque mode while stopping."],
-                 fill=None, edge=MODEL, head_color=MODEL, width=1.25)
-    labelled_box(s, 4.72, 6.14, 3.85, 1.04, "What raises the risk",
+    tf = textbox(s, 5.20, 1.94, 7.5, 0.26)
+    line(tf, "2  WHY IT CAN HAPPEN AT ALL", font=F_DISPLAY, size=14, color=INK, bold=True, first=True)
+    tf = textbox(s, 5.20, 2.26, 7.5, 0.9)
+    line(tf, "The wheel has rotational inertia. The tire carcass has to flex before it can",
+         font=F_MONO, size=9.5, color=INK_2, first=True)
+    line(tf, "pass force to the road, so it behaves as a spring between the wheel and the",
+         font=F_MONO, size=9.5, color=INK_2)
+    line(tf, "ground. An inertia on a spring can ring. Every real car has this mode; it is",
+         font=F_MONO, size=9.5, color=INK_2)
+    line(tf, "the same one behind brake judder and ABS chatter.",
+         font=F_MONO, size=9.5, color=INK_2)
+
+    tf = textbox(s, 5.20, 3.46, 7.5, 0.26)
+    line(tf, "3  WHY IT ONLY BITES AT LOW SPEED", font=F_DISPLAY, size=14, color=INK, bold=True, first=True)
+    tf = textbox(s, 5.20, 3.78, 7.5, 0.9)
+    line(tf, "Rolling is what damps it: the tire keeps laying down fresh rubber and renewing",
+         font=F_MONO, size=9.5, color=INK_2, first=True)
+    line(tf, "its grip. Fast rolling renews it quickly and the ringing dies out. At walking",
+         font=F_MONO, size=9.5, color=INK_2)
+    line(tf, "pace there is little damping left, and at a standstill none.",
+         font=F_MONO, size=9.5, color=INK_2)
+    line(tf, "Evaluating the tire once per step removes a further fixed amount, at any speed.",
+         font=F_MONO, size=9.5, color=WARN, space_before=4)
+
+    tf = textbox(s, 5.20, 4.98, 7.5, 0.26)
+    line(tf, "4  WHY WE DO NOT SEE IT", font=F_DISPLAY, size=14, color=MODEL, bold=True, first=True)
+    tf = textbox(s, 5.20, 5.30, 7.5, 0.5)
+    line(tf, "Below 2 m/s CarMaker switches to its stand-still tire model, and we put the dyno",
+         font=F_MONO, size=9.5, color=INK_2, first=True)
+    line(tf, "into torque mode with zero tire torque while stopping. The slow region is never run.",
+         font=F_MONO, size=9.5, color=INK_2)
+
+    labelled_box(s, 0.62, 6.06, 3.85, 1.10, "How to check",
+                 ["Look at rotv and Trq_T2W through a", "slow crawl. Clean trace, no issue.",
+                  "Tens-of-hertz wobble, come back to this."],
+                 fill=None, edge=WARN, head_color=WARN, width=1.5)
+    labelled_box(s, 4.72, 6.06, 3.85, 1.10, "What would raise the risk",
                  ["A longer sample time, a smaller wheel", "inertia, a shorter relaxation length,",
-                  "or a second delay in the loop."],
+                  "or a second delay added to the loop."],
                  fill=None, edge=HW, head_color=HW, width=1.25)
-    labelled_box(s, 8.82, 6.14, 3.90, 1.04, "The frequency, if you want it",
-                 ["Tens of hertz for a passenger wheel; we", "estimate 40-50 Hz from a textbook slip",
-                  "stiffness. Read Cs from the tire file."],
+    labelled_box(s, 8.82, 6.06, 3.90, 1.10, "The frequency, if you want it",
+                 ["Set by wheel inertia against carcass", "stiffness; tens of hertz for a car wheel.",
+                  "Our 40-50 Hz is a textbook estimate."],
                  fill=None, edge=RULE, head_color=INK, width=1.25)
     return s
 
