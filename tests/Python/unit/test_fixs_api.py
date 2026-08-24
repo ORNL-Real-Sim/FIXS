@@ -78,29 +78,6 @@ def test_getall_returns_a_copy():
 # Connect-time contracts
 # ---------------------------------------------------------------------------
 
-def test_require_missing_field_fails_at_connect():
-    """A field the config cannot deliver is a startup error, not a per-tick surprise."""
-    if not os.path.exists(SIMPLE_ECHO_CONFIG):
-        pytest.skip('config file not found')
-    with pytest.raises(fixs.FieldsMissing) as excinfo:
-        fixs.connect(SIMPLE_ECHO_CONFIG, require=['speedFreeFlow'])
-    assert 'speedFreeFlow' in str(excinfo.value)
-
-
-def test_require_present_field_gets_past_validation():
-    """Validation happens before any network work.
-
-    Port 1 rather than the configured one, so the test cannot accidentally reach
-    a TrafficLayer someone left running.
-    """
-    if not os.path.exists(SIMPLE_ECHO_CONFIG):
-        pytest.skip('config file not found')
-    with pytest.raises(fixs.FixsError) as excinfo:
-        fixs.connect(SIMPLE_ECHO_CONFIG, require=['speed'],
-                     host='127.0.0.1', port=1, connectTimeout=0.1)
-    assert not isinstance(excinfo.value, fixs.FieldsMissing)
-
-
 def test_missing_config_is_reported_by_path():
     with pytest.raises(fixs.FixsError) as excinfo:
         fixs.connect('no_such_config.yaml')
@@ -166,6 +143,9 @@ def test_unknown_port_lists_what_is_declared():
 # ---------------------------------------------------------------------------
 
 FIELDS = ['id', 'speed', 'speedDesired']
+# A config that also carries the command fields the actuation tests use.
+FULL_FIELDS = FIELDS + ['accelerationDesired', 'steerAngleDesired',
+                        'acceleratorPedalDesired', 'brakePedalDesired']
 
 
 class FakeSocket:
@@ -212,17 +192,19 @@ class _ConfigStub:
     application_setup = {}
 
 
-def _install(ticks, egoIds=('ego',), shutdown=True):
+def _install(ticks, egoIds=('ego',), shutdown=True, fields=None):
     """Point the module at a fake TrafficLayer without touching a real socket."""
     from CommonLib.SocketHelper import SocketHelper
     if shutdown:
         ticks = list(ticks) + [(0, 99.0, [])]
     fixs.close()
+    fields = list(fields or FIELDS)
     msgHelper = MsgHelper()
-    msgHelper.set_vehicle_message_field(FIELDS)
+    msgHelper.set_vehicle_message_field(fields)
     fixs._helper = SocketHelper(config_helper=_ConfigStub(), msg_helper=msgHelper)
-    fixs._sock = FakeSocket(ticks, FIELDS)
+    fixs._sock = FakeSocket(ticks, fields)
     fixs._egoIds = list(egoIds)
+    fixs._declaredFields = frozenset(fields)
     fixs._armed = False
     return fixs._sock
 
@@ -242,10 +224,10 @@ def _drain(vehIDs=None):
         fixs.send(vehIDs() if callable(vehIDs) else vehIDs)
 
 
-def _recordCount(message):
+def _recordCount(message, fields=None):
     """Count vehicle records in one encoded FIXS message."""
     helper = MsgHelper()
-    helper.set_vehicle_message_field(FIELDS)
+    helper.set_vehicle_message_field(list(fields or FIELDS))
     _, _, total = helper.depack_msg_header(message[:helper.msg_header_size])
     index = helper.msg_header_size
     count = 0
@@ -301,6 +283,47 @@ def test_set_rejects_a_measured_field():
     fixs.close()
 
 
+def test_set_rejects_a_field_not_on_the_wire():
+    """A command that cannot be serialised would vanish with no symptom."""
+    _install([(1, 0.1, [_veh('ego')])])          # declares speedDesired only
+    fixs.recv()
+    with pytest.raises(fixs.ProtocolError) as excinfo:
+        fixs.vehicle.get('ego').set(steerAngleDesired=0.1)
+    assert 'VehicleMessageField' in str(excinfo.value)
+    fixs.close()
+
+
+def test_set_rejects_non_finite_values():
+    """NaN otherwise reaches SUMO and surfaces far from the cause."""
+    _install([(1, 0.1, [_veh('ego')])])
+    fixs.recv()
+    with pytest.raises(ValueError):
+        fixs.vehicle.get('ego').set(speedDesired=float('nan'))
+    fixs.close()
+
+
+def test_views_refuse_to_answer_when_no_tick_is_held():
+    """Answering '{}' would read as a quiet tick rather than as no tick."""
+    fixs.close()
+    for call in (lambda: fixs.vehicle.getAll(),
+                 lambda: fixs.vehicle.get('ego'),
+                 lambda: fixs.vehicle.getIDList(),
+                 lambda: fixs.getTime()):
+        with pytest.raises(fixs.ProtocolError):
+            call()
+
+
+def test_views_refuse_to_answer_after_shutdown():
+    _install([(1, 0.1, [_veh('ego')])])
+    fixs.recv()
+    assert fixs.vehicle.getIDList() == ['ego']
+    fixs.send()
+    assert fixs.recv() is None                    # shutdown tick
+    with pytest.raises(fixs.ProtocolError) as excinfo:
+        fixs.vehicle.getAll()
+    assert 'shut down' in str(excinfo.value)
+
+
 def test_set_rejects_an_unknown_field():
     """A typo in a field name fails immediately, listing what is writable."""
     _install([(1, 0.1, [_veh('ego')])])
@@ -313,7 +336,7 @@ def test_set_rejects_an_unknown_field():
 
 def test_partial_actuation_is_rejected_at_send():
     """applyEgoActuation reads all three every tick, so two is not a command."""
-    _install([(1, 0.1, [_veh('ego')])])
+    _install([(1, 0.1, [_veh('ego')])], fields=FULL_FIELDS)
     fixs.recv()
     fixs.vehicle.get('ego').set(steerAngleDesired=0.1, brakePedalDesired=0.0)
     with pytest.raises(fixs.ProtocolError) as excinfo:
@@ -323,19 +346,19 @@ def test_partial_actuation_is_rejected_at_send():
 
 
 def test_complete_actuation_is_accepted():
-    sock = _install([(1, 0.1, [_veh('ego')])])
+    sock = _install([(1, 0.1, [_veh('ego')])], fields=FULL_FIELDS)
     fixs.recv()
     fixs.vehicle.get('ego').set(steerAngleDesired=0.1,
                                 acceleratorPedalDesired=0.3,
                                 brakePedalDesired=0.0)
     fixs.send()
-    assert _recordCount(sock.sent[0]) == 1
+    assert _recordCount(sock.sent[0], FULL_FIELDS) == 1
     fixs.close()
 
 
 def test_both_longitudinal_commands_are_rejected():
     """ConfigHelper.cpp:256 accepts exactly one."""
-    _install([(1, 0.1, [_veh('ego')])])
+    _install([(1, 0.1, [_veh('ego')])], fields=FULL_FIELDS)
     fixs.recv()
     fixs.vehicle.get('ego').set(speedDesired=9.0, accelerationDesired=1.0)
     with pytest.raises(fixs.ProtocolError) as excinfo:

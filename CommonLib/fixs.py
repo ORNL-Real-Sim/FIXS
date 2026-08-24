@@ -56,6 +56,7 @@ aliasing something about to be overwritten.
 
 import atexit
 import dataclasses
+import math
 import os
 import socket
 import time as _time
@@ -70,7 +71,7 @@ __all__ = [
     'connect', 'recv', 'send', 'close',
     'getTime', 'getFields', 'getEgoIDList',
     'vehicle', 'trafficlight',
-    'Vehicle', 'FixsError', 'NotConnected', 'ProtocolError', 'FieldsMissing',
+    'Vehicle', 'FixsError', 'NotConnected', 'ProtocolError',
 ]
 
 
@@ -85,21 +86,15 @@ class NotConnected(FixsError):
 class ProtocolError(FixsError):
     """Raised when recv/send are called out of order, or a command is incomplete.
 
-    TrafficLayer does not advance until every subscriber has answered, so a tick
-    that is received and never answered stalls the whole co-simulation. Rather
-    than let that surface as an unexplained hang on the next recv(), it is
-    reported here, naming the tick that was left unanswered.
-    """
+    Two situations:
 
-
-class FieldsMissing(FixsError):
-    """Raised by connect(require=...) when the config cannot deliver a field.
-
-    Raised at startup rather than letting the application discover it per tick.
-    An omitted field and a genuine zero are the same bytes on the wire, so a
-    controller planning against a field the config never declared plans against
-    0.0 and looks like it is working -- which is how `speedFreeFlow` (free-flow
-    desire) silently degrades into `speedLimit` (posted limit).
+    * recv/send out of order. TrafficLayer does not advance until every
+      subscriber has answered, so a tick received and never answered stalls the
+      whole co-simulation; rather than let that surface as an unexplained hang
+      on the next recv(), it is reported here.
+    * reading tick data when no tick is held -- before the first recv(), after
+      shutdown, or after close(). Answering "no vehicles" there would read as a
+      quiet tick rather than as no tick at all.
     """
 
 
@@ -183,6 +178,27 @@ class Vehicle(VehData):
                 f"'{name}' is not a vehicle field. Writable: "
                 f"{', '.join(sorted(self.COMMAND_FIELDS))}."
             )
+        if _declaredFields is not None:
+            absent = [f for f in fields if f not in _declaredFields]
+            if absent:
+                # pack_veh_data only serialises fields in VehicleMessageField, so
+                # this command would be written into the record, never leave the
+                # process, and the vehicle would simply not respond -- with no
+                # symptom anywhere in the stack.
+                raise ProtocolError(
+                    f"{', '.join(sorted(absent))} cannot be commanded: not in "
+                    f"this config's SimulationSetup.VehicleMessageField, so it "
+                    f"would not be put on the wire. On the wire: "
+                    f"{', '.join(sorted(_declaredFields & self.COMMAND_FIELDS))}."
+                )
+        for name, value in fields.items():
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise TypeError(
+                    f"{name} must be a number, got {type(value).__name__}")
+            if not math.isfinite(value):
+                # A diverged controller otherwise ships NaN into SUMO, where it
+                # surfaces as strange vehicle behaviour far from the cause.
+                raise ValueError(f'{name} must be finite, got {value!r}')
         for name, value in fields.items():
             object.__setattr__(self, name, value)
         object.__setattr__(self, '_written', self._written | frozenset(fields))
@@ -214,8 +230,15 @@ class _View:
 
     _KIND = 'record'
 
-    def __init__(self, records=(), key=lambda r: r.id.strip()):
+    def __init__(self, records=(), key=lambda r: r.id.strip(), unavailable=None):
         self._byId = {key(r): r for r in records}
+        # Set when there is no tick to report. Answering "empty" in that state
+        # would read as a quiet tick rather than as no tick at all.
+        self._unavailable = unavailable
+
+    def _require(self):
+        if self._unavailable is not None:
+            raise ProtocolError(self._unavailable)
 
     def get(self, objectID):
         """(string) -> record | None
@@ -223,6 +246,7 @@ class _View:
         ``None`` rather than an error: a subscribed vehicle that has not
         departed yet is a normal state, checked every tick.
         """
+        self._require()
         return self._byId.get(objectID)
 
     def getAll(self):
@@ -230,13 +254,17 @@ class _View:
 
         Iterate it with ``.items()``; iterating a dict directly yields its keys.
         """
+        self._require()
         return dict(self._byId)
 
     def getIDList(self):
         """() -> list[string]"""
+        self._require()
         return list(self._byId)
 
     def __repr__(self):
+        if self._unavailable is not None:
+            return f'<no {self._KIND} data: {self._unavailable}>' 
         return (f'<{len(self._byId)} {self._KIND}(s): '
                 f'{", ".join(sorted(self._byId)) or "none"}>')
 
@@ -253,8 +281,17 @@ class _TrafficLightView(_View):
 # Module state
 # ---------------------------------------------------------------------------
 
-vehicle: _VehicleView = _VehicleView()
-trafficlight: _TrafficLightView = _TrafficLightView()
+_NOT_CONNECTED = 'no tick data: not connected -- call fixs.connect() first'
+_NO_TICK_YET = 'no tick data: nothing received yet -- call fixs.recv() first'
+_SHUTDOWN = 'no tick data: TrafficLayer has shut down'
+
+vehicle: _VehicleView = _VehicleView(unavailable=_NOT_CONNECTED)
+trafficlight: _TrafficLightView = _TrafficLightView(unavailable=_NOT_CONNECTED)
+
+#: VehicleMessageField for this connection; None until connect().
+_declaredFields: typing.Optional[frozenset] = None
+#: Why tick data is unavailable, or None while a tick is held.
+_noTick: typing.Optional[str] = _NOT_CONNECTED
 
 _helper: typing.Optional[SocketHelper] = None
 _sock: typing.Optional[socket.socket] = None
@@ -276,7 +313,7 @@ def _requireConnection():
 # Connecting
 # ---------------------------------------------------------------------------
 
-def connect(configPath=None, *, port=None, host=None, ego=None, require=(),
+def connect(configPath=None, *, port=None, host=None, ego=None,
             connectTimeout=None, recvTimeout=None):
     """(string, ...) -> (string, integer) -- connect and return the endpoint.
 
@@ -292,8 +329,6 @@ def connect(configPath=None, *, port=None, host=None, ego=None, require=(),
     :param ego: id, or list of ids, this client controls, reported by
         :func:`getEgoIDList`. Defaults to the ``attribute.id`` list of the
         selected subscription, so the yaml is not restated in code.
-    :param require: field names that must be on the wire. Raises
-        :class:`FieldsMissing` here rather than degrading silently per tick.
     :param connectTimeout: seconds to keep retrying the connect; ``None``
         retries forever, which is right under a supervisor (run_cosim) that
         stops the stack itself when something upstream dies.
@@ -301,7 +336,8 @@ def connect(configPath=None, *, port=None, host=None, ego=None, require=(),
         indefinitely. TrafficLayer advances only once EVERY subscriber has
         answered, so a deadline here fires when some OTHER client stalls.
     """
-    global _helper, _sock, _egoIds
+    global _helper, _sock, _egoIds, _declaredFields
+    global vehicle, trafficlight, _noTick
 
     if _sock is not None:
         close()
@@ -314,13 +350,6 @@ def connect(configPath=None, *, port=None, host=None, ego=None, require=(),
     config.getConfig(configPath)
 
     declared = config.simulation_setup.get('VehicleMessageField') or ['id', 'speed']
-    missing = [f for f in require if f not in declared]
-    if missing:
-        raise FieldsMissing(
-            f"{configPath} does not put {', '.join(missing)} on the wire. Add "
-            f"them to SimulationSetup.VehicleMessageField, which declares: "
-            f"{', '.join(declared)}."
-        )
 
     subscription = _selectSubscription(config, configPath, port)
     if host is None:
@@ -335,8 +364,12 @@ def connect(configPath=None, *, port=None, host=None, ego=None, require=(),
     msgHelper = MsgHelper()
     msgHelper.set_vehicle_message_field(declared)
 
+    _declaredFields = frozenset(declared)
     _helper = SocketHelper(config_helper=config, msg_helper=msgHelper)
     _sock = _openSocket(host, int(port), connectTimeout, recvTimeout)
+    _noTick = _NO_TICK_YET
+    vehicle = _VehicleView(unavailable=_NO_TICK_YET)
+    trafficlight = _TrafficLightView(unavailable=_NO_TICK_YET)
     atexit.register(close)          # an unanswered tick must still go out
     return host, int(port)
 
@@ -406,6 +439,7 @@ def close():
     on this: call send() in the loop body, where it is visible.
     """
     global _sock, _helper, _egoIds, _armed, _received
+    global vehicle, trafficlight, _noTick, _declaredFields
     if _armed and _sock is not None:
         try:
             send()
@@ -421,6 +455,10 @@ def close():
     _egoIds = []
     _armed = False
     _received = []
+    _declaredFields = None
+    _noTick = _NOT_CONNECTED
+    vehicle = _VehicleView(unavailable=_NOT_CONNECTED)
+    trafficlight = _TrafficLightView(unavailable=_NOT_CONNECTED)
 
 
 def getFields():
@@ -440,7 +478,13 @@ def getEgoIDList():
 
 
 def getTime():
-    """() -> double -- simulation time of the tick currently held."""
+    """() -> double -- simulation time of the tick currently held.
+
+    Raises :class:`ProtocolError` when no tick is held; returning 0.0 there
+    would be indistinguishable from a simulation that starts at zero.
+    """
+    if _noTick is not None:
+        raise ProtocolError(_noTick)
     return _simTime
 
 
@@ -467,6 +511,7 @@ def recv():
     """
     _requireConnection()
     global vehicle, trafficlight, _armed, _received, _simState, _simTime
+    global _noTick
 
     if _armed:
         raise ProtocolError(
@@ -477,8 +522,9 @@ def recv():
     _helper.clear_data()
     simState, simTime = _helper.recv_data(_sock)
     if simState == 0:
-        vehicle = _VehicleView()
-        trafficlight = _TrafficLightView()
+        _noTick = _SHUTDOWN
+        vehicle = _VehicleView(unavailable=_SHUTDOWN)
+        trafficlight = _TrafficLightView(unavailable=_SHUTDOWN)
         return None
 
     _received = _helper.vehicle_data_receive_list
@@ -491,6 +537,7 @@ def recv():
         key=lambda r: (r.name or '').strip())
 
     _simState, _simTime = simState, simTime
+    _noTick = None
     _armed = True
     return simTime
 
