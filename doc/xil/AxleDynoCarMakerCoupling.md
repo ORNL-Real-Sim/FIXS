@@ -649,6 +649,11 @@ information to the hardware at all. Confirm it is 13/14/15.
 
 ## 11. Next steps
 
+Several open items below can only be closed from a recorded run.
+[`DynoDataChecks.md`](DynoDataChecks.md) lists the channels to capture, the checks to
+run on them, and what each result would mean for the architecture.
+
+
 1. Close OPEN-5, OPEN-6 (fidelity/completeness — do not change correctness).
 2. Close OPEN-8, OPEN-9 by reading the tire parameter file; then check a log for
    ~45 Hz content in the 2-5 m/s band (§7.1).
