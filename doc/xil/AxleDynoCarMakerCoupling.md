@@ -3,15 +3,18 @@
 Status: **Step 1 — document the working implementation.** No CARLA content yet.
 CM version referenced: 13.1.3.
 
-**Slide versions of this material** sit beside this file in `doc/xil/`. They are
-repo-side deliverables rather than Sphinx pages, so they are not linked from the
-rendered documentation:
+**Slide version.** `AxleDynoCarMakerCoupling.pptx` sits beside this file: six slides
+of native, editable PowerPoint shapes. It follows the same chain as this document —
+the loop, when `Trq_T2W[k]` is computed within the integration step, how the tire
+model computes it, what can make the loop ring, and a summary.
+
+It is a repo-side deliverable rather than a Sphinx page, so it is not linked from the
+rendered documentation.
 
 | File | Use |
 |---|---|
-| `AxleDynoCarMakerCoupling_slides.html` | self-contained; open in any browser, light/dark aware |
-| `AxleDynoCarMakerCoupling.pptx` | native editable PowerPoint shapes — for presenting |
-| `make_slides_pptx.py` | regenerates the `.pptx`. **Edit this, not the binary** |
+| `AxleDynoCarMakerCoupling.pptx` | the deck — for presenting |
+| `make_slides_pptx.py` | regenerates it. **Edit this, not the binary** |
 
 The `.pptx` is a build product checked in for convenience. A binary does not diff, so
 treat `make_slides_pptx.py` as the source of truth and regenerate rather than
