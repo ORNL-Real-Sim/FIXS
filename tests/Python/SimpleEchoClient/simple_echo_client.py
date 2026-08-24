@@ -28,6 +28,9 @@ def parse_args():
     p.add_argument('--max-echo', type=int, default=0,
                    help='Echo back at most this many vehicles (0 = all). Use 1 to mirror XIL '
                         '(client returns only ego) and avoid stressing the receive-many path.')
+    p.add_argument('--verbose', action='store_true',
+                   help='Print every vehicle every step. Separate from the config\'s '
+                        'EnableVerboseLog, which controls FIXS\'s own hex-buffer dumps.')
     p.add_argument('--report', action='store_true',
                    help='On exit, print a machine-readable summary line: RESULT max_vehicles=<N> distinct_total=<M>.')
     p.add_argument('--expect-min', type=int, default=None,
@@ -40,9 +43,9 @@ def parse_args():
 def main():
     args = parse_args()
 
-    # Connect. The endpoint, the message fields and the verbose flag all come
-    # from the same config TrafficLayer is running, so there is nothing here to
-    # keep in sync by hand.
+    # Connect. The endpoint and the message fields both come from the same
+    # config TrafficLayer is running, so there is nothing here to keep in sync
+    # by hand.
     fixs.connect(args.config)
 
     # Counters for the subscription repro (#176): peak vehicle count and all distinct ids seen
@@ -60,31 +63,29 @@ def main():
                 break
             step_count += 1
 
-            vehicles = fixs.vehicle.getAll()
+            veh_ids = fixs.vehicle.getIDList()
 
             # Track vehicle visibility (after warmup) for the subscription repro
             if step_count > args.warmup:
-                if len(vehicles) > max_vehicles:
-                    max_vehicles = len(vehicles)
-                distinct_ids.update(vehicles)
+                if len(veh_ids) > max_vehicles:
+                    max_vehicles = len(veh_ids)
+                distinct_ids.update(veh_ids)
 
             # Decide how many vehicles to echo back. In real XIL the client (CarMaker)
             # returns only the ego pose, so TrafficLayer's RECEIVE path is only ever
             # exercised with ~1 vehicle. --max-echo caps the echo to mirror that; echoing
             # ALL received vehicles (max_echo=0) stresses a receive-many path that
             # production never uses and can deadlock the round-trip at higher counts.
-            echo_ids = fixs.vehicle.getIDList()
-            if args.max_echo > 0:
-                echo_ids = echo_ids[:args.max_echo]
+            echo_ids = veh_ids if args.max_echo == 0 else veh_ids[:args.max_echo]
 
-            if fixs.verbose:
+            if args.verbose:
                 print(f'\n--- Step {step_count} | Time: {sim_time:.2f}s ---')
-                print(f'Received {len(vehicles)} vehicles:')
-                for veh_id, veh_data in vehicles.items():
+                print(f'Received {len(veh_ids)} vehicles:')
+                for veh_id, veh_data in fixs.vehicle.getAll().items():
                     print(f'  Vehicle ID: {veh_id}, Speed: {veh_data.speed:.2f} m/s, '
                           f'Pos: ({veh_data.positionX:.2f}, {veh_data.positionY:.2f})')
             elif step_count % 100 == 0:
-                print(f'Step {step_count} | Time: {sim_time:.2f}s | Vehicles: {len(vehicles)}')
+                print(f'Step {step_count} | Time: {sim_time:.2f}s | Vehicles: {len(veh_ids)}')
 
             fixs.send(echo_ids)
 

@@ -6,48 +6,47 @@ A Python application talks to TrafficLayer like this::
 
     fixs.connect('config.yaml')
     while True:
-        simTime = fixs.recv()
+        simTime = fixs.recv()                     # data arrives here
         if simTime is None:                       # TrafficLayer has shut down
             break
-        ego = fixs.ego.getAll().get('ego')
+
+        ego = fixs.vehicle.get('ego')
         if ego is not None:
-            fixs.vehicle.setSpeedDesired('ego', plan(ego.speed))
-        fixs.send()
+            ego.set(speedDesired=plan(ego.speed))
+
+        fixs.send()                               # goes on the wire here
 
 Everything the co-simulation protocol requires -- connecting and retrying,
-framing, replying exactly once per tick, replying even when there is nothing to
-say, honouring the shutdown signal, clearing state between ticks -- is handled
-here. None of it is the application's to remember.
+framing, answering exactly once per tick, answering even when there is nothing
+to say, honouring the shutdown signal, clearing state between ticks -- is
+handled here. None of it is the application's to remember.
 
 This module is a facade over the existing helpers, which are unchanged:
 ConfigHelper reads the yaml, MsgHelper packs and unpacks, SocketHelper frames.
 Scripts that use those directly keep working exactly as before.
 
 
-Why this looks like TraCI, and where it deliberately does not
--------------------------------------------------------------
-The familiar half is borrowed on purpose: ``fixs.vehicle`` / ``fixs.trafficlight``
-namespaces, ``getIDList()``, ``getAll()``, ``set<Field>(id, value)``.
+recv() is the only thing that touches the network on the read side
+------------------------------------------------------------------
+``recv()`` reads one message, decodes it, and rebinds the views. Everything
+after that is local: ``get()`` / ``getAll()`` / ``getIDList()`` are dictionary
+lookups, and ``set()`` writes into a record held in memory. Nothing leaves the
+process until ``send()``.
 
-The part that is NOT copied is TraCI's one-getter-per-field style. Each TraCI
-getter is a separate request to SUMO -- that is why ``getSpeed`` and
-``getPosition`` are distinct methods. FIXS is push-based: TrafficLayer sends one
-message per tick holding exactly the vehicles the subscription selected and
-exactly the fields ``VehicleMessageField`` declared, so by the time your code
-runs the data is already in memory. The closest TraCI analogue is therefore not
-its getters but its SUBSCRIPTIONS -- ``subscribe()`` plus
-``getAllSubscriptionResults()`` -- which is the shape used here: declare fields
-in the yaml, receive them in bulk, read them off a record.
+That is the difference from TraCI, where ``getSpeed(id)`` is a request that
+costs a round trip. It is also why there are no per-field getters here: they
+would imply you can ask for anything at any time, when in fact the answer set
+was fixed by the config before the loop started -- the vehicles the
+subscription selected, carrying the fields ``VehicleMessageField`` declared.
 
-There is deliberately no ``simulationStep``. TraCI's advances the simulator's
-clock; nothing here does -- TrafficLayer owns the clock. ``recv()`` waits for
-the next tick it is given and ``send()`` answers it, so the two directions are
-two calls that each do what their name says.
+The closest TraCI analogue is its SUBSCRIPTIONS -- ``subscribe()`` plus
+``getAllSubscriptionResults()`` -- not its getters. There is deliberately no
+``simulationStep`` either: TraCI's advances the simulator's clock, and nothing
+here does, because TrafficLayer owns the clock.
 
 Views are rebound on every ``recv()``:
 
     fixs.vehicle        every vehicle in this tick's feed
-    fixs.ego            only the ids this client declared (see connect(ego=...))
     fixs.trafficlight   this tick's signal states
 
 Holding a record across ticks is safe: every tick decodes fresh objects, so
@@ -56,6 +55,7 @@ aliasing something about to be overwritten.
 """
 
 import atexit
+import dataclasses
 import os
 import socket
 import time as _time
@@ -67,8 +67,9 @@ from CommonLib.SocketHelper import SocketHelper
 from CommonLib.VehDataMsgDefs import VehData
 
 __all__ = [
-    'connect', 'recv', 'send', 'close', 'getFields', 'getTime',
-    'vehicle', 'ego', 'trafficlight', 'verbose',
+    'connect', 'recv', 'send', 'close',
+    'getTime', 'getFields', 'getEgoIDList',
+    'vehicle', 'trafficlight',
     'Vehicle', 'FixsError', 'NotConnected', 'ProtocolError', 'FieldsMissing',
 ]
 
@@ -82,12 +83,12 @@ class NotConnected(FixsError):
 
 
 class ProtocolError(FixsError):
-    """Raised when recv/send are called out of order.
+    """Raised when recv/send are called out of order, or a command is incomplete.
 
-    TrafficLayer does not advance until every subscriber has answered, so a
-    tick that is received and never answered stalls the whole co-simulation.
-    Rather than let that surface as an unexplained hang on the next recv(),
-    it is reported here, naming the tick that was left unanswered.
+    TrafficLayer does not advance until every subscriber has answered, so a tick
+    that is received and never answered stalls the whole co-simulation. Rather
+    than let that surface as an unexplained hang on the next recv(), it is
+    reported here, naming the tick that was left unanswered.
     """
 
 
@@ -106,19 +107,26 @@ class FieldsMissing(FixsError):
 # Records
 # ---------------------------------------------------------------------------
 
+_WIRE_FIELDS = frozenset(f.name for f in dataclasses.fields(VehData))
+
+
 class Vehicle(VehData):
-    """One vehicle, for one tick. Read-only.
+    """One vehicle, for one tick.
 
-    Every field can be read; none can be assigned. Commands go through the
-    setters on :data:`fixs.vehicle`, which is the only way to put anything on
-    the wire. Two reasons for the asymmetry:
+    Read any field directly (``veh.speed``). Write only through :meth:`set`,
+    which takes wire field names as keywords::
 
-    * **A local calculation must not become a command.** Converting units in
-      place (``veh.speed *= 2.23694`` -- the eco controller does exactly this
+        veh.set(speedDesired=9.0)
+        veh.set(steerAngleDesired=s, acceleratorPedalDesired=a, brakePedalDesired=b)
+
+    Assignment raises. Two failure modes close because of it:
+
+    * **A local calculation cannot become a command.** Converting units in place
+      (``veh.speed *= 2.23694`` -- the eco controller does exactly this
       conversion on its dataframe) would otherwise be indistinguishable from an
       instruction to SUMO.
 
-    * **You cannot fabricate a reply record.** A fresh ``VehData`` leaves every
+    * **A reply record cannot be fabricated.** A fresh ``VehData`` leaves every
       unset field at its dataclass default -- position (0,0,0), heading 0 -- and
       TrafficLayer publishes a client's return to later clients by REPLACING the
       whole record for that id, not by merging fields. That is how a controller
@@ -126,19 +134,58 @@ class Vehicle(VehData):
       (ORNL-Real-Sim/FIXS_Applications#25). Here the only record that can be
       returned is the one that arrived.
 
-    This is a subclass of ``VehData`` with the same fields, so
-    ``isinstance(rec, VehData)`` still holds and adding a field to
-    ``VehDataMsgDefs.py`` surfaces it here automatically.
+    Calling ``set()`` also marks this record for the reply, so ``send()`` with no
+    argument returns exactly what was commanded.
+
+    This subclasses ``VehData`` rather than redefining it, so
+    ``isinstance(rec, VehData)`` holds and a field added to ``VehDataMsgDefs.py``
+    is available here with no change to this module.
     """
 
-    #: The wire's command channel: the only fields a client may write.
-    COMMAND_FIELDS = frozenset({
-        'speedDesired',
-        'accelerationDesired',
-        'steerAngleDesired',
-        'acceleratorPedalDesired',
-        'brakePedalDesired',
-    })
+    #: Longitudinal control. TrafficLayer consumes one of these, never both:
+    #: ConfigHelper.cpp:256 requires exactly one in VehicleMessageField, and
+    #: TrafficHelper.cpp:801 reports that SUMO does not implement the
+    #: acceleration form.
+    LONGITUDINAL_FIELDS = frozenset({'speedDesired', 'accelerationDesired'})
+
+    #: L4 actuation. CarlaBackend::applyEgoActuation reads all three every tick
+    #: (mainVirCarla.cpp:335), so a partial write ships whatever arrived for the
+    #: rest. Steer is a physical angle in rad; pedals are positions in [0, 1].
+    ACTUATION_FIELDS = frozenset({'steerAngleDesired',
+                                  'acceleratorPedalDesired',
+                                  'brakePedalDesired'})
+
+    #: Everything a client may write.
+    COMMAND_FIELDS = LONGITUDINAL_FIELDS | ACTUATION_FIELDS
+
+    _written = frozenset()
+
+    def set(self, **fields):
+        """(**fields) -> None -- command this vehicle.
+
+        Keywords are wire field names. Raises on an unknown name, and on a
+        measured field, which is data from the traffic simulator rather than a
+        command channel.
+        """
+        if not fields:
+            raise TypeError(
+                'set() needs at least one field, e.g. set(speedDesired=9.0)')
+        for name in fields:
+            if name in self.COMMAND_FIELDS:
+                continue
+            if name in _WIRE_FIELDS:
+                raise AttributeError(
+                    f"'{name}' is measured data from the traffic simulator and "
+                    f"cannot be commanded. Writable: "
+                    f"{', '.join(sorted(self.COMMAND_FIELDS))}."
+                )
+            raise AttributeError(
+                f"'{name}' is not a vehicle field. Writable: "
+                f"{', '.join(sorted(self.COMMAND_FIELDS))}."
+            )
+        for name, value in fields.items():
+            object.__setattr__(self, name, value)
+        object.__setattr__(self, '_written', self._written | frozenset(fields))
 
     def __setattr__(self, name, value):
         if name.startswith('_'):
@@ -146,9 +193,7 @@ class Vehicle(VehData):
             return
         if name in self.COMMAND_FIELDS:
             raise AttributeError(
-                f"records are read-only; use fixs.vehicle.set{name[0].upper()}"
-                f"{name[1:]}(vehID, value) to command '{name}'"
-            )
+                f'records are read-only; use veh.set({name}=...) to command it')
         raise AttributeError(
             f"'{name}' is measured data from the traffic simulator and cannot "
             f"be assigned. Records are read-only."
@@ -162,8 +207,9 @@ class Vehicle(VehData):
 class _View:
     """Records of one kind for the current tick.
 
-    ``getAll()`` is the FIXS equivalent of TraCI's
-    ``getAllSubscriptionResults()``: the whole tick in one call, keyed by id.
+    Every method here is a local lookup -- the data arrived with the last
+    recv(). ``getAll()`` is the FIXS equivalent of TraCI's
+    ``getAllSubscriptionResults()``.
     """
 
     _KIND = 'record'
@@ -171,29 +217,24 @@ class _View:
     def __init__(self, records=(), key=lambda r: r.id.strip()):
         self._byId = {key(r): r for r in records}
 
+    def get(self, objectID):
+        """(string) -> record | None
+
+        ``None`` rather than an error: a subscribed vehicle that has not
+        departed yet is a normal state, checked every tick.
+        """
+        return self._byId.get(objectID)
+
+    def getAll(self):
+        """() -> dict[string, record] -- this tick's records, keyed by id.
+
+        Iterate it with ``.items()``; iterating a dict directly yields its keys.
+        """
+        return dict(self._byId)
+
     def getIDList(self):
         """() -> list[string]"""
         return list(self._byId)
-
-    def getAll(self):
-        """() -> dict[string, record] -- every record in this tick's feed."""
-        return dict(self._byId)
-
-    def get(self, objectIDs):
-        """(list[string]) -> dict[string, record]
-
-        Ids that are not in this tick's feed are simply absent from the result,
-        which is also how TraCI subscription results behave.
-        """
-        if isinstance(objectIDs, str):
-            raise TypeError(
-                f'get() takes a list of ids, not a single string. '
-                f'Use get([{objectIDs!r}]).'
-            )
-        return {i: self._byId[i] for i in objectIDs if i in self._byId}
-
-    def __len__(self):
-        return len(self._byId)
 
     def __repr__(self):
         return (f'<{len(self._byId)} {self._KIND}(s): '
@@ -201,42 +242,7 @@ class _View:
 
 
 class _VehicleView(_View):
-    """Vehicles, plus the command channel back to TrafficLayer."""
-
     _KIND = 'vehicle'
-
-    def _command(self, vehID, field, value):
-        record = self._byId.get(vehID)
-        if record is None:
-            # Commanding a vehicle that is not in this tick is a bug, not a
-            # state to tolerate: a typo would otherwise do nothing, silently,
-            # for the whole run.
-            raise KeyError(
-                f"cannot command '{vehID}': not in this tick's feed. Present: "
-                f"{', '.join(sorted(self._byId)) or '(none)'}"
-            )
-        object.__setattr__(record, field, value)
-        _commanded.add(vehID)
-
-    def setSpeedDesired(self, vehID, value):
-        """(string, double) -> None"""
-        self._command(vehID, 'speedDesired', value)
-
-    def setAccelerationDesired(self, vehID, value):
-        """(string, double) -> None"""
-        self._command(vehID, 'accelerationDesired', value)
-
-    def setSteerAngleDesired(self, vehID, value):
-        """(string, double) -> None -- desired front road-wheel angle, rad."""
-        self._command(vehID, 'steerAngleDesired', value)
-
-    def setAcceleratorPedalDesired(self, vehID, value):
-        """(string, double) -> None -- pedal position in [0, 1]."""
-        self._command(vehID, 'acceleratorPedalDesired', value)
-
-    def setBrakePedalDesired(self, vehID, value):
-        """(string, double) -> None -- pedal position in [0, 1]."""
-        self._command(vehID, 'brakePedalDesired', value)
 
 
 class _TrafficLightView(_View):
@@ -248,16 +254,13 @@ class _TrafficLightView(_View):
 # ---------------------------------------------------------------------------
 
 vehicle: _VehicleView = _VehicleView()
-ego: _VehicleView = _VehicleView()
 trafficlight: _TrafficLightView = _TrafficLightView()
-verbose: bool = False           # SimulationSetup.EnableVerboseLog, from the config
 
 _helper: typing.Optional[SocketHelper] = None
 _sock: typing.Optional[socket.socket] = None
 _egoIds: typing.List[str] = []
-_commanded: typing.Set[str] = set()
 
-# The tick currently held awaiting its reply.
+# The tick currently held awaiting its answer.
 _armed: bool = False
 _received: typing.List[Vehicle] = []
 _simState: int = 0
@@ -282,13 +285,13 @@ def connect(configPath=None, *, port=None, host=None, ego=None, require=(),
         the wire format IS ``SimulationSetup.VehicleMessageField``, so two yamls
         that disagree decode the same bytes differently.
     :param port: which ``ApplicationSetup.VehicleSubscription`` entry is this
-        client's. Required only when the config declares more than one, and
-        then it is required rather than guessed -- silently taking entry 0 is
-        how two clients end up sharing one endpoint.
+        client's. Required only when the config declares more than one, and then
+        required rather than guessed -- silently taking entry 0 is how two
+        clients end up sharing one endpoint.
     :param host: override the address from the config.
-    :param ego: id, or list of ids, this client controls, exposed as
-        ``fixs.ego``. Defaults to the ``attribute.id`` list of the selected
-        subscription, so the yaml does not have to be restated in code.
+    :param ego: id, or list of ids, this client controls, reported by
+        :func:`getEgoIDList`. Defaults to the ``attribute.id`` list of the
+        selected subscription, so the yaml is not restated in code.
     :param require: field names that must be on the wire. Raises
         :class:`FieldsMissing` here rather than degrading silently per tick.
     :param connectTimeout: seconds to keep retrying the connect; ``None``
@@ -296,9 +299,9 @@ def connect(configPath=None, *, port=None, host=None, ego=None, require=(),
         stops the stack itself when something upstream dies.
     :param recvTimeout: seconds to wait for the next message; ``None`` waits
         indefinitely. TrafficLayer advances only once EVERY subscriber has
-        replied, so a deadline here fires when some OTHER client stalls.
+        answered, so a deadline here fires when some OTHER client stalls.
     """
-    global _helper, _sock, _egoIds, verbose
+    global _helper, _sock, _egoIds
 
     if _sock is not None:
         close()
@@ -332,10 +335,9 @@ def connect(configPath=None, *, port=None, host=None, ego=None, require=(),
     msgHelper = MsgHelper()
     msgHelper.set_vehicle_message_field(declared)
 
-    verbose = bool(config.simulation_setup.get('EnableVerboseLog', False))
     _helper = SocketHelper(config_helper=config, msg_helper=msgHelper)
     _sock = _openSocket(host, int(port), connectTimeout, recvTimeout)
-    atexit.register(close)          # a held reply must still go out on exit
+    atexit.register(close)          # an unanswered tick must still go out
     return host, int(port)
 
 
@@ -358,9 +360,8 @@ def _selectSubscription(config, configPath, port):
     if len(subscriptions) > 1:
         declaredPorts = [p for e in subscriptions for p in e.get('port', [])]
         raise FixsError(
-            f'{configPath} declares {len(subscriptions)} vehicle '
-            f'subscriptions (ports {declaredPorts}); pass port= to say which '
-            f'one is this client.'
+            f'{configPath} declares {len(subscriptions)} vehicle subscriptions '
+            f'(ports {declaredPorts}); pass port= to say which is this client.'
         )
     return subscriptions[0]
 
@@ -401,16 +402,15 @@ def close():
     """Close the connection. Safe to call more than once.
 
     A tick that was received and never answered is answered here as a safety
-    net -- TrafficLayer is blocked waiting for it, so leaving without a reply
-    stalls the whole co-simulation. Applications should not rely on this: call
-    send() in the loop body, where you can see it.
+    net -- TrafficLayer is blocked waiting for it. Applications should not rely
+    on this: call send() in the loop body, where it is visible.
     """
     global _sock, _helper, _egoIds, _armed, _received
     if _armed and _sock is not None:
         try:
             send()
         except (OSError, FixsError):
-            pass                # peer already gone; nothing to deliver
+            pass                # peer already gone, or an incomplete command
     if _sock is not None:
         try:
             _sock.close()
@@ -427,6 +427,16 @@ def getFields():
     """() -> list[string] -- the VehicleMessageField list this connection decodes."""
     _requireConnection()
     return list(_helper.msg_helper.vehicle_msg_field)
+
+
+def getEgoIDList():
+    """() -> list[string] -- the ids this client declared.
+
+    Configuration, not data: this is the subscription's ``attribute.id`` list
+    and does not change between ticks. Whether a given id is in the feed right
+    now is ``fixs.vehicle.get(vehID) is not None``.
+    """
+    return list(_egoIds)
 
 
 def getTime():
@@ -453,13 +463,10 @@ def recv():
 
     Raises :class:`ProtocolError` if the previous tick was never answered.
     TrafficLayer does not advance until every subscriber has replied, so a
-    missing send() otherwise surfaces as an unexplained hang here.
-
-    NOTE this does not advance the simulator. TrafficLayer owns the clock; see
-    the module docstring on why there is no ``simulationStep``.
+    missing send() would otherwise surface as an unexplained hang here.
     """
     _requireConnection()
-    global vehicle, ego, trafficlight, _armed, _received, _simState, _simTime
+    global vehicle, trafficlight, _armed, _received, _simState, _simTime
 
     if _armed:
         raise ProtocolError(
@@ -470,21 +477,20 @@ def recv():
     _helper.clear_data()
     simState, simTime = _helper.recv_data(_sock)
     if simState == 0:
-        vehicle, ego = _VehicleView(), _VehicleView()
+        vehicle = _VehicleView()
         trafficlight = _TrafficLightView()
         return None
 
     _received = _helper.vehicle_data_receive_list
     for record in _received:
         record.__class__ = Vehicle      # adopt in place: no copy, no re-decode
+        object.__setattr__(record, '_written', frozenset())
     vehicle = _VehicleView(_received)
-    ego = _VehicleView(r for r in _received if r.id.strip() in _egoIds)
     trafficlight = _TrafficLightView(
         _helper.traffic_light_data_receive_list,
         key=lambda r: (r.name or '').strip())
 
     _simState, _simTime = simState, simTime
-    _commanded.clear()
     _armed = True
     return simTime
 
@@ -492,8 +498,8 @@ def recv():
 def send(vehIDs=None):
     """(list) -> None -- answer the tick now.
 
-    Without an argument the reply carries exactly the records commanded through
-    the setters, which is what a controller wants: returning ~200 untouched
+    Without an argument the reply carries exactly the records commanded with
+    ``veh.set(...)``, which is what a controller wants: returning ~200 untouched
     records every tick doubles upstream volume to say nothing.
 
     ``vehIDs`` adds records to return UNCHANGED, on top of whatever was
@@ -514,15 +520,21 @@ def send(vehIDs=None):
             'fixs.send() exactly once per tick received.'
         )
 
+    commanded = set()
+    for record in _received:
+        if record._written:
+            _validateCommand(record)
+            commanded.add(record.id.strip())
+
     if vehIDs is None:
-        wanted = _commanded
+        wanted = commanded
     else:
         if isinstance(vehIDs, str):
             raise TypeError(
                 f'send() takes a list of ids, not a single string. '
                 f'Use send([{vehIDs!r}]).'
             )
-        wanted = _commanded | set(vehIDs)
+        wanted = commanded | set(vehIDs)
 
     # Filter the received list rather than the id-keyed view, so records go back
     # in the order they arrived and a repeated id is not collapsed.
@@ -534,6 +546,28 @@ def send(vehIDs=None):
     _helper.vehicle_data_send_list.extend(sendList)
     _helper.sendData(_simState, _simTime, _sock)
     _armed = False
+
+
+def _validateCommand(record):
+    """Check that what was written forms a command TrafficLayer can act on."""
+    written = record._written
+
+    actuation = written & Vehicle.ACTUATION_FIELDS
+    if actuation and actuation != Vehicle.ACTUATION_FIELDS:
+        missing = Vehicle.ACTUATION_FIELDS - actuation
+        raise ProtocolError(
+            f"'{record.id.strip()}': actuation is one command -- "
+            f"CarlaBackend::applyEgoActuation reads all three fields every "
+            f"tick, so the ones left out would ship whatever arrived. "
+            f"Missing: {', '.join(sorted(missing))}."
+        )
+
+    if written >= Vehicle.LONGITUDINAL_FIELDS:
+        raise ProtocolError(
+            f"'{record.id.strip()}': set speedDesired or accelerationDesired, "
+            f"not both -- TrafficLayer accepts exactly one longitudinal command "
+            f"(ConfigHelper.cpp:256)."
+        )
 
 
 def __getattr__(name):

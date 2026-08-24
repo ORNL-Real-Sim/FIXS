@@ -46,7 +46,7 @@ def test_command_fields_cannot_be_assigned_either(field):
     veh = _adopted(id='ego')
     with pytest.raises(AttributeError) as excinfo:
         setattr(veh, field, 1.0)
-    assert 'fixs.vehicle.set' in str(excinfo.value)
+    assert 'veh.set(' in str(excinfo.value)
 
 
 # ---------------------------------------------------------------------------
@@ -58,21 +58,14 @@ def test_getall_and_getidlist():
     view = fixs._VehicleView([a, b])
     assert view.getAll() == {'ego': a, 'veh1': b}
     assert sorted(view.getIDList()) == ['ego', 'veh1']
-    assert len(view) == 2
 
 
-def test_get_takes_a_list_and_skips_absent_ids():
-    view = fixs._VehicleView([_adopted(id='ego')])
-    assert view.get(['ego', 'nope']) == {'ego': view.getAll()['ego']}
-
-
-def test_get_rejects_a_bare_string():
-    """A string is iterable, so accepting one would do per-character lookups
-    and return an empty dict rather than an error."""
-    view = fixs._VehicleView([_adopted(id='ego')])
-    with pytest.raises(TypeError) as excinfo:
-        view.get('ego')
-    assert "get(['ego'])" in str(excinfo.value)
+def test_get_returns_the_record_or_none():
+    a = _adopted(id='ego')
+    view = fixs._VehicleView([a])
+    assert view.get('ego') is a
+    # Absent is a normal state -- a subscribed ego before its departure time.
+    assert view.get('nope') is None
 
 
 def test_getall_returns_a_copy():
@@ -275,7 +268,7 @@ def test_reply_carries_only_commanded_records_by_default():
     while True:
         if fixs.recv() is None:
             break
-        fixs.vehicle.setSpeedDesired('ego', 9.0)
+        fixs.vehicle.get('ego').set(speedDesired=9.0)
         fixs.send()
     assert len(sock.sent) == 1
     # One record on the wire, not two: the untouched vehicle is not returned.
@@ -287,33 +280,84 @@ def test_setter_writes_the_value_that_goes_out():
     while True:
         if fixs.recv() is None:
             break
-        fixs.vehicle.setSpeedDesired('ego', 9.0)
-        assert fixs.vehicle.getAll()['ego'].speedDesired == 9.0
+        fixs.vehicle.get('ego').set(speedDesired=9.0)
+        assert fixs.vehicle.get('ego').speedDesired == 9.0
         fixs.send()
 
 
-def test_setter_on_an_absent_id_raises():
-    """A typo would otherwise do nothing, silently, for the whole run."""
+def test_absent_id_reads_as_none():
     _install([(1, 0.1, [_veh('ego')])])
     fixs.recv()
-    with pytest.raises(KeyError) as excinfo:
-        fixs.vehicle.setSpeedDesired('egoo', 1.0)
-    assert 'ego' in str(excinfo.value)
+    assert fixs.vehicle.get('egoo') is None
     fixs.close()
 
 
-def test_ego_view_holds_only_declared_ids():
-    _install([(1, 0.1, [_veh('ego'), _veh('other')])], egoIds=('ego',))
+def test_set_rejects_a_measured_field():
+    _install([(1, 0.1, [_veh('ego')])])
     fixs.recv()
-    assert fixs.ego.getIDList() == ['ego']
-    assert sorted(fixs.vehicle.getIDList()) == ['ego', 'other']
+    with pytest.raises(AttributeError) as excinfo:
+        fixs.vehicle.get('ego').set(speed=12.0)
+    assert 'measured' in str(excinfo.value)
+    fixs.close()
+
+
+def test_set_rejects_an_unknown_field():
+    """A typo in a field name fails immediately, listing what is writable."""
+    _install([(1, 0.1, [_veh('ego')])])
+    fixs.recv()
+    with pytest.raises(AttributeError) as excinfo:
+        fixs.vehicle.get('ego').set(spedDesired=9.0)
+    assert 'speedDesired' in str(excinfo.value)
+    fixs.close()
+
+
+def test_partial_actuation_is_rejected_at_send():
+    """applyEgoActuation reads all three every tick, so two is not a command."""
+    _install([(1, 0.1, [_veh('ego')])])
+    fixs.recv()
+    fixs.vehicle.get('ego').set(steerAngleDesired=0.1, brakePedalDesired=0.0)
+    with pytest.raises(fixs.ProtocolError) as excinfo:
+        fixs.send()
+    assert 'acceleratorPedalDesired' in str(excinfo.value)
+    fixs.close()
+
+
+def test_complete_actuation_is_accepted():
+    sock = _install([(1, 0.1, [_veh('ego')])])
+    fixs.recv()
+    fixs.vehicle.get('ego').set(steerAngleDesired=0.1,
+                                acceleratorPedalDesired=0.3,
+                                brakePedalDesired=0.0)
+    fixs.send()
+    assert _recordCount(sock.sent[0]) == 1
+    fixs.close()
+
+
+def test_both_longitudinal_commands_are_rejected():
+    """ConfigHelper.cpp:256 accepts exactly one."""
+    _install([(1, 0.1, [_veh('ego')])])
+    fixs.recv()
+    fixs.vehicle.get('ego').set(speedDesired=9.0, accelerationDesired=1.0)
+    with pytest.raises(fixs.ProtocolError) as excinfo:
+        fixs.send()
+    assert 'not both' in str(excinfo.value)
+    fixs.close()
+
+
+def test_declared_ids_are_configuration_not_this_tick():
+    """getEgoIDList is the subscription's list, whether or not they are present."""
+    _install([(1, 0.1, [_veh('other')])], egoIds=('ego',))
+    fixs.recv()
+    assert fixs.getEgoIDList() == ['ego']
+    assert fixs.vehicle.getIDList() == ['other']
+    assert fixs.vehicle.get('ego') is None
     fixs.close()
 
 
 def test_multiple_egos_are_supported():
     _install([(1, 0.1, [_veh('e1'), _veh('e2'), _veh('bg')])], egoIds=('e1', 'e2'))
     fixs.recv()
-    assert sorted(fixs.ego.getIDList()) == ['e1', 'e2']
+    assert sorted(fixs.getEgoIDList()) == ['e1', 'e2']
     fixs.close()
 
 
@@ -335,7 +379,7 @@ def test_send_ids_are_additive_to_commands():
     while True:
         if fixs.recv() is None:
             break
-        fixs.vehicle.setSpeedDesired('b', 3.0)
+        fixs.vehicle.get('b').set(speedDesired=3.0)
         fixs.send(['ego'])
     assert _recordCount(sock.sent[0]) == 2
 
