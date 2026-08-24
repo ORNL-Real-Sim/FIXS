@@ -170,7 +170,7 @@ def new_slide(prs, num, eyebrow, title, lede=None):
 
     tf = textbox(s, 0.62, 0.24, 8.0, 0.26)
     p = tf.paragraphs[0]
-    r = p.add_run(); r.text = "%02d / 09" % num
+    r = p.add_run(); r.text = "%02d / 08" % num
     r.font.name, r.font.size, r.font.bold = F_MONO, Pt(9), True
     r.font.color.rgb = HW
     r = p.add_run(); r.text = "    " + eyebrow.upper()
@@ -242,90 +242,97 @@ def slide_01(prs):
 
 
 def slide_02(prs):
-    s = new_slide(prs, 2, "State ownership",
-                  "One wheel-spin integrator exists in the whole system",
-                  "CarMaker's went out with the PowerTrain module. The hardware's physical spin is "
-                  "servo-slaved. Ours is the only one — which is why nothing can diverge.")
+    s = new_slide(prs, 2, "The loop",
+                  "What each part owns, and what crosses between them",
+                  "Three parts, four signals, one equation. The wheel speed is computed in "
+                  "Simulink and sent to both sides. Nothing else crosses.")
 
-    labelled_box(s, 0.62, 2.20, 3.5, 2.30, "HARDWARE",
-                 ["powertrain", "a torque source only", "",
-                  "owns no integrated state:", "its shaft speed is forced", "by the servo"],
+    labelled_box(s, 0.62, 2.02, 3.15, 1.70, "HARDWARE",
+                 ["real powertrain on the dyno", "",
+                  "The dyno speed controller", "makes the shaft follow w."],
                  fill=HW_SOFT, edge=HW, head_color=HW, width=1.5)
 
-    labelled_box(s, 4.92, 2.20, 3.5, 2.30, "SIMULINK — OURS",
-                 ["wheel spin  w", "Backward Euler, Ts = 1 ms", "",
-                  "THE ONLY INTEGRATOR", "for this state, anywhere", "in the system"],
+    labelled_box(s, 4.72, 1.86, 3.90, 2.02, "SIMULINK — OUR BLOCK",
+                 ["w[k] = w[k-1]",
+                  "       + (Ts / I) * ( Taxl[k]",
+                  "       + Trq_T2W[k] )",
+                  "",
+                  "Ts = 0.001 s, same step as CarMaker",
+                  "I  = Wheel.<i>.I, read from CarMaker"],
                  fill=None, edge=INK, head_color=INK, width=2.5)
 
-    labelled_box(s, 9.22, 2.20, 3.5, 2.30, "CARMAKER",
-                 ["body · suspension", "tire · road", "",
-                  "PowerTrain module removed", "— so its wheel spin DOF", "is gone too"],
+    labelled_box(s, 9.57, 2.02, 3.15, 1.70, "CARMAKER",
+                 ["tire, body, suspension, road", "",
+                  "Uses w to find tire slip,", "then returns the tire torque."],
                  fill=MODEL_SOFT, edge=MODEL, head_color=MODEL, width=1.5)
 
-    arrow(s, 4.12, 2.72, 4.86, 2.72, color=HW, width=2.25)
-    tf = textbox(s, 4.10, 2.44, 1.0, 0.26); line(tf, "Taxl", font=F_MONO, size=10, color=HW, first=True)
-    arrow(s, 4.86, 3.92, 4.12, 3.92, color=HW, width=2.0, dash=DASH)
-    tf = textbox(s, 4.02, 4.00, 1.3, 0.26); line(tf, "w_cmd", font=F_MONO, size=9, color=HW, first=True)
+    # hardware -> simulink
+    arrow(s, 3.77, 2.42, 4.66, 2.42, color=HW, width=2.5)
+    tf = textbox(s, 3.80, 2.12, 1.6, 0.24)
+    line(tf, "Taxl[k]", font=F_MONO, size=10, color=HW, bold=True, first=True)
+    tf = textbox(s, 3.80, 2.62, 1.7, 0.5)
+    line(tf, "measured axle", font=F_MONO, size=8.5, color=INK_3, first=True)
+    line(tf, "torque [Nm]", font=F_MONO, size=8.5, color=INK_3)
 
-    arrow(s, 8.42, 2.72, 9.16, 2.72, color=MODEL, width=2.25)
-    tf = textbox(s, 8.40, 2.44, 1.0, 0.26); line(tf, "rotv", font=F_MONO, size=10, color=MODEL, first=True)
-    arrow(s, 9.16, 3.92, 8.42, 3.92, color=MODEL, width=2.25)
-    tf = textbox(s, 8.32, 4.00, 1.4, 0.26); line(tf, "Trq_T2W", font=F_MONO, size=9, color=MODEL, first=True)
+    # simulink -> hardware
+    arrow(s, 4.66, 3.42, 3.77, 3.42, color=HW, width=2.5, dash=DASH)
+    tf = textbox(s, 3.80, 3.50, 1.8, 0.5)
+    line(tf, "w[k] as speed", font=F_MONO, size=8.5, color=HW, first=True)
+    line(tf, "command [rad/s]", font=F_MONO, size=8.5, color=HW)
 
-    caption(s, "CM DriveLine performs this integration natively — RefMan Fig. 16.83 "
-               "“Integration of rotation speeds”. We rebuilt that block with the same inertia "
-               "parameter,", y=5.00)
-    caption(s, "matching IPG's own UserPowerTrain.mdl. Consequence: CM's tire slip is computed from "
-               "exactly the number that commands the dyno — consistent by construction, not by tracking.",
-            y=5.24)
+    # simulink -> carmaker
+    arrow(s, 8.62, 2.42, 9.51, 2.42, color=MODEL, width=2.5)
+    tf = textbox(s, 8.65, 2.12, 1.6, 0.24)
+    line(tf, "w[k]", font=F_MONO, size=10, color=MODEL, bold=True, first=True)
+    tf = textbox(s, 8.65, 2.62, 1.8, 0.5)
+    line(tf, "written to rotv", font=F_MONO, size=8.5, color=INK_3, first=True)
+    line(tf, "[rad/s]", font=F_MONO, size=8.5, color=INK_3)
+
+    # carmaker -> simulink
+    arrow(s, 9.51, 3.42, 8.62, 3.42, color=MODEL, width=2.5)
+    tf = textbox(s, 8.65, 3.50, 1.8, 0.5)
+    line(tf, "Trq_T2W[k]", font=F_MONO, size=9, color=MODEL, bold=True, first=True)
+    line(tf, "tire torque [Nm]", font=F_MONO, size=8.5, color=INK_3)
+
+    plain_line(s, 0.62, 4.30, 12.72, 4.30, color=RULE)
+
+    facts = [
+        ("The same w[k] goes to both sides.", HW,
+         "CarMaker is given the computed speed, not the measured one."),
+        ("The real shaft speed stays in the dyno controller.", INK,
+         "If the servo lags, CarMaker never finds out."),
+        ("CarMaker has no wheel speed of its own.", MODEL,
+         "Its integrator went with the PowerTrain module, so ours is the only one."),
+        ("CarMaker never uses Taxl either.", INK,
+         "We send it, but with the support torques zeroed nothing reads it."),
+    ]
+    yy = 4.46
+    for head, col, tail in facts:
+        tf = textbox(s, 0.62, yy, 12.1, 0.24)
+        p = tf.paragraphs[0]
+        r = p.add_run(); r.text = head
+        r.font.name, r.font.size, r.font.bold = F_MONO, Pt(10), True
+        r.font.color.rgb = col
+        r = p.add_run(); r.text = "   " + tail
+        r.font.name, r.font.size = F_MONO, Pt(10)
+        r.font.color.rgb = INK_2
+        yy += 0.30
+
+    caption(s, "Read it as a sentence: add the measured axle torque to the tire torque from CarMaker, "
+               "divide by the wheel inertia, integrate.", y=5.82)
+    caption(s, "CarMaker does this same integration natively in its DriveLine (RefMan Fig. 16.83). We "
+               "rebuilt that block with the same inertia parameter,", y=6.06)
+    caption(s, "matching IPG's own UserPowerTrain.mdl. All CarMaker brake torque is zeroed here, because "
+               "real braking is already inside Taxl.", y=6.30)
     return s
 
 
 def slide_03(prs):
-    s = new_slide(prs, 3, "Signal flow", "What crosses the cut at step k",
-                  "The actual dyno shaft speed never reaches CarMaker. It is seen only by the "
-                  "dyno's internal speed-tracking controller.")
-
-    labelled_box(s, 0.62, 2.30, 3.1, 1.75, "DYNO + VEHICLE",
-                 ["internal speed servo", "tracks w_cmd", "", "w_act stays in here"],
-                 fill=HW_SOFT, edge=HW, head_color=HW, width=1.5)
-
-    sh = labelled_box(s, 5.05, 2.10, 3.3, 2.15, "SIMULINK",
-                      ["w[k] = w[k-1]", "   + (Ts/I) *", "   ( Taxl[k]", "   + Trq_T2W[k] )"],
-                      fill=None, edge=INK, head_color=INK, width=2.5)
-
-    labelled_box(s, 9.70, 2.30, 3.0, 1.75, "CARMAKER",
-                 ["tire → body → road", "", "holds vehicle mass"],
-                 fill=MODEL_SOFT, edge=MODEL, head_color=MODEL, width=1.5)
-
-    arrow(s, 3.72, 2.70, 4.99, 2.70, color=HW, width=2.5)
-    tf = textbox(s, 3.78, 2.40, 1.6, 0.26); line(tf, "Taxl[k]", font=F_MONO, size=10, color=HW, first=True)
-    tf = textbox(s, 3.78, 2.80, 1.7, 0.26); line(tf, "measured", font=F_MONO, size=8.5, color=INK_3, first=True)
-
-    arrow(s, 4.99, 3.72, 3.72, 3.72, color=HW, width=2.5, dash=DASH)
-    tf = textbox(s, 3.86, 3.80, 1.9, 0.26); line(tf, "w_cmd = w[k]", font=F_MONO, size=9, color=HW, first=True)
-
-    arrow(s, 8.35, 2.70, 9.64, 2.70, color=MODEL, width=2.5)
-    tf = textbox(s, 8.42, 2.40, 1.7, 0.26); line(tf, "rotv = w[k]", font=F_MONO, size=10, color=MODEL, first=True)
-    tf = textbox(s, 8.42, 2.80, 2.2, 0.26); line(tf, "Trq_Drive = Taxl[k]", font=F_MONO, size=8.5, color=INK_3, first=True)
-
-    arrow(s, 9.64, 3.72, 8.35, 3.72, color=MODEL, width=2.5)
-    tf = textbox(s, 8.50, 3.80, 1.7, 0.26); line(tf, "Trq_T2W[k]", font=F_MONO, size=9, color=MODEL, first=True)
-
-    plain_line(s, 0.62, 4.62, 12.72, 4.62, color=RULE)
-    caption(s, "Zeroed by us: all CM brake torque, Trq_Supp2WC, Trq_Supp2Bdy1, Trq_Supp2BdyEng.",
-            y=4.80, color=HW)
-    caption(s, "Trq_Drive therefore has no live consumer — in this build it is bookkeeping only. "
-               "The one dynamically active hardware→CM signal is rotv:", y=5.04)
-    caption(s, "CarMaker sees the resultant of Taxl and Ttire, never Taxl itself.", y=5.28)
-    return s
-
-
-def slide_04(prs):
-    s = new_slide(prs, 4, "Timing · the key diagram",
+    s = new_slide(prs, 3, "Timing · the key diagram",
                   "Where the one-step delay actually lives",
-                  "The tire's slip→force map is memoryless. The delay is in the shared variable, "
-                  "because Tire is scheduled before PowerTrain and Rim_rotv is written once per cycle.")
+                  "The tire model has no memory: give it the inputs and it returns a force straight "
+                  "away. The delay comes from the order the modules run in. Rim_rotv is written "
+                  "once per cycle by PowerTrain, and Tire runs before that.")
 
     y = 2.05
     h = 0.72
@@ -402,11 +409,11 @@ def slide_04(prs):
     return s
 
 
-def slide_05(prs):
-    s = new_slide(prs, 5, "Two integrations",
-                  "The wheel integration is not after PowerTrain — it IS PowerTrain",
-                  "Routinely conflated. They happen at different points in the sequence and are "
-                  "owned by different parties.")
+def slide_04(prs):
+    s = new_slide(prs, 4, "Two integrations",
+                  "The wheel integration happens at the PowerTrain step, not after it",
+                  "Two different integrations are easy to mix up. They run at different points "
+                  "and belong to different parties.")
 
     labelled_box(s, 0.62, 2.05, 5.9, 1.36, "A · OURS — wheel spin  w",
                  ["At the PowerTrain slot. CM natively does it in the",
@@ -441,9 +448,9 @@ def slide_05(prs):
     return s
 
 
-def slide_06(prs):
-    s = new_slide(prs, 6, "Inside the tire",
-                  "Almost stateless — and the exception is what saves you")
+def slide_05(prs):
+    s = new_slide(prs, 5, "Inside the tire",
+                  "The tire has almost no state, and the one exception matters")
 
     tf = textbox(s, 0.62, 2.00, 2.6, 0.3)
     line(tf, "INPUTS", font=F_DISPLAY, size=13, color=MODEL, bold=True, first=True)
@@ -505,8 +512,8 @@ def slide_06(prs):
     return s
 
 
-def slide_07(prs):
-    s = new_slide(prs, 7, "Longitudinal ↔ lateral",
+def slide_06(prs):
+    s = new_slide(prs, 6, "Longitudinal ↔ lateral",
                   "The bench is longitudinal-only, but the load it sees is lateral-aware")
 
     labelled_box(s, 0.62, 2.20, 2.5, 0.86, "our w[k]", ["→ vBelt → s"],
@@ -563,10 +570,11 @@ def slide_07(prs):
     return s
 
 
-def slide_08(prs):
-    s = new_slide(prs, 8, "Stability", "A ~45 Hz mode whose damping grows with speed",
-                  "Wheel inertia against tire relaxation gives a second-order system. Natural frequency "
-                  "is speed-independent; damping is proportional to speed.")
+def slide_07(prs):
+    s = new_slide(prs, 7, "Stability", "A ~45 Hz mode whose damping grows with speed",
+                  "Wheel inertia working against tire relaxation gives a second-order system. Its "
+                  "frequency does not change with speed. Its damping is proportional to speed, "
+                  "and the one-step delay takes a fixed amount away.")
 
     mono_block(s, 0.62, 1.98, 12.1, 1.10, [
         ("wn   = r * sqrt( Cs / (I*sigma) )  ~ 286 rad/s ~ 45 Hz   — INDEPENDENT of speed", INK, True),
@@ -648,8 +656,8 @@ def slide_08(prs):
     return s
 
 
-def slide_09(prs):
-    s = new_slide(prs, 9, "Verdict", "Why it works, and the two things it cannot tell you")
+def slide_08(prs):
+    s = new_slide(prs, 8, "Verdict", "Why it works, and the two things it cannot tell you")
 
     why = [("One integrator",
             ["Divergence needs two states drifting apart.", "There is one. CM's tire slip comes from",
@@ -695,7 +703,7 @@ def main() -> None:
     prs = Presentation()
     prs.slide_width, prs.slide_height = SW, SH
     for fn in (slide_01, slide_02, slide_03, slide_04,
-               slide_05, slide_06, slide_07, slide_08, slide_09):
+               slide_05, slide_06, slide_07, slide_08):
         fn(prs)
     prs.save(OUT)
     print("wrote %s  (%d slides, %.0f KB)"

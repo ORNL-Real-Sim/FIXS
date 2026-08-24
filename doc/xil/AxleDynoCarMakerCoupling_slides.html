@@ -70,7 +70,7 @@ body{
   text-transform:uppercase; color:var(--ink-3);
 }
 .eyebrow .num{color:var(--hw); font-weight:700}
-.eyebrow .num::after{content:" / 09"; color:var(--ink-3); font-weight:400}
+.eyebrow .num::after{content:" / 08"; color:var(--ink-3); font-weight:400}
 
 h1,h2{
   font-family:var(--font-display); font-variation-settings:'wght' 700,'wdth' 85;
@@ -167,7 +167,7 @@ a{color:var(--hw)}
   <div class="wrap">
     <div class="eyebrow"><span class="num">01</span><span>FIXS &middot; XIL bench &middot; dev_v0.9.0</span></div>
     <h1>Axle Dyno &harr; CarMaker Coupling</h1>
-    <p class="lede">How the working implementation exchanges torque and speed with CarMaker across a single scalar per corner &mdash; where the one-step delay comes from, why the loop is stable, and what the architecture cannot tell you about itself.</p>
+    <p class="lede">How the bench and CarMaker exchange torque and speed today. Where the one-step delay comes from, why the loop is stable, and the two things it cannot tell you about itself.</p>
     <div class="eq">w<sub>i</sub>[k] = w<sub>i</sub>[k&minus;1] + (K&middot;Ts / I<sub>i</sub>) &middot; ( <b>Taxl<sub>i</sub>[k]</b> + <i>Ttire<sub>i</sub>[k]</i> )
 
 K = 1     Ts = 0.001 s     I<sub>i</sub> = CarMaker parameter  Wheel.&lt;i&gt;.I</div>
@@ -182,120 +182,94 @@ K = 1     Ts = 0.001 s     I<sub>i</sub> = CarMaker parameter  Wheel.&lt;i&gt;.I
 <!-- 02 ─────────────────────────────────────────────── -->
 <section class="slide">
   <div class="wrap">
-    <div class="eyebrow"><span class="num">02</span><span>State ownership</span></div>
-    <h2>One wheel-spin integrator exists in the whole system</h2>
-    <p class="lede">CarMaker&rsquo;s went out with the PowerTrain module. The hardware&rsquo;s physical spin is servo-slaved. Ours is the only one &mdash; which is why nothing can diverge.</p>
+    <div class="eyebrow"><span class="num">02</span><span>The loop</span></div>
+    <h2>What each part owns, and what crosses between them</h2>
+    <p class="lede">Three parts, four signals, one equation. The wheel speed is computed in Simulink and sent to both sides. Nothing else crosses.</p>
 
     <figure>
       <div class="plate">
-        <svg viewBox="0 0 1000 330" role="img" aria-labelledby="d2t">
-          <title id="d2t">Three domains: hardware owns the powertrain as a torque source, Simulink owns the wheel spin state, CarMaker owns body, tire and road</title>
-          <rect x="30" y="66" width="252" height="168" rx="2" fill="var(--hw-soft)" stroke="var(--hw)" stroke-width="1.5"/>
-          <text class="t-hd" x="46" y="94" fill="var(--hw)">HARDWARE</text>
-          <text class="t-sig" x="46" y="122">powertrain</text>
-          <text class="t-note" x="46" y="142">a torque source only</text>
-          <line x1="46" y1="158" x2="266" y2="158" stroke="var(--hw)" stroke-width="1" opacity=".45"/>
-          <text class="t-note" x="46" y="180">owns no integrated state:</text>
-          <text class="t-note" x="46" y="198">its shaft speed is forced</text>
-          <text class="t-note" x="46" y="216">by the servo</text>
+        <svg viewBox="0 0 1000 400" role="img" aria-labelledby="d2t">
+          <title id="d2t">Hardware sends measured axle torque to a Simulink block, which integrates it together with the tire torque from CarMaker to get the wheel speed, and sends that speed to both the dyno and CarMaker</title>
 
-          <rect x="374" y="66" width="252" height="168" rx="2" fill="none" stroke="var(--ink)" stroke-width="2.5"/>
-          <text class="t-hd" x="390" y="94">SIMULINK &mdash; OURS</text>
-          <text class="t-sig" x="390" y="122">wheel spin  w</text>
-          <text class="t-note" x="390" y="142">Backward Euler, Ts = 1 ms</text>
-          <line x1="390" y1="158" x2="610" y2="158" stroke="var(--ink)" stroke-width="1" opacity=".35"/>
-          <text class="t-note" x="390" y="180" fill="var(--hw)">THE ONLY INTEGRATOR</text>
-          <text class="t-note" x="390" y="198">for this state, anywhere</text>
-          <text class="t-note" x="390" y="216">in the system</text>
+          <rect x="24" y="84" width="228" height="150" rx="2" fill="var(--hw-soft)" stroke="var(--hw)" stroke-width="1.5"/>
+          <text class="t-hd" x="42" y="114" fill="var(--hw)">HARDWARE</text>
+          <text class="t-sig" x="42" y="146">real powertrain</text>
+          <text class="t-sig" x="42" y="168">on the dyno</text>
+          <line x1="42" y1="184" x2="234" y2="184" stroke="var(--hw)" stroke-width="1" opacity=".45"/>
+          <text class="t-note" x="42" y="204">The dyno speed controller</text>
+          <text class="t-note" x="42" y="222">makes the shaft follow w.</text>
 
-          <rect x="718" y="66" width="252" height="168" rx="2" fill="var(--model-soft)" stroke="var(--model)" stroke-width="1.5"/>
-          <text class="t-hd" x="734" y="94" fill="var(--model)">CARMAKER</text>
-          <text class="t-sig" x="734" y="122">body &middot; suspension</text>
-          <text class="t-sig" x="734" y="142">tire &middot; road</text>
-          <line x1="734" y1="158" x2="954" y2="158" stroke="var(--model)" stroke-width="1" opacity=".45"/>
-          <text class="t-note" x="734" y="180">PowerTrain module</text>
-          <text class="t-note" x="734" y="198">removed &mdash; so its wheel</text>
-          <text class="t-note" x="734" y="216">spin DOF is gone too</text>
+          <rect x="366" y="64" width="268" height="190" rx="2" fill="none" stroke="var(--ink)" stroke-width="2.5"/>
+          <text class="t-hd" x="384" y="94">SIMULINK &mdash; OUR BLOCK</text>
+          <text class="t-eq" x="384" y="132">w[k] = w[k&minus;1]</text>
+          <text class="t-eq" x="404" y="156">+ (Ts / I) &middot; ( Taxl[k]</text>
+          <text class="t-eq" x="404" y="180">+ Trq_T2W[k] )</text>
+          <line x1="384" y1="198" x2="616" y2="198" stroke="var(--ink)" stroke-width="1" opacity=".35"/>
+          <text class="t-note" x="384" y="218">Ts = 0.001 s, same step as CarMaker</text>
+          <text class="t-note" x="384" y="236">I&nbsp; = Wheel.&lt;i&gt;.I, read from CarMaker</text>
 
-          <line x1="282" y1="112" x2="366" y2="112" stroke="var(--hw)" stroke-width="2" marker-end="url(#ah-hw)"/>
-          <text class="t-sig" x="290" y="103" fill="var(--hw)">Taxl</text>
-          <line x1="366" y1="196" x2="282" y2="196" stroke="var(--hw)" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#ah-hw)"/>
-          <text class="t-note" x="288" y="187" fill="var(--hw)">w_cmd &rarr; servo</text>
+          <rect x="748" y="84" width="228" height="150" rx="2" fill="var(--model-soft)" stroke="var(--model)" stroke-width="1.5"/>
+          <text class="t-hd" x="766" y="114" fill="var(--model)">CARMAKER</text>
+          <text class="t-sig" x="766" y="146">tire, body,</text>
+          <text class="t-sig" x="766" y="168">suspension, road</text>
+          <line x1="766" y1="184" x2="958" y2="184" stroke="var(--model)" stroke-width="1" opacity=".45"/>
+          <text class="t-note" x="766" y="204">Uses w to find tire slip,</text>
+          <text class="t-note" x="766" y="222">then returns the tire torque.</text>
 
-          <line x1="626" y1="112" x2="710" y2="112" stroke="var(--model)" stroke-width="2" marker-end="url(#ah-model)"/>
-          <text class="t-sig" x="634" y="103" fill="var(--model)">rotv</text>
-          <line x1="710" y1="196" x2="626" y2="196" stroke="var(--model)" stroke-width="2" marker-end="url(#ah-model)"/>
-          <text class="t-sig" x="630" y="187" fill="var(--model)">Trq_T2W</text>
+          <line x1="252" y1="120" x2="358" y2="120" stroke="var(--hw)" stroke-width="2.5" marker-end="url(#ah-hw)"/>
+          <text class="t-sig" x="262" y="111" fill="var(--hw)">Taxl[k]</text>
+          <text class="t-note" x="262" y="140">measured axle torque,</text>
+          <text class="t-note" x="262" y="156">drive minus brake [Nm]</text>
 
-          <text class="t-note" x="30" y="270">Reference: CM DriveLine performs this integration natively &mdash; RefMan Fig. 16.83 &ldquo;Integration of rotation speeds&rdquo;.</text>
-          <text class="t-note" x="30" y="290">We rebuilt that block with the same inertia parameter, matching IPG&rsquo;s own UserPowerTrain.mdl reference model.</text>
-          <text class="t-note" x="30" y="310" fill="var(--hw)">Consequence: CM&rsquo;s tire slip is computed from exactly the number that commands the dyno &mdash; consistent by construction, not by tracking.</text>
+          <line x1="358" y1="212" x2="252" y2="212" stroke="var(--hw)" stroke-width="2.5" stroke-dasharray="6 4" marker-end="url(#ah-hw)"/>
+          <text class="t-sig" x="258" y="203" fill="var(--hw)">w[k]</text>
+          <text class="t-note" x="288" y="203" fill="var(--hw)">as speed command [rad/s]</text>
+
+          <line x1="634" y1="120" x2="740" y2="120" stroke="var(--model)" stroke-width="2.5" marker-end="url(#ah-model)"/>
+          <text class="t-sig" x="644" y="111" fill="var(--model)">w[k]</text>
+          <text class="t-note" x="644" y="140">written to rotv [rad/s]</text>
+          <text class="t-note" x="644" y="156">(and Taxl to Trq_Drive)</text>
+
+          <line x1="740" y1="212" x2="634" y2="212" stroke="var(--model)" stroke-width="2.5" marker-end="url(#ah-model)"/>
+          <text class="t-sig" x="640" y="203" fill="var(--model)">Trq_T2W[k]</text>
+          <text class="t-note" x="640" y="232" fill="var(--model)">tire torque [Nm]</text>
+
+          <line x1="24" y1="286" x2="976" y2="286" stroke="var(--rule)" stroke-width="1"/>
+
+          <text class="t-note" x="24" y="312" fill="var(--hw)">The same w[k] goes to both sides.</text>
+          <text class="t-note" x="248" y="312">CarMaker is given the computed speed, not the measured one.</text>
+          <text class="t-note" x="24" y="334">The real shaft speed stays inside the dyno controller. If the servo lags, CarMaker never finds out.</text>
+          <text class="t-note" x="24" y="356" fill="var(--model)">CarMaker has no wheel speed of its own.</text>
+          <text class="t-note" x="286" y="356">Its integrator was removed with the PowerTrain module, so ours is the only one.</text>
+          <text class="t-note" x="24" y="378">CarMaker also never uses Taxl. We send it, but with the support torques zeroed nothing reads it.</text>
         </svg>
       </div>
+      <figcaption>CarMaker performs this same integration natively in its DriveLine (RefMan Fig. 16.83, &ldquo;Integration of rotation speeds&rdquo;). We rebuilt that block with the same inertia parameter, matching IPG&rsquo;s own UserPowerTrain.mdl.</figcaption>
     </figure>
+
+    <div class="cols">
+      <div class="card hw">
+        <h3>Read it as a sentence</h3>
+        <p>Add the measured axle torque to the tire torque from CarMaker. Divide by the wheel inertia. Integrate. That is the wheel speed, and it is the only wheel speed in the system.</p>
+      </div>
+      <div class="card model">
+        <h3>Why it stays consistent</h3>
+        <p>CarMaker works out tire slip from the exact number that commands the dyno. The two can never hold different values, because there is only one value.</p>
+      </div>
+      <div class="card">
+        <h3>What we zeroed</h3>
+        <p>All CarMaker brake torque, since real braking is already inside <code>Taxl</code>. Also <code>Trq_Supp2WC</code>, <code>Trq_Supp2Bdy1</code> and <code>Trq_Supp2BdyEng</code>.</p>
+      </div>
+    </div>
   </div>
 </section>
 
 <!-- 03 ─────────────────────────────────────────────── -->
 <section class="slide">
   <div class="wrap">
-    <div class="eyebrow"><span class="num">03</span><span>Signal flow</span></div>
-    <h2>What crosses the cut at step k</h2>
-    <p class="lede">The actual dyno shaft speed never reaches CarMaker. It is seen only by the dyno&rsquo;s internal speed-tracking controller.</p>
-
-    <figure>
-      <div class="plate">
-        <svg viewBox="0 0 1000 360" role="img" aria-labelledby="d3t">
-          <title id="d3t">Signal flow: hardware sends measured axle torque, Simulink integrates, sends commanded speed to the dyno and the same value to CarMaker, which returns tire torque</title>
-
-          <rect x="40" y="120" width="200" height="110" rx="2" fill="var(--hw-soft)" stroke="var(--hw)" stroke-width="1.5"/>
-          <text class="t-hd" x="56" y="150" fill="var(--hw)">DYNO + VEHICLE</text>
-          <text class="t-note" x="56" y="176">internal speed servo</text>
-          <text class="t-note" x="56" y="196">tracks w_cmd</text>
-          <text class="t-note" x="56" y="216" fill="var(--warn)">w_act stays in here</text>
-
-          <rect x="390" y="96" width="240" height="158" rx="2" fill="none" stroke="var(--ink)" stroke-width="2.5"/>
-          <text class="t-hd" x="406" y="126">SIMULINK</text>
-          <text class="t-eq" x="406" y="158">w[k] = w[k&minus;1]</text>
-          <text class="t-eq" x="424" y="180">+ (Ts/I) &middot;</text>
-          <text class="t-eq" x="424" y="202">( Taxl[k]</text>
-          <text class="t-eq" x="424" y="224">+ Trq_T2W[k] )</text>
-
-          <rect x="780" y="120" width="180" height="110" rx="2" fill="var(--model-soft)" stroke="var(--model)" stroke-width="1.5"/>
-          <text class="t-hd" x="796" y="150" fill="var(--model)">CARMAKER</text>
-          <text class="t-note" x="796" y="176">tire &rarr; body</text>
-          <text class="t-note" x="796" y="196">&rarr; road</text>
-
-          <line x1="240" y1="146" x2="382" y2="146" stroke="var(--hw)" stroke-width="2.5" marker-end="url(#ah-hw)"/>
-          <text class="t-sig" x="252" y="137" fill="var(--hw)">Taxl[k]  measured</text>
-          <text class="t-note" x="252" y="166">= T_drive &minus; T_brake</text>
-
-          <line x1="382" y1="212" x2="240" y2="212" stroke="var(--hw)" stroke-width="2.5" stroke-dasharray="6 4" marker-end="url(#ah-hw)"/>
-          <text class="t-sig" x="256" y="203" fill="var(--hw)">w_cmd[k] = w[k]</text>
-
-          <line x1="630" y1="146" x2="772" y2="146" stroke="var(--model)" stroke-width="2.5" marker-end="url(#ah-model)"/>
-          <text class="t-sig" x="642" y="137" fill="var(--model)">rotv = w[k]</text>
-          <text class="t-note" x="642" y="166">Trq_Drive = Taxl[k]</text>
-
-          <line x1="772" y1="212" x2="630" y2="212" stroke="var(--model)" stroke-width="2.5" marker-end="url(#ah-model)"/>
-          <text class="t-sig" x="646" y="203" fill="var(--model)">Trq_T2W[k]</text>
-
-          <line x1="40" y1="284" x2="960" y2="284" stroke="var(--rule)" stroke-width="1"/>
-          <text class="t-note" x="40" y="308" fill="var(--hw)">Zeroed by us: all CM brake torque, Trq_Supp2WC, Trq_Supp2Bdy1, Trq_Supp2BdyEng.</text>
-          <text class="t-note" x="40" y="328">Trq_Drive therefore has no live consumer &mdash; in this build it is bookkeeping only. The one dynamically active</text>
-          <text class="t-note" x="40" y="348">hardware&rarr;CM signal is <tspan fill="var(--model)">rotv</tspan>: CarMaker sees the resultant of Taxl and Ttire, never Taxl itself.</text>
-        </svg>
-      </div>
-    </figure>
-  </div>
-</section>
-
-<!-- 04 ─────────────────────────────────────────────── -->
-<section class="slide">
-  <div class="wrap">
-    <div class="eyebrow"><span class="num">04</span><span>Timing &middot; the key diagram</span></div>
+    <div class="eyebrow"><span class="num">03</span><span>Timing &middot; the key diagram</span></div>
     <h2>Where the one-step delay actually lives</h2>
-    <p class="lede">The tire&rsquo;s slip&rarr;force map is memoryless. The delay is not in the tire &mdash; it is in the shared variable, because Tire is scheduled before PowerTrain and <code>Rim_rotv</code> is written only once per cycle.</p>
+    <p class="lede">The tire model has no memory: give it the inputs and it returns a force straight away. The delay comes from the order the modules run in. <code>Rim_rotv</code> is written once per cycle by PowerTrain, and Tire runs before that.</p>
 
     <figure>
       <div class="plate">
@@ -366,12 +340,12 @@ K = 1     Ts = 0.001 s     I<sub>i</sub> = CarMaker parameter  Wheel.&lt;i&gt;.I
   </div>
 </section>
 
-<!-- 05 ─────────────────────────────────────────────── -->
+<!-- 04 ─────────────────────────────────────────────── -->
 <section class="slide">
   <div class="wrap">
-    <div class="eyebrow"><span class="num">05</span><span>Two integrations</span></div>
-    <h2>The wheel integration is not after PowerTrain &mdash; it <em>is</em> PowerTrain</h2>
-    <p class="lede">These are routinely conflated. They happen at different points in the sequence and are owned by different parties.</p>
+    <div class="eyebrow"><span class="num">04</span><span>Two integrations</span></div>
+    <h2>The wheel integration happens at the PowerTrain step, not after it</h2>
+    <p class="lede">Two different integrations are easy to mix up. They run at different points and belong to different parties.</p>
 
     <div class="cols">
       <div class="card hw">
@@ -405,11 +379,11 @@ Body Frame    <i>INTEGRATION B</i>:  advances chassis / suspension states</div>
   </div>
 </section>
 
-<!-- 06 ─────────────────────────────────────────────── -->
+<!-- 05 ─────────────────────────────────────────────── -->
 <section class="slide">
   <div class="wrap">
-    <div class="eyebrow"><span class="num">06</span><span>Inside the tire</span></div>
-    <h2>Almost stateless &mdash; and the exception is what saves you</h2>
+    <div class="eyebrow"><span class="num">05</span><span>Inside the tire</span></div>
+    <h2>The tire has almost no state, and the one exception matters</h2>
 
     <figure>
       <div class="plate">
@@ -477,10 +451,10 @@ Body Frame    <i>INTEGRATION B</i>:  advances chassis / suspension states</div>
   </div>
 </section>
 
-<!-- 07 ─────────────────────────────────────────────── -->
+<!-- 06 ─────────────────────────────────────────────── -->
 <section class="slide">
   <div class="wrap">
-    <div class="eyebrow"><span class="num">07</span><span>Longitudinal &harr; lateral</span></div>
+    <div class="eyebrow"><span class="num">06</span><span>Longitudinal &harr; lateral</span></div>
     <h2>The bench is longitudinal-only, but the load it sees is lateral-aware</h2>
 
     <figure>
@@ -549,12 +523,12 @@ Body Frame    <i>INTEGRATION B</i>:  advances chassis / suspension states</div>
   </div>
 </section>
 
-<!-- 08 ─────────────────────────────────────────────── -->
+<!-- 07 ─────────────────────────────────────────────── -->
 <section class="slide">
   <div class="wrap">
-    <div class="eyebrow"><span class="num">08</span><span>Stability</span></div>
+    <div class="eyebrow"><span class="num">07</span><span>Stability</span></div>
     <h2>A ~45 Hz mode whose damping grows with speed</h2>
-    <p class="lede">Wheel inertia against tire relaxation gives a second-order system. Its natural frequency is speed-independent; its damping is proportional to speed. The one-step delay subtracts a fixed amount.</p>
+    <p class="lede">Wheel inertia working against tire relaxation gives a second-order system. Its frequency does not change with speed. Its damping is proportional to speed, and the one-step delay takes a fixed amount away.</p>
 
     <div class="eq">wn   = r &middot; sqrt( Cs / (I&middot;sigma) )   &asymp; 286 rad/s &asymp; <b>45 Hz</b>   &mdash; independent of speed
 zeta = vx / (2&middot;sigma&middot;wn)          &asymp; vx / 28.6          &mdash; proportional to speed
@@ -624,10 +598,10 @@ delay cost                          &asymp; wn&middot;Ts/2 = <b>0.143</b>       
   </div>
 </section>
 
-<!-- 09 ─────────────────────────────────────────────── -->
+<!-- 08 ─────────────────────────────────────────────── -->
 <section class="slide">
   <div class="wrap">
-    <div class="eyebrow"><span class="num">09</span><span>Verdict</span></div>
+    <div class="eyebrow"><span class="num">08</span><span>Verdict</span></div>
     <h2>Why it works, and the two things it cannot tell you</h2>
 
     <div class="cols">
