@@ -95,9 +95,10 @@ def slide_01(prs):
 
 # ---------------------------------------------------------------- 02
 def slide_02(prs):
-    s = new_slide(prs, 2, "The wall", "What CARLA will and will not tell you",
-                  "The data exists and is computed every tick. There is simply no way "
-                  "to ask for it.")
+    s = new_slide(prs, 2, "The wall — on 0.9.15",
+                  "What CARLA 0.9.15 will and will not tell you",
+                  "The data exists and is computed every tick. On 0.9.15 there is no way "
+                  "to ask for it. On 0.9.16 there is — see slide 06.")
 
     labelled_box(s, 0.62, 2.00, 5.9, 2.05, "READABLE",
                  ["get_velocity          get_transform",
@@ -128,8 +129,8 @@ def slide_02(prs):
         ("show_debug_telemetry renders them to the HUD.  There is no RPC path.", HW, True),
     ])
 
-    caption(s, "Consequence: Trq_T2W and omega_i are both unavailable. Every design that "
-               "follows is a way of living with that.", y=5.98, color=WARN)
+    caption(s, "Consequence on 0.9.15: Trq_T2W and omega_i are both unavailable, and the "
+               "two designs that follow are ways of living with that.", y=5.98, color=WARN)
     return s
 
 
@@ -289,46 +290,52 @@ def slide_05(prs):
 
 # ---------------------------------------------------------------- 06
 def slide_06(prs):
-    s = new_slide(prs, 6, "Evidence", "What is measured, what is derived, what is not",
-                  "Taken against a live CARLA 0.9.15 server, or read from the CARLA and "
-                  "UE4/PhysX source trees.")
+    s = new_slide(prs, 6, "0.9.16 changes the answer",
+                  "get_telemetry_data makes both signals readable",
+                  "We are on 0.9.15.2. Everything on slides 02 and 04 exists to work "
+                  "around a signal that the next release exposes directly.")
 
-    rows = [
-        ("velocity write rejects external force; residual = one step", "measured", MODEL),
-        ("velocity write imposes zero sideslip (0.45 vs 21 deg)", "measured", MODEL),
-        ("enable_constant_velocity latched + body frame", "measured", MODEL),
-        ("apply_physics_control resets state (15.00 -> 0.02 m/s)", "measured", MODEL),
-        ("add_force acts at COM, dead from rest, inverts slip sign", "measured", MODEL),
-        ("stock pedal map non-linear (47%) / flattened linear (2.7%)", "measured", MODEL),
-        ("J_w = 0.5 * 20 * r^2 = 1.369 kg m^2", "measured, 1.1%", MODEL),
-        ("wheel re-sync tau = 3.4e-4 * v", "derived", HW),
-        ("Fres form, from UpdateDrag", "from source", HW),
-        ("drag area = 2.52 m^2 (UE4 defaults, absent from assets)", "UNVERIFIED", WARN),
-    ]
-    y = 1.96
-    for text, status, col in rows:
-        tf = textbox(s, 0.62, y, 9.2, 0.26)
-        line(tf, text, font=F_MONO, size=10, color=INK_2, first=True)
-        tf = textbox(s, 10.0, y, 2.7, 0.26)
-        line(tf, status, font=F_MONO, size=10, color=col,
-             bold=(status == "UNVERIFIED"), first=True)
-        y += 0.30
+    b = box(s, 0.62, 1.96, 12.1, 1.62, fill=MODEL_SOFT, edge=MODEL, width=2.0)
+    tf = b.text_frame
+    line(tf, "carla.WheelTelemetryData      -- per wheel, read-only, no HUD needed",
+         font=F_MONO, size=10.5, color=MODEL, bold=True, first=True,
+         align=PP_ALIGN.LEFT)
+    for t in ["omega        <- WHEEL SPEED          tire_load    <- Fz",
+              "torque       <- Trq_T2W              long_force   <- Fx",
+              "long_slip    <- kappa                lat_force    <- Fy",
+              "lat_slip     <- alpha                tire_friction, normalised forms",
+              "",
+              "VehicleTelemetryData:  speed  steer  throttle  brake  engine_rpm  gear  drag"]:
+        line(tf, t, font=F_MONO, size=10, color=INK, space_before=2, align=PP_ALIGN.LEFT)
 
-    plain_line(s, 0.62, 5.06, 12.72, 5.06, color=RULE)
+    tf = textbox(s, 0.62, 3.74, 6.0, 0.28)
+    line(tf, "WHAT IT RETIRES", font=F_DISPLAY, size=13, color=MODEL, bold=True, first=True)
+    tf = textbox(s, 0.62, 4.04, 6.1, 1.3)
+    for t in ["the vdot inverse -- read torque directly",
+              "the unverified 2.52 m^2 drag area -- drag is reported",
+              "per-wheel READ needing a fork -- telemetry is per wheel",
+              "open items C-1, C-3, C-4, C-5"]:
+        line(tf, t, font=F_MONO, size=9.5, color=INK_2,
+             first=t.startswith("the vdot"), align=PP_ALIGN.LEFT)
 
-    labelled_box(s, 0.62, 5.22, 5.9, 1.20, "RECOMMENDATION",
-                 ["Design A, with enable_constant_velocity.",
-                  "CARLA's aero is a fixed 2.52 m^2 box and its",
-                  "tire has no relaxation -- little is gained by",
-                  "putting its longitudinal physics in the loop."],
-                 fill=MODEL_SOFT, edge=MODEL, head_color=MODEL, width=1.5)
+    tf = textbox(s, 6.90, 3.74, 6.0, 0.28)
+    line(tf, "WHAT IT DOES NOT", font=F_DISPLAY, size=13, color=WARN, bold=True, first=True)
+    tf = textbox(s, 6.90, 4.04, 5.9, 1.3)
+    for t in ["telemetry is READ-ONLY. Injecting Taxl still goes",
+              "through apply_control -- one scalar throttle, split",
+              "by CARLA's differential.",
+              "So: measure per wheel, command lumped.",
+              "Per-wheel COMMAND still needs the SimpleWheeled fork."]:
+        line(tf, t, font=F_MONO, size=9.5, color=INK_2,
+             first=t.startswith("telemetry"), align=PP_ALIGN.LEFT)
 
-    labelled_box(s, 6.82, 5.22, 5.9, 1.20, "THE ONE OPEN MEASUREMENT",
-                 ["Two coastdowns to verify the drag area were",
-                  "both contaminated -- the car left the road and",
-                  "the fit returned a negative area. Needs a",
-                  "collision sensor. Low stakes: ~213 N at 30 m/s."],
-                 fill=WARN_SOFT, edge=WARN, head_color=WARN, width=1.5)
+    mono_block(s, 0.62, 5.46, 12.1, 0.86, [
+        ("Taxl_i -> pedal map -> CARLA -> get_telemetry_data().wheels[i].omega -> w_cmd_i", HW, True),
+        ("                                                     .wheels[i].torque -> Trq_T2W_i", HW, True),
+    ])
+
+    caption(s, "That is the CarMaker loop, per wheel, with no reconstruction and no fork. "
+               "Upgrading is the highest-value action in this study.", y=6.46, color=MODEL)
     return s
 
 
