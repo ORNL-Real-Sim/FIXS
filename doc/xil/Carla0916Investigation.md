@@ -333,13 +333,20 @@ Cd * A = 0.377 m^2
 `physics_control.drag_coefficient` reports **0.150** for the Model 3, giving
 
 ```
-ChassisDragArea = 2.515 m^2
+ChassisDragArea = 0.377 / 0.150 = 2.515 m^2
 ```
 
-The 0.9.15 work inferred 2.52 m² from the UE4 class defaults (180 cm × 140 cm) and
-could never confirm it in motion. **The area was right.** What was wrong was the
-coefficient: CARLA's blueprint sets `Cd = 0.15`, not the UE4 class default of 0.3,
-so the drag force is half what that work assumed.
+`CarlaDynoCoupling.md` §4.1 inferred **2.52 m²** from the UE4 class defaults
+(180 cm × 140 cm), on the argument that CARLA's Blueprints do not serialise those
+properties and UE4 only stores non-defaults. It flagged the number *"not yet verified
+in motion"* and left `Cd` symbolic. **That inference is now confirmed to 0.2 %**, and
+the reasoning behind it — that CARLA never touches `ChassisWidth`/`ChassisHeight` —
+holds.
+
+Note that `Cd` was never the unknown: `physics_control.drag_coefficient` is exposed on
+0.9.15 too. It is worth stating explicitly only because it is **0.15**, half the UE4
+class default of 0.3, so anyone carrying the class default through by habit gets twice
+the drag. Item C-1 in `CarlaDynoCoupling.md` §8 can be closed.
 
 ### 5.6 Net effect on the dyno bench
 

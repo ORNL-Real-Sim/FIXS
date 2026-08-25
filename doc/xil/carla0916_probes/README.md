@@ -30,6 +30,13 @@ client library faults on teardown.
 | `01_launch_traffic_telemetry.py` | does the server run, spawn traffic, and return telemetry at all? | 4.2 |
 | `02_telemetry_conventions.py` | which index is which corner, and what are the signs? | 5.1–5.3 |
 | `03_torque_identity.py` | is `torque` anything other than `-long_force * radius`? | 5.1 |
+
+`03` also contains a second experiment (H2) that tries to recover the wheel inertia from
+`J_w * dw/dt = torque` during a coast. **It is inconclusive by construction** and no
+conclusion is drawn from it in the write-up: the driveline stays engaged through a coast,
+so engine braking and the differential contribute torques that the telemetry does not
+report, and the implied `J_w` comes out negative. Recovering `J_w` needs the disengaged
+test in `CarlaDynoCoupling.md` §8, not this one.
 | `04_drag_and_balance.py` | what is `Cd*A`, and does `m*a = sum(Fx) - drag`? | 5.4–5.5 |
 | `05_balance_by_speed.py` | where does that balance break down? | 5.4 |
 
