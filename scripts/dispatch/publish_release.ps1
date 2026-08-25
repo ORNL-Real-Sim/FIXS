@@ -79,7 +79,7 @@ FIXS Build - $date
 # is to be reachable BEFORE anyone has the zip.
 $FrontDoor = @()
 foreach ($f in @('FIXS.bat', 'FIXS.sh')) {
-    $p = Join-Path $RepoRoot "scriptsrontdoor\$f"
+    $p = Join-Path $RepoRoot (Join-Path "scripts" (Join-Path "frontdoor" $f))
     if (Test-Path $p) { $FrontDoor += $p }
     else { Write-Warning "scripts/frontdoor/$f is missing - not publishing it." }
 }
