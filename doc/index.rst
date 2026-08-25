@@ -27,9 +27,20 @@ Real-Sim Documentation
 
 .. toctree::
    :maxdepth: 2
+   :caption: Building from Source
+
+   BUILD
+   Carla_Windows_building
+   Carla_0916_Windows_building
+   Carla_Linux_building
+
+.. toctree::
+   :maxdepth: 2
    :caption: XIL Bench
 
    xil/AxleDynoCarMakerCoupling
+   xil/CarlaDynoCoupling
+   xil/DynoDataChecks
 
 .. toctree::
    :maxdepth: 3
@@ -51,6 +62,9 @@ Real-Sim Documentation
 
    DEVELOPER_GUIDE
    ContributionGuide
+   FIXS_message_flow
+   gui-design/wireframes
+   156_drivingsim_dll_design_proposal
 
 .. toctree::
    :maxdepth: 2
