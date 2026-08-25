@@ -20,7 +20,13 @@ import os
 import subprocess
 import sys
 
-import carla_env_setup as env
+# env_setup (was carla_env_setup) and import_map moved out of this
+# folder (#313); make them
+# importable before the flat imports below.
+import _cosim_path  # noqa: E402
+_cosim_path.ensure()
+
+import env_setup as env
 import import_map
 import props
 

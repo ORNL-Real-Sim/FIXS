@@ -1,21 +1,58 @@
 """
-app_catalog.py - the `apps/` manifest contract for FIXS application repos.
+app_catalog.py - the application manifest contract for FIXS consumer repos.
 
 FIXS is the enabler, not the owner: this module defines and parses the canonical
-application manifest, but hardcodes no application name. An app repo that sits
-above a fetched FIXS bundle (<repo>/FIXS/Carla/... , hence <repo>/apps/) declares
-everything run_cosim needs to know about its applications in ONE file:
+application manifest, but hardcodes no application name. A repo that sits above a
+fetched FIXS bundle declares everything run_cosim needs to know about its
+applications in ONE file, looked up in this order:
 
-    <repo>/apps/apps.json
+    $FIXS_APPS_JSON  ->  <repo>/fixs.json  ->  <repo>/apps/apps.json
 
-If that file is absent, every entry point here degrades to "no apps", and
-run_cosim behaves exactly as it did before app awareness existed. Same shape as
-the Digital-Twin-Library `catalog.json` that import_map already consumes: FIXS
-owns the schema + tooling, the repo owns the data.
+If none exists, every entry point here degrades to "no apps", and run_cosim
+behaves exactly as it did before app awareness existed. Same shape as the
+Digital-Twin-Library `catalog.json` that import_map already consumes: FIXS owns
+the schema + tooling, the repo owns the data.
 
 
-Schema (schema: 1)
-------------------
+Two schemas, both supported
+---------------------------
+schema 2 (fixs.json) is the generic form. It sits beside the front door and
+addresses app folders by a path relative to ITSELF, at any depth - so a repo can
+keep its applications wherever they already live and does not need a directory
+called apps/ at all. This is what lets FIXS be dropped into a repo that is not
+laid out like FIXS_Applications.
+
+schema 1 (apps/apps.json) is the original: `dir` is a bare folder NAME under the
+repo's apps/ folder. It keeps working exactly as before and is not deprecated
+here - FIXS_Applications has one committed, and a schema-1 manifest must load
+byte-for-byte identically and without a word of warning.
+
+The schema is taken from the manifest's own `schema` key. When that is absent it
+is inferred from the filename (fixs.json -> 2, apps.json -> 1), which is the only
+place the filename means anything; an explicit declaration always wins.
+
+
+Schema 2 (fixs.json)
+--------------------
+{
+  "schema": 2,
+  "fixs": { "repo": "ORNL-Real-Sim/FIXS",             # engine source + pin, read by
+            "version": "v0.9.0-alpha" },              #   the front door before any
+                                                      #   engine code exists on disk
+  "maps": { "repo": "ORNL-Real-Sim/Digital-Twin-Library",
+            "tag_prefix": "" },
+  "apps": [ ... same entries as below, except that "dir" is a PATH relative to
+            this file ("apps/mlk_eco_driving", "src/controllers/eco") rather than
+            a name under apps/ ... ]
+}
+
+The "fixs" and "maps" blocks are declared here so one file describes the whole
+integration, but nothing in this module reads them: the front door regex-reads
+fixs.repo / fixs.version before python exists, and import_map owns the map source.
+
+
+Schema 1 (apps/apps.json)
+-------------------------
 {
   "schema": 1,
   "apps": [
@@ -134,9 +171,26 @@ import json
 import os
 import sys
 
-import carla_env_setup as env
+import env_setup as env
+import fixs_paths
 
-SCHEMA = 1
+# Manifest schemas this FIXS understands. 2 is the generic form (fixs.json, app
+# folders addressed by a path relative to the manifest); 1 is the original
+# (apps/apps.json, app folders named under apps/). BOTH are supported, and a
+# schema-1 manifest must behave exactly as it did before schema 2 existed -
+# FIXS_Applications has one committed and is not required to convert.
+#
+# A membership test, not `!= SCHEMA`: the old equality warned on every load the
+# moment this constant moved ahead of a manifest, so bumping it would have made
+# every existing repo print "schema 1, this FIXS understands 2. Reading it anyway"
+# on every single launch. Only a schema we genuinely do not know is worth a word.
+KNOWN_SCHEMAS = (1, 2)
+SCHEMA = 2                       # what a manifest we generate declares
+LEGACY_SCHEMA = 1
+
+MANIFEST_NAME = "fixs.json"
+LEGACY_MANIFEST_NAME = "apps.json"
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 # Identity for a run with no application selected. It is a real key, not a null:
@@ -149,17 +203,32 @@ GENERIC = "_generic"
 # Locations
 # --------------------------------------------------------------------------- #
 def app_root():
-    """The application repo root: two levels up from this file
-    (<repo>/FIXS/Carla/app_catalog.py -> <repo>). Mirrors import_map._app_root()."""
-    return os.path.dirname(os.path.dirname(HERE))
+    """The application repo root: the directory containing FIXS/. Anchored on the
+    FIXS root rather than counted up from this file, so it survives a move.
+    Mirrors import_map._app_root()."""
+    return fixs_paths.app_root(HERE)
 
 
 def catalog_path(root=None):
-    """Path to the app manifest: $FIXS_APPS_JSON, else <repo>/apps/apps.json."""
+    """Path to the app manifest, first of these that exists:
+
+        $FIXS_APPS_JSON  ->  <repo>/fixs.json  ->  <repo>/apps/apps.json
+
+    fixs.json is the generic form (schema 2): it sits beside the front door and
+    can point at app folders anywhere in the repo, which is what lets FIXS be
+    dropped into a repo that is not laid out like FIXS_Applications. apps/apps.json
+    is the original (schema 1) and keeps working untouched.
+
+    Returns the apps/apps.json path when neither exists, so the "no manifest"
+    message names the conventional location rather than an invented one."""
     override = os.environ.get("FIXS_APPS_JSON")
     if override:
         return override
-    return os.path.join(root or app_root(), "apps", "apps.json")
+    base = root or app_root()
+    generic = os.path.join(base, MANIFEST_NAME)
+    if os.path.isfile(generic):
+        return generic
+    return os.path.join(base, "apps", LEGACY_MANIFEST_NAME)
 
 
 def apps_home(app_id=None):
@@ -173,7 +242,14 @@ def apps_home(app_id=None):
 
 
 def app_dir(app, root=None):
-    """Absolute path of the app's folder under apps/ (entry['dir'], else its id)."""
+    """Absolute path of the app's folder.
+
+    load_catalog resolved this once, against the manifest that declared it, and
+    parked it on the entry - so read that. The fallback is for app dicts built by
+    hand (tests, callers that never loaded a manifest) and keeps the original
+    schema-1 rule."""
+    if app.get("path"):
+        return app["path"]
     return os.path.join(root or app_root(), "apps", app.get("dir") or app["id"])
 
 
@@ -187,15 +263,18 @@ def launch_command(app, root=None):
     through verbatim and never interpreted: the app owns its own arguments."""
     if not app or not app.get("launch"):
         return None, None
-    import shlex
-    parts = shlex.split(app["launch"], posix=(os.name != "nt"))
+    parts = _split_launch(app["launch"])
     if not parts:
         return None, None
     here = app_dir(app, root)
-    exe = parts[0]
+    # load_catalog resolved the launcher against the manifest that declared it
+    # (schemas disagree about what it is relative to); fall back for app dicts
+    # built by hand, which is the schema-1 rule.
+    exe = app.get("launch_path") or (
+        parts[0] if os.path.isabs(parts[0]) else os.path.join(here, parts[0]))
     if not os.path.splitext(exe)[1]:
         exe += ".bat" if os.name == "nt" else ".sh"
-    path = exe if os.path.isabs(exe) else os.path.join(here, exe)
+    path = exe
     if not os.path.isfile(path):
         _warn(f"app '{app['id']}': launch command '{app['launch']}' not found "
               f"at {path}; nothing will be started for it.")
@@ -319,12 +398,61 @@ def _normalize_config(raw, app_id):
             "engine": engine}
 
 
-def _normalize_app(raw):
-    """One manifest entry -> a normalized app dict, or None if unusable."""
+def _derive_id(launch, schema):
+    """The app id implied by its launcher: the basename, minus any extension and a
+    leading 'run_'. "projects/autolab/controlA/run_ctrl" -> "ctrl".
+
+    The id is a KEY, not prose - it becomes a directory (~/.fixs/apps/<id>/), a
+    run-profile key and the word you type after --app - so it is taken from a
+    filename, which is already path-safe, rather than from the title, which is not.
+    An explicit "id" always wins; the wizard writes one whenever the derivation
+    would collide or read badly."""
+    if not launch or schema == LEGACY_SCHEMA:
+        return ""
+    stem = os.path.splitext(os.path.basename(launch.replace("\\", "/").rstrip("/")))[0]
+    if stem.lower().startswith("run_"):
+        stem = stem[4:]
+    return stem.strip()
+
+
+def _resolve_dir(declared, schema, base):
+    """Absolute path of an app folder, per the schema that declared it.
+
+    schema 1 - `dir` is a NAME under the repo's apps/ folder, and `base` is the
+               repo root: <repo>/apps/<dir>. Unchanged from before schema 2, and
+               the reason a committed apps/apps.json needs no edits.
+    schema 2 - `dir` is a PATH relative to the manifest itself, at any depth
+               ("apps/mlk_eco_driving", "src/controllers/eco", "../shared/app").
+               That is the whole generalization: an app folder no longer has to
+               live under a directory called apps/.
+
+    Keyed on the declared schema, never on which filename the manifest came from,
+    so the two forms stay independent of where they are written."""
+    if schema == LEGACY_SCHEMA:
+        return os.path.join(base, "apps", declared)
+    return os.path.normpath(os.path.join(base, *declared.split("/")))
+
+
+def _normalize_app(raw, schema=LEGACY_SCHEMA, base=None):
+    """One manifest entry -> a normalized app dict, or None if unusable.
+
+    `base` is the directory app folders are resolved against - the repo root for
+    schema 1, the manifest's own folder for schema 2. Omitted by callers that only
+    want the declared fields normalized, which leaves 'path' off the result."""
     if not isinstance(raw, dict):
         _warn("ignoring a manifest entry that is not an object.")
         return None
-    app_id = (raw.get("id") or "").strip()
+    launch = (raw.get("launch") or "").strip() or None
+    # schema 2 identifies an app by the ONE thing that makes it an application:
+    # the launcher it runs. The folder is that file's parent and the id is its
+    # basename, so neither has to be written down, and two launchers in one folder
+    # are two apps rather than a collision. schema 1 has no such rule - `launch` is
+    # optional there, and roosevelt/atlanta declare none at all.
+    if schema != LEGACY_SCHEMA and not launch:
+        _warn("ignoring an app entry with no 'launch': schema 2 identifies an "
+              "application by the launcher it starts.")
+        return None
+    app_id = (raw.get("id") or "").strip() or _derive_id(launch, schema)
     if not app_id:
         _warn("ignoring an app entry with no 'id'.")
         return None
@@ -349,10 +477,18 @@ def _normalize_app(raw):
         else:
             _warn(f"app '{app_id}': sumo_args key '{flag}' is not a --flag; ignoring it.")
     sumo_args = clean_args
-    # No "maps" -> the app id IS the map name to look for. Apps named after their
-    # location (roosevelt, atlanta) therefore need no map declaration at all.
+    # 'maps' is a HINT, not a constraint: it hoists those maps to the top of the
+    # picker (choose_map's `preferred`). Declare it when the controller was written
+    # against a particular network - one that hardcodes edge or TLS ids - and leave
+    # it out when the controller reads FIXS_CONFIG_YAML and adapts. The map a run
+    # actually uses is the saved setup's, in ~/.fixs/run_profiles.json.
+    #
+    # schema 1 falls back to the app id, because there an app was often named after
+    # its location (roosevelt, atlanta) and that name IS the map. schema 2 does not:
+    # an app is named after its launcher, so the id is no kind of map name, and
+    # defaulting to it would hoist a map that does not exist.
     maps = [m for m in (_normalize_map(m, app_id) for m in raw.get("maps") or []) if m]
-    if not maps:
+    if not maps and schema == LEGACY_SCHEMA:
         maps = [app_id]
     configs = [c for c in (_normalize_config(c, app_id) for c in raw.get("configs") or []) if c]
     # Extra python packages this app needs on top of the engine's own env, as a path
@@ -366,17 +502,62 @@ def _normalize_app(raw):
     # scenario to run (see FIXS_HANDOFF above). Kept as one opaque string: run_cosim
     # resolves it in the app folder and never reads its arguments, so what an app
     # needs to pass itself costs no change here.
-    launch = (raw.get("launch") or "").strip() or None
-    return {"id": app_id,
-            "title": (raw.get("title") or "").strip() or app_id,
-            "dir": (raw.get("dir") or "").strip() or app_id,
-            "note": (raw.get("note") or "").strip() or None,
-            "maps": maps,
-            "configs": configs,
-            "defaults": defaults,
-            "sumo_args": sumo_args,
-            "requirements": requirements,
-            "launch": launch}
+    # schema 2 derives the folder from the launcher; schema 1 keeps `dir`, a bare
+    # name under the repo's apps/. An explicit `dir` still wins in both.
+    #
+    # Assigned in a branch rather than an `or` chain because the empty string is a
+    # MEANINGFUL answer here: a launcher at the manifest's own level ("run_here")
+    # has dirname "", which means the repo root - and an `or` chain reads that as
+    # "no answer" and falls through to the id, putting the app in a folder named
+    # after itself that nobody created.
+    app_dir_rel = (raw.get("dir") or "").strip()
+    if not app_dir_rel:
+        if launch and schema != LEGACY_SCHEMA:
+            app_dir_rel = os.path.dirname(_split_launch(launch)[0]) if launch else ""
+        else:
+            app_dir_rel = app_id
+    app = {"id": app_id,
+           "title": (raw.get("title") or "").strip() or app_id,
+           "dir": app_dir_rel,
+           # 'note' was the schema-1 spelling. One field, two names, so a converted
+           # manifest keeps working and a new one reads like prose.
+           "note": ((raw.get("description") or raw.get("note") or "").strip()
+                    or None),
+           "maps": maps,
+           "configs": configs,
+           "defaults": defaults,
+           "sumo_args": sumo_args,
+           "requirements": requirements,
+           "launch": launch}
+    # Where the folder actually is, decided once, here, where the manifest that
+    # declared it is still in hand. Everything downstream reads app['path'] and
+    # never re-derives a location from a schema rule.
+    if base is not None:
+        app["path"] = _resolve_dir(app["dir"], schema, base)
+        # Same for the launcher. Under schema 2 `launch` carries its own path,
+        # relative to the MANIFEST - so resolving it against the app folder (which
+        # is that path's own parent) would double the prefix and look for
+        # <root>/projects/autolab/projects/autolab/run_ctrl. Under schema 1 it is a
+        # bare name relative to the app folder, which is the old rule. Settle it
+        # here, once, rather than teaching launch_command about schemas.
+        if launch:
+            argv = _split_launch(launch)
+            if argv:
+                app["launch_path"] = (
+                    os.path.normpath(os.path.join(base, *argv[0].split("/")))
+                    if schema != LEGACY_SCHEMA
+                    else os.path.join(app["path"], *argv[0].split("/")))
+    return app
+
+
+def _split_launch(launch):
+    """`launch` split into argv. The first token is the program; everything after
+    it belongs to the app and is never interpreted."""
+    import shlex
+    try:
+        return shlex.split(launch.replace("\\", "/"), posix=(os.name != "nt"))
+    except ValueError:                       # unbalanced quotes
+        return launch.replace("\\", "/").split()
 
 
 def load_catalog(root=None):
@@ -396,11 +577,28 @@ def load_catalog(root=None):
     if not isinstance(doc, dict):
         _warn(f"{path}: top level must be an object; continuing without apps.")
         return []
+    # An absent 'schema' is read from the filename: fixs.json is the generic form,
+    # apps.json the original. This is the ONE place the filename carries meaning,
+    # and an explicit declaration always wins over it - so either form can be
+    # written in either file, and a hand-written fixs.json needs no boilerplate.
     declared = doc.get("schema")
-    if declared is not None and declared != SCHEMA:
-        _warn(f"{path}: schema {declared}, this FIXS understands {SCHEMA}. "
-              f"Reading it anyway; update FIXS if entries look wrong.")
-    apps = [a for a in (_normalize_app(a) for a in doc.get("apps") or []) if a]
+    if declared is None:
+        schema = SCHEMA if os.path.basename(path) == MANIFEST_NAME else LEGACY_SCHEMA
+    elif declared in KNOWN_SCHEMAS:
+        schema = declared
+    else:
+        # Only an unrecognised schema is worth saying anything about. Warning
+        # whenever `declared != SCHEMA` meant every repo with a committed schema-1
+        # manifest printed a scary line on every launch the moment SCHEMA moved.
+        schema = SCHEMA
+        _warn(f"{path}: schema {declared} is not one this FIXS knows "
+              f"({', '.join(str(s) for s in KNOWN_SCHEMAS)}). Reading it as "
+              f"schema {schema}; update FIXS if entries look wrong.")
+    # schema 1 resolves app folders against the repo root, schema 2 against the
+    # manifest's own folder - which for <repo>/apps/apps.json and a schema-1
+    # 'dir' are the same place, and that is what keeps today's repos identical.
+    base = (root or app_root()) if schema == LEGACY_SCHEMA else os.path.dirname(path)
+    apps = [a for a in (_normalize_app(a, schema, base) for a in doc.get("apps") or []) if a]
     seen = {}
     for a in apps:
         if a["id"] in seen:
@@ -416,7 +614,11 @@ def find_app(apps, ident):
         return None
     key = os.path.basename(str(ident).replace("\\", "/").rstrip("/")).strip().lower()
     for a in apps or []:
-        if key in (a["id"].lower(), a["dir"].lower(), a["title"].lower()):
+        # basename on 'dir' too: under schema 2 it is a path, so `--app eco` has to
+        # match a folder declared as "src/controllers/eco". Under schema 1 it is
+        # already a bare name and basename leaves it alone.
+        folder = os.path.basename(a["dir"].replace("\\", "/").rstrip("/")).lower()
+        if key in (a["id"].lower(), folder, a["title"].lower()):
             return a
     return None
 
@@ -424,7 +626,7 @@ def find_app(apps, ident):
 # --------------------------------------------------------------------------- #
 # Picking
 # --------------------------------------------------------------------------- #
-def choose_app(apps, root=None, current=None):
+def choose_app(apps, root=None, current=None, add_app=None):
     """Numbered menu of the declared applications; returns the chosen app dict, or
     None for "no app" (the generic, pre-app-awareness run). Auto-selects nothing:
     even a single app is offered, because the None escape has to stay reachable.
@@ -435,27 +637,52 @@ def choose_app(apps, root=None, current=None):
     Without it Enter always meant item 1, so opening this row on a setup running any
     other app and pressing Enter switched the app - and took the map and the
     scenario yaml with it, since both are invalidated by an app change."""
-    if not apps:
-        return None
     if not sys.stdin.isatty():
+        return None
+    # A repo with no applications used to return here, so the row said
+    # "(none - generic co-sim)" and offered no way to change that. Declaring one is
+    # exactly what someone integrating a new repo needs to do next, and a --add-app
+    # flag is not a thing anyone discovers - so the row that names the gap is the
+    # row that has to offer the fix.
+    if not apps and not add_app:
         return None
     ids = [a["id"] for a in apps]
     idx = ids.index(current) + 1 if current in ids else 1
-    print("\n[apps] Pick an application to run:")
-    for i, a in enumerate(apps, 1):
-        missing = "" if os.path.isdir(app_dir(a, root)) else "   (folder missing)"
-        maps = ", ".join(a["maps"]) or "-"
-        mark = "  (current)" if a["id"] == current else ""
-        print(f"   {i:>2}) {a['title']:<34} maps: {maps}{missing}{mark}")
-    print("    0) none - just pick a map (generic co-sim)")
+    if apps:
+        print("\n[apps] Pick an application to run:")
+        for i, a in enumerate(apps, 1):
+            missing = "" if os.path.isdir(app_dir(a, root)) else "   (folder missing)"
+            maps = ", ".join(a["maps"]) or "any"
+            mark = "  (current)" if a["id"] == current else ""
+            print(f"   {i:>2}) {a['title']:<34} maps: {maps}{missing}{mark}")
+    else:
+        print("\n[apps] No applications are declared in this repo yet.")
+    print("    0) none - just pick a map (generic co-sim: SUMO drives every "
+          "vehicle, CARLA renders)")
+    if add_app:
+        print("    a) + declare an application in this repo ...")
     while True:
         try:
-            ans = input(f"[apps] Which? [0-{len(apps)}], Enter = {idx}: ").strip()
+            hint = f"[0-{len(apps)}]" if apps else "[0]"
+            ans = input(f"[apps] Which? {hint}{'/a' if add_app else ''}, "
+                        f"Enter = {idx if apps else 0}: ").strip().lower()
         except EOFError:
             return None
         if ans == "":
-            return apps[idx - 1]
+            return apps[idx - 1] if apps else None
         if ans == "0":
+            return None
+        if ans == "a" and add_app:
+            new_id = add_app()
+            if not new_id:
+                return apps[idx - 1] if apps else None
+            # Re-read rather than trusting what the wizard built: the manifest on
+            # disk is the thing every later run will see, so if it does not parse
+            # back to an app, better to find out now than at launch.
+            for a in load_catalog(root):
+                if a["id"] == new_id:
+                    return a
+            _warn(f"'{new_id}' was written but does not load back; running generic.")
             return None
         if ans.isdigit() and 1 <= int(ans) <= len(apps):
             return apps[int(ans) - 1]

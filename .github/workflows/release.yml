@@ -1,9 +1,13 @@
 name: Release (public core)
 
-# Automated release pipeline for #191 / #57 - two rolling channels, one workflow:
+# Automated release pipeline for #191 / #57 - one workflow, one rolling channel
+# per release train, resolved by convention rather than by a table here:
 #
-#   push -> main          publishes the 'latest' prerelease   (current train)
-#   push -> dev_v0.9.0    publishes the 'alpha_v0.9.0' prerelease (0.9.0 train)
+#   push -> main          publishes the 'latest' prerelease        (current train)
+#   push -> dev_vX.Y.Z    publishes the 'vX.Y.Z-alpha' prerelease  (that train)
+#
+# scripts/dispatch/release_channel.ps1 owns that mapping; everything downstream
+# (zip label, the local describe tag, publish_release.ps1) reads it from there.
 #
 # On pull requests it builds + packages only (NO publish) as a build gate.
 #
@@ -22,10 +26,19 @@ on:
         description: 'Publish the built zip to this branch''s rolling prerelease'
         type: boolean
         default: false
+  # Globbed, not listed, so a new train is a branch name and nothing else - which
+  # is the rule scripts/dispatch/release_channel.ps1 already states ("dev_v0.10.0
+  # gets its v0.10.0-alpha channel the day the branch is created"). That was only
+  # ever true of the CHANNEL; the trigger stayed a literal list, so dev_v0.10.0
+  # built nothing and PRs targeting it ran no build gate at all.
+  #
+  # Publishing stays guarded independently: release_channel.ps1 sets a channel only
+  # for an exact dev_vX.Y.Z, so a branch like dev_v0.10.0_wip builds and never
+  # publishes.
   pull_request:
-    branches: [dev, main, dev_v0.9.0]
+    branches: [dev, main, 'dev_v*']
   push:
-    branches: [main, dev_v0.9.0]
+    branches: [main, 'dev_v*']
 
 permissions:
   contents: write        # create/update the rolling release + tag on publish
@@ -295,6 +308,35 @@ jobs:
           } else {
             Write-Host "VirtualEnvironment.lib absent (expected on the current/main train)."
           }
+          # Assert the LAYOUT, not just that files exist. 8_create_zip.ps1 remaps
+          # scripts/cosim/ to cosim/ on the way in (#313), and a bundle that lost
+          # that hoist would unpack a FIXS/ whose entry points are one directory
+          # deeper than every front door expects - failing at run time, in the
+          # consumer's repo, with an error that names nothing about packaging.
+          # This is the #238 failure mode: packaging drift found by a user.
+          $zipTest = Join-Path $env:RUNNER_TEMP 'ziptest'
+          Remove-Item $zipTest -Recurse -Force -ErrorAction SilentlyContinue
+          Expand-Archive -Path $zip.FullName -DestinationPath $zipTest -Force
+          foreach ($must in @('cosim\run_cosim.py', 'cosim\app_catalog.py',
+                              'cosim\env_setup.py', 'Carla\run_cosim.py',
+                              'frontdoor\FIXS.bat', 'frontdoor\FIXS.sh',
+                              'environment.yml')) {
+            if (-not (Test-Path (Join-Path $zipTest $must))) {
+              Write-Error "Packaged zip is missing $must - bundle layout is wrong."
+              exit 1
+            }
+          }
+          # The build tooling must NOT ship. update_fixs.* in particular has to stay
+          # source-side at its frozen raw.githubusercontent path; a copy inside the
+          # bundle would be a second one to keep in sync, which is the whole failure
+          # mode #313 exists to remove.
+          foreach ($never in @('scripts', 'dispatch', 'update_fixs.ps1', 'update_fixs.sh')) {
+            if (Test-Path (Join-Path $zipTest $never)) {
+              Write-Error "Packaged zip contains $never - build tooling must stay source-side."
+              exit 1
+            }
+          }
+          Write-Host "Bundle layout OK: cosim/ + frontdoor/ hoisted, Carla/ shims present, no build tooling."
 
       - name: Upload packaged zip as a workflow artifact (inspect on PRs)
         if: steps.detect.outputs.should_build == 'true'

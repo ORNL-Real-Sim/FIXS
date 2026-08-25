@@ -16,7 +16,8 @@ import sys
 
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "Carla"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__),
+                                "..", "..", "..", "scripts", "cosim"))
 import app_catalog  # noqa: E402
 import run_cosim  # noqa: E402
 

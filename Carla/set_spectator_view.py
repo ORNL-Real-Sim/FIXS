@@ -16,7 +16,13 @@ from __future__ import annotations
 import argparse
 import sys
 
-import carla_env_setup as env
+# env_setup (was carla_env_setup) moved out of this folder (#313);
+# make it importable
+# before the flat import below.
+import _cosim_path  # noqa: E402
+_cosim_path.ensure()
+
+import env_setup as env
 
 # Get onto the interpreter carla.json names BEFORE importing carla - see
 # load_opendrive_world.py for why this sits above the import rather than in main().

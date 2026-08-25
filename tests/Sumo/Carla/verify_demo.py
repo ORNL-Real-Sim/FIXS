@@ -20,9 +20,13 @@ import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-# the co-sim runtime lives at the repo root: FIXS_root/Carla
-CARLA = os.path.normpath(os.path.join(HERE, "..", "..", "..", "Carla"))
-sys.path.insert(0, CARLA)  # for run_cosim
+# Two folders since #313: the CARLA component stayed at FIXS_root/Carla,
+# the renderer-agnostic co-sim modules moved to FIXS_root/scripts/cosim.
+ROOT = os.path.normpath(os.path.join(HERE, "..", "..", ".."))
+CARLA = os.path.join(ROOT, "Carla")
+COSIM = os.path.join(ROOT, "scripts", "cosim")
+sys.path.insert(0, CARLA)
+sys.path.insert(0, COSIM)  # for run_cosim
 sys.path.insert(0, os.path.join(CARLA, "sumo"))
 sys.path.insert(0, os.path.join(CARLA, "sumo", "run_synchronization"))
 

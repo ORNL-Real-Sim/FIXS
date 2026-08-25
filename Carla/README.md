@@ -22,7 +22,7 @@ Carla/                        <- self-contained co-sim component (shipped in the
     trafficlight_helper.py         SUMO<->CARLA<->Unreal coordinate transforms
     unreal_remove_tl.py            remove placed TL actors
   run_cosim.py                cross-platform launcher (Windows/Linux) - the entry point
-  carla_env_setup.py          one-time/reconfigure CARLA env picker (saves ~/.fixs/carla.json)
+  (moved to cosim/env_setup.py)  one-time/reconfigure CARLA env picker (saves ~/.fixs/carla.json)
   import_map.py               import a RoadRunner/OpenDRIVE map into a source build
   place_tls.py                place SUMO traffic lights into a cooked map (editor)
   place_signs.py              place the RoadRunner sign meshes CARLA's import culled
@@ -92,7 +92,7 @@ and asserts SUMO vehicles transfer into CARLA. No custom map/FBX required.
 
 `run_cosim.py` does **not** hard-code a CARLA path or rely on `CARLA_ROOT`.
 Instead it reads a per-machine config at `~/.fixs/carla.json` written by
-`carla_env_setup.py`. That config is outside any repo (never git-tracked), so it
+`cosim/env_setup.py`. That config is outside any repo (never git-tracked), so it
 is set once per computer and reused by every FIXS app on it.
 
 **You don't have to run setup by hand** &mdash; the first time `run_cosim.py`
@@ -103,9 +103,9 @@ Run setup explicitly only to **switch CARLA** (packaged &harr; source build, or 
 different install/version):
 
 ```bash
-python Carla/carla_env_setup.py                   # interactive picker
-python Carla/carla_env_setup.py --show            # print the current config
-python Carla/carla_env_setup.py --update-python   # rebind ONLY the python env
+python cosim/env_setup.py                   # interactive picker
+python cosim/env_setup.py --show            # print the current config
+python cosim/env_setup.py --update-python   # rebind ONLY the python env
 ```
 
 Setup asks **packaged** vs **source build**, then opens a native folder picker:
@@ -150,7 +150,7 @@ Whichever env is bound, setup says so when it is not the one that was asked for
 never stop a run, they degrade it under a different name (no `yaml` makes every
 scenario setting read as its default, including `CarlaServerIP`).
 
-**Every entry point runs under that one interpreter.** `carla_env_setup.
+**Every entry point runs under that one interpreter.** `cosim/env_setup.
 reexec_under_configured` is each script's first act — `run_cosim.py`,
 `import_map.py`, `place_tls.py`, `place_signs.py` and the world/spectator helpers
 — so which script you happen to start with cannot change the env you end up in,
