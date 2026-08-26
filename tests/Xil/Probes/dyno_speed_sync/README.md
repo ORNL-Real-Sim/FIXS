@@ -15,12 +15,20 @@ CARLA's speed with the dyno's speed every sync interval — what
 
 ## Running it
 
-```bash
-# the repo's env; the stock C:\Program Files\Python310 on the dev box is unstable
-python tests/Xil/Probes/dyno_speed_sync/dyno_sync_sim.py --sync-sweep 0.002,0.005,0.02,0.05,0.10
+Use the `realsim` conda env. The simulator itself needs only the standard
+library; matplotlib is optional and only draws the figure, so if you want the
+plot use `fixs_applications`, which has it.
 
-pytest tests/Xil/Probes/dyno_speed_sync/ -q
+```bash
+# conda run does not work in every shell here, so resolve the interpreter directly
+PY=~/miniconda3/envs/realsim/python.exe
+
+$PY -m pytest tests/Xil/Probes/dyno_speed_sync/ -q
+$PY tests/Xil/Probes/dyno_speed_sync/dyno_sync_sim.py --sync-sweep 0.002,0.005,0.02,0.05,0.10
 ```
+
+Verified identical results under `realsim` (3.10.20) and `fixs_applications`
+(3.10.20).
 
 Outputs land in `out/`: one `trace_<coupling>.csv` per coupling, a `summary.json`
 with every parameter and every metric, and `dyno_sync_overview.png` if matplotlib
