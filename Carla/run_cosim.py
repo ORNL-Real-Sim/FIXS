@@ -577,7 +577,10 @@ def sumo_launch_cmd(sumocfg, traci_port, num_clients, gui, autostart, app=None,
 
 
 def cadence_banner(engine, carla_tick, pose_refresh, realtime):
-    """One line stating the whole resolved cadence, printed by both engines.
+    """One line stating the whole resolved cadence, printed by every bridge.
+
+    `engine` is which one is about to run -- "py", "cpp" or "standalone" -- so the
+    banner and the engine line above it always agree.
 
     So that a run never again has to be reverse engineered from three keys and a
     hardcoded grid: it names the feed, the tick, the interpolation factor and the
@@ -828,7 +831,10 @@ def run_native_stack(config_yaml, sumocfg, tl_table, cfg, args, app=None,
     sumo_autostart = read_sumo_autostart(config_yaml) and not args.sumo_no_start
     num_clients = read_sumo_num_clients(config_yaml)
     carla_tick, pose_refresh = read_cadence(config_yaml)
-    print(cadence_banner("cpp", carla_tick, pose_refresh,
+    # `bridge`, not a literal: this function serves BOTH VirEnvCores now, and a
+    # banner that always said "cpp" contradicted the engine line printed two lines
+    # earlier on every Python run.
+    print(cadence_banner(bridge, carla_tick, pose_refresh,
                          read_realtime_pacing(config_yaml)))
 
     for label, port in (("SUMO (TraCI)", traci_port),
@@ -1046,7 +1052,9 @@ def run_python_bridge(config_yaml, sumocfg, tl_table, tls_manager, no_net_offset
     num_clients = read_sumo_num_clients(config_yaml)
     carla_tick, pose_refresh = read_cadence(config_yaml)
     realtime = read_realtime_pacing(config_yaml)
-    print(cadence_banner("py", carla_tick, pose_refresh, realtime))
+    # "standalone", not "py": py now means the Python VirEnvCore, which is the
+    # FIXS-native stack above. This is CARLA's own bridge (#330).
+    print(cadence_banner("standalone", carla_tick, pose_refresh, realtime))
 
     # A leftover SUMO from a killed run still holds the TraCI port, and the new one
     # then cannot bind - same failure the native stack guards against.
