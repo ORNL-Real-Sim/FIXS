@@ -1,5 +1,6 @@
 from re import M
 from typing import List
+import typing
 
 from numpy import byte
 from CommonLib.VehDataMsgDefs import VehData, TrafficLightData, DetectorData
@@ -49,6 +50,7 @@ class MsgHelper:
             'length': False,
             'width': False,
             'height': False,
+            'lightIndicators': False,
             'activeLaneChange': False,
             # #174 EgoDriver command channel (L2/L4), serialized at the END
             'steerAngleDesired': False,
@@ -73,6 +75,17 @@ class MsgHelper:
         self.msg_header_size = 9
         self.msg_each_header_size = 3
 
+        # id-keyed exchange storage, the peer of the MsgHelper.h members of the
+        # same names. Filled by SocketHelper alongside its flat lists; see the
+        # note above clearRecvStorage().
+        self.VehDataRecv_um: typing.Dict[str, VehData] = {}
+        self.TlsDataRecv_um: typing.Dict[str, TrafficLightData] = {}
+        # C++ keys this by socket fd; here it is the socket INDEX (0 = the
+        # vehicle-data connection, 1 = the separate signal connection), which is
+        # what a caller actually addresses -- mainVirCarla.cpp uses `sock0 = 0`
+        # and then indexes serverSock with it.
+        self.VehDataSend_um: typing.Dict[int, typing.List[VehData]] = {}
+
 
     # #86: the wire layout of a vehicle record, in order, with the struct code
     # for each numeric field. Strings are length-prefixed so they cannot join a
@@ -91,9 +104,43 @@ class MsgHelper:
         ('speedLimitNext', 'f'), ('speedLimitChangeDistance', 'f'),
         ('linkIdNext', 's'), ('grade', 'f'), ('activeLaneChange', 'b'),
         ('length', 'f'), ('width', 'f'), ('height', 'f'),
+        ('lightIndicators', 'H'),
         ('steerAngleDesired', 'f'), ('acceleratorPedalDesired', 'f'),
         ('brakePedalDesired', 'f'), ('speedFreeFlow', 'f'),
     ]
+
+    # ---- id-keyed exchange storage (parity with MsgHelper.h) --------------
+    # The C++ MsgHelper owns this storage and VirEnvCore reads it directly
+    # (Msg_c.VehDataRecv_um / TlsDataRecv_um / VehDataSend_um). Python kept only
+    # the flat lists on SocketHelper, so the Python core had no id-keyed feed to
+    # walk and the two seven-step bodies could not read the same. These are
+    # ADDITIVE -- SocketHelper.recv_data fills both, and every existing caller
+    # (fixs.py, the apps, the echo clients) reads the lists exactly as before.
+    #
+    # Keys are the RAW wire id / TLS name, not a stripped copy, matching
+    # SocketHelper.cpp:1030. Records arrive length-prefixed, so a received id
+    # carries no padding to strip; only a fabricated VehData does, and one of
+    # those never lands here.
+
+    def clearRecvStorage(self):
+        """() -> None -- drop this tick's received records. Peer of MsgHelper.h."""
+        self.VehDataRecv_um.clear()
+        self.TlsDataRecv_um.clear()
+
+    def clearSendStorage(self):
+        """() -> None -- drop this tick's outgoing records. Peer of MsgHelper.h."""
+        self.VehDataSend_um.clear()
+
+    @property
+    def VehicleMessageField_set(self):
+        """() -> set -- the enabled vehicle fields, as the C++ member of that name.
+
+        The C++ MsgHelper stores VehicleMessageField_set directly; Python stores
+        the same information as the vehicle_msg_field_valid flag dict. Exposing it
+        under the C++ name lets VirEnvCore.py test subscriptions with the same
+        expression VirEnvCore.cpp uses.
+        """
+        return {name for name, on in self.vehicle_msg_field_valid.items() if on}
 
     def _build_decode_plan(self):
         """Group the enabled fields into string reads and batched unpacks.
@@ -228,6 +275,7 @@ class MsgHelper:
                   + self.vehicle_msg_field_valid.get('length', 0) * 4  # length
                   + self.vehicle_msg_field_valid.get('width', 0) * 4  # width
                   + self.vehicle_msg_field_valid.get('height', 0) * 4  # height
+                  + self.vehicle_msg_field_valid.get('lightIndicators', 0) * 2  # lightIndicators
                   + self.vehicle_msg_field_valid.get('steerAngleDesired', 0) * 4  # steerAngleDesired
                   + self.vehicle_msg_field_valid.get('acceleratorPedalDesired', 0) * 4  # acceleratorPedalDesired
                   + self.vehicle_msg_field_valid.get('brakePedalDesired', 0) * 4  # brakePedalDesired
@@ -365,6 +413,11 @@ class MsgHelper:
         if self.vehicle_msg_field_valid.get('height'):
             byte_data[byte_index:byte_index+4] = struct.pack('f', veh_data.height)
             byte_index += 4
+
+        # uint16, between height and the EgoDriver block -- MsgHelper.cpp:395.
+        if self.vehicle_msg_field_valid.get('lightIndicators'):
+            byte_data[byte_index:byte_index+2] = struct.pack('H', veh_data.lightIndicators)
+            byte_index += 2
 
         # #174 EgoDriver command channel (serialized at the END, matching C++)
         if self.vehicle_msg_field_valid.get('steerAngleDesired'):

@@ -39,6 +39,11 @@ class SocketHelper:
         self.traffic_light_data_receive_list.clear()
         self.detector_data_receive_list.clear()
 
+        # The id-keyed views of the same records (MsgHelper.VehDataRecv_um etc.)
+        # are cleared with them, so a tick never mixes two exchanges.
+        self.msg_helper.clearRecvStorage()
+        self.msg_helper.clearSendStorage()
+
 
 
     def pack_traffic_light_data(self, TrafficLightData):
@@ -171,12 +176,17 @@ class SocketHelper:
                 aa = 1
                 vehicle_data_received = self.msg_helper.depack_veh_data(received_buffer)
                 self.vehicle_data_receive_list.append(vehicle_data_received)
+                # Also index it by id for MsgHelper.VehDataRecv_um -- the feed
+                # VirEnvCore walks, and the peer of SocketHelper.cpp:1030. Raw
+                # wire id, unstripped, exactly as the C++ keys it.
+                self.msg_helper.VehDataRecv_um[vehicle_data_received.id] = vehicle_data_received
             elif msg_type == MessageType.traffic_light_data:
                 # Wire format is fixed: name (uint8 len + bytes), id (uint16),
                 # state (uint8 len + bytes). depack_traffic_light_data on
                 # MsgHelper handles it.
                 tls_data = self.msg_helper.depack_traffic_light_data(received_buffer)
                 self.traffic_light_data_receive_list.append(tls_data)
+                self.msg_helper.TlsDataRecv_um[tls_data.name] = tls_data
 
             elif msg_type == MessageType.detector_data:
                 # DetDataRecv_v = self.depackDetectorData(received_buffer) 
