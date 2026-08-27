@@ -722,7 +722,8 @@ CarlaSetup:
 HANDOFF_TIMEOUT_S = 60
 
 
-def start_app(app, config_yaml=None, timeout=HANDOFF_TIMEOUT_S, sumocfg=None):
+def start_app(app, config_yaml=None, timeout=HANDOFF_TIMEOUT_S, sumo_only=False,
+              sumocfg=None):
     """Start the app's `launch` command and collect the scenario it reports.
 
     Returns (proc, sumocfg-or-None). ONE process spans both moments a controller
@@ -761,6 +762,14 @@ def start_app(app, config_yaml=None, timeout=HANDOFF_TIMEOUT_S, sumocfg=None):
     env = dict(os.environ, FIXS_HANDOFF=handoff, FIXS_PYTHON=sys.executable)
     if config_yaml:
         env["FIXS_CONFIG_YAML"] = config_yaml
+    # FIXS_SUMO_ONLY because the yaml cannot answer "is CARLA in this run". Every
+    # co-sim yaml has a CarlaSetup section - that is what makes it a co-sim yaml -
+    # so an app checking the yaml to decide whether its geometry will be rendered
+    # gets the same answer either way, and one that refuses to run a scenario CARLA
+    # cannot render would refuse the very run that exists to do it without CARLA.
+    # Only run_cosim knows, so run_cosim says.
+    if sumo_only:
+        env["FIXS_SUMO_ONLY"] = "1"
     # FIXS_SUMOCFG because --sumocfg names the scenario THE USER chose, and an app
     # that generates its own can only honour that by building FROM it. Without this
     # the flag reaches SUMO but never the app, so the only thing it could do to a
@@ -800,7 +809,7 @@ def start_app(app, config_yaml=None, timeout=HANDOFF_TIMEOUT_S, sumocfg=None):
 
 def run_native_stack(config_yaml, sumocfg, tl_table, cfg, args, app=None,
                      ctl_sock=None, app_owns_scenario=False, app_proc=None,
-                     bridge="cpp"):
+                      sumo_only=False, bridge="cpp"):
     """FIXS-native bridge: launch SUMO (TraCI server) + TrafficLayer (-f config) +
     VirCarlaEnv (-f config -t tl_table), plus the app's own `launch` command if it
     declares one. CARLA is already up and the map loaded by run_cosim's preflight.
@@ -809,13 +818,21 @@ def run_native_stack(config_yaml, sumocfg, tl_table, cfg, args, app=None,
     TrafficLayer is the sole TraCI client, so it steps SUMO (an app controller
     subscribes to TrafficLayer on the application port, it does not drive SUMO).
     Blocks on VirCarlaEnv - the co-sim front-end - and tears the others down on
-    exit."""
+    exit.
+
+    sumo_only drops VirCarlaEnv and changes nothing else: same SUMO, same
+    TrafficLayer, same app controller, same ports. It is for driving a scenario
+    CARLA cannot render - a network edited on the SUMO side, or a controller
+    change worth checking before anyone cooks a map for it. With no CARLA
+    front-end there is nothing to block on, so it blocks on the app's controller
+    where there is one and on TrafficLayer where there is not."""
     import shutil
     tl_exe, vce_exe = _native_binaries()
-    # Only require the bridge this run will actually start. The C++ VirCarlaEnv is
-    # built only when the libcarla dep is available, so demanding it for a Python-
-    # bridge run would refuse a stack that has everything it needs.
-    needed = [tl_exe] + ([vce_exe] if bridge == "cpp" else [PY_BRIDGE])
+    # Only require what this run will actually start: the bridge it selected, and no
+    # bridge at all when there is no CARLA half. The C++ VirCarlaEnv is built only
+    # when the libcarla dep is available, so demanding it for a Python-bridge run -
+    # or for a SUMO-only one - would refuse a stack that has everything it needs.
+    needed = [tl_exe] if sumo_only else [tl_exe, vce_exe if bridge == "cpp" else PY_BRIDGE]
     missing = [q for q in needed if not os.path.isfile(q)]
     if missing:
         sys.exit(f"[cosim] engine {bridge!r} needs these, not found:" + "\n  "
@@ -932,43 +949,59 @@ def run_native_stack(config_yaml, sumocfg, tl_table, cfg, args, app=None,
             return 1
         if not _port_listening(bridge_port):
             print(f"[cosim]   WARN TrafficLayer is running but port {bridge_port} is not "
-                  f"open yet; VirCarlaEnv may fail to subscribe.")
+                  + ("open yet." if sumo_only else
+                     "open yet; VirCarlaEnv may fail to subscribe."))
         else:
             print(f"[cosim]   OK   TrafficLayer serving the bridge on {bridge_port}")
 
-        # The two bridges take the same two arguments, so nothing downstream --
-        # supervision, teardown, the "which component died" report -- has to know
-        # which one is running.
-        if bridge == "cpp":
-            bridge_name = "VirCarlaEnv"
-            vce_cmd = [vce_exe, "-f", config_yaml]
+        # What the run blocks on. Normally the CARLA bridge: it is the co-sim
+        # front-end, and closing its window is how a run is ended. Without it the
+        # longest-lived thing is the app's controller, and with no app either,
+        # TrafficLayer.
+        if sumo_only:
+            front_name, front = (("TrafficLayer", tl) if app_proc is None
+                                 else (app["id"], app_proc))
         else:
-            bridge_name = "mainVirCarla"
-            # sys.executable, not a bare "python": run_cosim already re-launched
-            # itself under the interpreter that has the carla wheel, and that is
-            # the only one the bridge can import carla from.
-            vce_cmd = [sys.executable, PY_BRIDGE, "-f", config_yaml]
-        if tl_table:
-            vce_cmd += ["-t", tl_table]
-        print(f"[VCE]  {bridge_name} -f {config_yaml}"
-              + (f" -t {tl_table}" if tl_table else ""))
-        vce = subprocess.Popen(vce_cmd)
-        procs.append((bridge_name, vce))
-        time.sleep(3)   # long enough for a config/CARLA-connection failure to surface
-        if not _check(bridge_name, vce,
-                      f"check CARLA is reachable at {args.carla_host}:{args.carla_port} "
-                      f"and see CarlaClient.log in {os.getcwd()}."):
-            return 1
+            # The two bridges take the same two arguments, so nothing downstream --
+            # supervision, teardown, the "which component died" report -- has to know
+            # which one is running.
+            if bridge == "cpp":
+                bridge_name = "VirCarlaEnv"
+                vce_cmd = [vce_exe, "-f", config_yaml]
+            else:
+                bridge_name = "mainVirCarla"
+                # sys.executable, not a bare "python": run_cosim already re-launched
+                # itself under the interpreter that has the carla wheel, and that is
+                # the only one the bridge can import carla from.
+                vce_cmd = [sys.executable, PY_BRIDGE, "-f", config_yaml]
+            if tl_table:
+                vce_cmd += ["-t", tl_table]
+            print(f"[VCE]  {bridge_name} -f {config_yaml}"
+                  + (f" -t {tl_table}" if tl_table else ""))
+            vce = subprocess.Popen(vce_cmd)
+            procs.append((bridge_name, vce))
+            time.sleep(3)   # long enough for a config/CARLA-connection failure to surface
+            if not _check(bridge_name, vce,
+                          f"check CARLA is reachable at {args.carla_host}:{args.carla_port} "
+                          f"and see CarlaClient.log in {os.getcwd()}."):
+                return 1
+            front_name, front = bridge_name, vce
 
-        print(f"\n[cosim] native stack up: SUMO + TrafficLayer + {bridge_name}"
-              + (f" + {app['id']}" if app_proc is not None else "") + ".\n"
-              "[cosim] vehicles should now appear in the CARLA window. Ctrl+C here, or "
-              f"close {bridge_name}, to stop.\n")
+        if sumo_only:
+            print("\n[cosim] SUMO-only stack up: SUMO + TrafficLayer"
+                  + (f" + {app['id']}" if app_proc is not None else "") + ", no CARLA.\n"
+                  f"[cosim] nothing is rendered - watch it in sumo-gui. Ctrl+C here, or "
+                  f"let {front_name} finish, to stop.\n")
+        else:
+            print(f"\n[cosim] native stack up: SUMO + TrafficLayer + {front_name}"
+                  + (f" + {app['id']}" if app_proc is not None else "") + ".\n"
+                  "[cosim] vehicles should now appear in the CARLA window. Ctrl+C here, or "
+                  f"close {front_name}, to stop.\n")
 
-        # Supervise: block on VirCarlaEnv (the front-end) but surface it if any other
+        # Supervise: block on the front process but surface it if any other
         # component dies first - otherwise a dead TrafficLayer just looks like a freeze.
         import peer
-        while _alive(vce):
+        while _alive(front):
             # The control socket is a component like any other: if the CARLA host
             # hangs up - its Ctrl+C, its CARLA dying, the network going - the feed
             # is over. Without this the first symptom is VirCarlaEnv dying seconds
@@ -978,7 +1011,7 @@ def run_native_stack(config_yaml, sumocfg, tl_table, cfg, args, app=None,
                       "Shutting the stack down.")
                 break
             dead = [(n, p.returncode) for n, p in procs
-                    if n != bridge_name and not _alive(p)]
+                    if n != front_name and not _alive(p)]
             if dead:
                 # An app component that ran to its own end is a FINISHED run, not a
                 # failure - saying "the feed has stopped" for a clean exit sends
@@ -992,11 +1025,11 @@ def run_native_stack(config_yaml, sumocfg, tl_table, cfg, args, app=None,
                           f"the feed has stopped. Shutting the stack down.")
                 break
             time.sleep(1.0)
-        rc = vce.poll()
+        rc = front.poll()
         if rc is None:
             rc = 0
         else:
-            print(f"[cosim] {bridge_name} exited ({rc}); stopping the native stack.")
+            print(f"[cosim] {front_name} exited ({rc}); stopping the stack.")
         return rc
     finally:
         for name, p in reversed(procs):
@@ -3140,6 +3173,17 @@ def main():
     ap.add_argument("--carla-timeout", type=float, default=10.0,
                     help="CARLA client connect timeout in seconds (default: 10; "
                          "raise for heavy source-build maps)")
+    # SUMO + TrafficLayer + the app's controller, with no CARLA anywhere: not
+    # launched, not connected to, not rendered into. For a scenario CARLA cannot
+    # render yet - a network edited on the SUMO side, or a controller change worth
+    # checking before a map is cooked for it.
+    #
+    # SUPPRESSed rather than documented: this is a development escape hatch, and
+    # run_cosim's whole promise is that what you pick is a co-simulation. Offering
+    # "...but without the simulator half" in --help invites picking it to make a
+    # CARLA problem go away, which is how you end up with results nobody can place.
+    # Un-suppress it when it is something users are meant to reach for.
+    ap.add_argument("--sumo-only", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--connect-timeout", type=float, default=15.0,
                     help="seconds to wait for the CARLA RPC handshake (default 15). "
                          "Separate from --load-timeout: reaching a server is fast or "
@@ -3415,6 +3459,7 @@ def main():
         # was chosen (--config, or the one the profile remembers); a first run that
         # GENERATES a per-map config has none yet, and the app falls back to its own.
         app_proc, app_sumocfg = start_app(app, args.config or setup.get("config"),
+                                          sumo_only=args.sumo_only,
                                           sumocfg=args.sumocfg)
 
     def cached_sumo_dir(name):
@@ -3983,6 +4028,24 @@ def main():
     if args.prep_only:
         print(f"[cosim] --prep-only: '{target_map}' imported + prepped (TLs/signs); not launching.")
         return 0
+
+    # --sumo-only leaves before any of the CARLA preflight below: no server is
+    # started, no client connects, no world is loaded. Returning here rather than
+    # threading a flag through that block is deliberate - the block's job is to put
+    # a specific map in front of a specific server, and a run with no server has no
+    # part of it to keep. Everything the stack needs (the scenario yaml, the
+    # sumocfg, the app and its controller) is already resolved above.
+    if args.sumo_only:
+        if backend != "cpp":
+            sys.exit(f"[cosim] --sumo-only needs engine 'cpp' (SUMO + TrafficLayer); "
+                     f"this scenario asks for '{backend}', which is the CARLA "
+                     f"co-simulation bridge and has nothing to run without CARLA.")
+        print(f"[cosim] --sumo-only: SUMO + TrafficLayer"
+              + (f" + {app['id']}" if app is not None else "")
+              + ", no CARLA. config " + str(config_yaml))
+        return run_native_stack(config_yaml, sumocfg, tl_table, cfg, args, app,
+                                ctl_sock=None, app_owns_scenario=app_owns_scenario,
+                                app_proc=app_proc, sumo_only=True)
 
     carla_proc = None
     try:
