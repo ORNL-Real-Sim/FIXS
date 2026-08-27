@@ -2645,6 +2645,57 @@ def _edit_slots(slots, rec, ctx, cfg, apps, catalog, repo, tag_prefix, args=None
     return cfg
 
 
+# The answers configure_run has collected so far, for the case where it never
+# returns. Module-level because an exception unwinds its locals before main() can
+# read them, and because the alternative - threading a holder through the
+# signature - puts a parameter on a function whose callers do not care.
+_IN_PROGRESS = {}
+
+# The setup name the pre-import checkpoint wrote, if any. A dict rather than a bare
+# name so main() can set it without a `global` declaration at the top of a very long
+# function.
+_CHECKPOINT = {}
+
+
+def _say_checkpoint_kept():
+    """Point at the saved setup, once, on a run that failed after it was written.
+
+    The pre-import checkpoint is silent by design: it fires on EVERY run, before
+    the cook, and cannot know yet whether the cook will succeed - announcing it
+    there would print a line on every good run to report something that only
+    matters on a bad one. So the notice hangs off the failure instead, which is the
+    one moment it is both abnormal and useful. Nothing is printed when the
+    questionnaire itself was interrupted: that path says its own piece, and the
+    checkpoint below it never ran."""
+    name = _CHECKPOINT.pop("name", None)
+    if name:
+        print(f"[cosim] setup '{name}' is saved; the next run opens on it.")
+
+
+def _checkpoint_interrupted_setup():
+    """Keep the answers given so far when setup is abandoned part-way.
+
+    The questionnaire is where most of the typing happens, and Ctrl+C in it used to
+    throw all of it away - the pre-import checkpoint sits AFTER configure_run
+    returns, so it only ever covered a failed cook. This covers the other half.
+
+    Two guards, both about not making things worse than losing the answers:
+    `dirty` skips a setup that was opened and not edited - there is nothing to
+    keep, and writing would only re-tag a good record as unfinished. And an
+    existing name is never overwritten: reaching the confirm step is what offers
+    to fork, and an interrupted edit is exactly a fork nobody got to name, so it
+    lands beside the original instead of on top of it."""
+    rec, doc = _IN_PROGRESS.get("rec"), _IN_PROGRESS.get("doc") or {}
+    if not rec or not _IN_PROGRESS.get("dirty"):
+        return
+    name = _IN_PROGRESS.get("name")
+    if not name or name in (doc.get("setups") or {}):
+        name = run_profile.suggest_name(rec.get("app"), doc)
+    run_profile.save_partial(name, rec, "setup")
+    print(f"\n[cosim] kept the answers so far as '{name}'; "
+          f"it is offered on the next run.")
+
+
 def configure_run(args, cfg, repo, tag_prefix, catalog):
     """Decide everything this run needs, looping until the user confirms.
 
@@ -2695,6 +2746,11 @@ def configure_run(args, cfg, repo, tag_prefix, catalog):
     #    name: an untouched setup keeps its own, an edited one offers to fork.
     dirty = rec is None
     while True:
+        # Publish the state an interrupt should keep. Once per redraw is enough:
+        # rec is edited in place, so the entry below tracks the edits themselves -
+        # this only has to catch rec being REPLACED (a new setup, or switching to
+        # another saved one).
+        _IN_PROGRESS.update(name=name, rec=rec, dirty=dirty, doc=doc)
         if rec is None:
             rec = {"app": None, "sumo_gui": True}
             _apply_cli(rec, args)
@@ -2988,8 +3044,21 @@ def main():
                     help="do not pace the co-sim to real time (run as fast as "
                          "possible). Written to CarlaSetup.RealtimePacing, so it "
                          "applies to whichever bridge runs.")
-    ap.add_argument("--no-net-offset", action="store_true",
-                    help="zero the SUMO net offset (RoadRunner-local maps)")
+    # ON by default. Every tl_table FIXS writes is in SUMO coordinates - measured
+    # across five cooked maps here (uga, roosevelt, mlk x2, atlanta): 1156 rows, not
+    # one negative y. CARLA's world is left-handed, so SUMO (x, y) is CARLA (x, -y),
+    # and without the flip the spectator is sent to +y where there is no road: on the
+    # UGA campus map the busiest junction sits at y=1200, so the camera framed a point
+    # 2400 m north of it and the map looked unloaded. Off was never right for a
+    # FIXS-generated table; it is only right for a table already in CARLA coordinates,
+    # which is what --net-offset is for.
+    ap.add_argument("--no-net-offset", dest="no_net_offset", action="store_true",
+                    default=None,
+                    help="zero the SUMO net offset - read the TL table's y as SUMO y "
+                         "and flip it into CARLA's left-handed world. ON by default.")
+    ap.add_argument("--net-offset", dest="no_net_offset", action="store_false",
+                    help="the opposite: take the TL table's y as CARLA y unchanged, "
+                         "for a table already written in CARLA coordinates")
     ap.add_argument("--carla-host", default=None,
                     help="CARLA RPC host (default: CarlaSetup.CarlaServerIP from "
                          "the scenario yaml, else localhost). A non-local host "
@@ -3230,8 +3299,17 @@ def main():
     if args.serve:
         ctl_sock = await_peer(args)
 
-    app, setup_name, staged_configs, setup, cfg, ctx = configure_run(
-        args, cfg, repo, tag_prefix, catalog)
+    # Ctrl+C at a prompt, and the deliberate quits, both leave by an exception; the
+    # answers are only worth keeping on the way out, so the checkpoint hangs off
+    # the exit rather than costing a write per question.
+    try:
+        app, setup_name, staged_configs, setup, cfg, ctx = configure_run(
+            args, cfg, repo, tag_prefix, catalog)
+    except (KeyboardInterrupt, SystemExit):
+        _checkpoint_interrupted_setup()
+        raise
+    finally:
+        _IN_PROGRESS.clear()
 
     # The app is settled and we are already running under the configured interpreter
     # (reexec_under_configured above), so this is the first point where "what does THIS app
@@ -3301,13 +3379,33 @@ def main():
     picked_local = ctx.get("picked_local") or setup.get("map_local")
     if picked_local and not os.path.exists(picked_local):
         picked_local = None
+    # Checkpoint. Everything the questionnaire asked is now decided, and the next
+    # thing that runs - the map import - is the one that fails for reasons outside
+    # this script (a cook that crashes the editor, a bundle that will not open).
+    # The full save is ~400 lines below, past that import, so a failed cook used to
+    # discard the app, map and local pick just chosen. config/config_scope are NOT
+    # passed: they are resolved after the import, and `setup` already carries
+    # whatever the previous run knew, which is the right thing to come back to.
+    run_profile.save_partial(setup_name, {**setup,
+                                          "app": app["id"] if app else None,
+                                          "map": target_map,
+                                          "map_origin": map_origin,
+                                          "map_local": picked_local,
+                                          "sumo_gui": bool(args.sumo_gui)},
+                             "map import")
+    _CHECKPOINT["name"] = setup_name
     # Was the map chosen from the menu on THIS run? Only then is "you just picked a
     # map that is already cooked - reimport it?" worth asking. A replayed setup is a
     # deliberate re-run, and prompting about re-cooking it every time is noise.
     picked_now = bool(ctx.get("picked_now"))
 
     # Per-map settings are defaults; explicit CLI flags override.
-    no_net_offset = args.no_net_offset or settings.get("net_offset") == "zero"
+    # None = neither --no-net-offset nor --net-offset was given, so the map's own
+    # setting decides and its default is ON (see the flag). A map opts out with
+    # net_offset: "keep"; "zero" is the historical spelling of ON and still reads as
+    # ON here, so an existing per-map setting keeps meaning what it meant.
+    no_net_offset = (args.no_net_offset if args.no_net_offset is not None
+                     else settings.get("net_offset") != "keep")
     tls_manager = args.tls_manager or settings.get("tls_manager") or "sumo"
 
     sumo_dir = None              # dir holding the chosen bundle's .sumocfg (set on open)
@@ -3383,7 +3481,15 @@ def main():
 
         if resolved is None:
             if carla_src is not None:                    # a DT/local bundle or raw export
-                real = import_map.map_name_in(carla_src) or target_map
+                # descriptor_only: a bundle that SHIPS a descriptor names the
+                # package CARLA cooks, and that name is not ours to change. A raw
+                # export ships none - FIXS generates it - so the name chosen at the
+                # import prompt is the name. The old .xodr-stem fallback could not
+                # tell those apart and always won, which silently discarded the
+                # rename: the prompt took 'uga_untextured', the export was
+                # ugaaa.xodr, and the cook, the descriptor and /Game all said
+                # 'ugaaa' while the run profile said 'uga_untextured'.
+                real = import_map.map_name_in(carla_src, descriptor_only=True) or target_map
                 verb = "re-importing" if args.reimport else "importing"
                 print(f"[cosim] {verb} '{real}' before launch ...")
                 _tell_peer(ctl_sock, "cook", f"importing and cooking '{real}' - "
@@ -4059,4 +4165,18 @@ if __name__ == "__main__":
         # two machines - --serve where CARLA is, --peer where the traffic is.
         sys.exit("[cosim] --serve is the CARLA half of a distributed run and "
                  "--peer is the traffic half; they run on different machines.")
-    sys.exit(serve_forever() if "--serve" in sys.argv else main())
+    # Wrapped so a run that dies AFTER the setup was checkpointed says where the
+    # answers went. Both exits are covered: sys.exit with a message (the usual way
+    # a cook failure is reported) and a non-zero return.
+    try:
+        _rc = serve_forever() if "--serve" in sys.argv else main()
+    except SystemExit as exc:
+        if exc.code not in (0, None):
+            _say_checkpoint_kept()
+        raise
+    except KeyboardInterrupt:
+        _say_checkpoint_kept()
+        raise
+    if _rc:
+        _say_checkpoint_kept()
+    sys.exit(_rc)
