@@ -38,10 +38,14 @@ from CommonLib.VirEnv.VirEnvCore import VirEnvCore                       # noqa:
 if __package__:
     from .BridgeHelper import BridgeHelper
     from .CarlaBackend import CarlaBackend
-else:                                # run as a plain script: siblings are on path
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    from BridgeHelper import BridgeHelper          # noqa: F401  (frame parity check)
-    from CarlaBackend import CarlaBackend
+else:
+    # Run as a plain script (python Carla/VirEnv/mainVirCarla.py). Put the PARENT
+    # of this package on sys.path and import through the package, rather than
+    # importing the siblings flat: CarlaBackend imports BridgeHelper relatively,
+    # and a flat import gives it no parent package to resolve that against.
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from VirEnv.BridgeHelper import BridgeHelper
+    from VirEnv.CarlaBackend import CarlaBackend
 
 #: Must match the EgoDriver client's DriveCommand steer scaling.
 kMaxSteerRad = 0.7
@@ -246,7 +250,15 @@ def main(argv=None):
                 break
             backend.flushBatch()
 
-            onFeed = onFeedBoundary(simTime, 1e-6)
+            # An exchange boundary AND a tick that actually carried one. The core
+            # skips the recv at simTime 0 (there is nothing to receive before the
+            # first exchange), so answering there would send a reply to a tick that
+            # was never received -- and every later reply would then be paired with
+            # the previous exchange. mainVirCarla.cpp tests the boundary alone and
+            # does emit that extra message; measured, TrafficLayer does not expect
+            # one (a strict recv-then-send client runs the same port for 6501
+            # exchanges), so this deviates from the C++ deliberately. See #329.
+            onFeed = simTime > 1e-5 and onFeedBoundary(simTime, 1e-6)
 
             # ---- L2: apply the external speed advisory at each feed -----------
             # Set the driver target BEFORE it runs this tick. applyEgoControl routes
