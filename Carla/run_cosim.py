@@ -2988,8 +2988,21 @@ def main():
                     help="do not pace the co-sim to real time (run as fast as "
                          "possible). Written to CarlaSetup.RealtimePacing, so it "
                          "applies to whichever bridge runs.")
-    ap.add_argument("--no-net-offset", action="store_true",
-                    help="zero the SUMO net offset (RoadRunner-local maps)")
+    # ON by default. Every tl_table FIXS writes is in SUMO coordinates - measured
+    # across five cooked maps here (uga, roosevelt, mlk x2, atlanta): 1156 rows, not
+    # one negative y. CARLA's world is left-handed, so SUMO (x, y) is CARLA (x, -y),
+    # and without the flip the spectator is sent to +y where there is no road: on the
+    # UGA campus map the busiest junction sits at y=1200, so the camera framed a point
+    # 2400 m north of it and the map looked unloaded. Off was never right for a
+    # FIXS-generated table; it is only right for a table already in CARLA coordinates,
+    # which is what --net-offset is for.
+    ap.add_argument("--no-net-offset", dest="no_net_offset", action="store_true",
+                    default=None,
+                    help="zero the SUMO net offset - read the TL table's y as SUMO y "
+                         "and flip it into CARLA's left-handed world. ON by default.")
+    ap.add_argument("--net-offset", dest="no_net_offset", action="store_false",
+                    help="the opposite: take the TL table's y as CARLA y unchanged, "
+                         "for a table already written in CARLA coordinates")
     ap.add_argument("--carla-host", default=None,
                     help="CARLA RPC host (default: CarlaSetup.CarlaServerIP from "
                          "the scenario yaml, else localhost). A non-local host "
@@ -3307,7 +3320,12 @@ def main():
     picked_now = bool(ctx.get("picked_now"))
 
     # Per-map settings are defaults; explicit CLI flags override.
-    no_net_offset = args.no_net_offset or settings.get("net_offset") == "zero"
+    # None = neither --no-net-offset nor --net-offset was given, so the map's own
+    # setting decides and its default is ON (see the flag). A map opts out with
+    # net_offset: "keep"; "zero" is the historical spelling of ON and still reads as
+    # ON here, so an existing per-map setting keeps meaning what it meant.
+    no_net_offset = (args.no_net_offset if args.no_net_offset is not None
+                     else settings.get("net_offset") != "keep")
     tls_manager = args.tls_manager or settings.get("tls_manager") or "sumo"
 
     sumo_dir = None              # dir holding the chosen bundle's .sumocfg (set on open)
