@@ -279,40 +279,49 @@ def _select_package(name, package_url, precooked=False):
     A SOURCE build is the mirror image: it cooks, so it wants the .zip or the
     extracted folder and cannot use a cooked tarball.
 
-    For a source build we still ask zip-or-folder first, because the two need
-    different dialogs and askopenfilename cannot select a directory. Everything
-    downstream already accepts a folder (_stage_from_path copies a tree); only this
-    dialog could not offer one, which made the picker's "select a local .zip /
-    folder" a half truth - a typed path was the sole way to hand it a raw
-    extracted export. A precooked package is always one file, so it asks nothing."""
-    what = "precooked package (*_cooked.tar.gz)" if precooked else ".zip (or extracted folder)"
+    ONE explorer, and no zip-or-folder question. tkinter cannot select a file or a
+    directory in the same box - but it does not need to, because picking any file
+    INSIDE an extracted export identifies that export just as well as selecting its
+    folder would. So the dialog lists the bundle (.zip) and the files an export is
+    recognised by (.xodr/.fbx), and anything that is not an archive resolves to its
+    containing folder. The zip-or-folder decision ends up where it belongs - in what
+    the user clicks - instead of in a question asked before the explorer even opens,
+    and there is never a second dialog to cancel into. Everything downstream already
+    takes either (_stage_from_path copies a tree or unpacks an archive)."""
+    what = "precooked package (*_cooked.tar.gz)" if precooked else ".zip (or extracted export)"
     print(f"\n[import] Select the downloaded '{name}' {what}.")
+    if not precooked:
+        print("[import] Either the .zip, or - for an already-extracted export - the "
+              ".xodr/.fbx inside it (the folder is taken from it).")
     if package_url:
         print("[import] If you don't have it yet, download it (browser is fine - "
               "you need access to the release):")
         print(f"             {package_url}")
-    folder = (not precooked) and sys.stdin.isatty() and _prompt(
-        "[import] Is it a .zip or an extracted folder? "
-        "[Z = zip, F = folder, Enter = zip]: ").strip().lower().startswith("f")
+    start = _browse_start_dir()
     try:
         import tkinter as tk
         from tkinter import filedialog
         root = tk.Tk()
         root.withdraw()
         root.update()
-        if folder:
-            path = filedialog.askdirectory(
-                title=f"Select the extracted {name} package folder")
-        elif precooked:
+        if precooked:
             path = filedialog.askopenfilename(
                 title=f"Select the downloaded precooked {name} package (*_cooked.tar.gz)",
+                initialdir=start,
                 filetypes=[("Precooked map packages", "*.tar.gz"), ("All files", "*.*")])
         else:
             path = filedialog.askopenfilename(
-                title=f"Select the downloaded {name} package (.zip)",
-                filetypes=[("Zip archives", "*.zip"), ("All files", "*.*")])
+                title=f"Select the {name} package (.zip), or the .xodr/.fbx of an "
+                      f"extracted export",
+                initialdir=start,
+                filetypes=[("Map package or export", "*.zip *.xodr *.fbx"),
+                           ("Zip archives", "*.zip"),
+                           ("RoadRunner export", "*.xodr *.fbx"),
+                           ("All files", "*.*")])
+            path = _folder_of_export_file(path)
         root.destroy()
         if path:
+            _report_pick(path)
             return path
     except Exception as exc:  # no display / no tkinter
         print(f"[import] file picker unavailable ({exc}); type the path instead.")
@@ -326,7 +335,63 @@ def _select_package(name, package_url, precooked=False):
     path = _prompt(f"[import] Path to the downloaded {what}: ").strip().strip('"')
     if not path or not os.path.exists(path):
         sys.exit(f"[import] path not found: {path!r}")
+    _report_pick(path)
     return path
+
+
+def _folder_of_export_file(path):
+    """A pick from the single explorer, resolved to what staging actually wants.
+
+    An archive is the thing itself. Anything else was clicked to point AT a folder
+    - that is the whole reason the dialog offers .xodr/.fbx - so hand back the
+    directory containing it. A folder typed or dragged in already is left alone."""
+    if not path or os.path.isdir(path):
+        return path
+    if path.lower().endswith((".zip", ".tar.gz", ".tgz")):
+        return path
+    parent = os.path.dirname(path)
+    print(f"[import] taking the export folder of {os.path.basename(path)}")
+    return parent
+
+
+def _browse_start_dir():
+    """Where the file dialogs open. The map cache holds everything import_map has
+    downloaded, so it is where a hand-fetched bundle most often lands too. Falls
+    back to the home directory rather than to wherever the process happens to be -
+    a picker opening in FIXS/Carla helps nobody."""
+    for d in (_map_cache_dir(), os.path.expanduser("~")):
+        if d and os.path.isdir(d):
+            return d
+    return None
+
+
+def _report_pick(path):
+    """Say what is actually in what was just picked.
+
+    A folder is only the right one if it holds the export, and until now nothing
+    said so until _describe_export failed several steps later with "no .xodr
+    under ...". Naming the .xodr makes a good pick obvious; listing the subfolders
+    of a bad one turns "wrong folder" into "the export is one level down", which
+    is the mistake the nesting in these bundles invites
+    (Import/UGA_Campus/UGA_Campus/Carla_material/Exports)."""
+    try:
+        if os.path.isfile(path):
+            print(f"[import] picked {os.path.basename(path)} "
+                  f"({os.path.getsize(path) / (1 << 20):.0f} MB)")
+            return
+        names = sorted(os.listdir(path))
+        xodr = [f for f in names if f.lower().endswith(".xodr")]
+        fbx = [f for f in names if f.lower().endswith(".fbx")]
+        print(f"[import] picked {path}")
+        if xodr:
+            print(f"[import]   contains {', '.join(xodr)} and {len(fbx)} .fbx")
+            return
+        subs = [f for f in names if os.path.isdir(os.path.join(path, f))]
+        print("[import]   no .xodr directly here"
+              + (f"; subfolders: {', '.join(subs[:8])}" if subs else "")
+              + ("" if not subs else " - the export may be one of these."))
+    except OSError:
+        pass          # reporting must never be what stops an import
 
 
 def _has_descriptor(src):
