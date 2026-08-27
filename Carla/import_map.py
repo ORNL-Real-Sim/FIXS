@@ -994,14 +994,53 @@ def run_import(carla_root, ue4_root, name):
         restore()
 
 
+def _stash_dir(import_dir):
+    """Where set-aside packages wait out a cook: beside Import/, never in TEMP.
+
+    A sibling of Import/ rather than a child, because CARLA's Import.py cooks what
+    it finds under Import/ and a stash living there could be swept into the very
+    cook it is being hidden from. Beside it is invisible to that scan, sits next to
+    the data it belongs to, and - unlike TEMP - is not something Windows deletes on
+    its own schedule."""
+    return os.path.join(os.path.dirname(os.path.abspath(import_dir)),
+                        ".fixs-import-stash")
+
+
+def _restore_stash(import_dir, stash, names=None):
+    """Move `names` (default: everything) back from `stash` into `import_dir`."""
+    if not os.path.isdir(stash):
+        return []
+    back = []
+    for n in (names if names is not None else sorted(os.listdir(stash))):
+        src, dst = os.path.join(stash, n), os.path.join(import_dir, n)
+        if os.path.exists(src) and not os.path.exists(dst):
+            shutil.move(src, dst)
+            back.append(n)
+    if not os.listdir(stash):
+        os.rmdir(stash)
+    return back
+
+
 def _isolate_import(import_dir, keep):
     """Temporarily move every package under `import_dir` except `keep` aside, so
     CARLA's Import.py cooks only `keep`. Returns a restore() to move them back
     (call it in a finally). `keep`'s own descriptor + asset folder and the shared
-    roadpainter_decals.json stay put."""
+    roadpainter_decals.json stay put.
+
+    Recovers first. restore() runs in a finally, which covers an exception but not
+    a killed process - and a cook is long, so it is exactly the thing people kill.
+    That used to strand every other package in a TEMP directory nobody would think
+    to look in: 1.3 GB of maps, sitting where Windows cleans up on its own
+    schedule, with Import/ simply looking like the maps had been deleted. Now the
+    stash is somewhere findable and the next import puts it back on its own."""
     if not os.path.isdir(import_dir):
         return lambda: None
-    stash = tempfile.mkdtemp(prefix="fixs-import-stash-")
+    stash = _stash_dir(import_dir)
+    recovered = _restore_stash(import_dir, stash)
+    if recovered:
+        print(f"[import] a previous cook did not finish; restored "
+              f"{len(recovered)} set-aside Import/ item(s) first.")
+    os.makedirs(stash, exist_ok=True)
     moved = []
     for f in sorted(os.listdir(import_dir)):
         if not f.lower().endswith(".json") or f.lower() == "roadpainter_decals.json":
@@ -1020,11 +1059,11 @@ def _isolate_import(import_dir, keep):
               f"other Import/ item(s), restored after)")
 
     def restore():
-        for m in moved:
-            src = os.path.join(stash, m)
-            if os.path.exists(src):
-                shutil.move(src, os.path.join(import_dir, m))
-        shutil.rmtree(stash, ignore_errors=True)
+        _restore_stash(import_dir, stash, moved)
+        # Only if empty: rmtree would delete anything an earlier crash left that
+        # this cook did not set aside itself, which is the opposite of the point.
+        if os.path.isdir(stash) and not os.listdir(stash):
+            os.rmdir(stash)
     return restore
 
 
