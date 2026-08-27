@@ -20,7 +20,7 @@ confirm:
        1) app       roosevelt
        2) map       roosevelt_full            (Digital-Twin-Library)
        3) scenario  config.yaml               (generated, this app on this map)
-       4) engine    py                        (run_synchronization.py)
+       4) engine    py                        (Python VirEnvCore: mainVirCarla.py)
        5) CARLA     source  C:/src_ext/Carla  ->  127.0.0.1:2000
        6) SUMO      gui, step 0.05
 
@@ -259,7 +259,8 @@ def _fmt(slot, rec, carla_cfg, derived=None):
         return f"{os.path.basename(path):<26} ({where})"
     if slot == "engine":
         eng = derived.get("engine") or "py"
-        how = "run_synchronization.py" if eng == "py" else "TrafficLayer + VirCarlaEnv"
+        how = ("TrafficLayer + mainVirCarla.py" if eng == "py"
+               else "TrafficLayer + VirCarlaEnv")
         return f"{eng:<26} ({how}, from the yaml)"
     if slot == "carla":
         # Two different things on one line, so label them: the INSTALL comes from

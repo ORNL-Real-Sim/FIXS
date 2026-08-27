@@ -5,7 +5,7 @@ same method names (``map_transfrom_Sumo_to_Carla`` keeps its long-standing
 spelling so the two are greppable together), same arithmetic in the same order.
 
 Why this is a fresh port rather than a reuse of CARLA's own
-``Carla/sumo/run_synchronization/sumo_integration/bridge_helper.py``: the C++
+``standalone/run_synchronization/sumo_integration/bridge_helper.py``: the C++
 BridgeHelper has diverged from it (a different extent convention, the FIXS
 traffic-light table, the vClass -> blueprint sets), and the point of this module
 is to reproduce THE C++ ONE. A bridge that produced CARLA's original transforms
@@ -133,7 +133,14 @@ class BridgeHelper:
 
         x = in_location.x + math.cos(yaw * math.pi / 180.0) * extent.x
         y = in_location.y - math.sin(yaw * math.pi / 180.0) * extent.x
-        z = in_location.z - math.sin(pitch * math.pi / 180.0) * extent.x
+        # #326: PLUS, not minus. This is the pivot -> front step, the inverse of
+        # the one map_transfrom_Sumo_to_Carla takes, and the front of a climbing
+        # vehicle sits ABOVE its bounding-box centre. x and y already mirror
+        # correctly; z subtracted BOTH ways, so a round trip moved z by
+        # 2*sin(pitch)*extent.x instead of returning it. Inherited from CARLA
+        # sumo_integration/bridge_helper.py, which still has it -- which is why
+        # test_bridge_helper compares this direction to upstream in x/y/yaw only.
+        z = in_location.z + math.sin(pitch * math.pi / 180.0) * extent.x
 
         x += BridgeHelper.offset.x
         y -= BridgeHelper.offset.y

@@ -7,7 +7,7 @@ a frame problem. That is worth an independent check rather than a re-reading of 
 own arithmetic.
 
 The independent reference is CARLA's own
-``Carla/sumo/run_synchronization/sumo_integration/bridge_helper.py``, whose
+``standalone/run_synchronization/sumo_integration/bridge_helper.py``, whose
 ``get_carla_transform`` / ``get_sumo_transform`` are the upstream code the C++
 BridgeHelper was ported FROM, and are still identical in arithmetic (yaw ->
 -yaw + 90, step back cos/sin * extent.x, Y flip, rotation yaw - 90). So agreeing
@@ -31,7 +31,7 @@ sys.path.insert(0, REPO_ROOT)
 
 carla = pytest.importorskip('carla', reason='the carla client package is not installed')
 
-sys.path.insert(0, os.path.join(REPO_ROOT, 'Carla', 'sumo', 'run_synchronization'))
+sys.path.insert(0, os.path.join(REPO_ROOT, 'standalone', 'run_synchronization'))
 
 from Carla.VirEnv.BridgeHelper import (BridgeHelper, SumoTrafficLightState,  # noqa: E402
                                        TrafficLight)
@@ -91,15 +91,33 @@ def test_sumo_to_carla_matches_upstream(pose, ext):
 
 @pytest.mark.parametrize('pose', POSES)
 @pytest.mark.parametrize('ext', EXTENTS)
-def test_carla_to_sumo_matches_upstream(pose, ext):
+def test_carla_to_sumo_matches_upstream_except_z(pose, ext):
+    """x, y and yaw match upstream; z deliberately does not -- see #326.
+
+    Upstream subtracts the pitch anchor in BOTH directions, so its round trip
+    moves z instead of returning it. That was inherited by BridgeHelper.cpp and
+    is now fixed in both bridges together. Everything else still has to agree,
+    which is what keeps this an independent check of the port.
+    """
     extent = carla.Vector3D(*ext)
     carlaTf = _tf(*pose)
-    _same(UpstreamBridgeHelper.get_sumo_transform(carlaTf, extent),
-          BridgeHelper.map_transfrom_Carla_to_Sumo(carlaTf, extent))
+    up = UpstreamBridgeHelper.get_sumo_transform(carlaTf, extent)
+    ours = BridgeHelper.map_transfrom_Carla_to_Sumo(carlaTf, extent)
+    assert ours.location.x == pytest.approx(up.location.x, abs=1e-6)
+    assert ours.location.y == pytest.approx(up.location.y, abs=1e-6)
+    assert ours.rotation.pitch == pytest.approx(up.rotation.pitch, abs=1e-6)
+    assert abs((ours.rotation.yaw - up.rotation.yaw + 180.0) % 360.0 - 180.0) < 1e-6
+    # z differs by exactly twice the anchor component, and by nothing else.
+    # z differs by exactly twice the anchor component, and by nothing else. The
+    # tolerance is 1e-3 rather than 1e-6 because carla.Location stores float32:
+    # a difference taken at z = 210 m carries ~1e-5 m of representation noise,
+    # which is four orders below the 0.36 m effect being asserted.
+    step = math.sin(math.radians(carlaTf.rotation.pitch)) * extent.x
+    assert ours.location.z - up.location.z == pytest.approx(2.0 * step, abs=1e-3)
 
 
 @pytest.mark.parametrize('pose', POSES)
-def test_the_two_directions_invert_in_x_y_and_yaw(pose):
+def test_the_two_directions_are_inverses(pose):
     """Forward then back returns the planar pose, which a wrong anchor sign would not.
 
     The anchor step is what makes this a real check: getting ``+ extent.x`` where
@@ -107,7 +125,7 @@ def test_the_two_directions_invert_in_x_y_and_yaw(pose):
     applies the same error twice, but not through these two, which derive the step
     from DIFFERENT yaw expressions (``-yaw + 90`` forward, ``-yaw`` back).
 
-    z is checked separately below -- it does NOT invert, and that is inherited.
+    Since #326 this holds in z as well; see the next test.
     """
     extent = carla.Vector3D(2.3, 1.0, 0.75)
     sumoTf = _tf(*pose)
@@ -117,34 +135,36 @@ def test_the_two_directions_invert_in_x_y_and_yaw(pose):
     assert back.location.y == pytest.approx(sumoTf.location.y, abs=1e-4)
     assert back.rotation.pitch == pytest.approx(sumoTf.rotation.pitch, abs=1e-4)
     assert abs((back.rotation.yaw - sumoTf.rotation.yaw + 180.0) % 360.0 - 180.0) < 1e-4
+    # z inverts too, since #326. Before that fix it did not: both directions
+    # subtracted the pitch anchor, so a round trip moved z by twice it.
+    assert back.location.z == pytest.approx(sumoTf.location.z, abs=1e-4)
 
 
-def test_z_does_not_invert_and_that_is_inherited_not_introduced_here():
-    """ORNL-Real-Sim/FIXS#326: the reverse transform subtracts the pitch component
-    instead of adding it, so a round trip moves z by 2 * sin(pitch) * extent.x
-    rather than returning it.
+def test_z_returns_exactly_and_upstream_still_does_not():
+    """ORNL-Real-Sim/FIXS#326, fixed: the reverse transform ADDS the pitch anchor.
 
-    x and y invert correctly because the reverse mirrors their sign (``- cos``
-    forward, ``+ cos`` back); z uses ``- sin(pitch) * extent.x`` in BOTH
-    directions. The defect is in CARLA's own sumo_integration/bridge_helper.py and
-    was carried into VirCarlaEnv/BridgeHelper.cpp, and this port reproduces it
-    deliberately -- a Python bridge that quietly corrected it would place the ego's
-    elevation differently from the C++ bridge, which is exactly the divergence
-    #325 exists to prevent.
+    The pivot -> front step is the inverse of the front -> pivot one, and the
+    front of a climbing vehicle sits above its bounding-box centre. Both
+    directions used to subtract it, so a round trip moved z by
+    2*sin(pitch)*extent.x rather than returning it -- reporting a mode-A ego
+    that much too low into the traffic simulator, on every grade.
 
-    Pinned here so the day it IS fixed, it is fixed in both and this test says so.
+    Fixed in BridgeHelper.cpp and BridgeHelper.py in one change, so the two
+    bridges still place the ego identically. Upstream CARLA still has it, and
+    this asserts that too -- so if a future sync pulls upstream back in, this
+    test says what changed.
     """
     extent = carla.Vector3D(2.3, 1.0, 0.75)
     pitchDeg = 6.0
     sumoTf = _tf(0.0, 0.0, 10.0, 0.0, pitchDeg)
     back = BridgeHelper.map_transfrom_Carla_to_Sumo(
         BridgeHelper.map_transfrom_Sumo_to_Carla(sumoTf, extent), extent)
+    assert back.location.z == pytest.approx(10.0, abs=1e-5)
+
     step = math.sin(math.radians(pitchDeg)) * extent.x
-    assert back.location.z == pytest.approx(10.0 - 2.0 * step, abs=1e-5)
-    # ... and upstream CARLA does exactly the same, which is where it comes from.
     upstreamBack = UpstreamBridgeHelper.get_sumo_transform(
         UpstreamBridgeHelper.get_carla_transform(sumoTf, extent), extent)
-    assert back.location.z == pytest.approx(upstreamBack.location.z, abs=1e-5)
+    assert upstreamBack.location.z == pytest.approx(10.0 - 2.0 * step, abs=1e-5)
 
 
 def test_the_anchor_step_is_half_a_vehicle_not_a_whole_one():

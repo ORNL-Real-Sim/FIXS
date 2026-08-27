@@ -51,7 +51,12 @@ except AttributeError:                               # pragma: no cover - old py
     pass
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SYNC = os.path.join(HERE, "sumo", "run_synchronization", "run_synchronization.py")
+# CARLA's own standalone bridge. It lives OUTSIDE Carla/ (#330) because
+# 8_create_zip.ps1 packs Carla/ wholesale and this speaks no FIXS: it drives SUMO
+# over its own TraCI connection and takes no controller, XIL component or
+# TrafficLayer subscription. Reachable only via --standalone-bridge.
+SYNC = os.path.join(os.path.dirname(HERE), "standalone", "run_synchronization",
+                    "run_synchronization.py")
 PY_BRIDGE = os.path.join(HERE, "VirEnv", "mainVirCarla.py")
 FIXS_ROOT = os.path.dirname(HERE)          # FIXS/Carla -> FIXS (the fetched bundle root)
 APP_ROOT = os.path.dirname(FIXS_ROOT)      # FIXS -> the app dir (holds initialize.{sh,ps1})
@@ -1021,6 +1026,16 @@ def run_python_bridge(config_yaml, sumocfg, tl_table, tls_manager, no_net_offset
 
     Cadence and pacing come from the scenario yaml, the same file the native stack
     reads, so switching --engine changes the bridge and nothing else."""
+    # A release bundle has no standalone/ -- that is the point of #330 -- so say
+    # so plainly instead of failing on a missing file.
+    if not os.path.isfile(SYNC):
+        sys.exit(os.linesep.join([
+            f"[cosim] --standalone-bridge needs {SYNC}, which is not here.",
+            "        It ships only in a source checkout: it speaks no FIXS, so it",
+            "        is deliberately not part of the release bundle (#330). Drop",
+            "        the flag to run the FIXS stack, which is what this is for.",
+        ]))
+
     import shutil
     sumo_bin = "sumo-gui" if args.sumo_gui else "sumo"
     if not shutil.which(sumo_bin):

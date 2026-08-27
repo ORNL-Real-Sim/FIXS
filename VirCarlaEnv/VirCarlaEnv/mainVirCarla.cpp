@@ -383,7 +383,19 @@ int main(int argc, const char* argv[]) {
 
             // FIXS feed boundary (0.1 s): a recv happened this step, so send the
             // paired response + clear here. Sub-steps in between only render.
-            const bool onFeed = fixs::onFeedBoundary(simTime, 1e-6);
+            // #329: an exchange boundary AND a tick that actually carried one.
+            // VirEnvCore::runStep does NOT recv at simTime 0 -- it gates on
+            // simTime > 1e-5, because there is nothing to receive before the first
+            // exchange -- but simTime 0 IS on the boundary. Testing the boundary
+            // alone therefore answered a tick that was never received, and every
+            // reply after it was paired with the exchange BEFORE the one it
+            // described. Invisible in a render-only run, where every reply is a bare
+            // header; a 0.1 s attribution error in the mode-A ego readback, which is
+            // the one channel that closes back into the traffic simulator.
+            // Measured: TrafficLayer does not expect a leading client message -- a
+            // strict recv-then-send client ran this port for 6501 exchanges of
+            // mlk_eco_driving without stalling.
+            const bool onFeed = simTime > 1e-5 && fixs::onFeedBoundary(simTime, 1e-6);
 
             // SUMO<->CARLA elevation audit, once per exchange. Here rather than inside
             // setVehiclePose because it asks whether the two MAPS agree, which no
