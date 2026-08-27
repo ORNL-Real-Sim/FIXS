@@ -370,6 +370,31 @@ off-road — regen VISSIM from the xodr, **never edit the CM side to match**. `p
 + `build_demand.py` must read the PROBE-LOCAL `simple_traffic_light.net.xml`, not the
 stale `tests/Python/SimpleTrafficLight/` copy.
 
+**The turnaround geometry is shared, and lives in
+[`Carla/utils/sumo_uturn.py`](Carla/utils/sumo_uturn.py) (#327).** `gen_loop_net.py`
+imports `curved_uturn()` from it rather than carrying its own copy of the curvature
+integration. Do NOT re-inline that math here: the regression that keeps it honest is
+that `gen_loop_net.py` still regenerates the committed `nodes.nod.xml`/`edges.edg.xml`
+byte-for-byte, and two copies would drift silently.
+
+Why a curved loop and not SUMO's own turnaround: SUMO's point turnaround is a short
+internal link that pivots the vehicle 180° on the spot (on MLK, 4.97 m at 3.73 m/s —
+about a 1.6 m turning radius). That is fine for queue statistics and undrivable for
+anything tracking the OpenDRIVE export, so a CM/CARLA ego stalls at the terminus or
+leaves the road. The teardrop replaces it with a tangent-continuous path at a 45 m
+radius.
+
+`sumo_uturn.py` also runs standalone, to put that same loop on a network that ALREADY
+exists — a real digital twin (MLK and the rest of the Digital-Twin-Library) has no
+plain-XML sources to regenerate from. It adds edges and never renames or removes any,
+so route files stay valid; it emits node/edge/connection patches for `netconvert -s`
+instead of hand-editing the net; and it attaches to the LANE CENTRELINES that carry the
+traffic, not to the junction centroid. That last point is not cosmetic — at MLK's west
+end the arriving lane is 8.5 m to one side of the junction centre, and anchoring on the
+centre makes netconvert bridge the gap with a connector that crabs the vehicle sideways
+(measured: a ±37° S-jog at an 11 m radius), reintroducing exactly the geometry the loop
+exists to remove.
+
 **Signal identity is faithful SUMO → xodr → CM (1:1).** netconvert emits one
 `<signal id="<tls_id>_<linkIndex>">` per SUMO controlled connection, with the turn
 direction in `subtype` (10=left, 20=right, 30=straight). osc2cm stamps that id on each
