@@ -266,10 +266,17 @@ def _try_gh_download(package_url):
     return None, None
 
 
-def _select_package(name, package_url, precooked=False):
+def _select_package(name, package_url, precooked=False, inside=("xodr", "fbx")):
     """Let the user point at a package they downloaded by hand - a native file
     picker, falling back to a typed path. This is the portable path: no GitHub
     CLI / auth needed, just browser access to the release.
+
+    `inside` names the files that identify this kind of thing once it has been
+    extracted: a map export is known by its .xodr/.fbx, a SUMO scenario by its
+    .sumocfg. They are what makes one dialog enough - see below - so they are the
+    caller's to state. Hardcoding the map's extensions here filtered a SUMO
+    scenario's own files out of its dialog, which opened on an empty listing and
+    read as the explorer having failed to appear.
 
     `precooked` says which artefact this CARLA can actually take, and it has to be
     asked for by name. A PACKAGED build cooks nothing, so the only thing it can
@@ -281,18 +288,20 @@ def _select_package(name, package_url, precooked=False):
 
     ONE explorer, and no zip-or-folder question. tkinter cannot select a file or a
     directory in the same box - but it does not need to, because picking any file
-    INSIDE an extracted export identifies that export just as well as selecting its
-    folder would. So the dialog lists the bundle (.zip) and the files an export is
-    recognised by (.xodr/.fbx), and anything that is not an archive resolves to its
-    containing folder. The zip-or-folder decision ends up where it belongs - in what
-    the user clicks - instead of in a question asked before the explorer even opens,
-    and there is never a second dialog to cancel into. Everything downstream already
-    takes either (_stage_from_path copies a tree or unpacks an archive)."""
-    what = "precooked package (*_cooked.tar.gz)" if precooked else ".zip (or extracted export)"
+    INSIDE an extracted package identifies it just as well as selecting its folder
+    would. So the dialog lists the bundle (.zip) and the `inside` files, and
+    anything that is not an archive resolves to its containing folder. The
+    zip-or-folder decision ends up where it belongs - in what the user clicks -
+    instead of in a question asked before the explorer even opens, and there is
+    never a second dialog to cancel into. Everything downstream already takes
+    either (_stage_from_path copies a tree or unpacks an archive)."""
+    shown = "/".join("." + e for e in inside)
+    what = ("precooked package (*_cooked.tar.gz)" if precooked
+            else f".zip (or an extracted folder, by its {shown})")
     print(f"\n[import] Select the downloaded '{name}' {what}.")
     if not precooked:
-        print("[import] Either the .zip, or - for an already-extracted export - the "
-              ".xodr/.fbx inside it (the folder is taken from it).")
+        print(f"[import] Either the .zip, or - if it is already extracted - the "
+              f"{shown} inside it (the folder is taken from it).")
     if package_url:
         print("[import] If you don't have it yet, download it (browser is fine - "
               "you need access to the release):")
@@ -310,18 +319,19 @@ def _select_package(name, package_url, precooked=False):
                 initialdir=start,
                 filetypes=[("Precooked map packages", "*.tar.gz"), ("All files", "*.*")])
         else:
+            pats = " ".join("*." + e for e in inside)
             path = filedialog.askopenfilename(
-                title=f"Select the {name} package (.zip), or the .xodr/.fbx of an "
-                      f"extracted export",
+                title=f"Select the {name} (.zip), or the {shown} of an "
+                      f"extracted one",
                 initialdir=start,
-                filetypes=[("Map package or export", "*.zip *.xodr *.fbx"),
+                filetypes=[(f"{name} (.zip or {shown})", f"*.zip {pats}"),
                            ("Zip archives", "*.zip"),
-                           ("RoadRunner export", "*.xodr *.fbx"),
+                           (f"Extracted ({shown})", pats),
                            ("All files", "*.*")])
             path = _folder_of_export_file(path)
         root.destroy()
         if path:
-            _report_pick(path)
+            _report_pick(path, inside)
             return path
     except Exception as exc:  # no display / no tkinter
         print(f"[import] file picker unavailable ({exc}); type the path instead.")
@@ -365,31 +375,37 @@ def _browse_start_dir():
     return None
 
 
-def _report_pick(path):
+def _report_pick(path, inside=("xodr", "fbx")):
     """Say what is actually in what was just picked.
 
-    A folder is only the right one if it holds the export, and until now nothing
+    A folder is only the right one if it holds the thing, and until now nothing
     said so until _describe_export failed several steps later with "no .xodr
-    under ...". Naming the .xodr makes a good pick obvious; listing the subfolders
-    of a bad one turns "wrong folder" into "the export is one level down", which
-    is the mistake the nesting in these bundles invites
-    (Import/UGA_Campus/UGA_Campus/Carla_material/Exports)."""
+    under ...". Naming what was found makes a good pick obvious; listing the
+    subfolders of a bad one turns "wrong folder" into "it is one level down",
+    which is the mistake the nesting in these bundles invites
+    (Import/UGA_Campus/UGA_Campus/Carla_material/Exports).
+
+    `inside` is the caller's - what counts as found differs by what is being
+    picked, and reporting "no .xodr here" about a SUMO scenario would be noise
+    dressed up as a diagnosis."""
     try:
         if os.path.isfile(path):
             print(f"[import] picked {os.path.basename(path)} "
                   f"({os.path.getsize(path) / (1 << 20):.0f} MB)")
             return
         names = sorted(os.listdir(path))
-        xodr = [f for f in names if f.lower().endswith(".xodr")]
-        fbx = [f for f in names if f.lower().endswith(".fbx")]
+        hits = [f for f in names
+                if f.lower().endswith(tuple("." + e for e in inside))]
         print(f"[import] picked {path}")
-        if xodr:
-            print(f"[import]   contains {', '.join(xodr)} and {len(fbx)} .fbx")
+        if hits:
+            print(f"[import]   contains {', '.join(hits[:6])}"
+                  + (f" (+{len(hits) - 6} more)" if len(hits) > 6 else ""))
             return
+        shown = "/".join("." + e for e in inside)
         subs = [f for f in names if os.path.isdir(os.path.join(path, f))]
-        print("[import]   no .xodr directly here"
+        print(f"[import]   no {shown} directly here"
               + (f"; subfolders: {', '.join(subs[:8])}" if subs else "")
-              + ("" if not subs else " - the export may be one of these."))
+              + ("" if not subs else " - it may be one of these."))
     except OSError:
         pass          # reporting must never be what stops an import
 
@@ -1721,7 +1737,9 @@ def choose_sumo_source(cache_name=None):
         return None
     print("\n[cosim] the chosen map has no SUMO scenario; select one now "
           "(a .zip or folder containing a .sumocfg).")
-    path = _select_package("SUMO scenario", None)  # native picker / typed path
+    # A scenario is known by its .sumocfg, not by a map's .xodr/.fbx - state it,
+    # or the dialog filters this scenario's own files out and opens empty.
+    path = _select_package("SUMO scenario", None, inside=("sumocfg",))
     _carla_src, sumo_dir = classify_source(path, cache_name)
     if sumo_dir is None:
         print(f"[cosim] no .sumocfg found in {path}")
