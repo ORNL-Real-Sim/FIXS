@@ -610,6 +610,62 @@ def check_routes(route_files, uturns):
                   f"the pivot with --keep-point-turnaround")
 
 
+def repair_routes(specs, uturns):
+    """Send routes that drove a removed point turnaround round the loop instead.
+
+    Removing the pivot disconnects every route that used it, so a scenario is
+    only usable with the new network once its routes are repaired. The splice
+    keys on the same in-edge/out-edge adjacency that was removed, so what gets
+    rewritten is exactly what would otherwise be broken.
+
+    Each spec is "IN[,OUT]"; without OUT the file is rewritten in place and the
+    original kept as IN.bak.
+    """
+    loops = {(u.in_edge, u.out_edge): [u.eid_in, u.eid_loop, u.eid_out]
+             for u in uturns if not u.opt.keep_point_turnaround}
+    if not loops:
+        print("[sumo_uturn] --repair-routes: no turnaround was removed, nothing to repair")
+        return
+
+    def splice(edges):
+        out, n = [], 0
+        for i, e in enumerate(edges):
+            out.append(e)
+            nxt = edges[i + 1] if i + 1 < len(edges) else None
+            if (e, nxt) in loops:
+                out.extend(loops[(e, nxt)])
+                n += 1
+        return out, n
+
+    for spec in specs:
+        src, _, dst = spec.partition(",")
+        src_path = Path(src.strip())
+        dst_path = Path(dst.strip()) if dst.strip() else src_path
+        if not src_path.is_file():
+            raise SystemExit(f"--repair-routes: no such file {src_path}")
+        tree = ET.parse(str(src_path))
+        routes = changed = splices = 0
+        for el in tree.getroot().iter("route"):
+            edges = (el.get("edges") or "").split()
+            if not edges:
+                continue
+            routes += 1
+            new_edges, n = splice(edges)
+            if n:
+                el.set("edges", " ".join(new_edges))
+                changed += 1
+                splices += n
+        if dst_path == src_path:
+            backup = src_path.with_suffix(src_path.suffix + ".bak")
+            if not backup.exists():
+                shutil.copy2(str(src_path), str(backup))
+                print(f"[sumo_uturn] kept the original as {backup.name}")
+        dst_path.parent.mkdir(parents=True, exist_ok=True)
+        tree.write(str(dst_path), encoding="UTF-8", xml_declaration=True)
+        print(f"[sumo_uturn] repaired {dst_path.name}: {changed} of {routes} route(s), "
+              f"{splices} turnaround(s) sent round a loop")
+
+
 def find_netconvert():
     exe = shutil.which("netconvert")
     if exe:
@@ -726,6 +782,10 @@ def build_parser():
     l.add_argument("--check-routes", action="append", default=[], metavar="ROU.XML",
                    help="report how many routes in this file drive a removed point "
                         "turnaround (repeatable)")
+    l.add_argument("--repair-routes", action="append", default=[], metavar="IN[,OUT]",
+                   help="rewrite those routes to drive the loop instead, so they stay "
+                        "connected. Without OUT the file is updated in place and the "
+                        "original kept as IN.bak (repeatable)")
 
     o = p.add_argument_group("output")
     o.add_argument("--prefix", default="ut", help="id prefix for new edges/nodes")
@@ -799,6 +859,7 @@ def main(argv=None):
         return 0
     run_netconvert(opt.net, opt.out, nod, edg, con, opt.netconvert_arg)
     print(f"[sumo_uturn] wrote {opt.out}")
+    repair_routes(opt.repair_routes, uturns)
     return 0
 
 
