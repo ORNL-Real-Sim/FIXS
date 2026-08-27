@@ -3383,7 +3383,15 @@ def main():
 
         if resolved is None:
             if carla_src is not None:                    # a DT/local bundle or raw export
-                real = import_map.map_name_in(carla_src) or target_map
+                # descriptor_only: a bundle that SHIPS a descriptor names the
+                # package CARLA cooks, and that name is not ours to change. A raw
+                # export ships none - FIXS generates it - so the name chosen at the
+                # import prompt is the name. The old .xodr-stem fallback could not
+                # tell those apart and always won, which silently discarded the
+                # rename: the prompt took 'uga_untextured', the export was
+                # ugaaa.xodr, and the cook, the descriptor and /Game all said
+                # 'ugaaa' while the run profile said 'uga_untextured'.
+                real = import_map.map_name_in(carla_src, descriptor_only=True) or target_map
                 verb = "re-importing" if args.reimport else "importing"
                 print(f"[cosim] {verb} '{real}' before launch ...")
                 _tell_peer(ctl_sock, "cook", f"importing and cooking '{real}' - "

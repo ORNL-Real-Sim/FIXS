@@ -798,12 +798,18 @@ def bundle_sumocfg(sumo_dir):
     return os.path.join(sumo_dir, cfgs[0])
 
 
-def map_name_in(carla_src):
+def map_name_in(carla_src, descriptor_only=False):
     """The real map/package name a staged CARLA source describes - the stem of its
     lone `<name>.json` descriptor, else its lone `<name>.xodr`. This is the name
     CARLA actually cooks/loads, which need NOT equal a release/location tag (e.g.
     the `roosevelt` bundle's carla/ describes `Roosevelt_07142026`). None if it
-    cannot be told unambiguously (0 or >1 candidates)."""
+    cannot be told unambiguously (0 or >1 candidates).
+
+    `descriptor_only` drops the .xodr fallback, for callers that must distinguish
+    "this bundle DECLARES its package name, and it is not ours to change" from
+    "there is only an export here, so the name is still open". Those are different
+    answers and the fallback conflated them: a raw export always yields its .xodr
+    stem, which then overrode a name the user had just been asked for."""
     if not carla_src or not os.path.isdir(carla_src):
         return None
 
@@ -818,6 +824,8 @@ def map_name_in(carla_src):
     jsons = [j for j in stems(".json") if j.lower() != "roadpainter_decals"]
     if len(jsons) == 1:
         return jsons[0]
+    if descriptor_only:
+        return None
     xodrs = list(set(stems(".xodr")))
     if len(xodrs) == 1:
         return xodrs[0]
