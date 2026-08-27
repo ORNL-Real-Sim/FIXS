@@ -967,6 +967,18 @@ def run_import(carla_root, ue4_root, name):
         proc_env["UE4_ROOT"] = ue4_root
     if not proc_env.get("UE4_ROOT"):
         print("[import] WARNING: UE4_ROOT not set; the cook commandlet may fail.")
+    # #311 again, on the one editor launch FIXS does not build the argv for.
+    # env.EDITOR_LAUNCH_FLAGS carries -DisableFrameTraceCapture onto every UE4Editor
+    # FIXS starts itself (run_cosim, place_tls, place_signs), but the cook goes
+    # through CARLA's Util/BuildTools/Import.py, which assembles its own commandlet
+    # command line - so the flag never reached it and the RenderDoc "Locate main
+    # RenderDoc executable..." dialog still blocked the cook. UE4 appends whatever
+    # UE-CmdLineArgs holds to any command line it parses (Engine/Source/Runtime/Core,
+    # LogSuppressionInterface.cpp:634), which is how a flag gets into an argv owned
+    # by someone else without patching their script.
+    extra = " ".join(env.EDITOR_LAUNCH_FLAGS)
+    proc_env["UE-CmdLineArgs"] = (
+        f"{proc_env['UE-CmdLineArgs']} {extra}" if proc_env.get("UE-CmdLineArgs") else extra)
     cmd = [sys.executable, import_py, f"--package={name}"]
     print(f"[import] running: {' '.join(cmd)}  (cwd={carla_root})")
     print("[import] cooking the map can take several minutes ...")
