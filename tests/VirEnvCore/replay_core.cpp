@@ -11,8 +11,10 @@
 //============================================================================
 #include "../../CommonLib/VirEnvCore.h"
 #include "MockVirEnvBackend.h"
+#include "replay_trace.h"
 
 #include <iostream>
+#include <cstdlib>
 #include <cassert>
 #include <string>
 #include <vector>
@@ -55,7 +57,47 @@ static void dump(const char* title, const vector<string>& ev) {
     std::cout.flush();  // so the transcript survives an assert() abort
 }
 
-int main() {
+// A recorded corridor (--trace) drives the SAME core through thousands of real
+// appear / disappear / skip events; the scripted scenarios below pin four steps and
+// two vehicles. tests/VirEnv/replay_core.py takes the same flags and emits the same
+// digests, and test_core_parity.py compares the two lists index by index.
+static int runTrace(int argc, char** argv) {
+    std::string tracePath, digestOut, egoId;
+    int substeps = 1;
+    for (int i = 1; i < argc; i++) {
+        const std::string a = argv[i];
+        if (a == "--trace" && i + 1 < argc) tracePath = argv[++i];
+        else if (a == "--substeps" && i + 1 < argc) substeps = std::atoi(argv[++i]);
+        else if (a == "--ego" && i + 1 < argc) egoId = argv[++i];
+        else if (a == "--digest-out" && i + 1 < argc) digestOut = argv[++i];
+    }
+    if (substeps < 1) substeps = 1;
+    virenv::trace::Result res;
+    if (!virenv::trace::replayTrace(tracePath, substeps, egoId, res)) return 1;
+    std::cout << "[replay] " << res.exchanges << " exchanges x " << res.substeps
+              << " substeps, ego=" << res.egoId << "\n";
+    std::cout << "[replay] spawn " << res.counts["spawn"]
+              << "  despawn " << res.counts["despawn"]
+              << "  pose " << res.counts["pose"]
+              << "  tls " << res.counts["tls"] << "\n";
+    std::string all;
+    for (std::size_t n = 0; n < res.digests.size(); n++) {
+        if (n) all += "\n";
+        all += res.digests[n];
+    }
+    std::cout << "[replay] overall digest "
+              << virenv::trace::hex16(virenv::trace::fnv1a64(all)) << "\n";
+    if (!digestOut.empty()) {
+        if (!virenv::trace::writeDigestJson(digestOut, res)) return 1;
+        std::cout << "[replay] digests -> " << digestOut << "\n";
+    }
+    return 0;
+}
+
+int main(int argc, char** argv) {
+    for (int i = 1; i < argc; i++)
+        if (std::string(argv[i]) == "--trace") return runTrace(argc, argv);
+
     // ===== Scenario 1: Carla-style -- interpolate=false, 1:1 @ 0.1 s =====
     {
         MockVirEnvBackend mock;
