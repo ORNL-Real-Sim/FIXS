@@ -251,13 +251,16 @@ def main(argv=None):
             backend.flushBatch()
 
             # An exchange boundary AND a tick that actually carried one. The core
-            # skips the recv at simTime 0 (there is nothing to receive before the
-            # first exchange), so answering there would send a reply to a tick that
-            # was never received -- and every later reply would then be paired with
-            # the previous exchange. mainVirCarla.cpp tests the boundary alone and
-            # does emit that extra message; measured, TrafficLayer does not expect
-            # one (a strict recv-then-send client runs the same port for 6501
-            # exchanges), so this deviates from the C++ deliberately. See #329.
+            # skips the recv at simTime 0, so answering there would send a reply to
+            # a tick that was never received -- and fixs.py refuses it outright
+            # ("there is no tick to answer"), which is how this was found.
+            #
+            # mainVirCarla.cpp deliberately does NOT carry this term: measured, the
+            # C++ path breaks without that leading message (#329 has the bisect).
+            # This path is measured to be fine with the pairing strict -- 6501
+            # exchanges of mlk_eco_driving, reproducing the reference exactly -- so
+            # the two are not symmetric here and neither should be "corrected" to
+            # match the other until #329 explains why.
             onFeed = simTime > 1e-5 and onFeedBoundary(simTime, 1e-6)
 
             # ---- L2: apply the external speed advisory at each feed -----------

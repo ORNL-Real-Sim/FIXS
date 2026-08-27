@@ -381,21 +381,25 @@ int main(int argc, const char* argv[]) {
 
             world.Tick(10s);               // advance Carla one sub-step (10s: TM sync work rides on the tick)
 
-            // FIXS feed boundary (0.1 s): a recv happened this step, so send the
-            // paired response + clear here. Sub-steps in between only render.
-            // #329: an exchange boundary AND a tick that actually carried one.
-            // VirEnvCore::runStep does NOT recv at simTime 0 -- it gates on
-            // simTime > 1e-5, because there is nothing to receive before the first
-            // exchange -- but simTime 0 IS on the boundary. Testing the boundary
-            // alone therefore answered a tick that was never received, and every
-            // reply after it was paired with the exchange BEFORE the one it
-            // described. Invisible in a render-only run, where every reply is a bare
-            // header; a 0.1 s attribution error in the mode-A ego readback, which is
-            // the one channel that closes back into the traffic simulator.
-            // Measured: TrafficLayer does not expect a leading client message -- a
-            // strict recv-then-send client ran this port for 6501 exchanges of
-            // mlk_eco_driving without stalling.
-            const bool onFeed = simTime > 1e-5 && fixs::onFeedBoundary(simTime, 1e-6);
+            // #329: this MUST stay the boundary alone -- do NOT add a
+            // `simTime > 1e-5` term to pair it with the recv, however wrong the
+            // unpaired reply at simTime 0 looks. VirEnvCore::runStep does not recv
+            // there, so that first send has no matching receive; but MEASURED, the
+            // C++ path needs it. Bisected on mlk_eco_driving, 50 s window, same
+            // stack and map, only this line differing:
+            //     stock                              96092 poses, ran to t=50.1
+            //     with simTime > 1e-5 added           3344 poses, died at t=1.7
+            //     that reverted, z fix kept          96094 poses, ran to t=50.1
+            // TrafficLayer then reports "send() failed mid-message / ERROR: send to
+            // client fails" and shuts the run down, i.e. it stopped being drained.
+            // So the leading message is load-bearing on this path.
+            //
+            // The Python bridge does NOT need it (Carla/VirEnv/mainVirCarla.py runs
+            // the same port for all 6501 exchanges with the pairing strict, twice
+            // over), so the two transports are not symmetric here and the mechanism
+            // is not yet established. Worth understanding before the mode-A ego
+            // readback is trusted, since an off-by-one there is 1.4 m at 14 m/s.
+            const bool onFeed = fixs::onFeedBoundary(simTime, 1e-6);
 
             // SUMO<->CARLA elevation audit, once per exchange. Here rather than inside
             // setVehiclePose because it asks whether the two MAPS agree, which no
