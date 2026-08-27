@@ -30,6 +30,7 @@ class ConfigHelper:
         self.CarMaker_setup = defaultdict(lambda: None)
         self.Sumo_setup = defaultdict(lambda: None)
         self.Carla_setup = defaultdict(lambda: None)
+        self.DataLog_setup = defaultdict(lambda: None)
     def getConfig(self, configName):
         path = os.path.normpath(configName)
         with open(path, 'r') as file:
@@ -86,8 +87,69 @@ class ConfigHelper:
         self.Carla_setup["CarlaClientIP"] = self.parserString(carla_node, "CarlaClientIP", "127.0.0.1")
         self.Carla_setup["CarlaClientPort"] = self.parserInteger(carla_node, "CarlaClientPort", 430)
         self.Carla_setup["CarlaMapName"] = self.parserString(carla_node, "CarlaMapName", "Town01")
-        self.Carla_setup["TrafficRefreshRate"] = self.parserDouble(carla_node, "TrafficRefreshRate", 0.1)
+        # 0 == every Carla tick. This key is the pose RE-APPLY cadence and, absent,
+        # must not impose one: the bridge resolves 0 to CarlaTimeStep. The old 0.1
+        # default here was a leftover from before #219, when this key WAS the feed
+        # period; it silently pinned traffic to 10 Hz however fine the world step,
+        # so with CarlaTimeStep 0.025 every vehicle held a stale pose for 3 of every
+        # 4 ticks and jumped a whole feed of travel on the 4th. Matches
+        # ConfigHelper.cpp; see #261.
+        self.Carla_setup["TrafficRefreshRate"] = self.parserDouble(carla_node, "TrafficRefreshRate", 0.0)
         self.Carla_setup["InterestedIds"] = self.parserStringVector(carla_node, "InterestedIds", ["ego"])
+
+        # ---- the rest of CarlaSetup, at parity with ConfigHelper.cpp -----------
+        # The Python bridge (Carla/VirEnv) reads this block in full, so every key
+        # the C++ VirCarlaEnv honours has to be parsed here with the SAME default.
+        # A key defaulted differently in the two parsers is a config that means two
+        # things depending on which bridge reads it.
+        self.Carla_setup["EnableExternalControl"] = self.parserFlag(carla_node, "EnableExternalControl", False)
+        self.Carla_setup["UseVehicleTypeAsBlueprint"] = self.parserFlag(carla_node, "UseVehicleTypeAsBlueprint", False)
+        self.Carla_setup["RealtimePacing"] = self.parserFlag(carla_node, "RealtimePacing", False)
+        # Carla render sub-step (interpolate the feed for smoother motion). 0 -> 1:1.
+        self.Carla_setup["CarlaTimeStep"] = self.parserDouble(carla_node, "CarlaTimeStep", 0.0)
+
+        # Spectator BEV follow (rigid top-down snap). Default ON, 50 m up, north-up.
+        self.Carla_setup["CenteredViewId"] = self.parserString(carla_node, "CenteredViewId", "ego")
+        self.Carla_setup["EnableSpectatorFollow"] = self.parserFlag(carla_node, "EnableSpectatorFollow", True)
+        self.Carla_setup["SpectatorHeight"] = self.parserDouble(carla_node, "SpectatorHeight", 50.0)
+        self.Carla_setup["SpectatorAlignYaw"] = self.parserFlag(carla_node, "SpectatorAlignYaw", False)
+
+        # #174 ego dynamics ownership + control (mode A/B). EnableEgoSimulink is the
+        # back-compat alias: EgoDynamicsOwner derives from it when unset.
+        self.Carla_setup["EgoDynamicsOwner"] = self.parserString(
+            carla_node, "EgoDynamicsOwner",
+            "Simulink" if self.Carla_setup["EnableEgoSimulink"] else "Carla")
+        self.Carla_setup["EgoControl"] = self.parserString(carla_node, "EgoControl", "None")
+
+        # #174 ego driving-mode ladder:
+        #   0 = SumoDriver (the traffic sim owns the ego; Carla renders it)
+        #   1 = CarlaDriver / L0    2 = Advisory / L2    3 = Control / L4
+        self.Carla_setup["EgoMode"] = self.parserInteger(carla_node, "EgoMode", 0)
+        # L0 driver: native Carla TM by default; "Pursuit" selects the EgoDriver
+        # fallback module, "Actuation" the external wire-command path.
+        self.Carla_setup["EgoL0Driver"] = self.parserString(carla_node, "EgoL0Driver", "TM")
+        self.Carla_setup["EgoId"] = self.parserString(carla_node, "EgoId", "ego")
+        self.Carla_setup["EgoSumoType"] = self.parserString(carla_node, "EgoSumoType", "car")
+        self.Carla_setup["EgoBlueprint"] = self.parserString(carla_node, "EgoBlueprint", "vehicle.tesla.model3")
+        self.Carla_setup["EgoSpawnPose"] = [float(v) for v in (carla_node.get("EgoSpawnPose") or [])]
+        self.Carla_setup["EgoRoutePoints"] = [(float(pt[0]), float(pt[1]))
+                                              for pt in (carla_node.get("EgoRoutePoints") or [])]
+        self.Carla_setup["EgoRouteRepeat"] = self.parserInteger(carla_node, "EgoRouteRepeat", 50)
+        self.Carla_setup["EgoTargetSpeed"] = self.parserDouble(carla_node, "EgoTargetSpeed", 8.33)
+        self.Carla_setup["TrafficManagerPort"] = self.parserInteger(carla_node, "TrafficManagerPort", 8000)
+
+        # Signal Subscription -- which junctions this client is served. The bridge
+        # matches these ids to its traffic-light table; a junction subscribed with
+        # no row there is a light that never changes.
+        self.application_setup["SignalSubscription"] = self.parseVehicleSubscription(
+            app_node, "SignalSubscription", [])
+
+        # DataLog Setup -- generic FIXS infrastructure logging (CommonLib/VirEnv/DataLogger)
+        datalog_node = config.get("DataLogSetup", {}) or {}
+        self.DataLog_setup["EnableDataLog"] = self.parserFlag(datalog_node, "EnableDataLog", False)
+        self.DataLog_setup["DataLogPath"] = self.parserString(datalog_node, "DataLogPath", "")
+        self.DataLog_setup["DataLogWho"] = self.parserStringVector(datalog_node, "DataLogWho", [])
+        self.DataLog_setup["DataLogFields"] = self.parserStringVector(datalog_node, "DataLogFields", [])
 
     def resetConfig(self):
         # Clear all config settings
@@ -95,6 +157,9 @@ class ConfigHelper:
         self.application_setup.clear()
         self.Xil_setup.clear()
         self.CarMaker_setup.clear()
+        self.Sumo_setup.clear()
+        self.Carla_setup.clear()
+        self.DataLog_setup.clear()
 
     def parserFlag(self, node, name, default=False):
         return node.get(name, default) in ['true', True]

@@ -217,22 +217,33 @@ class VirEnvCore:
                     'host (a separate TrafficSignalPort); the Carla host sets it '
                     'False and receives vehicles and signals on one port.')
 
-        try:
-            fixs.connect(configPath, port=self.vehDataPort_, host=self.trafficLayerIP_,
-                         role='virenv')
-        except Exception as exc:                                # noqa: BLE001
-            return (InitErr.ERROR_INIT_SOCKET,
-                    'RealSim: Initialize Socket Failed: %s' % exc)
+        if self.ENABLE_REALSIM:
+            try:
+                fixs.connect(configPath, port=self.vehDataPort_, host=self.trafficLayerIP_,
+                             role='virenv')
+            except Exception as exc:                            # noqa: BLE001
+                return (InitErr.ERROR_INIT_SOCKET,
+                        'RealSim: Initialize Socket Failed: %s' % exc)
+            self.Sock_c, self.Msg_c = fixs.transport()
+        else:
+            # Co-simulation off: no socket, but the wire format still has to be
+            # known -- the backend is driven from records some other source fills
+            # into Msg_c, and a MsgHelper with no fields set decodes nothing. The
+            # C++ host fills Msg_c from the config itself; here connect() normally
+            # does it, so with no connect we read the same key ourselves.
+            from CommonLib.ConfigHelper import ConfigHelper
+            cfg = ConfigHelper()
+            cfg.getConfig(configPath)
+            self.Msg_c.set_vehicle_message_field(
+                cfg.simulation_setup.get('VehicleMessageField') or ['id', 'speed'])
 
-        self.Sock_c, self.Msg_c = fixs.transport()
-
-        # required subscription fields (same contract as before). Checked AFTER
-        # connect because the field set comes from the config fixs.connect parsed;
-        # the C++ host fills Msg_c itself and so can check first.
+        # required subscription fields (same contract as before). Checked AFTER the
+        # field set is known; the C++ host fills Msg_c itself and so checks first.
         need = ('vehicleClass', 'heading', 'grade')
         have = self.Msg_c.VehicleMessageField_set
         if any(f not in have for f in need):
-            fixs.close()
+            if self.ENABLE_REALSIM:
+                fixs.close()
             return (InitErr.ERROR_INIT_MSG_FIELD,
                     'RealSim: Must subscribe: id, speed, vehicleClass, heading, grade, '
                     'speedDesired/accelerationDesired')
