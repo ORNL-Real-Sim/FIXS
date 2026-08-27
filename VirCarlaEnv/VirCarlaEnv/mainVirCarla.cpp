@@ -453,6 +453,13 @@ int main(int argc, const char* argv[]) {
                         const VehFullData_t& cmd = itAct->second;
                         backend.applyEgoActuation(cmd.acceleratorPedalDesired, cmd.brakePedalDesired,
                                                   cmd.steerAngleDesired / kMaxSteerRad);  // rad -> normalized
+                        // The advisory rides on the SAME record. Track it here too, or
+                        // the datalog reports EgoTargetSpeed forever: lastAdvisory is
+                        // otherwise only refreshed in the branch above, which this mode
+                        // skips. That made speedDesired a constant in every external run
+                        // -- so the standard datalog could not be used to compare an
+                        // external driver against an internal one at all.
+                        if (cmd.speedDesired > 0.0f) lastAdvisory = cmd.speedDesired;
                     }
                 }
             }
@@ -539,7 +546,11 @@ int main(int argc, const char* argv[]) {
                         // driver the flow is reversed and the bridge reports them. Costs
                         // nothing on the wire (a field is only serialised if the config
                         // lists it) and makes the driver's decisions observable.
-                        if (useFallbackDriver) {
+                        // Unconditional: applyEgoActuation records what it applied
+                        // too, so this is "what the ego was commanded", not "what the
+                        // in-bridge driver decided". Gating it on useFallbackDriver
+                        // logged zeros for every external run.
+                        {
                             const auto& cmd = backend.lastEgoCommand();
                             d.acceleratorPedalDesired = (float)cmd.throttle;
                             d.brakePedalDesired       = (float)cmd.brake;

@@ -328,6 +328,15 @@ void CarlaBackend::applyEgoActuation(double throttle, double brake, double steer
     c.brake    = (float)std::max(0.0, std::min(1.0, brake));
     c.steer    = (float)std::max(-1.0, std::min(1.0, steerNorm));
     egoActor_->ApplyControl(c);
+    // Record what was APPLIED, exactly as driveEgoFallback does. The datalog asks
+    // the backend what the ego was commanded this tick; before this it could only
+    // answer for the in-bridge driver, so an EgoActuationSource: external run
+    // logged zeros for all three actuation fields and looked like a controller
+    // that never commanded anything. Who produced the command is not the
+    // datalog's business -- what reached the ego is.
+    lastEgoCmd_.throttle = c.throttle;
+    lastEgoCmd_.brake    = c.brake;
+    lastEgoCmd_.steer    = c.steer;
 }
 
 void CarlaBackend::applyEgoControl(const std::string& /*egoId*/, double desiredSpeed) {
