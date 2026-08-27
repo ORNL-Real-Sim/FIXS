@@ -679,17 +679,28 @@ def stage_package(carla_root, name, package_url=None, package_dir=None, package_
             print(f"[import] '{name}' ships no CARLA descriptor; treating it as a "
                   f"raw RoadRunner export and generating one.")
             raw_dest = os.path.join(import_dir, name)
-            fresh = not os.path.isdir(raw_dest)
+            # REPLACE, never merge. This directory is derived from `src`, and
+            # _describe_export renames the geometry inside it to the map name - so
+            # a run that staged successfully and then died later (a cook that
+            # crashed) leaves <name>.fbx here, and _stage_from_path copies the
+            # export's own ugaaa.fbx back in beside it. _export_fbx then sees two
+            # unrelated .fbx and refuses, identically, on every retry: the import
+            # became unrecoverable without deleting this folder by hand. The old
+            # `fresh` guard could not help - it only covered a descriptor failure
+            # on a directory that same call had created, and by the second attempt
+            # the directory was no longer new.
+            if os.path.isdir(raw_dest):
+                print(f"[import] re-staging: replacing {raw_dest}")
+                shutil.rmtree(raw_dest, ignore_errors=True)
             os.makedirs(raw_dest, exist_ok=True)
             _stage_from_path(src, raw_dest)
             try:
                 generate_descriptor(import_dir, name)
             except SystemExit:
-                # Don't leave a half-staged export behind for the next attempt to
-                # trip over: an abandoned copy reads as the same map staged twice.
-                if fresh:
-                    shutil.rmtree(raw_dest, ignore_errors=True)
-                    print(f"[import] removed the partially staged {raw_dest}")
+                # Unconditional now: the directory above is always this call's, so
+                # there is never someone else's staging to preserve.
+                shutil.rmtree(raw_dest, ignore_errors=True)
+                print(f"[import] removed the partially staged {raw_dest}")
                 raise
     finally:
         if tmpdir:
