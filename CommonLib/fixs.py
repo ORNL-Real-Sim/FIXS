@@ -85,8 +85,19 @@ from CommonLib.VehDataMsgDefs import VehData
 __all__ = [
     'connect', 'recv', 'send', 'close',
     'sim', 'vehicle', 'trafficlight',
+    'emit', 'transport',
     'Vehicle', 'Shutdown', 'FixsError', 'NotConnected', 'ProtocolError',
 ]
+
+#: The roles a connection can be opened in. A CONTROLLER decides -- it may write
+#: only the command fields, and may return only records that arrived, which is
+#: what stops a controller fabricating a record and teleporting a vehicle it
+#: never saw (ORNL-Real-Sim/FIXS_Applications#25). A VIRENV bridge MEASURES: its
+#: whole job is to report the pose and speed its backend produced, for ids the
+#: traffic simulator may not have yet. Those are opposite contracts, so the role
+#: is named at connect() rather than inferred -- no client acquires bridge powers
+#: by accident, and the controller contract does not weaken by one field.
+_ROLES = ('controller', 'virenv')
 
 
 class Shutdown(Exception):
@@ -393,6 +404,10 @@ _noTick: typing.Optional[str] = _NOT_CONNECTED
 _helper: typing.Optional[SocketHelper] = None
 _sock: typing.Optional[socket.socket] = None
 _egoIds: typing.List[str] = []
+#: This connection's role; see _ROLES. 'controller' until connect() says otherwise.
+_role: str = 'controller'
+#: Records a virenv bridge has staged for this tick's reply via emit().
+_emitted: typing.List[VehData] = []
 
 # The tick currently held awaiting its answer.
 _armed: bool = False
@@ -411,7 +426,7 @@ def _requireConnection():
 # ---------------------------------------------------------------------------
 
 def connect(configPath=None, *, port=None, host=None, ego=None,
-            connectTimeout=None, recvTimeout=None):
+            connectTimeout=None, recvTimeout=None, role='controller'):
     """(string, ...) -> (string, integer) -- connect and return the endpoint.
 
     :param configPath: the config yaml TrafficLayer is running. Defaults to
@@ -432,9 +447,16 @@ def connect(configPath=None, *, port=None, host=None, ego=None,
     :param recvTimeout: seconds to wait for the next message; ``None`` waits
         indefinitely. TrafficLayer advances only once EVERY subscriber has
         answered, so a deadline here fires when some OTHER client stalls.
+    :param role: ``'controller'`` (default) or ``'virenv'``. See :data:`_ROLES`.
+        ``'virenv'`` unlocks :func:`emit` and :func:`transport`, which a
+        controller must not have.
     """
-    global _helper, _sock, _egoIds, _declaredFields
+    global _helper, _sock, _egoIds, _declaredFields, _role
     global sim, vehicle, trafficlight, _noTick
+
+    if role not in _ROLES:
+        raise FixsError(
+            f'unknown role {role!r}. Use one of: {", ".join(_ROLES)}.')
 
     if _sock is not None:
         close()
@@ -462,6 +484,7 @@ def connect(configPath=None, *, port=None, host=None, ego=None,
     msgHelper.set_vehicle_message_field(declared)
 
     _declaredFields = frozenset(declared)
+    _role = role
     _helper = SocketHelper(config_helper=config, msg_helper=msgHelper)
     _sock = _openSocket(host, int(port), connectTimeout, recvTimeout)
     _noTick = _NO_TICK_YET
@@ -510,6 +533,18 @@ def _openSocket(host, port, connectTimeout, recvTimeout):
     while True:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        # TCP_NODELAY: disable Nagle, as SocketHelper.cpp does on every socket it
+        # opens. The FIXS exchange is strict request/response with small messages --
+        # a render-only bridge answers with a bare 9-byte header -- which is the
+        # exact shape Nagle penalises: it holds a small write until the previous
+        # segment is acknowledged, and the peer's delayed ACK does not arrive until
+        # its timer fires. Measured on the MLK corridor, the Python bridge waited
+        # 77.41 ms per tick in the FIXS exchange against the C++ bridge's 42.66 ms
+        # on the same stack and window, while doing LESS work of its own (33.13 vs
+        # 37.41 ms). The 34.75 ms difference is a delayed-ACK interval, not
+        # computation, and it applied to every Python FIXS client -- the eco
+        # controller included, so it was a cost on the whole co-simulation.
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         try:
             sock.connect((host, port))
         except OSError as exc:
@@ -537,7 +572,7 @@ def close():
     net -- TrafficLayer is blocked waiting for it. Applications should not rely
     on this: call send() in the loop body, where it is visible.
     """
-    global _sock, _helper, _egoIds, _armed, _received
+    global _sock, _helper, _egoIds, _armed, _received, _role, _emitted
     global sim, vehicle, trafficlight, _noTick, _declaredFields
     if _armed and _sock is not None:
         try:
@@ -554,6 +589,8 @@ def close():
     _egoIds = []
     _armed = False
     _received = []
+    _role = 'controller'
+    _emitted = []
     _declaredFields = None
     _noTick = _NOT_CONNECTED
     sim = _Sim(unavailable=_NOT_CONNECTED)
@@ -641,7 +678,7 @@ def send(vehIDs=None):
     tick may advance.
     """
     _requireConnection()
-    global _armed
+    global _armed, _emitted
     if not _armed:
         raise ProtocolError(
             'there is no tick to answer. Call fixs.recv() first, and call '
@@ -671,9 +708,72 @@ def send(vehIDs=None):
     # Do NOT substitute a placeholder record when sendList is empty: it would
     # put a vehicle with an empty id and zeroed fields on the wire every idle
     # tick, which over a long run is most of the traffic.
-    _helper.vehicle_data_send_list.extend(sendList)
+    # A virenv bridge's measured records go out ahead of any echoed ones, so a
+    # bridge that both emits an id and lists it in vehIDs reports the measured
+    # value -- the last write for an id is the one TrafficLayer keeps, and the
+    # echo would otherwise overwrite the measurement with the stale input.
+    _helper.vehicle_data_send_list.extend(_emitted)
+    _helper.vehicle_data_send_list.extend(
+        r for r in sendList if r.id.strip() not in {e.id.strip() for e in _emitted})
+    _emitted = []
     _helper.sendData(_simState, _simTime, _sock)
     _armed = False
+
+
+def emit(record):
+    """(VehData) -> None -- report a MEASURED record on this tick's reply.
+
+    The bridge counterpart of :meth:`Vehicle.set`. A virtual-environment bridge
+    does not command vehicles; it reports what its backend measured -- the ego
+    pose and speed CARLA's physics produced, for an id the traffic simulator may
+    not have yet (a deferred ego spawn). Both of those are things
+    :meth:`Vehicle.set` and :func:`send` deliberately forbid a controller, so
+    this is a separate verb gated on ``role='virenv'`` rather than a relaxation
+    of the controller contract.
+
+    ``record`` is a plain :class:`~CommonLib.VehDataMsgDefs.VehData` the caller
+    built -- fields are written directly, not through ``set()``. Only fields in
+    ``SimulationSetup.VehicleMessageField`` reach the wire, exactly as for any
+    other record.
+
+    :raises NotConnected: before connect() or after close().
+    :raises ProtocolError: on a controller connection, or with no tick held.
+    """
+    _requireConnection()
+    if _role != 'virenv':
+        raise ProtocolError(
+            "emit() reports measured state and is only available to a bridge. "
+            "This connection is a controller; command a vehicle with "
+            "veh.set(speedDesired=...), or open the connection with "
+            "fixs.connect(..., role='virenv')."
+        )
+    if not _armed:
+        raise ProtocolError(
+            'there is no tick to answer. Call fixs.recv() before fixs.emit().')
+    if not isinstance(record, VehData):
+        raise TypeError(
+            f'emit() takes a VehData, got {type(record).__name__}')
+    _emitted.append(record)
+
+
+def transport():
+    """() -> (SocketHelper, MsgHelper) -- the codec objects behind this connection.
+
+    For a bridge that mirrors the C++ ``VirEnvCore``, which owns ``Sock_c`` and
+    ``Msg_c`` directly and walks ``Msg_c.VehDataRecv_um`` in its step body. A
+    controller has no reason to reach past the views and is refused, so this does
+    not become a back door around the read-only records.
+
+    :raises ProtocolError: on a controller connection.
+    """
+    _requireConnection()
+    if _role != 'virenv':
+        raise ProtocolError(
+            "transport() exposes the raw codec and is only available to a "
+            "bridge. Read this tick through fixs.vehicle / fixs.trafficlight / "
+            "fixs.sim instead."
+        )
+    return _helper, _helper.msg_helper
 
 
 def _validateCommand(record):

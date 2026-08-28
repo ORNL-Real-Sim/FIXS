@@ -248,12 +248,19 @@ def test_find_source_wheel_absent(tmp_path):
     assert env.find_source_wheel(str(tmp_path / "nope"), sys.executable) is None
 
 
-def test_maybe_reexec_noop_same_interpreter():
-    """No re-exec when already on the configured python, or when it's missing /
-    unset (must simply return, never SystemExit)."""
-    run_cosim.maybe_reexec({"python": sys.executable})
-    run_cosim.maybe_reexec({"python": os.path.join(os.sep, "no", "such", "python")})
-    run_cosim.maybe_reexec({})
+def test_reexec_noop_same_interpreter():
+    """No re-exec when already on the configured python, or when it is missing /
+    unset (must simply return, never SystemExit).
+
+    Lives on carla_env_setup now, not run_cosim: every entry point -- import_map,
+    place_tls, load_opendrive_world -- needs the same relaunch, so run_cosim keeping
+    a private copy meant which script you started decided which interpreter you got
+    (see the note at run_cosim.py:1126). This test still named the old private copy.
+    """
+    env.reexec_under_configured(__file__, {"python": sys.executable})
+    env.reexec_under_configured(__file__,
+                                {"python": os.path.join(os.sep, "no", "such", "python")})
+    env.reexec_under_configured(__file__, {})
 
 
 def test_ensure_runtime_noop_when_python_valid(monkeypatch):
@@ -263,7 +270,7 @@ def test_ensure_runtime_noop_when_python_valid(monkeypatch):
     monkeypatch.setattr(env, "resolve_python",
                         lambda: called.__setitem__("resolve", True) or sys.executable)
     cfg = {"mode": "source", "carla_root": "x", "python": sys.executable}
-    out = run_cosim.ensure_runtime(dict(cfg))
+    out = env.ensure_runtime(dict(cfg))
     assert out == cfg and called["resolve"] is False
 
 
@@ -557,7 +564,7 @@ def test_ensure_runtime_repairs_missing_python(monkeypatch, tmp_path):
     saved = {}
     monkeypatch.setattr(env, "save_config", lambda c: saved.update(c))
     cfg = {"mode": "source", "carla_root": "C:/src_ext/Carla", "ue4_root": "C:/ue4"}
-    out = run_cosim.ensure_runtime(dict(cfg))
+    out = env.ensure_runtime(dict(cfg))
     assert out["python"] == sys.executable
     assert out["carla_root"] == "C:/src_ext/Carla" and out["ue4_root"] == "C:/ue4"
     assert saved.get("python") == sys.executable  # persisted
