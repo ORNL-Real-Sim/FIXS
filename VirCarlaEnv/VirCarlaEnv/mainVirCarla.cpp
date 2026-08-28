@@ -384,7 +384,7 @@ int main(int argc, const char* argv[]) {
 
             world.Tick(10s);               // advance Carla one sub-step (10s: TM sync work rides on the tick)
 
-            // #329: this MUST stay the boundary alone -- do NOT add a
+            // #325 (finding A): this MUST stay the boundary alone -- do NOT add a
             // `simTime > 1e-5` term to pair it with the recv, however wrong the
             // unpaired reply at simTime 0 looks. VirEnvCore::runStep does not recv
             // there, so that first send has no matching receive; but MEASURED, the
@@ -400,8 +400,8 @@ int main(int argc, const char* argv[]) {
             // The Python bridge does NOT need it (Carla/VirEnv/mainVirCarla.py runs
             // the same port for all 6501 exchanges with the pairing strict, twice
             // over), so the two transports are not symmetric here and the mechanism
-            // is not yet established. Worth understanding before the mode-A ego
-            // readback is trusted, since an off-by-one there is 1.4 m at 14 m/s.
+            // is not yet established (see the #325 thread, finding A). Worth understanding
+            // before the mode-A ego readback is trusted: an off-by-one is 1.4 m at 14 m/s.
             const bool onFeed = fixs::onFeedBoundary(simTime, 1e-6);
 
             // SUMO<->CARLA elevation audit, once per exchange. Here rather than inside

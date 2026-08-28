@@ -253,16 +253,16 @@ def main(argv=None):
             backend.flushBatch()
 
             # An exchange boundary AND a tick that actually carried one. The core
-            # skips the recv at simTime 0, so answering there would send a reply to
-            # a tick that was never received -- and fixs.py refuses it outright
-            # ("there is no tick to answer"), which is how this was found.
+            # skips the recv at simTime 0, so answering there would reply to a tick
+            # that was never received -- and fixs.py refuses it outright ("there is
+            # no tick to answer"), which is how this was found.
             #
-            # mainVirCarla.cpp deliberately does NOT carry this term: measured, the
-            # C++ path breaks without that leading message (#329 has the bisect).
-            # This path is measured to be fine with the pairing strict -- 6501
-            # exchanges of mlk_eco_driving, reproducing the reference exactly -- so
-            # the two are not symmetric here and neither should be "corrected" to
-            # match the other until #329 explains why.
+            # mainVirCarla.cpp deliberately does NOT carry this term. Measured, the
+            # C++ path BREAKS without that leading message, while this path is fine
+            # with the pairing strict -- 6501 exchanges of mlk_eco_driving,
+            # reproducing the reference exactly. The two transports are therefore
+            # not symmetric here, and neither should be made to match the other
+            # until that is explained. The bisect is on the #325 thread, finding A.
             onFeed = simTime > 1e-5 and onFeedBoundary(simTime, 1e-6)
 
             # ---- L2: apply the external speed advisory at each feed -----------
@@ -426,7 +426,7 @@ def main(argv=None):
             # 15.6), and pacing debt accumulating behind the 250 ms resync
             # threshold (resyncing after one tick instead changed nothing: 7.9
             # ex/s). Making the bridge 10% faster also changed nothing, so it is
-            # not the bridge throughput either. See #333. Until it is understood,
+            # not the bridge throughput either. See the #325 thread (finding B). Until it is understood,
             # --fast (pacing off) is the smoother way to watch this scenario, and
             # this stays identical to mainVirCarla.cpp rather than diverging on an
             # unproven theory.
