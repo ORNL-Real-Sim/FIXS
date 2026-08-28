@@ -100,16 +100,22 @@ def main(argv=None):
     _sock, msgHelper = fixs.transport()
 
     steps = 0
+    recvSeconds = 0.0
+    workSeconds = 0.0
     started = time.monotonic()
     try:
         with open(args.out, 'w', encoding='utf-8', newline='') as f:
             while True:
+                _t0 = time.monotonic()
                 fixs.recv()
+                recvSeconds += time.monotonic() - _t0
+                _t0 = time.monotonic()
                 writeStep(f, msgHelper, fixs.sim.state, fixs.sim.time)
                 # Reply with nothing: a render-only bridge reports no records, and a
                 # recorder that reported some would be a participant in the run it
                 # is supposed to be observing.
                 fixs.send()
+                workSeconds += time.monotonic() - _t0
                 steps += 1
                 if args.probe and args.progress and steps % args.progress == 0:
                     r = msgHelper.VehDataRecv_um.get(args.probe)
@@ -134,6 +140,16 @@ def main(argv=None):
     finally:
         fixs.close()
 
+    # The point of this number: it is what a Python FIXS client costs with NO
+    # CARLA behind it. If the exchange is slow here too, the Python socket and
+    # decode path is the limit; if it is fast, the limit is what the bridge does
+    # between exchanges, not how it talks to TrafficLayer.
+    if steps:
+        _el = time.monotonic() - started
+        print('[record] %.1f exchanges/s, %.2f ms/exchange '
+              '(recv %.2f ms, decode+reply %.2f ms)'
+              % (steps / _el, 1000.0 * _el / steps,
+                 1000.0 * recvSeconds / steps, 1000.0 * workSeconds / steps))
     print('[record] %d exchanges -> %s (%.1f KB)'
           % (steps, args.out, os.path.getsize(args.out) / 1024.0))
     return 0 if steps else 1
