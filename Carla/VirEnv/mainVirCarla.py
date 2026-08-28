@@ -250,7 +250,12 @@ def main(argv=None):
             if rc < 0:
                 print('co-sim recv/step ended: %s' % (err or '?'), file=sys.stderr)
                 break
-            backend.flushBatch()
+            # #266/#267: the batch is NOT flushed here. It is flushed just before
+            # world.tick(), AFTER the spectator has been queued into it, so the
+            # camera and the vehicles it follows are applied by ONE acknowledged
+            # call and cannot land in different ticks. Nothing between here and
+            # there reads back a CARLA transform: the ego-control calls drive TM /
+            # pedals, and the pose log reads lastAppliedPose, our own copy.
 
             # An exchange boundary AND a tick that actually carried one. The core
             # skips the recv at simTime 0, so answering there would reply to a tick
@@ -322,9 +327,11 @@ def main(argv=None):
                 if h is not None:
                     tf = backend.lastAppliedPose(h)
                     if tf is not None:
-                        spectator.set_transform(
+                        backend.queueTransform(
+                            spectator.id,
                             _spectatorTransform(tf, spectatorHeight, spectatorAlignYaw))
 
+            backend.flushBatch()   # one acknowledged apply: vehicles + camera
             world.tick()               # advance Carla one sub-step
 
             # SUMO <-> CARLA elevation audit, once per exchange. Here rather than

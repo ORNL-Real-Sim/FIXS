@@ -263,16 +263,40 @@ class CarlaBackend(IVirEnvBackend):
     #  Driver hooks -- not part of IVirEnvBackend
     # ------------------------------------------------------------------------
     def flushBatch(self):
-        """Apply this tick's transform commands as one batch.
+        """Apply this tick's transform commands as ONE acknowledged batch.
 
-        Synchronous (``do_tick=False`` but awaited): #267 measured that an async
-        ``apply_batch`` could miss the very tick that rendered it, so a vehicle
-        stood still for a frame and then jumped double while the camera moved
-        smoothly. At CarlaTimeStep 0.1 that hit 24% of frames.
+        Sync, not async, and called immediately before ``world.tick()`` with the
+        spectator already queued into it (#266/#267). Both halves matter and they
+        are one idea: everything this tick renders is applied by one call the
+        server has acknowledged.
+
+        An async ``apply_batch`` hands the commands to the socket and returns, so
+        the bridge races its own message: when the tick wins, the frame renders
+        every mirrored vehicle at its PREVIOUS pose while the camera -- placed
+        from the pose just commanded -- has moved on, and the next tick applies
+        both so the vehicle jumps twice as far. Measured on the C++ bridge at
+        CarlaTimeStep 0.1: 29% of frames lagging, the followed actor alternating
+        0.000 / 0.582 m instead of a steady 0.291.
+
+        Sync alone left 4.7%, because the camera still went out as its OWN RPC and
+        a separate message can be applied in a different tick from the poses it is
+        meant to be centred on. With the camera in this batch it is 0.0%.
+
+        Not only cosmetic: the interested-id readback reports the actor transform
+        back to FIXS, so a stale actor sends a pose one step old, and anything
+        differencing successive poses for velocity sees 0 then 2x.
         """
         if self._client is not None and self._batch:
             self._client.apply_batch_sync(self._batch, False)
         self._batch = []
+
+    def queueTransform(self, actorId, tf):
+        """(int, carla.Transform) -> None -- put ANY actor into this tick's batch.
+
+        Used for the spectator, so the camera lands in the same atomic apply as the
+        vehicles it follows rather than in a separate RPC that can miss the tick.
+        """
+        self._batch.append(carla.command.ApplyTransform(actorId, tf))
 
     def auditZAlignment(self):
         """SUMO <-> CARLA z-alignment audit (#193 placeholder).

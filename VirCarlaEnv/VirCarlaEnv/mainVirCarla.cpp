@@ -309,7 +309,12 @@ int main(int argc, const char* argv[]) {
                     std::cerr << "co-sim recv/step ended: " << (err ? err : "?") << "\n";
                 break;
             }
-            backend.flushBatch();          // ApplyBatch(transform commands)
+            // #266: the batch is NOT flushed here. It is flushed just before
+            // world.Tick(), AFTER the spectator has been queued into it, so the
+            // camera and the vehicles it follows are applied by ONE ApplyBatchSync
+            // and cannot land in different ticks. Nothing between here and there
+            // reads back a Carla transform: the ego-control calls drive TM / pedals,
+            // and the pose log reads lastAppliedPose, our own copy.
             // ---- L2: apply the external speed advisory at each 0.1s FIXS feed ----
             // Set the driver target BEFORE it runs this tick. applyEgoControl routes
             // it to native TM (SetDesiredSpeed) or the EgoDriver fallback (override);
@@ -376,12 +381,13 @@ int main(int argc, const char* argv[]) {
                     if (const carla::geom::Transform* tf = backend.lastAppliedPose(cit->second)) {
                         carla::geom::Location loc = tf->location; loc.z += spectatorHeight;
                         const float yaw = spectatorAlignYaw ? (tf->rotation.yaw - 90.f) : -90.f;
-                        spectator->SetTransform(
+                        backend.queueTransform(spectator->GetId(),
                             carla::geom::Transform(loc, carla::geom::Rotation(-90.f, yaw, 0.f)));
                     }
                 }
             }
 
+            backend.flushBatch();   // one acknowledged apply: vehicles + camera
             world.Tick(10s);               // advance Carla one sub-step (10s: TM sync work rides on the tick)
 
             // #325 (finding A): this MUST stay the boundary alone -- do NOT add a
