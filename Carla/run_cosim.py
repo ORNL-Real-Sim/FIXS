@@ -25,6 +25,7 @@ Examples:
 """
 import argparse
 import json
+import re
 import os
 import platform
 import shutil
@@ -4036,13 +4037,33 @@ def main():
     # part of it to keep. Everything the stack needs (the scenario yaml, the
     # sumocfg, the app and its controller) is already resolved above.
     if args.sumo_only:
-        if backend != "cpp":
-            sys.exit(f"[cosim] --sumo-only needs engine 'cpp' (SUMO + TrafficLayer); "
-                     f"this scenario asks for '{backend}', which is the CARLA "
-                     f"co-simulation bridge and has nothing to run without CARLA.")
+        # No check on `backend` here on purpose. It selects WHICH CARLA bridge would
+        # run (cpp = VirCarlaEnv, py = run_synchronization), and this mode runs
+        # neither - so a yaml declaring either is equally fine, and refusing 'py'
+        # would reject a SUMO-only scenario for naming a bridge nothing will start.
         print(f"[cosim] --sumo-only: SUMO + TrafficLayer"
               + (f" + {app['id']}" if app is not None else "")
               + ", no CARLA. config " + str(config_yaml))
+        # TrafficLayer serves whoever the yaml says will subscribe, and waits for
+        # all of them. A CARLA scenario yaml lists the bridge port among them, so
+        # with no bridge running TrafficLayer waits for a client that never comes
+        # and tears the run down at the end of warm-up - the app then dies on a
+        # connection reset, which reads as an app bug rather than a missing
+        # subscriber. Say it up front, at the point where it is still cheap to fix.
+        try:
+            _, _bridge_port = read_stack_ports(config_yaml)
+            if os.path.isfile(config_yaml):
+                _txt = open(config_yaml, encoding="utf-8", errors="ignore").read()
+                if re.search(rf"^\s*port:\s*\[\s*{_bridge_port}\s*\]", _txt, re.MULTILINE):
+                    print(f"[cosim] WARN {os.path.basename(config_yaml)} lists the bridge "
+                          f"port {_bridge_port} as a subscriber, but --sumo-only starts no "
+                          f"bridge.\n"
+                          f"[cosim]      TrafficLayer will wait for a client that never "
+                          f"connects and stop after the warm-up.\n"
+                          f"[cosim]      Use a scenario yaml with no bridge subscriber "
+                          f"(SUMO + the app only).")
+        except Exception:
+            pass
         return run_native_stack(config_yaml, sumocfg, tl_table, cfg, args, app,
                                 ctl_sock=None, app_owns_scenario=app_owns_scenario,
                                 app_proc=app_proc, sumo_only=True)
