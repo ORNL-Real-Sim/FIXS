@@ -278,6 +278,19 @@ def main(argv=None):
         # that can each be acted on separately. Summed and reported at
         # teardown; a monotonic() pair per phase is ~100 ns against a tick of
         # tens of milliseconds.
+        # Per-tick period, kept so the SPREAD is reportable and not just the mean.
+        # A mean says how fast the run goes; the spread says whether a viewer sees
+        # smooth motion, and those are different questions.
+        #
+        # Collected only once the exchange is flowing (feedCount > 2). That is not
+        # tidying: the tick that first calls recv spans the wait from connecting to
+        # the first exchange, which on a warm-up scenario is the whole fast-forward
+        # -- measured at 82.6 s of a 229 s run. Left in, it drags the mean from 48.9
+        # to 76.4 ms and puts an sd of 1506 ms on a distribution whose p95 is 63.
+        # The "ms/tick" on the summary line above is still loop-elapsed over ticks
+        # and so still carries it; read the steady-state line instead.
+        tickMs = []
+        tickT0 = time.monotonic()
         phase = {k: 0.0 for k in
                  ("fixs recv", "orchestrate", "flush batch", "world.tick",
                   "z audit", "readback+send", "pacing sleep")}
@@ -476,6 +489,10 @@ def main(argv=None):
             if onFeed:
                 feedCount += 1
             phase["readback+send"] += time.monotonic() - _t0
+            _now = time.monotonic()
+            if feedCount > 2:      # past the connect / warm-up wait
+                tickMs.append(1000.0 * (_now - tickT0))
+            tickT0 = _now
             stepCount += 1
             simTime = stepCount * carlaStep   # step counter avoids fp drift
 
@@ -523,6 +540,16 @@ def main(argv=None):
             print("             %-14s %7.2f ms/tick  %4.1f%%  (loop overhead)"
                   % ("unaccounted", 1000.0 * (loopElapsed - _acct) / stepCount,
                      100.0 * (loopElapsed - _acct) / loopElapsed))
+            steady = tickMs
+            if len(steady) > 20:
+                _s = sorted(steady)
+                _n = len(_s)
+                _mean = sum(_s) / _n
+                _sd = (sum((x - _mean) ** 2 for x in _s) / _n) ** 0.5
+                print("             steady state:  mean %.1f  p50 %.1f  p95 %.1f  "
+                      "p99 %.1f  max %.1f  sd %.1f ms  (%.1f exchanges/s)"
+                      % (_mean, _s[_n // 2], _s[int(_n * 0.95)], _s[int(_n * 0.99)],
+                         _s[-1], _sd, 1000.0 / _mean))
         if dataLog.isOpen():
             print('DataLogger closed: %s' % dataLog.path())
             dataLog.close()
