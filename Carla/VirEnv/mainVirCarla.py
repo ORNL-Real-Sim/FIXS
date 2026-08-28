@@ -240,6 +240,8 @@ def main(argv=None):
         stepCount = 0
         simTime = 0.0
         wallStart = time.monotonic()
+        loopStart = time.monotonic()   # rate summary at the end
+        feedCount = 0
 
         while simTime < simEndTime:
             # ---- core: recv (only on the feed boundary) -> spawn / pose (batch)
@@ -406,6 +408,8 @@ def main(argv=None):
                           file=sys.stderr)
                     break
 
+            if onFeed:
+                feedCount += 1
             stepCount += 1
             simTime = stepCount * carlaStep   # step counter avoids fp drift
 
@@ -414,6 +418,18 @@ def main(argv=None):
             # follow-cam renders smooth. Never over-throttles: if we fell behind,
             # the sleep is skipped and the reference resyncs. OFF for XIL, where the
             # real-time component already paces the loop.
+            # RealtimePacing does NOT deliver 10 Hz on this corridor and the cause
+            # is not established. Measured, MLK, 3001 exchanges: paced 8.1 ex/s
+            # (123 ms/tick) against a 100 ms target, while the same build unpaced
+            # reaches 11.3 ex/s (89 ms/tick). Two hypotheses were tested and are
+            # WRONG: Windows sleep granularity (measured 0.5 ms over-sleep, not
+            # 15.6), and pacing debt accumulating behind the 250 ms resync
+            # threshold (resyncing after one tick instead changed nothing: 7.9
+            # ex/s). Making the bridge 10% faster also changed nothing, so it is
+            # not the bridge throughput either. See #333. Until it is understood,
+            # --fast (pacing off) is the smoother way to watch this scenario, and
+            # this stays identical to mainVirCarla.cpp rather than diverging on an
+            # unproven theory.
             if realtimePacing:
                 target = wallStart + simTime
                 now = time.monotonic()
@@ -422,6 +438,16 @@ def main(argv=None):
                 elif now - target > 0.25:
                     wallStart = now - simTime
 
+        # How fast the bridge actually ran. Printed always, because "is the
+        # Python bridge slower than the C++ one" is otherwise answered by timing a
+        # whole stack -- SUMO, TrafficLayer, the controller and a warm-up -- and
+        # attributing the difference to the bridge. This is the loop itself.
+        loopElapsed = time.monotonic() - loopStart
+        if loopElapsed > 0 and stepCount:
+            print("Bridge loop: %d exchanges, %d ticks in %.1f s "
+                  "(%.1f exchanges/s, %.2f ms/tick)"
+                  % (feedCount, stepCount, loopElapsed, feedCount / loopElapsed,
+                     1000.0 * loopElapsed / stepCount))
         if dataLog.isOpen():
             print('DataLogger closed: %s' % dataLog.path())
             dataLog.close()

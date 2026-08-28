@@ -25,13 +25,23 @@ from CommonLib.VirEnv.IVirEnvBackend import IVirEnvBackend, kNoHandle   # noqa: 
 
 from .BridgeHelper import BridgeHelper                                  # noqa: E402
 
-__all__ = ['CarlaBackend', 'kZMismatchTolM']
+__all__ = ['CarlaBackend', 'kZMismatchTolM', 'kZAuditStride']
 
 #: Tolerance for the SUMO <-> CARLA per-vehicle z-alignment guard (#193
 #: placeholder). Above this, a teleported car is off the CARLA road surface enough
 #: to warn. With a densified elevation net the residual is ~mesh discretisation (a
 #: few cm), so 0.5 m warns only on a genuine map/elevation mismatch.
 kZMismatchTolM = 0.5
+
+#: How many exchanges the z audit takes to cover every mapped vehicle.
+#:
+#: 5, not 20. The check is for a static map/elevation mismatch, so in principle any
+#: stride finds it eventually -- but the violations actually observed on the MLK
+#: corridor ran ~5 consecutive exchanges (one vehicle crossing one bad stretch),
+#: and a stride of 20 would sample a 0.5 s event about a quarter of the time. 5
+#: covers every mapped vehicle within 0.5 s, so nothing that was reported before is
+#: missed now, and it still removes four fifths of the cost.
+kZAuditStride = 5
 
 # The SUMO/FIXS wire carries the FRONT-of-vehicle position; a CARLA actor
 # transform is the actor PIVOT, which sits at the bounding-box CENTRE
@@ -66,8 +76,10 @@ class CarlaBackend(IVirEnvBackend):
         self._batch = []                 # apply_transform commands this tick
         self._actors = {}                # VehHandle -> carla.Vehicle
         self._lastApplied = {}           # VehHandle -> carla.Transform (A/B + z audit)
+        self._extentX = {}           # VehHandle -> bounding_box.extent.x (fixed per actor)
         self._trafficLightMap = {}
         self._zWarned = 0                # rate limit for the z-mismatch guard
+        self._zAuditPhase = -1           # rotating slice for the z audit
 
     # --- logging -----------------------------------------------------------
     def log(self, msg):
@@ -88,14 +100,29 @@ class CarlaBackend(IVirEnvBackend):
             carla.Location(p.x, p.y, p.z),
             carla.Rotation(p.gradeRad * 180.0 / math.pi, p.headingDeg, 0.0))
 
-    def _extentOf(self, h):
-        """The actor's real half-size, falling back on the spawn frame."""
+    def _extentXOf(self, h):
+        """The actor half-length used as the pose anchor, cached per handle.
+
+        Only extent.x is ever read (the anchor steps back along the vehicle axis),
+        and a spawned actor's bounding box does not change -- so this is one
+        boost::python property fetch per vehicle per LIFETIME instead of two per
+        vehicle per TICK. On the MLK corridor that is ~1500 fetches instead of
+        ~2.5 million.
+
+        Not cached on the tick the bbox is still unpopulated (extent.x <= 0.1):
+        the spawn-frame default is returned and the real value is picked up next
+        tick, so a vehicle can never be anchored on the fallback for good.
+        """
+        e = self._extentX.get(h)
+        if e is not None:
+            return e
         actor = self._actors.get(h)
         if actor is not None:
-            e = actor.bounding_box.extent
-            if e.x > 0.1:                # guard a not-yet-populated bbox
-                return e
-        return _kDefaultExtent
+            ex = actor.bounding_box.extent.x
+            if ex > 0.1:
+                self._extentX[h] = ex
+                return ex
+        return _kDefaultExtent.x
 
     # --- traffic pool lifecycle -------------------------------------------
     def loadSignalTable(self, path):
@@ -153,11 +180,19 @@ class CarlaBackend(IVirEnvBackend):
         # destroyed actor's pose would stay queryable through lastAppliedPose(),
         # which the per-exchange z audit and the A/B log both read.
         self._lastApplied.pop(h, None)
+        self._extentX.pop(h, None)
 
     # --- per-step actuation ------------------------------------------------
     def setVehiclePose(self, h, p):
-        carlaTf = BridgeHelper.map_transfrom_Sumo_to_Carla(
-            self._sumoTransformOf(p), self._extentOf(h))
+        # The numeric path: BridgeHelper.map_transfrom_Sumo_to_Carla builds an
+        # intermediate carla.Transform purely to read six floats back out of it,
+        # which is three boost::python constructions per vehicle per tick for
+        # nothing. Same arithmetic, same function -- see sumo_to_carla_numeric.
+        x, y, z, pitch, yaw, roll = BridgeHelper.sumo_to_carla_numeric(
+            p.x, p.y, p.z, p.headingDeg, p.gradeRad * 180.0 / math.pi, 0.0,
+            self._extentXOf(h))
+        carlaTf = carla.Transform(carla.Location(x, y, z),
+                                  carla.Rotation(pitch, yaw, roll))
         self._lastApplied[h] = carlaTf
         # Batched, applied in flushBatch() before the world tick -- as the C++ does.
         self._batch.append(carla.command.ApplyTransform(h, carlaTf))
@@ -261,7 +296,21 @@ class CarlaBackend(IVirEnvBackend):
             self._map = self._world.get_map()
         if self._map is None:
             return
-        for h, tf in self._lastApplied.items():
+        # Sampled, not exhaustive. This asks whether the two MAPS agree on
+        # elevation -- a STATIC property of the map pair, not of the traffic -- so
+        # checking every vehicle every exchange re-answers one question hundreds of
+        # times per second. Measured on the MLK corridor it was 9.6 ms of a 42.7 ms
+        # tick: 23% of the bridge's own work, for a #193 placeholder that only
+        # warns. A rotating slice covers every mapped vehicle within kZAuditStride
+        # exchanges -- 0.5 s at the 0.1 s feed, shorter than the shortest violation
+        # observed on this corridor -- so nothing that was reported before is missed.
+        handles = list(self._lastApplied)
+        if not handles:
+            return
+        self._zAuditPhase = (self._zAuditPhase + 1) % kZAuditStride
+        for n in range(self._zAuditPhase, len(handles), kZAuditStride):
+            h = handles[n]
+            tf = self._lastApplied[h]
             wp = self._map.get_waypoint(tf.location)
             if wp is None:
                 continue

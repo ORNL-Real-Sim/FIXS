@@ -16,6 +16,7 @@
 #include <cmath>
 #include <chrono>
 #include <cstdlib>
+#include <cstdio>
 #include <thread>
 
 #include <carla/client/Client.h>
@@ -277,6 +278,8 @@ int main(int argc, const char* argv[]) {
         long stepCount = 0;
         double simTime = 0.0;
         auto wallStart = std::chrono::steady_clock::now();   // realtime-pacing reference
+        auto loopStart = std::chrono::steady_clock::now();   // rate summary at the end
+        long feedCount = 0;
 
         // ---- generic FIXS data logging (config: DataLogSetup) --------------
         // Records the vehicle-data records this bridge reports to FIXS, in the
@@ -482,6 +485,7 @@ int main(int argc, const char* argv[]) {
                 core.Msg_c.clearRecvStorage();
                 core.Msg_c.clearSendStorage();
             }
+            if (onFeed) feedCount++;
             simTime = (++stepCount) * carlaStep;   // step counter avoids fp drift
 
             // Realtime pacing (viz): sleep so each sub-tick lands at its wall-clock
@@ -498,6 +502,19 @@ int main(int argc, const char* argv[]) {
             }
         }
 
+        // How fast the bridge actually ran -- the same line the Python bridge
+        // prints, so the two are directly comparable. Timing a whole stack (SUMO,
+        // TrafficLayer, the controller, a warm-up) and attributing the difference
+        // to the bridge is how that question gets answered wrong.
+        {
+            const double el = std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - loopStart).count();
+            if (el > 0 && stepCount)
+                std::printf("Bridge loop: %ld exchanges, %ld ticks in %.1f s "
+                            "(%.1f exchanges/s, %.2f ms/tick)\n",
+                            feedCount, stepCount, el, feedCount / el,
+                            1000.0 * el / stepCount);
+        }
         if (dataLog.isOpen()) { std::cout << "DataLogger closed: " << dataLog.path() << "\n"; dataLog.close(); }
         if (egoMode >= 1) backend.destroyEgo();
         settings = world.GetSettings();

@@ -261,3 +261,37 @@ def test_closest_traffic_light_is_planar():
          'J2': {0: TrafficLight('J2', 0, 100.0, 0.0, 900.0, 0.0)}}
     assert BridgeHelper.find_closest_trafficLight_id(m, 99.0, 0.0) == ('J2', 0)
     assert BridgeHelper.find_closest_trafficLight_id({}, 0.0, 0.0) == ('', -1)
+
+
+# ---------------------------------------------------------------------------
+# The numeric fast path and the Transform wrapper are one implementation
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize('pose', POSES)
+@pytest.mark.parametrize('ext', EXTENTS)
+def test_numeric_core_matches_the_transform_wrapper(pose, ext):
+    """CarlaBackend.setVehiclePose calls sumo_to_carla_numeric directly, skipping
+    the intermediate carla.Transform that map_transfrom_Sumo_to_Carla builds. Same
+    function, so the two must land in the same place.
+
+    The tolerance is float32, not exact, and that is the one real difference: the
+    wrapper's inputs pass through carla.Location / carla.Rotation, which store
+    float32, while the numeric path keeps Python doubles until the single
+    Transform at the end. So the intermediate rounding differs by ~1e-7 relative.
+    Both outputs are float32 in the end, and the applied poses of the two BRIDGES
+    already differ by up to 1.68 m from the random blueprint draw -- this is nine
+    orders below that.
+    """
+    x, y, z, yawDeg, pitchDeg = pose
+    extent = carla.Vector3D(*ext)
+
+    viaWrapper = BridgeHelper.map_transfrom_Sumo_to_Carla(_tf(*pose), extent)
+    nx, ny, nz, npitch, nyaw, nroll = BridgeHelper.sumo_to_carla_numeric(
+        x, y, z, yawDeg, pitchDeg, 0.0, extent.x)
+
+    assert nx == pytest.approx(viaWrapper.location.x, rel=1e-5, abs=1e-4)
+    assert ny == pytest.approx(viaWrapper.location.y, rel=1e-5, abs=1e-4)
+    assert nz == pytest.approx(viaWrapper.location.z, rel=1e-5, abs=1e-4)
+    assert npitch == pytest.approx(viaWrapper.rotation.pitch, abs=1e-4)
+    assert abs((nyaw - viaWrapper.rotation.yaw + 180.0) % 360.0 - 180.0) < 1e-4
+    assert nroll == pytest.approx(viaWrapper.rotation.roll, abs=1e-4)

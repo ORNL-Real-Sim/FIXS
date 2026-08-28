@@ -99,28 +99,38 @@ class BridgeHelper:
 
     # ------------------------------------------------------------ transforms
     @staticmethod
+    def sumo_to_carla_numeric(x, y, z, yawDeg, pitchDeg, rollDeg, extentX):
+        """(floats) -> (x, y, z, pitch, yaw, roll) in the CARLA frame.
+
+        The arithmetic, on plain numbers. :meth:`map_transfrom_Sumo_to_Carla` is a
+        thin wrapper over it and is what the tests exercise, so there is still ONE
+        implementation -- but the per-vehicle hot path can skip building an
+        intermediate ``carla.Transform`` it only reads six floats back out of.
+        That matters: this runs once per mirrored vehicle per tick (~190 x 6501
+        on the MLK corridor), and every carla.Location / Rotation / Transform is a
+        boost::python object construction.
+        """
+        yaw = -1.0 * yawDeg + 90.0
+        cx = x - math.cos(yaw * math.pi / 180.0) * extentX
+        cy = y - math.sin(yaw * math.pi / 180.0) * extentX
+        cz = z - math.sin(pitchDeg * math.pi / 180.0) * extentX
+        cx -= BridgeHelper.offset.x
+        cy -= BridgeHelper.offset.y
+        return cx, -cy, cz, pitchDeg, yawDeg - 90.0, rollDeg
+
+    @staticmethod
     def map_transfrom_Sumo_to_Carla(in_sumo_transform, extent):
         """(carla.Transform, carla.Vector3D) -> carla.Transform.
 
         ``extent`` must be the actor's real ``bounding_box.extent``; see the
         module docstring for why a constant is wrong here.
         """
-        in_location = in_sumo_transform.location
-        in_rotation = in_sumo_transform.rotation
-
-        yaw = -1.0 * in_rotation.yaw + 90.0
-        pitch = in_rotation.pitch
-
-        x = in_location.x - math.cos(yaw * math.pi / 180.0) * extent.x
-        y = in_location.y - math.sin(yaw * math.pi / 180.0) * extent.x
-        z = in_location.z - math.sin(pitch * math.pi / 180.0) * extent.x
-
-        x -= BridgeHelper.offset.x
-        y -= BridgeHelper.offset.y
-
-        return carla.Transform(
-            carla.Location(x, -y, z),
-            carla.Rotation(in_rotation.pitch, in_rotation.yaw - 90.0, in_rotation.roll))
+        r = in_sumo_transform.rotation
+        l = in_sumo_transform.location
+        x, y, z, pitch, yaw, roll = BridgeHelper.sumo_to_carla_numeric(
+            l.x, l.y, l.z, r.yaw, r.pitch, r.roll, extent.x)
+        return carla.Transform(carla.Location(x, y, z),
+                               carla.Rotation(pitch, yaw, roll))
 
     @staticmethod
     def map_transfrom_Carla_to_Sumo(in_carla_transform, extent):
