@@ -193,7 +193,12 @@ def build_parser():
     r = p.add_argument_group("the ego's route (one of these)")
     r.add_argument("--route-edges", help="space-separated edge ids")
     r.add_argument("--route-from", metavar="ROUTE_ID",
-                   help="take the edges from a route the bundle already defines")
+                   help="take the edges from a route already defined - in the bundle's "
+                        "demand, or in any --route-file the app ships")
+    r.add_argument("--route-file", action="append", default=[], metavar="ROU.XML",
+                   help="an app's own route file to search for --route-from / --type-from "
+                        "(repeatable). Lets the ego's route be shipped as data next to the "
+                        "app instead of pasted into its code")
     r.add_argument("--repeat", type=int, default=0,
                    help="drive the route this many extra times (0 = once)")
 
@@ -243,7 +248,13 @@ def main(argv=None):
         raise SystemExit(f"{base_cfg} names no route-files")
     bundle_routes = [_abs_from(base_dir, f) for f in _split_list(rf_node.get("value"))]
 
-    routes_tree, n_edges = build_ego_routes(opt, bundle_routes)
+    # the app's own route files are searched FIRST: an ego route the app ships is
+    # its own statement of intent and must win over a same-named route in the map
+    search = [str(Path(f).resolve()) for f in opt.route_file] + bundle_routes
+    for f in search[:len(opt.route_file)]:
+        if not Path(f).is_file():
+            raise SystemExit(f"no such --route-file: {f}")
+    routes_tree, n_edges = build_ego_routes(opt, search)
     routes_tree.write(ego_rou, encoding="UTF-8", xml_declaration=True)
 
     cfg_tree, _ = build_sumocfg(opt, base_cfg, ego_rou)
