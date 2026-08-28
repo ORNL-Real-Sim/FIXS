@@ -226,6 +226,36 @@ def main(argv=None):
     if enableTlsSync:
         backend.freezeAndMatchTrafficLights()
 
+    # Does this run's reply to TrafficLayer ever carry records? Only a bridge
+    # that REPORTS state does: the mode-A ego readback (EgoMode >= 1) or the
+    # interested-id readback (EnableExternalControl). A render-only run answers
+    # with a bare header, which carries no information beyond "this subscriber is
+    # done" -- and that answer does not depend on the tick, so it can be given
+    # before the tick instead of after it.
+    #
+    # That is worth 34 ms/tick, and it is the whole of the measured gap against
+    # VirCarlaEnv. TrafficLayer advances only once every subscriber has replied,
+    # so replying after world.tick() puts this bridge's CARLA work INSIDE
+    # TrafficLayer's cycle: SUMO and the controller wait out the render. Replying
+    # first lets them run while CARLA renders. Measured on MLK, 2001 exchanges,
+    # one CARLA session, alternating with the C++ bridge:
+    #
+    #   reply after the tick    fixs recv 85.07   total 119.66   ( 8.4 ex/s)
+    #   reply before the tick   fixs recv 52.02   total  86.94   (11.5 ex/s)
+    #   VirCarlaEnv.exe         fixs recv 52.03   total  86.14   (11.6 ex/s)
+    #
+    # Every other phase already matched to within a millisecond, so this was the
+    # entire difference -- and the C++ gets it by accident, from the unpaired
+    # reply at simTime 0 that leaves it permanently one exchange ahead (#329).
+    # Here it is a stated condition instead: reply early ONLY when the reply is
+    # empty, so a bridge that reports state still reports THIS tick's state and
+    # never the previous one.
+    replyCarriesNothing = (egoMode < 1) and not enableExternalControl
+    if replyCarriesNothing:
+        print("Reply carries no records (EgoMode 0, no external control): "
+              "answering TrafficLayer before the CARLA tick, so SUMO and the "
+              "controller are not held behind the render.")
+
     egoDriver = EgoDriver()
     lastAdvisory = cs['EgoTargetSpeed']
 
@@ -281,6 +311,15 @@ def main(argv=None):
             # not symmetric here, and neither should be made to match the other
             # until that is explained. The bisect is on the #325 thread, finding A.
             onFeed = simTime > 1e-5 and onFeedBoundary(simTime, 1e-6)
+
+            if replyCarriesNothing and onFeed and core.ENABLE_REALSIM:
+                _t0 = time.monotonic()
+                rc, err = core.sendData(simTime)
+                phase["readback+send"] += time.monotonic() - _t0
+                if rc < 0:
+                    print("send to traffic layer failed: %s" % (err or "?"),
+                          file=sys.stderr)
+                    break
 
             # ---- L2: apply the external speed advisory at each feed -----------
             # Set the driver target BEFORE it runs this tick. applyEgoControl routes
@@ -427,7 +466,7 @@ def main(argv=None):
                         dataLog.logVehicle(simTime, d)
 
             # ---- the driver owns the send: once per feed, pairing with the recv
-            if onFeed and core.ENABLE_REALSIM:
+            if not replyCarriesNothing and onFeed and core.ENABLE_REALSIM:
                 rc, err = core.sendData(simTime)
                 if rc < 0:
                     print('send to traffic layer failed: %s' % (err or '?'),
