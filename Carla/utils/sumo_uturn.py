@@ -267,6 +267,9 @@ class Net:
                 "type": j.get("type"),
                 "x": float(j.get("x")), "y": float(j.get("y")),
                 "z": float(j.get("z")) if j.get("z") is not None else None,
+                # the polygon this terminus already has, to hand back to netconvert
+                # verbatim - see UTurn.nodes_xml()
+                "shape": j.get("shape"),
             }
         self.connections = []
         for c in root.findall("connection"):
@@ -453,6 +456,7 @@ class UTurn:
         feed_lane = opt.from_lane if opt.from_lane is not None else left(e_in["num_lanes"])
         recv_lane = opt.to_lane if opt.to_lane is not None else left(e_out["num_lanes"])
 
+        self.keep_shape = not opt.recompute_terminus_shape
         u = outward_axis(net, junction_id, in_edge, out_edge)
         # attach to the lane centrelines, not the junction centroid
         p_in, d_in = _lane_end(e_in, feed_lane, at_end=True)
@@ -508,11 +512,28 @@ class UTurn:
             z = f' z="{self.z:.2f}"' if self.z is not None else ""
             out.append(f'    <node id="{nid}" x="{x:.2f}" y="{y:.2f}"{z} '
                        f'type="priority" radius="{r}" keepClear="false"/>')
+        j = self.j
+        z = f' z="{j["z"]:.2f}"' if j["z"] is not None else ""
         if self.opt.neck_radius is not None:
-            j = self.j
-            z = f' z="{j["z"]:.2f}"' if j["z"] is not None else ""
             out.append(f'    <node id="{self.jid}" x="{j["x"]:.2f}" y="{j["y"]:.2f}"{z} '
                        f'type="{j["type"]}" radius="{self.opt.neck_radius}" keepClear="false"/>')
+        elif self.keep_shape and j.get("shape"):
+            # Hand the terminus its EXISTING polygon back, so netconvert does not
+            # recompute one. Left to itself it would: the loop gives this node two
+            # more legs, a wider polygon follows, and every edge meeting the node is
+            # clipped back to it - so the corridor's first and last edges get
+            # SHORTER. On MLK that moved 51066109#1 from 137.18 m to 133.19 m, and
+            # since the ego enters at a fixed offset from the lane start, it began
+            # 3.99 m closer to its first stop bar and every stored result diverged
+            # from the first step.
+            #
+            # Pinning the shape keeps the rest of the network bit-identical and, as
+            # a side effect, attaches the ramps BETTER: an unclipped ramp starts
+            # exactly where the corridor lane ends (measured 0.00 m and 0.04 m at
+            # MLK's two ends) instead of needing an internal connector to reach
+            # across the widened junction (0.38 m and 8.41 m).
+            out.append(f'    <node id="{self.jid}" x="{j["x"]:.2f}" y="{j["y"]:.2f}"{z} '
+                       f'type="{j["type"]}" shape="{j["shape"]}"/>')
         return out
 
     def edges_xml(self):
@@ -763,7 +784,13 @@ def build_parser():
     g.add_argument("--ds", type=float, default=DEFAULT_DS, help="polyline step (m)")
     g.add_argument("--throat-radius", type=float, default=DEFAULT_THROAT_RADIUS)
     g.add_argument("--neck-radius", type=float, default=None,
-                   help="also re-emit the terminus node with this junction radius")
+                   help="re-emit the terminus node with this junction radius instead of "
+                        "pinning its shape (implies --recompute-terminus-shape)")
+    g.add_argument("--recompute-terminus-shape", action="store_true",
+                   help="let netconvert recompute the terminus junction polygon. Default "
+                        "is to pin the one it already has: two extra legs otherwise widen "
+                        "it and every edge meeting it is clipped SHORTER, which moves the "
+                        "corridor and invalidates stored results (see nodes_xml)")
 
     l = p.add_argument_group("lanes and links")
     l.add_argument("--lanes", type=int, default=1)
