@@ -99,15 +99,24 @@ def _three_phase(t1_deg, ramp_r, loop_r, turn_sign, ds):
     return p1, p2, p3, x, y, h
 
 
-def solve_ramp_angle(ramp_r, loop_r, turn_sign, ds=DEFAULT_DS):
-    """Ramp angle T1 [deg] such that the turnaround lands back on the axis.
+def solve_ramp_angle(ramp_r, loop_r, turn_sign, ds=DEFAULT_DS, target_dy=0.0):
+    """Ramp angle T1 [deg] such that the turnaround lands `target_dy` off the line
+    it started on.
+
+    target_dy is what keeps the two directions apart. The entry lane and the exit
+    lane are different lanes, a median apart. A loop solved to come back to where
+    it STARTED lands on the entry lane and has to be bridged across to the exit
+    one - and both bridges are drawn to the same neck point, so the two ribbons
+    converge and overlap for a third of their length. Solving for the real
+    separation instead means the loop leaves the entry lane and arrives on the
+    exit lane, and each stub stays on its own.
 
     For ramp_r == loop_r the closed form is acos(r/(r+R)) = 60 deg exactly;
     bisection is kept because it also solves the ramp_r != loop_r case, where
     the tangency condition is cos(T1) = ramp_r / (ramp_r + loop_r).
     """
     def end_offset(t1d):
-        return _three_phase(t1d, ramp_r, loop_r, turn_sign, ds)[4]
+        return _three_phase(t1d, ramp_r, loop_r, turn_sign, ds)[4] - target_dy
 
     lo, hi = 1.0, 89.0
     flo = end_offset(lo)
@@ -164,17 +173,22 @@ def curved_uturn(ramp_r, loop_r, straight_past, side="right", ds=DEFAULT_DS,
     and the driven path length.
     """
     turn_sign = -1 if side == "right" else +1
-    t1_deg = solve_ramp_angle(ramp_r, loop_r, turn_sign, ds)
+    t1_deg = solve_ramp_angle(ramp_r, loop_r, turn_sign, ds,
+                              target_dy=exit_lat - entry_lat)
     p1, p2, p3, _ex, ey, eh = _three_phase(t1_deg, ramp_r, loop_r, turn_sign, ds)
 
-    neck = (straight_past, 0.0)
+    # The arcs start on the ENTRY lane and finish on the EXIT lane, so each stub
+    # runs straight out along its own lane instead of both angling in to a shared
+    # neck point. A single crossing where the two swap sides of the median remains,
+    # and is inherent: a U-turn between the two inner lanes has to cross once.
+    neck = (straight_past, entry_lat)
     shift = lambda pts: [(x + neck[0], y + neck[1]) for x, y in pts]
     p1, p2, p3 = shift(p1), shift(p2), shift(p3)
     t1_pt, t2_pt = p1[-1], p2[-1]
 
     p_in, p_out = (0.0, entry_lat), (0.0, exit_lat)
     stub_in = _hermite(p_in, entry_dir, neck, (1.0, 0.0), ds)
-    stub_out = _hermite(neck, (-1.0, 0.0), p_out, exit_dir, ds)
+    stub_out = _hermite(p3[-1], (-1.0, 0.0), p_out, exit_dir, ds)
 
     t1 = math.radians(t1_deg)
     length = (ramp_r * t1 * 2 + loop_r * (2 * t1 + math.pi)
@@ -187,7 +201,7 @@ def curved_uturn(ramp_r, loop_r, straight_past, side="right", ds=DEFAULT_DS,
         "t2": t2_pt,
         "neck": neck,
         "ramp_angle_deg": t1_deg,
-        "closure_offset": ey,
+        "closure_offset": ey - (exit_lat - entry_lat),
         "end_heading_deg": math.degrees(eh),
         "path_length": length,
         "min_stub_radius": min(_min_radius(stub_in), _min_radius(stub_out)),
