@@ -139,9 +139,26 @@ class SocketHelper:
             with open(log_file_path, 'a', encoding='utf-8') as log_file:  # 'a' for appending text
                 log_file.write(f"[HEADER] State: {sim_state}, Time: {sim_time:.2f}, TotalSize: {total_msg_size} | Hex: {received_buffer.hex()}\n")
         
+        # ONE read for the whole body, then parse it in memory.
+        #
+        # The loop below used to take the record header and the record body from
+        # the socket separately, so a 190-vehicle exchange cost ~410 recv() calls
+        # where the message header had already said exactly how many bytes were
+        # coming. Measured on the MLK corridor: 615,220 recv() calls over 1501
+        # exchanges, 410 per exchange, all but the first returning immediately
+        # from the socket buffer. Every FIXS client pays this -- the bridge and
+        # the controller both -- so it is a cost on the whole exchange, not on
+        # one component.
+        #
+        # The per-record size checks below still apply, and matter more now: they
+        # validate a size read out of THIS buffer rather than one about to be
+        # trusted to size a blocking read.
+        body = self._recv_exact(sock, max(0, total_msg_size - self.msg_header_size))
+        body_at = 0
         while (msg_processed_size < total_msg_size):
             # get message type header
-            received_buffer = self._recv_exact(sock, self.msg_each_header_size)
+            received_buffer = body[body_at:body_at + self.msg_each_header_size]
+            body_at += self.msg_each_header_size
             msg_size, msg_type = self.msg_helper.depack_msg_type(received_buffer)
 
             if self.enable_verbose_log:
@@ -164,7 +181,12 @@ class SocketHelper:
                 raise ValueError(
                     f'record size {msg_size} exceeds MAX_RECORD_SIZE '
                     f'{self.MAX_RECORD_SIZE} -- stream desync (#87)')
-            received_buffer = self._recv_exact(sock, body_size)
+            if body_at + body_size > len(body):
+                raise ValueError(
+                    f'record of {body_size} bytes runs past the message the header '
+                    f'declared ({total_msg_size}) -- stream desync (#87)')
+            received_buffer = body[body_at:body_at + body_size]
+            body_at += body_size
 
             if self.enable_verbose_log:
                 log_file_path = "received_msg_buffer.log"

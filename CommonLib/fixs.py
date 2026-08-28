@@ -533,6 +533,18 @@ def _openSocket(host, port, connectTimeout, recvTimeout):
     while True:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        # TCP_NODELAY: disable Nagle, as SocketHelper.cpp does on every socket it
+        # opens. The FIXS exchange is strict request/response with small messages --
+        # a render-only bridge answers with a bare 9-byte header -- which is the
+        # exact shape Nagle penalises: it holds a small write until the previous
+        # segment is acknowledged, and the peer's delayed ACK does not arrive until
+        # its timer fires. Measured on the MLK corridor, the Python bridge waited
+        # 77.41 ms per tick in the FIXS exchange against the C++ bridge's 42.66 ms
+        # on the same stack and window, while doing LESS work of its own (33.13 vs
+        # 37.41 ms). The 34.75 ms difference is a delayed-ACK interval, not
+        # computation, and it applied to every Python FIXS client -- the eco
+        # controller included, so it was a cost on the whole co-simulation.
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         try:
             sock.connect((host, port))
         except OSError as exc:

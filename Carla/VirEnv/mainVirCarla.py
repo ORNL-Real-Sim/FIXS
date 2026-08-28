@@ -242,11 +242,23 @@ def main(argv=None):
         wallStart = time.monotonic()
         loopStart = time.monotonic()   # rate summary at the end
         feedCount = 0
+        # Per-phase tic-toc. "The Python bridge is slower" and "the Python
+        # bridge waits longer for everyone else" look identical in a tick
+        # total and have opposite fixes, so the tick is split into the parts
+        # that can each be acted on separately. Summed and reported at
+        # teardown; a monotonic() pair per phase is ~100 ns against a tick of
+        # tens of milliseconds.
+        phase = {k: 0.0 for k in
+                 ("fixs recv", "orchestrate", "flush batch", "world.tick",
+                  "z audit", "readback+send", "pacing sleep")}
 
         while simTime < simEndTime:
             # ---- core: recv (only on the feed boundary) -> spawn / pose (batch)
             #      / despawn; the refresh interpolates EVERY sub-step ------------
+            _t0 = time.monotonic()
             rc, err = core.runStep(simTime)
+            phase["fixs recv"] += core.lastRecvSeconds
+            phase["orchestrate"] += (time.monotonic() - _t0) - core.lastRecvSeconds
             if rc < 0:
                 print('co-sim recv/step ended: %s' % (err or '?'), file=sys.stderr)
                 break
@@ -331,15 +343,22 @@ def main(argv=None):
                             spectator.id,
                             _spectatorTransform(tf, spectatorHeight, spectatorAlignYaw))
 
+            _t0 = time.monotonic()
             backend.flushBatch()   # one acknowledged apply: vehicles + camera
+            phase["flush batch"] += time.monotonic() - _t0
+            _t0 = time.monotonic()
             world.tick()               # advance Carla one sub-step
+            phase["world.tick"] += time.monotonic() - _t0
 
             # SUMO <-> CARLA elevation audit, once per exchange. Here rather than
             # inside setVehiclePose because it asks whether the two MAPS agree,
             # which no interpolated sub-step can change.
             if onFeed:
+                _t0 = time.monotonic()
                 backend.auditZAlignment()
+                phase["z audit"] += time.monotonic() - _t0
 
+            _t0 = time.monotonic()
             # ---- POST-tick L0+: the Carla-driven ego -> FIXS -----------------
             if egoMode >= 1:
                 es = EgoState()
@@ -417,6 +436,7 @@ def main(argv=None):
 
             if onFeed:
                 feedCount += 1
+            phase["readback+send"] += time.monotonic() - _t0
             stepCount += 1
             simTime = stepCount * carlaStep   # step counter avoids fp drift
 
@@ -437,6 +457,7 @@ def main(argv=None):
             # --fast (pacing off) is the smoother way to watch this scenario, and
             # this stays identical to mainVirCarla.cpp rather than diverging on an
             # unproven theory.
+            _t0 = time.monotonic()
             if realtimePacing:
                 target = wallStart + simTime
                 now = time.monotonic()
@@ -444,6 +465,7 @@ def main(argv=None):
                     time.sleep(target - now)
                 elif now - target > 0.25:
                     wallStart = now - simTime
+            phase["pacing sleep"] += time.monotonic() - _t0
 
         # How fast the bridge actually ran. Printed always, because "is the
         # Python bridge slower than the C++ one" is otherwise answered by timing a
@@ -455,6 +477,13 @@ def main(argv=None):
                   "(%.1f exchanges/s, %.2f ms/tick)"
                   % (feedCount, stepCount, loopElapsed, feedCount / loopElapsed,
                      1000.0 * loopElapsed / stepCount))
+            for name, sec in sorted(phase.items(), key=lambda kv: -kv[1]):
+                print("             %-14s %7.2f ms/tick  %4.1f%%"
+                      % (name, 1000.0 * sec / stepCount, 100.0 * sec / loopElapsed))
+            _acct = sum(phase.values())
+            print("             %-14s %7.2f ms/tick  %4.1f%%  (loop overhead)"
+                  % ("unaccounted", 1000.0 * (loopElapsed - _acct) / stepCount,
+                     100.0 * (loopElapsed - _acct) / loopElapsed))
         if dataLog.isOpen():
             print('DataLogger closed: %s' % dataLog.path())
             dataLog.close()

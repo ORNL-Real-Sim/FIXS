@@ -225,16 +225,28 @@ class MsgHelper:
         if getattr(self, '_decode_plan', None) is None:
             self._build_decode_plan()
 
+        # Write through the instance dict rather than setattr per field. VehData is
+        # a plain dataclass with no custom __setattr__, so this stores the same
+        # thing -- but a numeric segment becomes ONE C-level dict.update instead of
+        # N Python-level setattr calls. Measured on the MLK corridor: 5,224 setattr
+        # calls per exchange, 7.8 million over 1501 exchanges.
+        #
+        # It has to stay a plain __dict__ write: fixs.py adopts a decoded record by
+        # assigning record.__class__ = Vehicle, and Vehicle overrides __setattr__ to
+        # make records read-only. Going through setattr here would be writing to a
+        # VehData that is about to become a Vehicle -- harmless today, but it means
+        # the decode path and the read-only contract share no code, which is what
+        # keeps the contract enforceable.
+        vd = veh_data.__dict__
         for seg in self._decode_plan:
             if seg[0] == 's':
                 str_data, _sl, byte_index, _u = MsgHelper.depack_string(byte_data, byte_index)
-                setattr(veh_data, seg[1], str_data)
+                vd[seg[1]] = str_data
             else:
                 _kind, packer, names = seg
                 values = packer.unpack_from(byte_data, byte_index)
                 byte_index += packer.size
-                for name, value in zip(names, values):
-                    setattr(veh_data, name, value)
+                vd.update(zip(names, values))
 
         return veh_data
 

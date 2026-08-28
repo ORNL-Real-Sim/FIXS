@@ -39,6 +39,7 @@ bodies side by side. Three shapes necessarily differ, and only three:
 import math
 import os
 import sys
+import time as _time
 from dataclasses import replace
 
 from ..MsgHelper import MsgHelper
@@ -159,6 +160,12 @@ class VirEnvCore:
 
         self._rsDbg = None
         self._rsDebugEnabled = bool(os.environ.get('RS_DEBUG'))
+
+        #: Seconds the last runStep spent BLOCKED in the FIXS exchange, as opposed
+        #: to orchestrating. A host that wants to know whether it is slow or merely
+        #: waiting for the rest of the co-simulation reads this; without it the two
+        #: are indistinguishable in a tick total and have opposite fixes.
+        self.lastRecvSeconds = 0.0
 
     # ------------------------------------------------------------------ setup
     def setBackend(self, be):
@@ -286,16 +293,21 @@ class VirEnvCore:
         simTimeRecv = 0.0
 
         onUpdate = (simTime > 1e-5 and onFeedBoundary(simTime, 1e-5))
+        self.lastRecvSeconds = 0.0
         if onUpdate and self.ENABLE_REALSIM:
+            _t0 = _time.monotonic()
             try:
                 fixs.recv()
             except fixs.Shutdown:
+                self.lastRecvSeconds = _time.monotonic() - _t0
                 return (StepErr.ERROR_STEP_RECV,
                         'RealSim: traffic simulator ended the run')
             except Exception as exc:                            # noqa: BLE001
+                self.lastRecvSeconds = _time.monotonic() - _t0
                 return (StepErr.ERROR_STEP_RECV,
                         'RealSim: Receive from traffic simulator failed: %s' % exc)
             simStateRecv, simTimeRecv = fixs.sim.state, fixs.sim.time
+            self.lastRecvSeconds = _time.monotonic() - _t0
         elif onUpdate:
             # No transport: the caller pre-filled Msg_c.VehDataRecv_um itself.
             simTimeRecv = simTime

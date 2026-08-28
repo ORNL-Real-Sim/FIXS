@@ -142,6 +142,7 @@ private:
     std::unordered_map<VehHandle, carla::SharedPtr<carla::client::Vehicle>> actors_;
     std::unordered_map<VehHandle, carla::geom::Transform> lastApplied_;   // A/B instrumentation
     std::unordered_map<std::string, std::unordered_map<int, TrafficLight>> trafficLightMap_;
+    int zAuditPhase_ = -1;                                                 // rotating slice for the z audit
 
     static carla::geom::Transform sumoTransformOf(const Pose& p);
 };

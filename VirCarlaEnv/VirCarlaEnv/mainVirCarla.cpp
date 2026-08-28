@@ -280,6 +280,7 @@ int main(int argc, const char* argv[]) {
         auto wallStart = std::chrono::steady_clock::now();   // realtime-pacing reference
         auto loopStart = std::chrono::steady_clock::now();   // rate summary at the end
         long feedCount = 0;
+        double recvSeconds = 0.0;   // time in the FIXS exchange, measured not profiled
 
         // ---- generic FIXS data logging (config: DataLogSetup) --------------
         // Records the vehicle-data records this bridge reports to FIXS, in the
@@ -309,6 +310,8 @@ int main(int argc, const char* argv[]) {
                     std::cerr << "co-sim recv/step ended: " << (err ? err : "?") << "\n";
                 break;
             }
+            recvSeconds += core.lastRecvSeconds;   // the recv span only, as the
+                                                   // Python bridge reports it
             // #266: the batch is NOT flushed here. It is flushed just before
             // world.Tick(), AFTER the spectator has been queued into it, so the
             // camera and the vehicles it follows are applied by ONE ApplyBatchSync
@@ -520,6 +523,14 @@ int main(int argc, const char* argv[]) {
                             "(%.1f exchanges/s, %.2f ms/tick)\n",
                             feedCount, stepCount, el, feedCount / el,
                             1000.0 * el / stepCount);
+            // Split the tick: "slower" and "waits longer for everyone else" look
+            // identical in a total and have opposite fixes.
+            if (el > 0 && stepCount)
+                std::printf("             of which FIXS exchange %.2f ms/tick (%.0f%%%%), "
+                            "bridge work %.2f ms/tick\n",
+                            1000.0 * recvSeconds / stepCount,
+                            100.0 * recvSeconds / el,
+                            1000.0 * (el - recvSeconds) / stepCount);
         }
         if (dataLog.isOpen()) { std::cout << "DataLogger closed: " << dataLog.path() << "\n"; dataLog.close(); }
         if (egoMode >= 1) backend.destroyEgo();
