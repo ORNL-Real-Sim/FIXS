@@ -722,7 +722,7 @@ CarlaSetup:
 HANDOFF_TIMEOUT_S = 60
 
 
-def start_app(app, config_yaml=None, timeout=HANDOFF_TIMEOUT_S):
+def start_app(app, config_yaml=None, timeout=HANDOFF_TIMEOUT_S, sumocfg=None):
     """Start the app's `launch` command and collect the scenario it reports.
 
     Returns (proc, sumocfg-or-None). ONE process spans both moments a controller
@@ -761,6 +761,14 @@ def start_app(app, config_yaml=None, timeout=HANDOFF_TIMEOUT_S):
     env = dict(os.environ, FIXS_HANDOFF=handoff, FIXS_PYTHON=sys.executable)
     if config_yaml:
         env["FIXS_CONFIG_YAML"] = config_yaml
+    # FIXS_SUMOCFG because --sumocfg names the scenario THE USER chose, and an app
+    # that generates its own can only honour that by building FROM it. Without this
+    # the flag reaches SUMO but never the app, so the only thing it could do to a
+    # generating app was bypass it - which for a controller means SUMO running a
+    # scenario with no ego in it while the controller waits for one. Apps are free
+    # to ignore it, and one that does is bypassed exactly as before.
+    if sumocfg:
+        env["FIXS_SUMOCFG"] = sumocfg
     print(f"[APP]  {app['launch']}")
     proc = subprocess.Popen(argv, cwd=cwd, env=env)
     deadline = time.time() + timeout
@@ -3062,7 +3070,9 @@ def main():
                     help="SUMO .sumocfg. Optional: if omitted it comes from the "
                          "application's apps.json 'sumocfg' if it declares one, else "
                          "the chosen map bundle's sumo/ (a DT-Library map ships its "
-                         "scenario). Pass it to override with your own demand.")
+                         "scenario). Pass it to run your own demand - an app that "
+                         "generates its scenario is given it and builds from it, so "
+                         "its ego and outputs stay with the network you named.")
     ap.add_argument("--map", default=None,
                     help="Map to run: a Digital-Twin-Library location (e.g. 'roosevelt'), "
                          "or an already-cooked map name. If omitted, pick from the catalog "
@@ -3404,7 +3414,8 @@ def main():
         # The yaml this run will hand TrafficLayer. Known already for a config that
         # was chosen (--config, or the one the profile remembers); a first run that
         # GENERATES a per-map config has none yet, and the app falls back to its own.
-        app_proc, app_sumocfg = start_app(app, args.config or setup.get("config"))
+        app_proc, app_sumocfg = start_app(app, args.config or setup.get("config"),
+                                          sumocfg=args.sumocfg)
 
     def cached_sumo_dir(name):
         """An already-extracted ~/.fixs/maps/<name>/sumo, or None.
@@ -3696,8 +3707,17 @@ def main():
     # convention off. Declaring `launch` is not enough: an app whose controller is
     # happy with the map's own scenario reports nothing, claims nothing, and keeps
     # the convention - which is what a roosevelt-shaped app with a controller wants.
-    app_owns_scenario = sumocfg is None and app_sumocfg is not None
+    # ...and it owns it whether or not --sumocfg was passed: the app was handed that
+    # flag as FIXS_SUMOCFG, so what it reports is what it built FROM it. Running the
+    # flag's own file instead would throw away the ego, the demand and the output
+    # paths the app just put in place.
+    app_owns_scenario = app_sumocfg is not None
     if app_owns_scenario:
+        if sumocfg is not None and os.path.abspath(sumocfg) != os.path.abspath(app_sumocfg):
+            print(f"[cosim] --sumocfg reached '{app['id']}' as FIXS_SUMOCFG; running "
+                  f"what it built from it")
+            print(f"[cosim]   you named : {sumocfg}")
+            print(f"[cosim]   it reports: {app_sumocfg}")
         sumocfg = app_sumocfg
     if sumocfg is None:
         if sumo_dir is None:
