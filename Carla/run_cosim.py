@@ -810,7 +810,7 @@ def start_app(app, config_yaml=None, timeout=HANDOFF_TIMEOUT_S, sumo_only=False,
 
 def run_native_stack(config_yaml, sumocfg, tl_table, cfg, args, app=None,
                      ctl_sock=None, app_owns_scenario=False, app_proc=None,
-                      sumo_only=False, bridge="cpp"):
+                     sumo_only=False, bridge="cpp"):
     """FIXS-native bridge: launch SUMO (TraCI server) + TrafficLayer (-f config) +
     VirCarlaEnv (-f config -t tl_table), plus the app's own `launch` command if it
     declares one. CARLA is already up and the map loaded by run_cosim's preflight.
