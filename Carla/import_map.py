@@ -2362,6 +2362,191 @@ def purge_maps(records, drop_cache=False):
     return removed, failed
 
 
+def _purge_ask(msg):
+    """input() where EOF means 'answered nothing'. Deliberately not _prompt: that
+    one exits with advice about --map / --package, which is the wrong advice here
+    and, worse, exits mid-command. A purge that cannot ask must cancel, never
+    fall through to a default - the next step deletes."""
+    try:
+        return input(msg).strip()
+    except EOFError:
+        return ""
+
+
+def _parse_selection(answer, count):
+    """0-based indices named by a picker answer: '2', '1,3,4', '2-5', 'all'. None
+    when the answer does not parse or names nothing - the caller re-asks or
+    cancels rather than acting on a guess, because what follows is a deletion."""
+    answer = (answer or "").strip().lower()
+    if answer in ("a", "all", "*"):
+        return list(range(count))
+    chosen = set()
+    for part in answer.replace(" ", "").split(","):
+        if not part:
+            continue
+        lo, dash, hi = part.partition("-")
+        if dash:
+            if not (lo.isdigit() and hi.isdigit()):
+                return None
+            lo, hi = int(lo), int(hi)
+            if not (1 <= lo <= hi <= count):
+                return None
+            chosen.update(range(lo - 1, hi))
+        elif part.isdigit() and 1 <= int(part) <= count:
+            chosen.add(int(part) - 1)
+        else:
+            return None
+    return sorted(chosen) or None
+
+
+def _purge_table(records, indent="   "):
+    """The inventory as a numbered table: one row per map, one column per place a
+    map occupies. Three columns rather than one total, because they are not
+    equally expensive to rebuild and whoever is choosing needs to see that before
+    they choose."""
+    print(f"{indent}{'#':>3}  {'map':<22}{'cooked':>10}{'staged':>10}{'cache':>10}")
+    for i, record in enumerate(records, 1):
+        by = {}
+        for label, _path, size in record["pieces"]:
+            by[label] = by.get(label, 0) + size
+        note = "" if record["cooked_umap"] else "   (staging only, never cooked)"
+        print(f"{indent}{i:>3}) {record['name']:<22}"
+              f"{human_bytes(by.get('cooked')):>10}"
+              f"{human_bytes(by.get('staged')):>10}"
+              f"{human_bytes(by.get('cache')):>10}{note}")
+
+
+def purge(carla_root, mode=None, named="", drop_cache=None, interactive=False,
+          carla_busy=None):
+    """Delete imported maps from this machine. Returns a shell exit code.
+
+    A map occupies three places that age independently, so all three are shown
+    and the cache is chosen separately rather than swept along with the rest:
+
+      Content/<name>/       what the cook produced. Rebuilding it costs a re-cook.
+      Import/<name>/        the staging that cook read. Rebuilding costs a re-stage.
+      ~/.fixs/maps/<name>/  the downloaded bundle. Rebuilding it costs a DOWNLOAD,
+                            and this one is additionally read at RUN time - the
+                            .sumocfg a co-sim runs comes out of its sumo/ half. So
+                            deleting it does not merely make the next import
+                            slower, it stops the next RUN until something
+                            re-fetches it. Different blast radius, its own yes.
+
+    `named` selects without asking: "" opens the picker, "all" takes everything,
+    otherwise a comma-separated list of map names.
+
+    `interactive` is the caller's answer to "may this stop and ask?", the same
+    contract choose_imported_map takes and for the same reason: a --serve host has
+    a terminal and nobody sitting at it, and isatty() cannot tell the difference.
+
+    `carla_busy` is an optional zero-argument callable returning the pid of a
+    CARLA holding this machine's Content/ open, or None. Injected rather than
+    detected here because process inspection belongs to the caller - the same way
+    doctor.run takes who_has_port.
+
+    Nothing here re-resolves a name after the listing: the records shown are the
+    records deleted, so what is printed and what goes cannot drift apart."""
+    if carla_root is None:
+        print("[purge] no CARLA configured here; looking at the bundle cache only.")
+
+    records = purge_candidates(carla_root, mode)
+    if not records:
+        print("[purge] nothing to purge: no imported maps or cached bundles found.")
+        return 0
+
+    named = (named or "").strip()
+    grand = sum(record_bytes(r, True) for r in records)
+
+    print()
+    print(f"[purge] maps on this machine ({human_bytes(grand)} in total):")
+    _purge_table(records)
+    print()
+
+    if named:
+        if named.lower() in ("a", "all", "*"):
+            chosen = list(records)
+        else:
+            by_name = {r["name"].lower(): r for r in records}
+            chosen, unknown = [], []
+            for want in named.split(","):
+                want = want.strip()
+                if not want:
+                    continue
+                record = by_name.get(want.lower())
+                if record:
+                    chosen.append(record)
+                else:
+                    unknown.append(want)
+            if unknown:
+                sys.exit(f"[purge] not on this machine: {', '.join(unknown)}. "
+                         f"Run --purge-map with no name to see the list.")
+    elif not interactive:
+        sys.exit("[purge] non-interactive session: name what to purge "
+                 "(--purge-map NAME[,NAME] or --purge-map all).")
+    else:
+        picked = _parse_selection(
+            _purge_ask(f"[purge] Purge which? [1-{len(records)}, a list like "
+                       f"1,3,4, or 'all'; Enter to cancel]: "), len(records))
+        if picked is None:
+            print("[purge] cancelled; nothing was deleted.")
+            return 0
+        chosen = [records[i] for i in picked]
+
+    # The cache question: asked once for the whole selection, and only when there
+    # is a cache to lose. drop_cache answers it up front for a caller that knows.
+    cache_bytes = sum(size for r in chosen for label, _p, size in r["pieces"]
+                      if label == "cache")
+    if drop_cache is None:
+        if cache_bytes and interactive:
+            print()
+            print(f"[purge] {human_bytes(cache_bytes)} of that is the downloaded "
+                  f"bundle under ~/.fixs/maps.")
+            print("[purge] Re-creating it means a download - and a co-sim reads "
+                  "its scenario")
+            print("[purge] (.sumocfg) from there, so the next run needs it back.")
+            drop_cache = _purge_ask(
+                "[purge] Drop the cached bundles too? [y/N]: ").lower().startswith("y")
+        else:
+            drop_cache = False
+
+    total = sum(record_bytes(r, drop_cache) for r in chosen)
+    print()
+    print(f"[purge] will delete ({human_bytes(total)}):")
+    for record in chosen:
+        for label, path, size in record["pieces"]:
+            verb = "keep  " if (label == "cache" and not drop_cache) else "delete"
+            print(f"   {verb}  {path}   ({human_bytes(size)})")
+    print()
+
+    # CARLA keeps every package under Content/ open, and Windows will not unlink a
+    # mapped file - so a purge with CARLA up deletes half a map and then raises a
+    # PermissionError from somewhere in the middle of it. Refuse before touching
+    # anything, rather than leaving the wreckage that a half-delete makes.
+    busy = carla_busy() if (carla_busy and carla_root) else None
+    if busy:
+        sys.exit(f"[purge] CARLA is running (pid {busy}) and holds files under "
+                 f"Content/ open, so a delete would fail part-way through. "
+                 f"Close it and run this again.")
+
+    if interactive and not _purge_ask(
+            "[purge] Proceed? [y/N]: ").lower().startswith("y"):
+        print("[purge] cancelled; nothing was deleted.")
+        return 0
+
+    removed, failed = purge_maps(chosen, drop_cache=drop_cache)
+    freed = sum(size for _n, _l, _p, size in removed)
+    print(f"[purge] removed {len(removed)} item(s), {human_bytes(freed)} freed.")
+    if failed:
+        print(f"[purge] {len(failed)} could NOT be removed:")
+        for name, label, path, err in failed:
+            print(f"   {name} ({label}): {path}")
+            print(f"      {err}")
+        print("[purge] something still holding a file open (CARLA, the Unreal "
+              "editor, an explorer window) is the usual cause.")
+        return 1
+    return 0
+
+
 DEFAULT_MAP_REPO = "ORNL-Real-Sim/FIXS_Applications"
 DEFAULT_MAP_TAG_PREFIX = "map-"
 

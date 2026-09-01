@@ -750,10 +750,10 @@ def test_record_bytes_excludes_the_cache_by_default(tmp_path, monkeypatch):
     ("1,", [0]),        # a trailing comma has one reading; do not re-ask over it
 ])
 def test_parse_selection_accepts(answer, expected):
-    assert run_cosim._parse_selection(answer, 5) == expected
+    assert import_map._parse_selection(answer, 5) == expected
 
 
 @pytest.mark.parametrize("answer", ["", "0", "6", "4-2", "1-9", "x", "1,x", "-"])
 def test_parse_selection_rejects(answer):
     """None means re-ask. Nothing here may be guessed at: the next step deletes."""
-    assert run_cosim._parse_selection(answer, 5) is None
+    assert import_map._parse_selection(answer, 5) is None
