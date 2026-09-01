@@ -119,6 +119,17 @@ class MockVirEnvBackend(IVirEnvBackend):
     def applyEgoControl(self, egoId, desiredSpeed):
         self._rec('applyEgoControl', '%s v*=%s' % (egoId, _fx(desiredSpeed)))
 
+    # The two command shapes (#325). Recorded rather than no-op'd so a test can
+    # assert WHICH interface a controller commanded through, not merely that it
+    # commanded something.
+    def applyEgoActuation(self, throttle, brake, steerNorm):
+        self._rec('applyEgoActuation',
+                  'thr=%s brk=%s steer=%s' % (_fx(throttle), _fx(brake), _fx(steerNorm)))
+
+    def applyEgoSpeedSteer(self, speed, steerNorm, accel=None, jerk=None):
+        self._rec('applyEgoSpeedSteer',
+                  'v=%s steer=%s' % (_fx(speed), _fx(steerNorm)))
+
     # --- test fixtures -----------------------------------------------------
     def setMockEgo(self, ego, available=True):
         """(EgoState, bool) -> None -- what :meth:`readEgoState` will hand back."""

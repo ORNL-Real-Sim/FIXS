@@ -1,4 +1,4 @@
-"""IEgoController -- the contract a user-written ego controller satisfies (#325).
+"""EgoControllerHost -- load a user-written ego controller, and run it (#325).
 
 A controller is a Python file the scenario names. FIXS imports it and calls one
 function per step; the function reads the ego's state and writes a command onto
@@ -98,13 +98,31 @@ WHAT A CONTROLLER MUST NOT DO
 An exception from ``control`` stops the run and names the file. It does not fall
 back to EgoDriver: a silent fallback produces a run that looks fine and is not,
 which is the failure mode this codebase has paid for most.
+
+
+NOTE ON THE MIRROR
+------------------
+CommonLib/VirEnv/*.py and Carla/VirEnv/*.py are peers of C++ files, name for name
+(#335). This module deliberately has NO C++ twin: importing a user's .py at
+runtime is a Python capability, and the C++ bridge will not grow one shaped like
+this. Keeping it in its own module is what lets the mirrored files stay mirrored
+-- an earlier cut of this put the run half inside Carla/VirEnv/mainVirCarla.py,
+which quietly made that file stop being a faithful peer of mainVirCarla.cpp.
+
+For the same reason EgoDriver is left exactly as it is. It has a C++ twin, and
+_driveEgoFallback applies through the actor rather than through a backend verb,
+so routing it through this contract would change the verb transcript
+tests/VirEnv/test_core_parity.py compares. EgoDriver is not "the default
+implementation of this hook"; it is the built-in driver, and this is a second,
+Python-only slot beside it. The cost of that honesty is that EgoDriver cannot
+emit the speed+steer shape -- a missing feature, not a reason to restructure.
 """
 
 import importlib.util
 import os
 import sys
 
-__all__ = ['ControllerError', 'loadController', 'LoadedController']
+__all__ = ['ControllerError', 'loadController', 'LoadedController', 'runController']
 
 
 class ControllerError(Exception):
@@ -237,3 +255,83 @@ def loadController(spec, appRoot=None):
     if setupFn is not None and not callable(setupFn):
         raise ControllerError(f'EgoController: {where}:setup is not callable')
     return LoadedController(spec, obj, setupFn, shutdownFn)
+
+
+# ---------------------------------------------------------------------------
+# running one
+# ---------------------------------------------------------------------------
+
+#: Seconds since the last FIXS feed. Module state because the host calls
+#: runController as a free function, and the age belongs to the connection, not
+#: to any one controller.
+_feedAge = [0.0]
+
+
+def resetFeedAge():
+    """Call when a new feed arrives, before the sub-steps that follow it."""
+    _feedAge[0] = 0.0
+
+
+def runController(backend, controller, ego, dt, onFeed, maxSteerRad):
+    """One step: hand the controller state, apply whatever shape it commanded.
+
+    Backend-agnostic on purpose -- it touches only ``readEgoState``,
+    ``applyEgoActuation`` and ``applyEgoSpeedSteer``, all IVirEnvBackend verbs.
+    That is what lets tests/VirEnv drive a real controller against
+    MockVirEnvBackend with no simulator, dispatch included, and what would let a
+    non-CARLA host reuse this unchanged.
+
+    ``maxSteerRad`` is passed rather than imported: it is mirrored in the C++
+    bridge (mainVirCarla.cpp:131) and belongs to the host that owns the wire
+    scaling, not to this module.
+
+    :param ego: the ego's fixs.Vehicle for this feed. Its pose fields are
+        refreshed here every step; the fields the traffic simulator owns last
+        changed at the feed, and ``ego.feedAge`` says how long ago that was.
+    :returns: the command shape applied -- 'actuation', 'speedsteer', or None.
+    """
+    from CommonLib import fixs
+    from CommonLib.VirEnv.IVirEnvBackend import EgoState
+
+    if ego is None:
+        return None
+    es = EgoState()
+    if not backend.readEgoState(ego.id.strip(), es):
+        return None
+
+    if onFeed:
+        resetFeedAge()
+    else:
+        _feedAge[0] += dt
+
+    # EgoState is flat and already in the canonical FIXS wire frame -- the
+    # backend removed its own anchor before returning, so nothing is converted
+    # here (IVirEnvBackend.EgoState).
+    object.__setattr__(ego, 'positionX', es.x)
+    object.__setattr__(ego, 'positionY', es.y)
+    object.__setattr__(ego, 'positionZ', es.z)
+    object.__setattr__(ego, 'heading', es.heading)
+    object.__setattr__(ego, 'speed', es.speed)
+    object.__setattr__(ego, 'feedAge', _feedAge[0])
+
+    # Clear what the LAST step wrote before asking for this one. The record
+    # survives every sub-step of a feed, so without this _written only ever
+    # grows: a controller that wrote pedals once would still look like it was
+    # commanding them ten steps later, and "commanded nothing this step" -- a
+    # real and useful answer -- could never be observed again.
+    object.__setattr__(ego, '_written', frozenset())
+
+    controller.control(ego, dt)
+
+    kind = fixs.commandKind(ego)
+    if kind == 'actuation':
+        backend.applyEgoActuation(ego.acceleratorPedalDesired,
+                                  ego.brakePedalDesired,
+                                  ego.steerAngleDesired / maxSteerRad)
+    elif kind == 'speedsteer':
+        backend.applyEgoSpeedSteer(ego.speedDesired,
+                                   ego.steerAngleDesired / maxSteerRad)
+    # kind is None: the controller commanded nothing this step. The last command
+    # persists in the plant, which is the honest reading -- substituting a zero
+    # would brake a car whose controller simply had nothing new to say.
+    return kind

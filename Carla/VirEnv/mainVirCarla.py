@@ -32,7 +32,8 @@ from CommonLib.VehDataMsgDefs import VehData                             # noqa:
 from CommonLib.VirEnv.DataLogger import DataLogger                       # noqa: E402
 from CommonLib.VirEnv.EgoDriver import EgoDriver                         # noqa: E402
 from CommonLib.VirEnv.FixsProtocol import kFeedPeriodS, onFeedBoundary   # noqa: E402
-from CommonLib.VirEnv.IEgoController import loadController              # noqa: E402
+from CommonLib.VirEnv.EgoControllerHost import (                        # noqa: E402
+    loadController, runController)
 from CommonLib.VirEnv.IVirEnvBackend import EgoState, Pose, kNoHandle    # noqa: E402
 from CommonLib.VirEnv.VirEnvCore import VirEnvCore                       # noqa: E402
 
@@ -374,10 +375,13 @@ def main(argv=None):
             if egoMode >= 1 and useFallbackDriver:
                 _driveEgoFallback(backend, egoDriver, cs['EgoTargetSpeed'], lastAdvisory,
                                   egoMode)
-            # #325 embedded controller: same slot, same per-step rate.
+            # #325 embedded controller: same slot, same per-step rate. The
+            # step itself lives in CommonLib so this file stays a faithful peer
+            # of mainVirCarla.cpp, which has no such hook.
             if egoMode >= 1 and embedded is not None:
-                _driveEmbedded(backend, embedded, core, egoId, carlaStep,
-                               onFeed, lastAdvisory)
+                from CommonLib import fixs as _fixs
+                runController(backend, embedded, _fixs.vehicle.get(egoId),
+                              carlaStep, onFeed, kMaxSteerRad)
 
             if poseLog is not None:      # A/B: the applied Carla pose per SUMO id
                 for vid, h in core.mappedVehicles().items():
@@ -651,66 +655,6 @@ def _driveEgoFallback(backend, egoDriver, targetSpeed, lastAdvisory, egoMode):
     ego.apply_control(carla.VehicleControl(throttle=float(dc.throttle),
                                            brake=float(dc.brake),
                                            steer=float(dc.steer)))
-
-
-def _driveEmbedded(backend, embedded, core, egoId, dt, onFeed, lastAdvisory):
-    """One step of a user controller, and apply whichever shape it commanded.
-
-    The controller is handed state and never reaches for the backend itself: that
-    is what keeps the same file runnable under an XIL plant, and in replay_core
-    where there is no simulator at all.
-
-    Two clocks meet on this record. Pose and speed are refreshed here, every
-    step. Everything the traffic simulator computed -- the advisory,
-    signalLightColor -- last changed at the feed, so feedAge says how old it is
-    rather than leaving a controller to assume it is current.
-    """
-    from CommonLib import fixs
-
-    ego = fixs.vehicle.get(egoId)
-    if ego is None:
-        return
-    es = EgoState()
-    if not backend.readEgoState(egoId, es):
-        return
-
-    object.__setattr__(ego, 'positionX', es.pose.x)
-    object.__setattr__(ego, 'positionY', es.pose.y)
-    object.__setattr__(ego, 'positionZ', es.pose.z)
-    object.__setattr__(ego, 'heading', es.pose.headingDeg)
-    object.__setattr__(ego, 'speed', es.speed)
-    if onFeed:
-        _feedAgeAccum[0] = 0.0
-    else:
-        _feedAgeAccum[0] += dt
-    object.__setattr__(ego, 'feedAge', _feedAgeAccum[0])
-
-    # Clear what the LAST step wrote before asking for this one. The record
-    # survives every sub-step of a feed, so without this _written only ever
-    # grows: a controller that wrote pedals once would still look like it was
-    # commanding them ten steps later, and "commanded nothing this step" -- a
-    # real and useful answer -- could never be observed again.
-    object.__setattr__(ego, '_written', frozenset())
-
-    embedded.control(ego, dt)
-
-    kind = fixs.commandKind(ego)
-    if kind == 'actuation':
-        backend.applyEgoActuation(ego.acceleratorPedalDesired,
-                                  ego.brakePedalDesired,
-                                  ego.steerAngleDesired / kMaxSteerRad)
-    elif kind == 'speedsteer':
-        backend.applyEgoSpeedSteer(ego.speedDesired,
-                                   ego.steerAngleDesired / kMaxSteerRad)
-    # kind is None: the controller commanded nothing this step. The last command
-    # persists in the plant, which is the honest reading -- substituting a zero
-    # would brake a car whose controller simply had nothing new to say.
-
-
-#: Seconds since the last FIXS feed, so a controller can tell how old the fields
-#: the traffic simulator owns actually are. A list because the driver is a
-#: module-level function, matching the rest of this file.
-_feedAgeAccum = [0.0]
 
 
 def _openDataLog(config):

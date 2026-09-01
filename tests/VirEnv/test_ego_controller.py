@@ -12,13 +12,17 @@ import textwrap
 
 import pytest
 
-_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-if _ROOT not in sys.path:
-    sys.path.insert(0, _ROOT)
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_ROOT = os.path.dirname(os.path.dirname(_HERE))
+for _p in (_ROOT, _HERE):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 from CommonLib import fixs                                          # noqa: E402
-from CommonLib.VirEnv.IEgoController import (                       # noqa: E402
-    ControllerError, loadController)
+from CommonLib.VirEnv.EgoControllerHost import (                    # noqa: E402
+    ControllerError, loadController, runController)
+from CommonLib.VirEnv.IVirEnvBackend import EgoState                # noqa: E402
+from MockVirEnvBackend import MockVirEnvBackend                     # noqa: E402
 
 
 # --------------------------------------------------------------------------
@@ -240,3 +244,105 @@ def test_shipped_template_loads_and_commands(tmp_path):
     assert fixs.commandKind(ego) == 'actuation'
     fixs._validateCommand(ego)
     c.shutdown()
+
+
+# --------------------------------------------------------------------------
+# runController -- the whole path against a mock backend, no simulator
+#
+# This is what moving the driver out of Carla/VirEnv/mainVirCarla.py bought:
+# the dispatch is the new behaviour, and where it used to live nothing could
+# reach it. Writing these found that it read EgoState as if it were nested
+# (es.pose.x) when EgoState is flat -- it would have thrown on the first step.
+# --------------------------------------------------------------------------
+
+def _mockWithEgo(speed=6.0):
+    backend = MockVirEnvBackend()
+    es = EgoState()
+    es.speed, es.x, es.y, es.heading = speed, 12.0, -3.0, 90.0
+    backend.setMockEgo(es, available=True)
+    return backend
+
+
+def _run(tmp_path, body, name, dt=0.05, onFeed=True, speed=6.0):
+    backend = _mockWithEgo(speed)
+    ctl = loadController(controllerFile(tmp_path, body, name=name))
+    ctl.setup({}, 'ego')
+    ego = makeEgo()
+    backend.clear()
+    kind = runController(backend, ctl, ego, dt, onFeed, maxSteerRad=0.7)
+    return kind, ego, [e for e in backend.events() if 'applyEgo' in e]
+
+
+def test_run_dispatches_pedals_to_applyEgoActuation(tmp_path):
+    body = ("def control(ego, dt):\n"
+            "    ego.set(acceleratorPedalDesired=0.4, brakePedalDesired=0.0,\n"
+            "            steerAngleDesired=0.35)\n")
+    kind, ego, applied = _run(tmp_path, body, 'pedals.py')
+    assert kind == 'actuation'
+    assert any('applyEgoActuation' in e for e in applied), applied
+    assert any('steer=0.5' in e for e in applied), applied      # 0.35 rad / 0.7
+
+
+def test_run_dispatches_speed_to_applyEgoSpeedSteer(tmp_path):
+    body = ("def control(ego, dt):\n"
+            "    ego.set(speedDesired=9.0, steerAngleDesired=0.0)\n")
+    kind, ego, applied = _run(tmp_path, body, 'speed.py')
+    assert kind == 'speedsteer'
+    assert any('applyEgoSpeedSteer' in e for e in applied), applied
+
+
+def test_run_applies_nothing_when_controller_is_silent(tmp_path):
+    """Not an error, and deliberately not a zero command: the last one persists
+    in the plant, and a zero would brake a car that simply had nothing to say."""
+    kind, ego, applied = _run(tmp_path, "def control(ego, dt):\n    pass\n", 'quiet.py')
+    assert kind is None
+    assert applied == []
+
+
+def test_run_refreshes_pose_every_step(tmp_path):
+    """The reason the hook exists: state is what the backend just measured, not
+    what arrived at the last feed."""
+    body = ("def control(ego, dt):\n"
+            "    ego.set(speedDesired=ego.speed, steerAngleDesired=0.0)\n")
+    kind, ego, _ = _run(tmp_path, body, 'echo.py', speed=7.25)
+    assert ego.positionX == pytest.approx(12.0)
+    assert ego.speed == pytest.approx(7.25)
+    assert ego.speedDesired == pytest.approx(7.25)
+
+
+def test_feedage_is_zero_on_a_feed_and_grows_between(tmp_path):
+    body = ("seenAges = []\n"
+            "def control(ego, dt):\n"
+            "    seenAges.append(ego.feedAge)\n"
+            "    ego.set(speedDesired=5.0, steerAngleDesired=0.0)\n")
+    backend = _mockWithEgo()
+    ctl = loadController(controllerFile(tmp_path, body, name='ages.py'))
+    ego = makeEgo()
+    runController(backend, ctl, ego, 0.05, True, 0.7)      # the feed
+    runController(backend, ctl, ego, 0.05, False, 0.7)     # sub-step
+    runController(backend, ctl, ego, 0.05, False, 0.7)     # sub-step
+    assert sys.modules['ages'].seenAges == pytest.approx([0.0, 0.05, 0.10])
+
+
+def test_written_is_cleared_between_steps(tmp_path):
+    """Without this _written only grows, so a controller that commanded once
+    would look like it was still commanding ten steps later."""
+    body = ("step = [0]\n"
+            "def control(ego, dt):\n"
+            "    step[0] += 1\n"
+            "    if step[0] == 1:\n"
+            "        ego.set(acceleratorPedalDesired=0.5, brakePedalDesired=0.0,\n"
+            "                steerAngleDesired=0.0)\n")
+    backend = _mockWithEgo()
+    ctl = loadController(controllerFile(tmp_path, body, name='once.py'))
+    ego = makeEgo()
+    assert runController(backend, ctl, ego, 0.05, True, 0.7) == 'actuation'
+    assert runController(backend, ctl, ego, 0.05, False, 0.7) is None
+
+
+def test_no_ego_actor_is_not_an_error(tmp_path):
+    backend = MockVirEnvBackend()
+    backend.setMockEgo(EgoState(), available=False)
+    ctl = loadController(controllerFile(
+        tmp_path, "def control(ego, dt):\n    pass\n", name='noego.py'))
+    assert runController(backend, ctl, makeEgo(), 0.05, True, 0.7) is None
