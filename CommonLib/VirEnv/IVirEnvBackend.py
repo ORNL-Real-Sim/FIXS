@@ -211,6 +211,38 @@ class IVirEnvBackend(ABC):
         e.g. Carla TM ``set_desired_speed``. Default no-op.
         """
 
+    # --- the two command shapes -------------------------------------------
+    # A vehicle plant offers two interfaces, and which one a controller is using
+    # is read off the fields it wrote (fixs.commandKind). They differ in WHO
+    # CLOSES THE LOOP, which is a real architectural difference and not a
+    # convenience: with pedals the caller is the controller and its rate is the
+    # rate the loop closes at; with speed the plant closes it internally, at the
+    # plant's own rate, using the plant's own gains.
+    #
+    # Both default to no-ops so a backend can support one, the other, or neither.
+
+    def applyEgoActuation(self, throttle, brake, steerNorm):
+        """(float, float, float) -> None -- pedals + steer; the CALLER closes the loop.
+
+        throttle/brake in [0, 1], steerNorm in [-1, 1]. Carla: ``apply_control``.
+        All three arrive together (fixs._validateCommand enforces it) because a
+        partial write would leave the omitted ones at whatever arrived last.
+        """
+
+    def applyEgoSpeedSteer(self, speed, steerNorm, accel=None, jerk=None):
+        """(float, float, float, float) -> None -- speed + steer; the PLANT closes it.
+
+        speed in m/s, steerNorm in [-1, 1]; accel and jerk are optional limits.
+        Carla: ``apply_ackermann_control``, whose controller then tracks the speed
+        at the CARLA step rate rather than the rate commands arrive at -- which is
+        why this shape gives a fast inner loop without an in-process controller.
+
+        The cost is that the tracking gains become the plant's
+        (``AckermannControllerSettings`` in Carla), not the controller's. A
+        backend whose plant has no such loop should leave this a no-op rather
+        than fake one.
+        """
+
     # --- unified debug diagnostics -----------------------------------------
     def debugHeader(self):
         """() -> string -- extra CSV column names, comma-led, written once.

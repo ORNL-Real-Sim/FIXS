@@ -85,7 +85,7 @@ from CommonLib.VehDataMsgDefs import VehData
 __all__ = [
     'connect', 'recv', 'send', 'close',
     'sim', 'vehicle', 'trafficlight',
-    'emit', 'transport',
+    'emit', 'transport', 'commandKind',
     'Vehicle', 'Shutdown', 'FixsError', 'NotConnected', 'ProtocolError',
 ]
 
@@ -178,12 +178,22 @@ class Vehicle(VehData):
     #: acceleration form.
     LONGITUDINAL_FIELDS = frozenset({'speedDesired', 'accelerationDesired'})
 
-    #: L4 actuation. CarlaBackend::applyEgoActuation reads all three every tick
-    #: (mainVirCarla.cpp:335), so a partial write ships whatever arrived for the
-    #: rest. Steer is a physical angle in rad; pedals are positions in [0, 1].
-    ACTUATION_FIELDS = frozenset({'steerAngleDesired',
-                                  'acceleratorPedalDesired',
-                                  'brakePedalDesired'})
+    #: The pedals. CarlaBackend::applyEgoActuation reads throttle, brake AND
+    #: steer every tick (mainVirCarla.cpp:335), so a partial write ships
+    #: whatever arrived for the rest -- hence they travel together.
+    PEDAL_FIELDS = frozenset({'acceleratorPedalDesired', 'brakePedalDesired'})
+
+    #: Steer is a physical angle in rad. It is deliberately NOT part of
+    #: PEDAL_FIELDS: it belongs to both command shapes. Pedals + steer is the
+    #: actuation command; speed + steer is the speed-and-steer command, which a
+    #: plant closes the loop on itself (Carla: apply_ackermann_control). Folding
+    #: steer into the pedal set is what used to make the second shape
+    #: unrepresentable -- set(speedDesired=..., steerAngleDesired=...) was
+    #: rejected for 'missing' pedals it was never going to send.
+    STEER_FIELD = frozenset({'steerAngleDesired'})
+
+    #: L4 actuation: pedals + steer, one command.
+    ACTUATION_FIELDS = PEDAL_FIELDS | STEER_FIELD
 
     #: Everything a client may write.
     COMMAND_FIELDS = LONGITUDINAL_FIELDS | ACTUATION_FIELDS
@@ -776,25 +786,62 @@ def transport():
     return _helper, _helper.msg_helper
 
 
-def _validateCommand(record):
-    """Check that what was written forms a command TrafficLayer can act on."""
+def commandKind(record):
+    """(Vehicle) -> 'actuation' | 'speedsteer' | None -- the shape that was written.
+
+    Which fields a controller wrote IS which interface it is commanding through,
+    so the shape is read off the record rather than declared anywhere. The two
+    map onto the two interfaces a vehicle plant offers:
+
+        'actuation'   pedals + steer   -> the caller closes the loop
+                                          (Carla: apply_control)
+        'speedsteer'  speed  + steer   -> the plant closes it
+                                          (Carla: apply_ackermann_control)
+
+    ``None`` means nothing was commanded this tick, which is a real answer: the
+    last command persists, and a bridge should leave it alone rather than
+    substitute a zero.
+    """
     written = record._written
+    if written & Vehicle.PEDAL_FIELDS:
+        return 'actuation'
+    if written & Vehicle.LONGITUDINAL_FIELDS:
+        return 'speedsteer'
+    return None
 
-    actuation = written & Vehicle.ACTUATION_FIELDS
-    if actuation and actuation != Vehicle.ACTUATION_FIELDS:
-        missing = Vehicle.ACTUATION_FIELDS - actuation
-        raise ProtocolError(
-            f"'{record.id.strip()}': actuation is one command -- "
-            f"CarlaBackend::applyEgoActuation reads all three fields every "
-            f"tick, so the ones left out would ship whatever arrived. "
-            f"Missing: {', '.join(sorted(missing))}."
-        )
 
-    if written >= Vehicle.LONGITUDINAL_FIELDS:
+def _validateCommand(record):
+    """Check that what was written forms a command a plant can act on."""
+    written = record._written
+    kind = commandKind(record)
+    who = record.id.strip()
+
+    if kind == 'actuation':
+        missing = Vehicle.ACTUATION_FIELDS - written
+        if missing:
+            raise ProtocolError(
+                f"'{who}': actuation is one command -- applyEgoActuation reads "
+                f"throttle, brake and steer every tick, so the ones left out "
+                f"would ship whatever arrived. Missing: "
+                f"{', '.join(sorted(missing))}."
+            )
+
+    elif kind == 'speedsteer':
+        if written >= Vehicle.LONGITUDINAL_FIELDS:
+            raise ProtocolError(
+                f"'{who}': set speedDesired or accelerationDesired, not both -- "
+                f"TrafficLayer accepts exactly one longitudinal command "
+                f"(ConfigHelper.cpp:256)."
+            )
+
+    elif written & Vehicle.STEER_FIELD:
+        # Steer alone became representable when it left PEDAL_FIELDS. It is not
+        # a command: nothing downstream knows what to do with a steer angle and
+        # no longitudinal intent, so say so rather than apply half a command.
         raise ProtocolError(
-            f"'{record.id.strip()}': set speedDesired or accelerationDesired, "
-            f"not both -- TrafficLayer accepts exactly one longitudinal command "
-            f"(ConfigHelper.cpp:256)."
+            f"'{who}': steerAngleDesired alone is not a command. Pair it with "
+            f"the pedals (acceleratorPedalDesired, brakePedalDesired) to close "
+            f"the loop yourself, or with speedDesired to let the plant close it."
         )
 
 

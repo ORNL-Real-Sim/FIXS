@@ -32,6 +32,8 @@ from CommonLib.VehDataMsgDefs import VehData                             # noqa:
 from CommonLib.VirEnv.DataLogger import DataLogger                       # noqa: E402
 from CommonLib.VirEnv.EgoDriver import EgoDriver                         # noqa: E402
 from CommonLib.VirEnv.FixsProtocol import kFeedPeriodS, onFeedBoundary   # noqa: E402
+from CommonLib.VirEnv.EgoControllerHost import (                        # noqa: E402
+    loadController, runController)
 from CommonLib.VirEnv.IVirEnvBackend import EgoState, Pose, kNoHandle    # noqa: E402
 from CommonLib.VirEnv.VirEnvCore import VirEnvCore                       # noqa: E402
 
@@ -178,6 +180,10 @@ def main(argv=None):
     egoL0 = (cs['EgoL0Driver'] or '').lower()
     useFallbackDriver = egoL0 in ('pursuit', 'fallback', 'egodriver')
     useWireActuation = egoL0 == 'actuation'
+    # #325: a user controller in the driver slot. Same position in the loop as
+    # EgoDriver, so it inherits the same rate -- CarlaTimeStep, not the feed.
+    # That is the whole reason the hook exists; see IEgoController.
+    useEmbedded = egoL0 == 'embedded' or bool(cs.get('EgoController'))
 
     if egoMode >= 1 and len(cs['EgoSpawnPose']) < 4:
         raise SystemExit('EgoMode %d needs EgoSpawnPose: [x, y, z, headingDeg]' % egoMode)
@@ -257,6 +263,16 @@ def main(argv=None):
               "controller are not held behind the render.")
 
     egoDriver = EgoDriver()
+    embedded = None
+    if useEmbedded:
+        spec = cs.get('EgoController')
+        if not spec:
+            raise SystemExit("EgoActuationSource: embedded needs EgoController: "
+                             "<path to a .py defining control(ego, dt)>")
+        embedded = loadController(spec, appRoot=os.getcwd())
+        embedded.setup(cs, cs['EgoId'])
+        print("Ego controller: %s (called every CARLA step, not every feed)"
+              % embedded.spec)
     lastAdvisory = cs['EgoTargetSpeed']
 
     try:
@@ -359,6 +375,13 @@ def main(argv=None):
             if egoMode >= 1 and useFallbackDriver:
                 _driveEgoFallback(backend, egoDriver, cs['EgoTargetSpeed'], lastAdvisory,
                                   egoMode)
+            # #325 embedded controller: same slot, same per-step rate. The
+            # step itself lives in CommonLib so this file stays a faithful peer
+            # of mainVirCarla.cpp, which has no such hook.
+            if egoMode >= 1 and embedded is not None:
+                from CommonLib import fixs as _fixs
+                runController(backend, embedded, _fixs.vehicle.get(egoId),
+                              carlaStep, onFeed, kMaxSteerRad)
 
             if poseLog is not None:      # A/B: the applied Carla pose per SUMO id
                 for vid, h in core.mappedVehicles().items():

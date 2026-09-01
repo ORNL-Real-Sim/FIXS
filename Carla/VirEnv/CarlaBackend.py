@@ -457,6 +457,30 @@ class CarlaBackend(IVirEnvBackend):
             brake=float(max(0.0, min(1.0, brake))),
             steer=float(max(-1.0, min(1.0, steerNorm)))))
 
+    def applyEgoSpeedSteer(self, speed, steerNorm, accel=None, jerk=None):
+        """Apply a SPEED+STEER command: CARLA's own controller closes the loop.
+
+        The second of CARLA's two vehicle interfaces, and the one FIXS has never
+        used -- libcarla has exposed ApplyAckermannControlToVehicle all along.
+        Where applyEgoActuation realises a command computed elsewhere, this hands
+        CARLA a target and lets its Ackermann controller track it at the world
+        step rate. A 10 Hz command therefore still gets a 50 Hz loop closed on
+        it, with no in-process controller.
+
+        What that buys is not free: the gains are CARLA's
+        (AckermannControllerSettings), not ours, and they are not obviously right
+        for every vehicle and grade -- EgoDriver's own comments record that
+        throttle response on a 1845 kg vehicle on this arterial is sharply
+        nonlinear. Measure before trusting it.
+        """
+        if self._egoActor is None:
+            return
+        self._egoActor.apply_ackermann_control(carla.VehicleAckermannControl(
+            steer=float(max(-1.0, min(1.0, steerNorm))),
+            speed=float(max(0.0, speed)),
+            acceleration=float(accel if accel is not None else 0.0),
+            jerk=float(jerk if jerk is not None else 0.0)))
+
     def egoActor(self):
         return self._egoActor
 
