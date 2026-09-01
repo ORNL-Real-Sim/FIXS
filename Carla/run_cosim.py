@@ -1488,6 +1488,14 @@ def _is_carla_process(name):
     return "ue4editor" in n or "carlaue4" in n
 
 
+def _carla_pid_on(port):
+    """PID of a CARLA holding `port`, or None. The two questions - who is on the
+    port, and is that a CARLA - are always asked together, and callers that only
+    want the second should not have to know about the first."""
+    pid = _pid_on_port(port)
+    return pid if pid and _is_carla_process(_process_name(pid)) else None
+
+
 def _kill_pid_tree(pid):
     """Kill a PID and its whole process tree (CARLA spawns shader workers / a game
     child / CrashReportClient that a plain kill leaves holding the RPC port)."""
@@ -3128,6 +3136,17 @@ def main():
                     help="text file declaring the import package (package= and url= lines)")
     ap.add_argument("--reimport", action="store_true",
                     help="re-import the map even if already cooked (re-download + re-cook)")
+    ap.add_argument("--purge-map", nargs="?", const="", default=None,
+                    metavar="NAME[,NAME]",
+                    help="delete imported maps from this machine, then stop. With no "
+                         "NAME: list what is here and ask (accepts 1,3,4 or 'all'). "
+                         "Keeps the downloaded bundle unless asked otherwise.")
+    ap.add_argument("--purge-cache", dest="purge_cache", action="store_true",
+                    default=None,
+                    help="with --purge-map: drop ~/.fixs/maps/<name>/ too "
+                         "(the next import re-downloads it)")
+    ap.add_argument("--keep-cache", dest="purge_cache", action="store_false",
+                    help="with --purge-map: keep ~/.fixs/maps/<name>/ without asking")
     ap.add_argument("--tl-table", default=None, help="traffic_light_table.csv (for --tls-manager sumo)")
     ap.add_argument("--tls-manager", default=None, choices=["sumo", "carla", "none"],
                     help="who drives the lights (default: the map's catalog setting, else 'sumo')")
@@ -3344,6 +3363,28 @@ def main():
                           peer_port=args.peer_port or peer.peer_port(port),
                           who_has_port=_who_has_port,
                           **_doctor_role(doctor, cfg, args))
+
+    # --purge-map answers a question about this machine's disk and stops. Sits with
+    # --doctor rather than further down because it is pure filesystem work: it needs
+    # the saved config to find CARLA, but never the carla module, so it must not pay
+    # for (or be blocked by) the re-exec and env repair everything below depends on.
+    #
+    # The work is import_map's - it owns where a cooked map, its staging and its
+    # bundle live, and those rules differ by flavour. What is passed in is what only
+    # this process can answer: whether anyone is there to be asked, and whether a
+    # CARLA is holding Content/ open. Same shape as doctor.run(who_has_port=...).
+    if args.purge_map is not None:
+        import import_map
+        cfg = env.load_config() or {}
+        mode = cfg.get("mode") or "source"
+        port = args.carla_port or DEFAULT_CARLA_PORT
+        return import_map.purge(
+            # client mode means no CARLA on this machine, so there is no cooked
+            # content here to find - only the bundle cache, which is still local.
+            None if mode == "client" else cfg.get("carla_root"),
+            mode=mode, named=args.purge_map, drop_cache=args.purge_cache,
+            interactive=_interactive(args),
+            carla_busy=lambda: _carla_pid_on(port))
 
     # --carla-only holds a CARLA this machine launched, so the flags that mean
     # "launch nothing" contradict it outright. Caught here rather than later
