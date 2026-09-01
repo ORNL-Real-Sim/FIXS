@@ -2202,6 +2202,166 @@ def import_named(name, carla_root=None, ue4_root=None, package_url=None,
     return 0
 
 
+# ------------------------------------------------------------- purge a map
+
+# Content/ subdirectories that belong to CARLA itself, or to FIXS's own installed
+# assets, and never to an imported map. Named explicitly because the structural
+# test below is not sufficient on its own: CARLA's Content/Carla/ ships a
+# Config/Carla.Package.json exactly like an imported package does, so "has a
+# package descriptor" would offer the engine's own content up for deletion.
+ENGINE_CONTENT = frozenset((
+    "Carla", "Collections", "Developers", "FIXS", "Movies", "Splash",
+    "Cinematics", "HDRIBackdrop", "Localization", "PropsFactory",
+))
+
+
+def _dir_size(path):
+    """Bytes under `path`; 0 when it is absent. Entries that cannot be stat'd are
+    skipped rather than raising: this number exists for a human deciding what to
+    delete, and one unreadable file must not cost them the whole listing."""
+    total = 0
+    if not path or not os.path.isdir(path):
+        return 0
+    for root, _dirs, files in os.walk(path):
+        for name in files:
+            try:
+                total += os.path.getsize(os.path.join(root, name))
+            except OSError:
+                pass
+    return total
+
+
+def human_bytes(n):
+    """'1.4 GB', for a listing someone reads before agreeing to a deletion."""
+    if not n:
+        return "-"
+    size = float(n)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if size < 1024 or unit == "TB":
+            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024.0
+
+
+def purge_candidates(carla_root=None, mode=None):
+    """What every map on this machine occupies locally: one record per name,
+    sorted, as {"name", "pieces", "cooked_umap"}. `pieces` is a list of
+    (label, path, bytes) with label in ("cooked", "staged", "cache").
+
+    A name qualifies on ANY ONE of four pieces of evidence, because the three
+    locations age independently and a purge exists precisely for the states where
+    they disagree:
+
+      - Maps/<name>/<name>.umap        a finished cook
+      - Config/<name>.Package.json     a cook that died part-way, which is exactly
+                                       the wreckage this command exists to clear
+      - Import/<name>/                 staging a past import left behind
+      - ~/.fixs/maps/<name>/           a downloaded bundle, cooked or not
+
+    A lone Import/<name>.json never qualifies a name by itself - it is swept up
+    only once something else has - because CARLA's own Import/ holds descriptors
+    (roadpainter_decals.json) that name no map at all. ENGINE_CONTENT is
+    subtracted last, so no amount of evidence can offer CARLA's own content up.
+
+    carla_root=None is a valid call: a machine with no configured CARLA still has
+    a bundle cache, and being able to reclaim it is the whole point of asking."""
+    names = set()
+
+    content = content_root(carla_root, mode) if carla_root else None
+    if content and os.path.isdir(content):
+        for name in os.listdir(content):
+            if not os.path.isdir(os.path.join(content, name)):
+                continue
+            if os.path.isfile(cooked_map_path(carla_root, name, mode)) or \
+                    os.path.isfile(package_descriptor(carla_root, name, mode)):
+                names.add(name)
+
+    import_dir = os.path.join(carla_root, "Import") if carla_root else None
+    if import_dir and os.path.isdir(import_dir):
+        for entry in os.listdir(import_dir):
+            if os.path.isdir(os.path.join(import_dir, entry)):
+                names.add(entry)
+
+    cache_root = _map_cache_dir()
+    if os.path.isdir(cache_root):
+        for name in os.listdir(cache_root):
+            if os.path.isdir(os.path.join(cache_root, name)):
+                names.add(name)
+
+    records = []
+    for name in sorted(names - ENGINE_CONTENT):
+        pieces = []
+        if carla_root:
+            cooked = cooked_content_dir(carla_root, name, mode)
+            if os.path.isdir(cooked):
+                pieces.append(("cooked", cooked, _dir_size(cooked)))
+            # The .bak_reimport a failed re-import leaves behind is the same map's
+            # content under another name; purging the map without it would leave a
+            # full copy on disk that nothing will ever look at again.
+            backup = cooked + ".bak_reimport"
+            if os.path.isdir(backup):
+                pieces.append(("cooked", backup, _dir_size(backup)))
+            for path in staged_import_paths(carla_root, name):
+                pieces.append(("staged", path,
+                               _dir_size(path) if os.path.isdir(path)
+                               else os.path.getsize(path)))
+        # os.path.join, NOT _map_cache_dir(name): that helper CREATES the folder
+        # it names, and an inventory must not bring into being the very thing it
+        # is reporting on. An empty one is skipped too - there is nothing there to
+        # reclaim, and offering it would make a purge look bigger than it is.
+        cache = os.path.join(cache_root, name)
+        if os.path.isdir(cache) and os.listdir(cache):
+            pieces.append(("cache", cache, _dir_size(cache)))
+        if not pieces:
+            continue
+        records.append({
+            "name": name,
+            "pieces": pieces,
+            "cooked_umap": bool(carla_root) and os.path.isfile(
+                cooked_map_path(carla_root, name, mode)),
+        })
+    return records
+
+
+def staged_import_paths(carla_root, name):
+    """The staging a past import left in CARLA's Import/ for `name`: the folder and
+    the descriptor beside it. Either can outlive the other, so both are looked for
+    independently."""
+    import_dir = os.path.join(carla_root, "Import")
+    return [p for p in (os.path.join(import_dir, name),
+                        os.path.join(import_dir, name + ".json"))
+            if os.path.exists(p)]
+
+
+def record_bytes(record, with_cache=False):
+    """Bytes a purge of `record` would actually reclaim, given the cache choice."""
+    return sum(b for label, _p, b in record["pieces"]
+               if with_cache or label != "cache")
+
+
+def purge_maps(records, drop_cache=False):
+    """Delete what `records` describe. Returns (removed, failed), both lists of
+    (name, label, path, bytes); `failed` rows carry the OSError message in place of
+    the byte count's usefulness.
+
+    Takes the records purge_candidates built rather than names to re-resolve, so
+    what is deleted is exactly what the caller printed and the user agreed to -
+    there is no second lookup that could drift from the one shown."""
+    removed, failed = [], []
+    for record in records:
+        for label, path, size in record["pieces"]:
+            if label == "cache" and not drop_cache:
+                continue
+            try:
+                if os.path.isdir(path):
+                    shutil.rmtree(path)
+                else:
+                    os.remove(path)
+                removed.append((record["name"], label, path, size))
+            except OSError as exc:
+                failed.append((record["name"], label, path, str(exc)))
+    return removed, failed
+
+
 DEFAULT_MAP_REPO = "ORNL-Real-Sim/FIXS_Applications"
 DEFAULT_MAP_TAG_PREFIX = "map-"
 
