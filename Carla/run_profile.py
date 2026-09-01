@@ -20,7 +20,7 @@ confirm:
        1) app       roosevelt
        2) map       roosevelt_full            (Digital-Twin-Library)
        3) scenario  config.yaml               (generated, this app on this map)
-       4) engine    py                        (run_synchronization.py)
+       4) engine    py                        (Python VirEnvCore: mainVirCarla.py)
        5) CARLA     source  C:/src_ext/Carla  ->  127.0.0.1:2000
        6) SUMO      gui, step 0.05
 
@@ -150,9 +150,36 @@ def save_doc(doc):
 
 
 def save(name, rec):
-    """Store `rec` under `name` and mark it as the one that ran last."""
+    """Store `rec` under `name` and mark it as the one that ran last.
+
+    Clears `partial`: arriving here means every stage a checkpoint was standing in
+    for has completed, so the record stops advertising itself as unfinished."""
     doc = load_doc()
     rec = dict(rec)
+    rec.pop("partial", None)
+    rec["updated"] = datetime.now().isoformat(timespec="seconds")
+    doc["setups"][name] = rec
+    doc["last"] = name
+    save_doc(doc)
+    return rec
+
+
+def save_partial(name, rec, stage):
+    """Store the choices made so far, tagged with the stage that had not run yet.
+
+    The full save happens once a run is completely resolved, which is AFTER the map
+    import. A cook that fails therefore used to take the app, map and config just
+    chosen down with it, and the next run asked the whole questionnaire again - the
+    worst moment to re-ask, because a failed import is precisely when you want to
+    change one answer and retry. Writing the record early, under the same name,
+    means the retry starts from the answers instead of from nothing; the full save
+    later overwrites this one rather than leaving a second entry behind.
+
+    `stage` names what had not finished, and is shown in the list: "map import"
+    reads as a thing to retry, where a bare "incomplete" reads as corruption."""
+    doc = load_doc()
+    rec = dict(rec)
+    rec["partial"] = stage
     rec["updated"] = datetime.now().isoformat(timespec="seconds")
     doc["setups"][name] = rec
     doc["last"] = name
@@ -212,7 +239,12 @@ def summarize(rec):
             rec.get("map") or "no map",
             os.path.basename(rec.get("config") or "") or "auto config",
             "gui" if rec.get("sumo_gui", True) else "headless"]
-    return " | ".join(bits)
+    line = " | ".join(bits)
+    # An unfinished setup is still worth opening - that is the whole point of
+    # keeping it - but it must not read as one that ran, or the list would claim a
+    # map is cooked when the cook is what failed.
+    stage = rec.get("partial")
+    return f"{line}  [unfinished: {stage}]" if stage else line
 
 
 def _same_path(a, b):
@@ -259,7 +291,8 @@ def _fmt(slot, rec, carla_cfg, derived=None):
         return f"{os.path.basename(path):<26} ({where})"
     if slot == "engine":
         eng = derived.get("engine") or "py"
-        how = "run_synchronization.py" if eng == "py" else "TrafficLayer + VirCarlaEnv"
+        how = ("TrafficLayer + mainVirCarla.py" if eng == "py"
+               else "TrafficLayer + VirCarlaEnv")
         return f"{eng:<26} ({how}, from the yaml)"
     if slot == "carla":
         # Two different things on one line, so label them: the INSTALL comes from
@@ -321,6 +354,12 @@ def choose_setup(doc, interactive=True):
         return None
     last = doc.get("last") if doc.get("last") in names else names[0]
     if not interactive:
+        # Say it out loud. Interactively the list carries the marker, but a
+        # headless run shows no list, and silently replaying a setup whose map
+        # never cooked is how the failure gets rediscovered further downstream.
+        stage = (doc["setups"].get(last) or {}).get("partial")
+        if stage:
+            print(f"[cosim] resuming '{last}', which did not finish ({stage}).")
         return last
     width = min(max(len(n) for n in names), 24)
     while True:

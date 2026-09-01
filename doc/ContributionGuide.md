@@ -58,6 +58,35 @@ Always include the GitHub issue number in the branch name.
   ```
 - Add a test case if your change is testable without simulators
 
+### Building the documentation locally
+
+The published docs are built by ReadTheDocs on Linux (`.readthedocs.yml`). To preview
+them yourself:
+
+```bash
+python -m venv .docvenv
+.docvenv/bin/pip install -r doc/requirements_doc.txt      # Scripts\pip on Windows
+.docvenv/bin/python -m sphinx -b html doc doc/_build/html
+```
+
+**On Windows this segfaults**, usually part-way through `writing output...`, sometimes
+surfacing first as a nonsense `TypeError` from inside Sphinx or markdown-it. The cause is
+stack exhaustion: docutils recurses deeply per document and Windows gives the main thread
+far less stack than Linux does, so the whole doc set no longer fits. It is not a problem
+with any individual page, and it does not affect the ReadTheDocs build.
+
+Build on a thread with a larger stack instead:
+
+```python
+# build_docs.py
+import sys, threading
+from sphinx.cmd.build import main
+threading.stack_size(64 * 1024 * 1024)
+sys.setrecursionlimit(20000)
+t = threading.Thread(target=lambda: sys.exit(main(["-b", "html", "doc", "doc/_build/html"])))
+t.start(); t.join()
+```
+
 ---
 
 ## Step 4: Commit and Open a PR

@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <fstream>
 #include <iostream>
+#include <chrono>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -134,7 +135,9 @@ int VirEnvCore::runStep(double simTime, const char** errorMsg) {
     // may tick as fine as it likes, but it trades messages with TrafficLayer only
     // here, and TrafficLayer steps the traffic simulator once per exchange.
     bool onUpdate = (simTime > 1e-5 && fixs::onFeedBoundary(simTime, 1e-5));
+    lastRecvSeconds = 0.0;
     if (onUpdate) {
+        const auto recvT0 = std::chrono::steady_clock::now();
         Msg_c.clearRecvStorage();
         if (ENABLE_REALSIM && simTime) {
             for (unsigned int iS = 0; iS < Sock_c.serverSock.size(); iS++) {
@@ -144,6 +147,8 @@ int VirEnvCore::runStep(double simTime, const char** errorMsg) {
                 }
             }
         }
+        lastRecvSeconds = std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - recvT0).count();
     }
     return processStep(simTime, onUpdate, simStateRecv, simTimeRecv, errorMsg);
 }

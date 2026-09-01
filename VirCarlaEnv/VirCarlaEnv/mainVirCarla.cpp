@@ -17,6 +17,7 @@
 #include <cmath>
 #include <chrono>
 #include <cstdlib>
+#include <cstdio>
 #include <thread>
 
 #include <carla/client/Client.h>
@@ -363,6 +364,17 @@ int main(int argc, const char* argv[]) {
         long stepCount = 0;
         double simTime = 0.0;
         auto wallStart = std::chrono::steady_clock::now();   // realtime-pacing reference
+        auto loopStart = std::chrono::steady_clock::now();   // rate summary at the end
+        long feedCount = 0;
+        // Per-phase tic-toc, the SAME phases the Python bridge reports, so the two
+        // breakdowns line up name for name and a difference can be attributed to a
+        // part of the workflow instead of to a language.
+        double phRecv = 0, phOrch = 0, phFlush = 0, phTick = 0,
+               phAudit = 0, phBack = 0, phPace = 0;
+        auto _clk = []{ return std::chrono::steady_clock::now(); };
+        auto _el = [](const std::chrono::steady_clock::time_point& a) {
+            return std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - a).count(); };
 
         // ---- generic FIXS data logging (config: DataLogSetup) --------------
         // Records the vehicle-data records this bridge reports to FIXS, in the
@@ -387,17 +399,22 @@ int main(int argc, const char* argv[]) {
         while (simTime < simEndTime) {
             // ---- core: recv (only on the 0.1s feed boundary) -> spawn / pose
             //      (batch) / despawn; the refresh interpolates EVERY sub-step ----
+            auto _t0 = _clk();
             if (core.runStep(simTime, &err) < 0) {
                 if (WSAGetLastError() != WSAEINTR && WSAGetLastError() != WSAEFAULT)
                     std::cerr << "co-sim recv/step ended: " << (err ? err : "?") << "\n";
                 break;
             }
-            // NOTE: the batch is NOT flushed here. It is flushed just before
-            // world.Tick(), after the spectator has been queued into it, so the
+
+            phRecv += core.lastRecvSeconds;
+            phOrch += _el(_t0) - core.lastRecvSeconds;
+                                                   // Python bridge reports it
+            // #266: the batch is NOT flushed here. It is flushed just before
+            // world.Tick(), AFTER the spectator has been queued into it, so the
             // camera and the vehicles it follows are applied by ONE ApplyBatchSync
             // and cannot land in different ticks. Nothing between here and there
-            // reads back a Carla transform -- the ego-control calls below drive TM
-            // / pedals, and the pose log reads lastAppliedPose (our own copy).
+            // reads back a Carla transform: the ego-control calls drive TM / pedals,
+            // and the pose log reads lastAppliedPose, our own copy.
             //
             // The deferred ego spawn below is safe under that rule for the same
             // reason: it reads the pose out of the FIXS record it just received,
@@ -425,6 +442,7 @@ int main(int argc, const char* argv[]) {
                     if (!bringUpEgo(sp, /*settleOutOfBand=*/false)) break;
                 }
             }
+
 
             // ---- L2: apply the external speed advisory at each 0.1s FIXS feed ----
             // Set the driver target BEFORE it runs this tick. applyEgoControl routes
@@ -499,12 +517,14 @@ int main(int argc, const char* argv[]) {
                     if (const carla::geom::Transform* tf = backend.lastAppliedPose(cit->second)) {
                         carla::geom::Location loc = tf->location; loc.z += spectatorHeight;
                         const float yaw = spectatorAlignYaw ? (tf->rotation.yaw - 90.f) : -90.f;
+
                         // Into the SAME batch as the vehicles, not a separate
                         // SetTransform RPC. A standalone RPC is its own message and
                         // can be applied in a different tick from the poses it is
                         // supposed to be centred on -- which put the followed
                         // vehicle one step off centre on 4.7% of frames even after
                         // the vehicles themselves were made reliable.
+
                         backend.queueTransform(spectator->GetId(),
                             carla::geom::Transform(loc, carla::geom::Rotation(-90.f, yaw, 0.f)));
                     }
@@ -513,19 +533,41 @@ int main(int argc, const char* argv[]) {
 
             // One atomic apply for this tick: every mirrored vehicle AND the camera
             // that follows one of them, acknowledged by the server before we tick.
-            backend.flushBatch();
+
+            _t0 = _clk();
+            backend.flushBatch();   // one acknowledged apply: vehicles + camera
+            phFlush += _el(_t0);
+            _t0 = _clk();
 
             world.Tick(10s);               // advance Carla one sub-step (10s: TM sync work rides on the tick)
+            phTick += _el(_t0);
 
-            // FIXS feed boundary (0.1 s): a recv happened this step, so send the
-            // paired response + clear here. Sub-steps in between only render.
+            // #325 (finding A): this MUST stay the boundary alone -- do NOT add a
+            // `simTime > 1e-5` term to pair it with the recv, however wrong the
+            // unpaired reply at simTime 0 looks. VirEnvCore::runStep does not recv
+            // there, so that first send has no matching receive; but MEASURED, the
+            // C++ path needs it. Bisected on mlk_eco_driving, 50 s window, same
+            // stack and map, only this line differing:
+            //     stock                              96092 poses, ran to t=50.1
+            //     with simTime > 1e-5 added           3344 poses, died at t=1.7
+            //     that reverted, z fix kept          96094 poses, ran to t=50.1
+            // TrafficLayer then reports "send() failed mid-message / ERROR: send to
+            // client fails" and shuts the run down, i.e. it stopped being drained.
+            // So the leading message is load-bearing on this path.
+            //
+            // The Python bridge does NOT need it (Carla/VirEnv/mainVirCarla.py runs
+            // the same port for all 6501 exchanges with the pairing strict, twice
+            // over), so the two transports are not symmetric here and the mechanism
+            // is not yet established (see the #325 thread, finding A). Worth understanding
+            // before the mode-A ego readback is trusted: an off-by-one is 1.4 m at 14 m/s.
             const bool onFeed = fixs::onFeedBoundary(simTime, 1e-6);
 
             // SUMO<->CARLA elevation audit, once per exchange. Here rather than inside
             // setVehiclePose because it asks whether the two MAPS agree, which no
             // interpolated sub-step can change - see CarlaBackend::auditZAlignment.
-            if (onFeed) backend.auditZAlignment();
+            if (onFeed) { _t0 = _clk(); backend.auditZAlignment(); phAudit += _el(_t0); }
 
+            _t0 = _clk();
             // ---- POST-tick L0+: the Carla-driven ego -> FIXS (TL injects into SUMO)
             if (carlaOwnsEgo) {
                 virenv::EgoState es;
@@ -707,12 +749,15 @@ int main(int argc, const char* argv[]) {
                 core.Msg_c.clearRecvStorage();
                 core.Msg_c.clearSendStorage();
             }
+            if (onFeed) feedCount++;
+            phBack += _el(_t0);
             simTime = (++stepCount) * carlaStep;   // step counter avoids fp drift
 
             // Realtime pacing (viz): sleep so each sub-tick lands at its wall-clock
             // sim-time -> the sub-ticks spread evenly instead of bursting, so a
             // follow-cam renders smooth. Never over-throttles (if we fell behind,
             // sleep is skipped and the reference resyncs). OFF for XIL.
+            _t0 = _clk();
             if (realtimePacing) {
                 using namespace std::chrono;
                 auto target = wallStart + duration_cast<steady_clock::duration>(duration<double>(simTime));
@@ -721,8 +766,37 @@ int main(int argc, const char* argv[]) {
                 else if (now - target > milliseconds(250))
                     wallStart = now - duration_cast<steady_clock::duration>(duration<double>(simTime));
             }
+            phPace += _el(_t0);
         }
 
+        // How fast the bridge actually ran -- the same line the Python bridge
+        // prints, so the two are directly comparable. Timing a whole stack (SUMO,
+        // TrafficLayer, the controller, a warm-up) and attributing the difference
+        // to the bridge is how that question gets answered wrong.
+        {
+            const double el = std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - loopStart).count();
+            if (el > 0 && stepCount)
+                std::printf("Bridge loop: %ld exchanges, %ld ticks in %.1f s "
+                            "(%.1f exchanges/s, %.2f ms/tick)\n",
+                            feedCount, stepCount, el, feedCount / el,
+                            1000.0 * el / stepCount);
+            // Same phases, same order, same units as the Python bridge prints, so a
+            // difference lands on a part of the workflow rather than on a language.
+            const double phs[7] = { phRecv, phTick, phFlush, phOrch, phAudit, phBack, phPace };
+            const char*  nms[7] = { "fixs recv", "world.tick", "flush batch",
+                                    "orchestrate", "z audit", "readback+send",
+                                    "pacing sleep" };
+            double acct = 0;
+            for (int q = 0; q < 7; q++) {
+                acct += phs[q];
+                std::printf("             %-14s %7.2f ms/tick  %4.1f%%%%\n",
+                            nms[q], 1000.0 * phs[q] / stepCount, 100.0 * phs[q] / el);
+            }
+            std::printf("             %-14s %7.2f ms/tick  %4.1f%%%%  (loop overhead)\n",
+                        "unaccounted", 1000.0 * (el - acct) / stepCount,
+                        100.0 * (el - acct) / el);
+        }
         if (dataLog.isOpen()) { std::cout << "DataLogger closed: " << dataLog.path() << "\n"; dataLog.close(); }
         if (carlaOwnsEgo) backend.destroyEgo();
         settings = world.GetSettings();

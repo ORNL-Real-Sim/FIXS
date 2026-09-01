@@ -26,6 +26,10 @@
 // 0.5 m warns only on a genuine map/elevation mismatch. Policy/threshold config: #193.
 static constexpr double kZMismatchTolM = 0.5;
 
+// How many exchanges the z audit takes to cover every mapped vehicle. Mirrors
+// kZAuditStride in Carla/VirEnv/CarlaBackend.py so both bridges sample it the same.
+static constexpr int kZAuditStride = 5;
+
 namespace virenv {
 
 // #174 coord fix: the SUMO/FIXS wire carries the FRONT-of-vehicle position; the
@@ -148,7 +152,20 @@ void CarlaBackend::auditZAlignment() {
     if (!world_) return;
     if (!map_) map_ = world_->GetMap();
     if (!map_) return;
+    // Sampled over a rotating slice, not exhaustive. This asks whether the two MAPS
+    // agree on elevation -- a STATIC property of the map pair, not of the traffic --
+    // so checking every vehicle every exchange re-answers one question hundreds of
+    // times per second, each answer costing a whole-map waypoint search. Measured on
+    // the Python peer, where the same loop was 9.6 ms of a 42.7 ms tick: 23% of the
+    // bridge's own work for a #193 placeholder that only warns.
+    //
+    // Stride 5 covers every mapped vehicle within 0.5 s at the 0.1 s feed, shorter
+    // than the shortest violation observed on the MLK corridor (~5 consecutive
+    // exchanges), so nothing that was reported before is missed.
+    zAuditPhase_ = (zAuditPhase_ + 1) % kZAuditStride;
+    std::size_t n = 0;
     for (const std::pair<const VehHandle, carla::geom::Transform>& kv : lastApplied_) {
+        if ((n++ % kZAuditStride) != (std::size_t)zAuditPhase_) continue;
         carla::SharedPtr<carla::client::Waypoint> wp = map_->GetWaypoint(kv.second.location);
         if (wp)
             fixs::RS_XIL_GUARD("sumo_carla_z_mismatch",

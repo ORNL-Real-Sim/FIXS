@@ -14,7 +14,7 @@ dependencies:
   - pytest
   - pyyaml
   - shapely
-  # Carla/sumo/run_synchronization/sumo_integration/sumo_simulation.py imports
+  # standalone/run_synchronization/sumo_integration/sumo_simulation.py imports
   # lxml.etree, and nothing else installs it, so it has to be declared here.
   - lxml
   - vs2015_runtime

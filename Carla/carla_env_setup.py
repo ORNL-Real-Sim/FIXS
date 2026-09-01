@@ -83,6 +83,75 @@ def save_config(cfg):
 
 REEXEC_GUARD = "FIXS_REEXEC"
 
+# A conda env has no pyvenv.cfg, so CPython leaves ENABLE_USER_SITE on and puts the
+# PER-USER site directory (%APPDATA%\Python\PythonXY\site-packages on Windows,
+# ~/.local/lib/pythonX.Y/site-packages elsewhere) AHEAD of the env's own
+# site-packages. One `pip install --user` therefore shadows an env-installed package
+# in every env on the machine at once, and naming the right interpreter here is not
+# enough to stop it: a carla built from a source tree landed in the user directory
+# and won over the wheel this config installed, so the client spoke a different
+# protocol version than the server and died inside libcarla on ImageTmpl.h's
+# `GetWidth() * GetHeight() == size()` assertion - a C++ assert, so it took the
+# process down instead of raising something python could report. The version banner
+# said so ("Client API version = <hash>" vs "Simulator API version = 0.9.15.2") but
+# CARLA only warns there and connects anyway.
+#
+# carla.json names ONE interpreter; that interpreter has to mean one set of packages.
+# Two moves, because an env var alone cannot repair a process that has already booted:
+#   - export PYTHONNOUSERSITE, so every child - the re-exec below, TrafficLayer, the
+#     app's own launch command, the placers - starts without the directory at all;
+#   - drop it from THIS process's sys.path, for the case where we are already on the
+#     configured interpreter and so never re-exec.
+
+USER_SITE_OPT_OUT = "PYTHONNOUSERSITE"
+
+
+def quarantine_user_site():
+    """Keep per-user site-packages out of this run. Returns the paths dropped.
+
+    Empty on a healthy machine, and empty in a child we re-exec'd, which never
+    added the directory - so the caller's notice prints once, where it is news."""
+    os.environ[USER_SITE_OPT_OUT] = "1"
+    try:
+        import site
+        user_site = getattr(site, "USER_SITE", None) or site.getusersitepackages()
+    except Exception:
+        return []          # no usable site module: nothing to quarantine
+    if not user_site:
+        return []
+    target = os.path.normcase(os.path.normpath(user_site))
+    dropped = [p for p in sys.path
+               if p and os.path.normcase(os.path.normpath(p)) == target]
+    for path in dropped:
+        sys.path.remove(path)
+    return dropped
+
+
+# Run at import, not from a call each entry point has to remember: this module is the
+# first FIXS import in every one of them, and the quarantine has to beat `import carla`
+# on ALL paths - including the ones that answer and exit before
+# reexec_under_configured. run_cosim --version is the sharp case: its whole job is to
+# report which packages a run will use ("what to paste into a bug report"), and it
+# returns at the --doctor/--version branch, well above the re-exec - so it was
+# fingerprinting the shadowed copy and calling it present.
+USER_SITE_DROPPED = quarantine_user_site()
+_python_reported = False
+
+
+def report_python(tag="fixs"):
+    """Name the interpreter this run uses - once, and only when something had been
+    shadowing it.
+
+    Which directory got dropped is our problem, not the reader's. The question a
+    shadowed import makes unanswerable is "which python am I actually getting",
+    so answer that and say nothing else. Silent on a machine with no user-site
+    install, which is most of them."""
+    global _python_reported
+    if not USER_SITE_DROPPED or _python_reported:
+        return
+    _python_reported = True
+    print(f"[{tag}] python: {sys.executable}")
+
 
 def configured_python():
     """The interpreter carla.json names, if it is on disk. Else None."""
@@ -105,11 +174,18 @@ def reexec_under_configured(script, cfg=None, drop=(), tag="fixs"):
     arguments the child must not see again (run_cosim's --reconfigure has already
     been honoured by the time we switch). REEXEC_GUARD stops a config that points
     at a shim or a symlink - where the path comparison cannot tell parent from
-    child - from re-execing forever."""
+    child - from re-execing forever.
+
+    The user-site quarantine already happened at import. Naming the interpreter is
+    done here, and only on the paths that RETURN - if we re-exec, sys.executable is
+    not the python that ends up running, and the switch line below names the one
+    that does."""
     target = (cfg if cfg is not None else load_config() or {}).get("python")
     if not target or not os.path.isfile(target):
+        report_python(tag)
         return                       # nothing configured yet, or it has been removed
     if _same_python(target, sys.executable) or os.environ.get(REEXEC_GUARD) == "1":
+        report_python(tag)
         return
     print(f"[{tag}] switching to the configured python env:\n        {target}")
     cmd = [target, os.path.abspath(script), *[a for a in sys.argv[1:] if a not in drop]]

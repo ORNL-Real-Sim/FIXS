@@ -95,7 +95,7 @@ def detect_role(cfg, fixs_root):
     if (cfg or {}).get("carla_root"):
         # AMBIGUOUS, and it cannot be resolved from installed files: this is either
         # a render host for a remote traffic machine, or a self-contained
-        # engine=py co-sim (SUMO + run_synchronization.py + CARLA, all local).
+        # standalone co-sim (SUMO + standalone/run_synchronization.py + CARLA, all local).
         # The second needs SUMO; the first does not. So say so instead of guessing.
         return "render-or-local", ("a local CARLA and no FIXS bridge binaries - "
                                    "either a render host, or a self-contained "

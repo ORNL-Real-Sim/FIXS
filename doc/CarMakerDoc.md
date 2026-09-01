@@ -49,7 +49,7 @@ To simplify CarMaker project build process, we will build a library called Virtr
 required helper functions. Open [VirtualEnvironment.sln](..%2FVirtualEnvironment%2FVirtualEnvironment.sln)
 inside the VirtualEnvironment folder using Visual Studio 2022. in Visual Studio 2022, find the solution explorer window on the right of the screen, right click the _VirtualEnvironment_, select _Properties_,
 Then in the Property Page, find C/C++ -> General -> Additional Include Directories. Edit the carmaker version if necessary. And make sure yaml-cpp are included:
-![VirtualEvn_cppsetup.png](img%2FVirtualEvn_cppsetup.png)
+![VirtualEvn_cppsetup.png](img/VirtualEvn_cppsetup.png)
 
 Now you can build.
 
@@ -59,8 +59,8 @@ to `yaml-cppd.lib` (Debug version) that you build previously.
 
 Note: To build Debug version, in Visual Studio 2022, find the solution explorer window on the right of the screen, right click the _VirtualEnvironment_, select _Properties_, Then in the Property Page, find Librarian -> General -> Additional Dependencies.
 Type in the location of where you build the yaml-cppd.lib. Then under C/C++ -> Code Generation -> Runtime Library, set it to Multi-threaded Debug DLL (/MDd). And then build the solution in Debug version\
-![VS2022_changeDebug.png](img%2FVS2022_changeDebug.png)\
-![RuntimeLibsetup.png](img%2FRuntimeLibsetup.png)
+![VS2022_changeDebug.png](img/VS2022_changeDebug.png)\
+![RuntimeLibsetup.png](img/RuntimeLibsetup.png)
 
 #### Compile Source Codes
 
@@ -83,14 +83,14 @@ There is **app_tmp.c, CM_Main.c, CM_Vehicle.c, IO.c, and USer.C** files in the c
 - Define the dependencies folders\
   In C/C++ -> General -> Additional Include Directories, exam the Evaluated value, make sure the CarMaker verison and CarMaker support Matlab version are correct.
 
-  ![CM_VS_IncludeDependencies.png](img%2FCM_VS_IncludeDependencies.png)
+  ![CM_VS_IncludeDependencies.png](img/CM_VS_IncludeDependencies.png)
   - tips: Matlab version is inherited from (MATSUPP_DIR), this value can be modified from the `CarMaker.prop` file in `src` folder.
     change the version in ```<MATSUPP_MATVER> xxx </MATSUPP_MATVER>``` accordingly.
 
 
 - Define libraries\
   In Linker -> Input -> Additional Dependencies, add `VirtualEnvironment.lib`
-  ![CM_VS_Linker_AdditionalDependencies.png](img%2FCM_VS_Linker_AdditionalDependencies.png)
+  ![CM_VS_Linker_AdditionalDependencies.png](img/CM_VS_Linker_AdditionalDependencies.png)
 
 Next, modify the User.cpp to include the following codes
 - At beginning of the file, add the followings, ``need to make sure VirEnv_Wrapper.h is included before including the windows.h!``
@@ -262,7 +262,7 @@ to the desired config.yaml file, and (optional) signal light sync table file
 Note:  `-f` to point to the yaml config file for SUMO, `-s` to point signal light sync table between SUMO and CarMaker.
 Using either relative path to the working directory or absolute path are OK
 
-![CM_GUI_Config1.png](img%2FCM_GUI_Config1.png)
+![CM_GUI_Config1.png](img/CM_GUI_Config1.png)
 
 ### Run CarMaker-Simulink
 Open the CarMaker simulink model, double click `Edit Model Configuration`, if the compiled libcarmaker4sl.mexw64 is in the
@@ -386,7 +386,7 @@ CM_SRC_DIR          = "src_cm4dspace_realsim"
 ```
 
 Alternatively, you can skip the BuildConfig.py modification and manually edit settings in ConfigurationDesk->Build Configuration->Properties.
-![CM_DS_BuildConfig_24a.png](img%2FCM_DS_BuildConfig_24a.png)
+![CM_DS_BuildConfig_24a.png](img/CM_DS_BuildConfig_24a.png)
 
 3. set number of accepted overruns to be -1 in ConfigurationDesk:
 ![](img/DS_SCLX_NO_OVERRUN.png)

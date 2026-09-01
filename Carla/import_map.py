@@ -266,10 +266,17 @@ def _try_gh_download(package_url):
     return None, None
 
 
-def _select_package(name, package_url, precooked=False):
+def _select_package(name, package_url, precooked=False, inside=("xodr", "fbx")):
     """Let the user point at a package they downloaded by hand - a native file
     picker, falling back to a typed path. This is the portable path: no GitHub
     CLI / auth needed, just browser access to the release.
+
+    `inside` names the files that identify this kind of thing once it has been
+    extracted: a map export is known by its .xodr/.fbx, a SUMO scenario by its
+    .sumocfg. They are what makes one dialog enough - see below - so they are the
+    caller's to state. Hardcoding the map's extensions here filtered a SUMO
+    scenario's own files out of its dialog, which opened on an empty listing and
+    read as the explorer having failed to appear.
 
     `precooked` says which artefact this CARLA can actually take, and it has to be
     asked for by name. A PACKAGED build cooks nothing, so the only thing it can
@@ -279,40 +286,52 @@ def _select_package(name, package_url, precooked=False):
     A SOURCE build is the mirror image: it cooks, so it wants the .zip or the
     extracted folder and cannot use a cooked tarball.
 
-    For a source build we still ask zip-or-folder first, because the two need
-    different dialogs and askopenfilename cannot select a directory. Everything
-    downstream already accepts a folder (_stage_from_path copies a tree); only this
-    dialog could not offer one, which made the picker's "select a local .zip /
-    folder" a half truth - a typed path was the sole way to hand it a raw
-    extracted export. A precooked package is always one file, so it asks nothing."""
-    what = "precooked package (*_cooked.tar.gz)" if precooked else ".zip (or extracted folder)"
+    ONE explorer, and no zip-or-folder question. tkinter cannot select a file or a
+    directory in the same box - but it does not need to, because picking any file
+    INSIDE an extracted package identifies it just as well as selecting its folder
+    would. So the dialog lists the bundle (.zip) and the `inside` files, and
+    anything that is not an archive resolves to its containing folder. The
+    zip-or-folder decision ends up where it belongs - in what the user clicks -
+    instead of in a question asked before the explorer even opens, and there is
+    never a second dialog to cancel into. Everything downstream already takes
+    either (_stage_from_path copies a tree or unpacks an archive)."""
+    shown = "/".join("." + e for e in inside)
+    what = ("precooked package (*_cooked.tar.gz)" if precooked
+            else f".zip (or an extracted folder, by its {shown})")
     print(f"\n[import] Select the downloaded '{name}' {what}.")
+    if not precooked:
+        print(f"[import] Either the .zip, or - if it is already extracted - the "
+              f"{shown} inside it (the folder is taken from it).")
     if package_url:
         print("[import] If you don't have it yet, download it (browser is fine - "
               "you need access to the release):")
         print(f"             {package_url}")
-    folder = (not precooked) and sys.stdin.isatty() and _prompt(
-        "[import] Is it a .zip or an extracted folder? "
-        "[Z = zip, F = folder, Enter = zip]: ").strip().lower().startswith("f")
+    start = _browse_start_dir()
     try:
         import tkinter as tk
         from tkinter import filedialog
         root = tk.Tk()
         root.withdraw()
         root.update()
-        if folder:
-            path = filedialog.askdirectory(
-                title=f"Select the extracted {name} package folder")
-        elif precooked:
+        if precooked:
             path = filedialog.askopenfilename(
                 title=f"Select the downloaded precooked {name} package (*_cooked.tar.gz)",
+                initialdir=start,
                 filetypes=[("Precooked map packages", "*.tar.gz"), ("All files", "*.*")])
         else:
+            pats = " ".join("*." + e for e in inside)
             path = filedialog.askopenfilename(
-                title=f"Select the downloaded {name} package (.zip)",
-                filetypes=[("Zip archives", "*.zip"), ("All files", "*.*")])
+                title=f"Select the {name} (.zip), or the {shown} of an "
+                      f"extracted one",
+                initialdir=start,
+                filetypes=[(f"{name} (.zip or {shown})", f"*.zip {pats}"),
+                           ("Zip archives", "*.zip"),
+                           (f"Extracted ({shown})", pats),
+                           ("All files", "*.*")])
+            path = _folder_of_export_file(path)
         root.destroy()
         if path:
+            _report_pick(path, inside)
             return path
     except Exception as exc:  # no display / no tkinter
         print(f"[import] file picker unavailable ({exc}); type the path instead.")
@@ -326,7 +345,69 @@ def _select_package(name, package_url, precooked=False):
     path = _prompt(f"[import] Path to the downloaded {what}: ").strip().strip('"')
     if not path or not os.path.exists(path):
         sys.exit(f"[import] path not found: {path!r}")
+    _report_pick(path)
     return path
+
+
+def _folder_of_export_file(path):
+    """A pick from the single explorer, resolved to what staging actually wants.
+
+    An archive is the thing itself. Anything else was clicked to point AT a folder
+    - that is the whole reason the dialog offers .xodr/.fbx - so hand back the
+    directory containing it. A folder typed or dragged in already is left alone."""
+    if not path or os.path.isdir(path):
+        return path
+    if path.lower().endswith((".zip", ".tar.gz", ".tgz")):
+        return path
+    parent = os.path.dirname(path)
+    print(f"[import] taking the export folder of {os.path.basename(path)}")
+    return parent
+
+
+def _browse_start_dir():
+    """Where the file dialogs open. The map cache holds everything import_map has
+    downloaded, so it is where a hand-fetched bundle most often lands too. Falls
+    back to the home directory rather than to wherever the process happens to be -
+    a picker opening in FIXS/Carla helps nobody."""
+    for d in (_map_cache_dir(), os.path.expanduser("~")):
+        if d and os.path.isdir(d):
+            return d
+    return None
+
+
+def _report_pick(path, inside=("xodr", "fbx")):
+    """Say what is actually in what was just picked.
+
+    A folder is only the right one if it holds the thing, and until now nothing
+    said so until _describe_export failed several steps later with "no .xodr
+    under ...". Naming what was found makes a good pick obvious; listing the
+    subfolders of a bad one turns "wrong folder" into "it is one level down",
+    which is the mistake the nesting in these bundles invites
+    (Import/UGA_Campus/UGA_Campus/Carla_material/Exports).
+
+    `inside` is the caller's - what counts as found differs by what is being
+    picked, and reporting "no .xodr here" about a SUMO scenario would be noise
+    dressed up as a diagnosis."""
+    try:
+        if os.path.isfile(path):
+            print(f"[import] picked {os.path.basename(path)} "
+                  f"({os.path.getsize(path) / (1 << 20):.0f} MB)")
+            return
+        names = sorted(os.listdir(path))
+        hits = [f for f in names
+                if f.lower().endswith(tuple("." + e for e in inside))]
+        print(f"[import] picked {path}")
+        if hits:
+            print(f"[import]   contains {', '.join(hits[:6])}"
+                  + (f" (+{len(hits) - 6} more)" if len(hits) > 6 else ""))
+            return
+        shown = "/".join("." + e for e in inside)
+        subs = [f for f in names if os.path.isdir(os.path.join(path, f))]
+        print(f"[import]   no {shown} directly here"
+              + (f"; subfolders: {', '.join(subs[:8])}" if subs else "")
+              + ("" if not subs else " - it may be one of these."))
+    except OSError:
+        pass          # reporting must never be what stops an import
 
 
 def _has_descriptor(src):
@@ -614,17 +695,28 @@ def stage_package(carla_root, name, package_url=None, package_dir=None, package_
             print(f"[import] '{name}' ships no CARLA descriptor; treating it as a "
                   f"raw RoadRunner export and generating one.")
             raw_dest = os.path.join(import_dir, name)
-            fresh = not os.path.isdir(raw_dest)
+            # REPLACE, never merge. This directory is derived from `src`, and
+            # _describe_export renames the geometry inside it to the map name - so
+            # a run that staged successfully and then died later (a cook that
+            # crashed) leaves <name>.fbx here, and _stage_from_path copies the
+            # export's own ugaaa.fbx back in beside it. _export_fbx then sees two
+            # unrelated .fbx and refuses, identically, on every retry: the import
+            # became unrecoverable without deleting this folder by hand. The old
+            # `fresh` guard could not help - it only covered a descriptor failure
+            # on a directory that same call had created, and by the second attempt
+            # the directory was no longer new.
+            if os.path.isdir(raw_dest):
+                print(f"[import] re-staging: replacing {raw_dest}")
+                shutil.rmtree(raw_dest, ignore_errors=True)
             os.makedirs(raw_dest, exist_ok=True)
             _stage_from_path(src, raw_dest)
             try:
                 generate_descriptor(import_dir, name)
             except SystemExit:
-                # Don't leave a half-staged export behind for the next attempt to
-                # trip over: an abandoned copy reads as the same map staged twice.
-                if fresh:
-                    shutil.rmtree(raw_dest, ignore_errors=True)
-                    print(f"[import] removed the partially staged {raw_dest}")
+                # Unconditional now: the directory above is always this call's, so
+                # there is never someone else's staging to preserve.
+                shutil.rmtree(raw_dest, ignore_errors=True)
+                print(f"[import] removed the partially staged {raw_dest}")
                 raise
     finally:
         if tmpdir:
@@ -733,12 +825,18 @@ def bundle_sumocfg(sumo_dir):
     return os.path.join(sumo_dir, cfgs[0])
 
 
-def map_name_in(carla_src):
+def map_name_in(carla_src, descriptor_only=False):
     """The real map/package name a staged CARLA source describes - the stem of its
     lone `<name>.json` descriptor, else its lone `<name>.xodr`. This is the name
     CARLA actually cooks/loads, which need NOT equal a release/location tag (e.g.
     the `roosevelt` bundle's carla/ describes `Roosevelt_07142026`). None if it
-    cannot be told unambiguously (0 or >1 candidates)."""
+    cannot be told unambiguously (0 or >1 candidates).
+
+    `descriptor_only` drops the .xodr fallback, for callers that must distinguish
+    "this bundle DECLARES its package name, and it is not ours to change" from
+    "there is only an export here, so the name is still open". Those are different
+    answers and the fallback conflated them: a raw export always yields its .xodr
+    stem, which then overrode a name the user had just been asked for."""
     if not carla_src or not os.path.isdir(carla_src):
         return None
 
@@ -753,6 +851,8 @@ def map_name_in(carla_src):
     jsons = [j for j in stems(".json") if j.lower() != "roadpainter_decals"]
     if len(jsons) == 1:
         return jsons[0]
+    if descriptor_only:
+        return None
     xodrs = list(set(stems(".xodr")))
     if len(xodrs) == 1:
         return xodrs[0]
@@ -894,6 +994,18 @@ def run_import(carla_root, ue4_root, name):
         proc_env["UE4_ROOT"] = ue4_root
     if not proc_env.get("UE4_ROOT"):
         print("[import] WARNING: UE4_ROOT not set; the cook commandlet may fail.")
+    # #311 again, on the one editor launch FIXS does not build the argv for.
+    # env.EDITOR_LAUNCH_FLAGS carries -DisableFrameTraceCapture onto every UE4Editor
+    # FIXS starts itself (run_cosim, place_tls, place_signs), but the cook goes
+    # through CARLA's Util/BuildTools/Import.py, which assembles its own commandlet
+    # command line - so the flag never reached it and the RenderDoc "Locate main
+    # RenderDoc executable..." dialog still blocked the cook. UE4 appends whatever
+    # UE-CmdLineArgs holds to any command line it parses (Engine/Source/Runtime/Core,
+    # LogSuppressionInterface.cpp:634), which is how a flag gets into an argv owned
+    # by someone else without patching their script.
+    extra = " ".join(env.EDITOR_LAUNCH_FLAGS)
+    proc_env["UE-CmdLineArgs"] = (
+        f"{proc_env['UE-CmdLineArgs']} {extra}" if proc_env.get("UE-CmdLineArgs") else extra)
     cmd = [sys.executable, import_py, f"--package={name}"]
     print(f"[import] running: {' '.join(cmd)}  (cwd={carla_root})")
     print("[import] cooking the map can take several minutes ...")
@@ -909,14 +1021,53 @@ def run_import(carla_root, ue4_root, name):
         restore()
 
 
+def _stash_dir(import_dir):
+    """Where set-aside packages wait out a cook: beside Import/, never in TEMP.
+
+    A sibling of Import/ rather than a child, because CARLA's Import.py cooks what
+    it finds under Import/ and a stash living there could be swept into the very
+    cook it is being hidden from. Beside it is invisible to that scan, sits next to
+    the data it belongs to, and - unlike TEMP - is not something Windows deletes on
+    its own schedule."""
+    return os.path.join(os.path.dirname(os.path.abspath(import_dir)),
+                        ".fixs-import-stash")
+
+
+def _restore_stash(import_dir, stash, names=None):
+    """Move `names` (default: everything) back from `stash` into `import_dir`."""
+    if not os.path.isdir(stash):
+        return []
+    back = []
+    for n in (names if names is not None else sorted(os.listdir(stash))):
+        src, dst = os.path.join(stash, n), os.path.join(import_dir, n)
+        if os.path.exists(src) and not os.path.exists(dst):
+            shutil.move(src, dst)
+            back.append(n)
+    if not os.listdir(stash):
+        os.rmdir(stash)
+    return back
+
+
 def _isolate_import(import_dir, keep):
     """Temporarily move every package under `import_dir` except `keep` aside, so
     CARLA's Import.py cooks only `keep`. Returns a restore() to move them back
     (call it in a finally). `keep`'s own descriptor + asset folder and the shared
-    roadpainter_decals.json stay put."""
+    roadpainter_decals.json stay put.
+
+    Recovers first. restore() runs in a finally, which covers an exception but not
+    a killed process - and a cook is long, so it is exactly the thing people kill.
+    That used to strand every other package in a TEMP directory nobody would think
+    to look in: 1.3 GB of maps, sitting where Windows cleans up on its own
+    schedule, with Import/ simply looking like the maps had been deleted. Now the
+    stash is somewhere findable and the next import puts it back on its own."""
     if not os.path.isdir(import_dir):
         return lambda: None
-    stash = tempfile.mkdtemp(prefix="fixs-import-stash-")
+    stash = _stash_dir(import_dir)
+    recovered = _restore_stash(import_dir, stash)
+    if recovered:
+        print(f"[import] a previous cook did not finish; restored "
+              f"{len(recovered)} set-aside Import/ item(s) first.")
+    os.makedirs(stash, exist_ok=True)
     moved = []
     for f in sorted(os.listdir(import_dir)):
         if not f.lower().endswith(".json") or f.lower() == "roadpainter_decals.json":
@@ -935,11 +1086,11 @@ def _isolate_import(import_dir, keep):
               f"other Import/ item(s), restored after)")
 
     def restore():
-        for m in moved:
-            src = os.path.join(stash, m)
-            if os.path.exists(src):
-                shutil.move(src, os.path.join(import_dir, m))
-        shutil.rmtree(stash, ignore_errors=True)
+        _restore_stash(import_dir, stash, moved)
+        # Only if empty: rmtree would delete anything an earlier crash left that
+        # this cook did not set aside itself, which is the opposite of the point.
+        if os.path.isdir(stash) and not os.listdir(stash):
+            os.rmdir(stash)
     return restore
 
 
@@ -1586,7 +1737,9 @@ def choose_sumo_source(cache_name=None):
         return None
     print("\n[cosim] the chosen map has no SUMO scenario; select one now "
           "(a .zip or folder containing a .sumocfg).")
-    path = _select_package("SUMO scenario", None)  # native picker / typed path
+    # A scenario is known by its .sumocfg, not by a map's .xodr/.fbx - state it,
+    # or the dialog filters this scenario's own files out and opens empty.
+    path = _select_package("SUMO scenario", None, inside=("sumocfg",))
     _carla_src, sumo_dir = classify_source(path, cache_name)
     if sumo_dir is None:
         print(f"[cosim] no .sumocfg found in {path}")
