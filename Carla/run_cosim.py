@@ -3640,7 +3640,8 @@ def main():
                            and sumo_dir is None))
         if need_bundle and (picked_local or picked_tag):
             zip_path = picked_local or import_map.download_release_zip(
-                repo, picked_tag, force_redownload=args.reimport, cache_name=target_map)
+                repo, picked_tag, force_redownload=args.reimport,
+                cache_name=target_map, asset=(ent or {}).get("asset"))
             carla_src, bundle_sumo = import_map.open_bundle(zip_path, cache_name=target_map)
             if bundle_sumo:            # keep a cached sumo/ if this bundle has none
                 sumo_dir = bundle_sumo
@@ -3815,7 +3816,8 @@ def main():
             else picked_local
         if sumo_dir is None and (local_bundle or picked_tag):
             zip_path = local_bundle or import_map.download_release_zip(
-                repo, picked_tag, cache_name=target_map)
+                repo, picked_tag, cache_name=target_map,
+                asset=(ent or {}).get("asset"))
             _carla, sumo_dir = import_map.open_bundle(zip_path, cache_name=target_map)
         sumocfg = import_map.bundle_sumocfg(sumo_dir)
         # Still nothing (first time, no cache): pick one now. choose_sumo_source
