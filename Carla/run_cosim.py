@@ -3184,6 +3184,12 @@ def main():
                          "(the next import re-downloads it)")
     ap.add_argument("--keep-cache", dest="purge_cache", action="store_false",
                     help="with --purge-map: keep ~/.fixs/maps/<name>/ without asking")
+    ap.add_argument("--clean-import", action="store_true",
+                    help="before importing, clear stale per-map staging out of "
+                         "CARLA's Import/ (everything except the map this run "
+                         "imports). CARLA's own files and anything unrecognised are "
+                         "listed, never removed. Complements --purge-map, which "
+                         "clears what ONE map owns everywhere.")
     ap.add_argument("--tl-table", default=None, help="traffic_light_table.csv (for --tls-manager sumo)")
     ap.add_argument("--tls-manager", default=None, choices=["sumo", "carla", "none"],
                     help="who drives the lights (default: the map's catalog setting, else 'sumo')")
@@ -3649,6 +3655,14 @@ def main():
               f"TLs/signs are local-only operations - that CARLA must already have "
               f"'{target_map}' cooked with TLs/signs placed.")
         args.no_launch = True
+
+    # Asked for before the import, not after: Import/ is the folder CARLA's
+    # Import.py cooks out of, so clearing it is only meaningful while there is
+    # still a cook ahead. `keep` is this run's map, which must survive.
+    if args.clean_import and cfg is not None and cfg.get("carla_root"):
+        import_map.clean_import_dir(cfg["carla_root"], keep=target_map,
+                                    interactive=_interactive(args),
+                                    assume_yes=not _interactive(args))
 
     # Source-build preflight: a custom map must be cooked into the build before
     # CARLA can load it. Import it if missing - from a DT-Library bundle (downloaded
