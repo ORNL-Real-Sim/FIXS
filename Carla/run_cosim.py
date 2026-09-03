@@ -2659,6 +2659,42 @@ def hold_carla(carla_proc, target_map, args, sock=None):
     return 0
 
 
+def _sumo_for_local_pick(rec, ctx, local, args):
+    """Fill the SUMO slot now, when the map just picked leaves it empty and saying
+    so is free.
+
+    The scenario is normally resolved late, in main(), because four of the five
+    things that fill it need work done first: a bundle has to be OPENED to know it
+    ships a sumo/, and an app has to be STARTED to know it reports its own. Asking
+    every run would either ask what the bundle answers, or drag a ~380MB download
+    into a loop whose whole point is that it decides and downloads nothing.
+
+    A LOCAL pick has neither problem - it is a path on this disk, so the question is
+    one directory walk. A raw export never carries a .sumocfg, and deferring that
+    put the prompt between the cook and the signal placement, in the middle of the
+    one stretch you cannot walk away from.
+
+    Stores nothing new: choose_sumo_source caches under ~/.fixs/maps/<map>/sumo,
+    which main()'s chain already reads, so a skipped or cancelled pick lands back on
+    the late resolver unchanged."""
+    import import_map
+    if not local or args is None or not _interactive(args):
+        return
+    # Each of these means the late chain settles the slot with no human in it: the
+    # flag names the scenario outright, --reimport deliberately bypasses the cache
+    # this would write, and an app with a launcher may report its own scenario -
+    # which it cannot do until it runs.
+    if args.sumocfg is not None or args.reimport:
+        return
+    if (ctx.get("app") or {}).get("launch"):
+        return
+    if import_map.local_pick_carries_sumo(local):
+        return
+    if import_map.map_sumo_dir(rec["map"]):
+        return                    # a previous run already picked one for this map
+    import_map.choose_sumo_source(cache_name=rec["map"])
+
+
 def _edit_slots(slots, rec, ctx, cfg, apps, catalog, repo, tag_prefix, args=None,
                 auto=()):
     """Run the editor for each requested slot. Always in SLOT_KEYS order, so a
@@ -2714,6 +2750,7 @@ def _edit_slots(slots, rec, ctx, cfg, apps, catalog, repo, tag_prefix, args=None
             # already cooked - reimport it?" is worth asking; a replayed one is not.
             ctx["picked_now"] = True
             print(f"[cosim] selected map: {rec['map']}")
+            _sumo_for_local_pick(rec, ctx, local, args)
         elif slot == "config":
             if not rec.get("map"):
                 continue                      # nothing to scope a scenario to yet
@@ -3560,6 +3597,13 @@ def main():
                                           "sumo_gui": bool(args.sumo_gui)},
                              "map import")
     _CHECKPOINT["name"] = setup_name
+    # Where this map's CARLA half came from. Only a LOCAL pick needs it: a
+    # release download already stamps .source_sha, and a pick has no
+    # equivalent - which is why a hand-picked map carries no origin at all
+    # today. Written before the import, so a cook that fails still leaves a
+    # record of what was attempted.
+    if picked_local:
+        import_map.record_source(target_map, "carla", picked_local)
     # Was the map chosen from the menu on THIS run? Only then is "you just picked a
     # map that is already cooked - reimport it?" worth asking. A replayed setup is a
     # deliberate re-run, and prompting about re-cooking it every time is noise.

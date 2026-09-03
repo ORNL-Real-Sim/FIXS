@@ -766,7 +766,11 @@ def open_bundle(src, cache_name=None):
         sumo = os.path.join(src, "sumo")
         if os.path.isdir(carla):
             return carla, (sumo if os.path.isdir(sumo) else None)
-        return src, None
+        # Handed something INSIDE carla/ - what the picker returns for an
+        # already-extracted bundle, where the user clicks the .xodr rather
+        # than the .zip. Recover the sibling sumo/ instead of dropping it;
+        # carla_src stays `src`, so staging and naming are unchanged.
+        return src, _bundle_sumo_beside(src)
     if os.path.isfile(src) and src.lower().endswith(".zip"):
         with zipfile.ZipFile(src) as z:
             if not _looks_like_bundle(z.namelist()):
@@ -928,6 +932,52 @@ def classify_source(src, cache_name=None):
     if sdir is not None:
         return None, sdir                           # sumo-only
     return carla_src, None                          # carla-only
+
+
+def _bundle_sumo_beside(src):
+    """The sumo/ half of the bundle `src` sits inside, or None.
+
+    Ascends, because the file picker returns the folder holding the clicked
+    .xodr/.fbx and its depth inside carla/ varies across the library (atlanta ships
+    carla/<name>.xodr, roosevelt and mlk ship carla/<name>/<name>.xodr). Bounded,
+    and the ascent must pass through the bundle's own carla/, so an export sitting
+    beside an unrelated sumo/ is never adopted."""
+    if not src or not os.path.isdir(src):
+        return None
+    cur = os.path.normpath(src)
+    for _ in range(4):
+        parent = os.path.dirname(cur)
+        if not parent or parent == cur:
+            return None
+        if os.path.basename(cur).lower() == "carla" and \
+                os.path.isdir(os.path.join(parent, "sumo")):
+            return os.path.join(parent, "sumo")
+        cur = parent
+    return None
+
+
+def local_pick_carries_sumo(path):
+    """Does a locally-picked map source already come with a SUMO scenario?
+
+    Read-only and cheap - a zip is listed, a folder walked, nothing extracted or
+    copied - which is what lets the run questionnaire ask it while it is still only
+    making decisions. classify_source answers the same question but EXTRACTS a
+    bundle to do it, so it stays after the decisions rather than inside them.
+
+    False for a raw RoadRunner export and for a precooked *_cooked.tar.gz: the two
+    picks that leave run_cosim's SUMO slot empty."""
+    if not path:
+        return False
+    if os.path.isfile(path) and path.lower().endswith(".zip"):
+        try:
+            with zipfile.ZipFile(path) as z:
+                return any(n.lower().endswith(".sumocfg") for n in z.namelist())
+        except (OSError, zipfile.BadZipFile):
+            return False               # unreadable: let the late chain report it
+    if os.path.isdir(path):
+        return (_dir_with_sumocfg(path) is not None
+                or _bundle_sumo_beside(path) is not None)
+    return False
 
 
 def fetch_catalog(repo):
@@ -1788,6 +1838,8 @@ def choose_sumo_source(cache_name=None):
     _carla_src, sumo_dir = classify_source(path, cache_name)
     if sumo_dir is None:
         print(f"[cosim] no .sumocfg found in {path}")
+    else:
+        record_source(cache_name, "sumo", path)
     return sumo_dir
 
 
@@ -2039,6 +2091,35 @@ def _write_sha(directory, sha):
         with open(os.path.join(directory, SHA_FILE), "w", encoding="utf-8") as f:
             f.write(sha.strip() + "\n")
     except OSError:
+        pass
+
+
+def record_source(cache_name, half, path):
+    """Note where a locally-picked half came from, in ~/.fixs/maps/<name>/source.json.
+
+    A local pick otherwise leaves no trace: .source_sha is written only for release
+    downloads, so _check_map_source declines to check a hand-picked map at all. A
+    note per HALF rather than one digest, because the two halves of a local map come
+    from unrelated trees (a RoadRunner export and a SUMO folder), so there is no
+    shared identity to compare - only an origin to record. Best effort: a missing
+    note costs bookkeeping, not a run."""
+    import json
+    import time
+    if not cache_name or not path:
+        return
+    dest = os.path.join(_map_cache_dir(cache_name), "source.json")
+    try:
+        doc = {}
+        if os.path.isfile(dest):
+            with open(dest, encoding="utf-8") as f:
+                doc = json.load(f) or {}
+        doc[half] = {"path": os.path.abspath(path),
+                     "mtime": int(os.stat(path).st_mtime),
+                     "recorded": int(time.time())}
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        with open(dest, "w", encoding="utf-8") as f:
+            json.dump(doc, f, indent=2, sort_keys=True)
+    except (OSError, ValueError):
         pass
 
 
