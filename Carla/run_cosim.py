@@ -2680,17 +2680,20 @@ def _sumo_for_local_pick(rec, ctx, local, args):
     import import_map
     if not local or args is None or not _interactive(args):
         return
-    # Each of these means the late chain settles the slot with no human in it: the
-    # flag names the scenario outright, --reimport deliberately bypasses the cache
-    # this would write, and an app with a launcher may report its own scenario -
-    # which it cannot do until it runs.
-    if args.sumocfg is not None or args.reimport:
+    if args.sumocfg is not None:
         return
     if (ctx.get("app") or {}).get("launch"):
         return
     if import_map.local_pick_carries_sumo(local):
         return
-    if import_map.map_sumo_dir(rec["map"]):
+    # NOT gated on args.reimport the way the flag check above is: main()'s own
+    # cached_sumo_dir ignores this same cache whenever --reimport is set (a
+    # deliberate "refresh from the source" rule - see its docstring), so an early
+    # check that skipped here because the cache exists would just watch the late
+    # chain re-ask anyway - after the cook has already started, which is the exact
+    # failure this function exists to prevent. Skipping the cache is therefore
+    # keyed to the SAME flag the late chain uses, not exempted by it.
+    if not args.reimport and import_map.map_sumo_dir(rec["map"]):
         return                    # a previous run already picked one for this map
     import_map.choose_sumo_source(cache_name=rec["map"])
 
@@ -3616,10 +3619,23 @@ def main():
                 print(f"[cosim] --reimport {args.reimport_path!r} ignored: "
                       f"'{target_map}' is a {map_origin} map, not a local pick.")
         elif args.reimport_path:
+            # An explicit path wins even over a fresh pick just made in the
+            # editor (ctx) - it is the more deliberate of the two - so whatever
+            # that pick's own _sumo_for_local_pick call already asked about is
+            # stale the moment this line runs. Ask again, for the path that will
+            # actually be cooked.
             picked_local = args.reimport_path
+            _sumo_for_local_pick(setup, ctx, picked_local, args)
         elif not ctx.get("picked_local"):
+            # No fresh pick this run either: the browse dialog opened just below
+            # is the only place that named a source, so it is the only place
+            # that can ask about its SUMO half. A fresh pick THROUGH THE EDITOR
+            # (which would have made ctx["picked_local"] truthy) already asked,
+            # via _edit_slots's own call - asking again here would be a second
+            # dialog for the same answer.
             picked_local = import_map._select_package("map", None,
                                                        inside=("xodr", "fbx"))
+            _sumo_for_local_pick(setup, ctx, picked_local, args)
     # Checkpoint. Everything the questionnaire asked is now decided, and the next
     # thing that runs - the map import - is the one that fails for reasons outside
     # this script (a cook that crashes the editor, a bundle that will not open).
