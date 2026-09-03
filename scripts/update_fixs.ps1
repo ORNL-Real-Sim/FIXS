@@ -88,6 +88,74 @@ function Get-Asset {
     }
 }
 
+# ---------------------------------------------------------------------------
+# Pick ONE native-runtime asset off the rolling deps release.
+#
+# This used to be `-like 'libsumo-*.zip' | Select-Object -First 1`. That pattern
+# is unanchored in the MIDDLE, so when the Linux port published
+# libsumo-1.22.0-linux-x86_64.zip alongside libsumo-1.22.0.zip it matched both -
+# and the API lists assets by name, where '-' (0x2D) sorts before '.' (0x2E), so
+# the Linux zip came first. Every Windows install then unpacked a .so and died on
+# the libsumocpp.lib check below. Nothing about that was Linux-specific: any
+# second asset sharing the prefix would have done it.
+#
+# Two rules keep that from recurring:
+#   1. Match EXACT names, or failing that an ANCHORED, version-shaped pattern.
+#      '^libsumo-[0-9][0-9.]*\.zip$' cannot match '-linux-x86_64' because that
+#      suffix is not [0-9.] - so even the legacy unsuffixed name is now safe.
+#   2. NEVER take "the first of several". More than one match means the release
+#      is ambiguous and this script cannot know which is right; say so and stop.
+#      Silent mis-selection is what made the original bug expensive to find.
+# ---------------------------------------------------------------------------
+$PlatformTag = 'windows-x86_64'
+
+function Get-BundleDepVersion([string]$label) {
+    # BUILD_INFO.txt ships INSIDE the bundle and records the versions it was
+    # actually built against - a better pin than dependencies.yaml (not shipped)
+    # because TrafficLayer.exe links a specific libsumocpp.lib. A runtime from a
+    # different SUMO version loads and then fails at the first libsumo call, as a
+    # Win32 loader exception no catch block sees (#70). Pin when we can.
+    $f = Join-Path $OutputDir 'BUILD_INFO.txt'
+    if (-not (Test-Path $f)) { return $null }
+    if ((Get-Content $f -Raw) -match "(?m)^\s*${label}:\s+([0-9][0-9.]*)\s*$") { return $Matches[1] }
+    return $null
+}
+
+function Select-NativeAsset($assets, [string]$component, [string]$version) {
+    # Exact names first: fully determined, and the platform-qualified one wins so
+    # the legacy unsuffixed asset can be retired without touching this script.
+    #
+    # A pin that matches nothing is FATAL rather than a hint - we do not quietly
+    # install a different SUMO version. Nothing downstream would catch it: unlike
+    # the build side there is no load probe here, only the libsumocpp.lib presence
+    # check, which a mismatched-but-complete runtime passes. It would surface at
+    # the first libsumo call as a Win32 loader exception instead (#70).
+    if ($version) {
+        foreach ($name in @("$component-$version-$PlatformTag.zip", "$component-$version.zip")) {
+            $hit = @($assets | Where-Object { $_.name -eq $name })
+            if ($hit.Count -eq 1) { return $hit[0] }
+        }
+        throw ("this bundle was built against $component $version, but the '$DepsTag' release " +
+               "carries no $component-$version-$PlatformTag.zip (nor $component-$version.zip). " +
+               'Publish it with scripts/dispatch/pack_native_deps.ps1 -Publish.')
+    }
+    # No version pin at all (BUILD_INFO.txt absent or unparseable). Fall back to an
+    # anchored match, preferring the platform-qualified name, and refuse to guess.
+    $esc = [regex]::Escape($component)
+    foreach ($rx in @("^$esc-[0-9][0-9.]*-$([regex]::Escape($PlatformTag))\.zip$", "^$esc-[0-9][0-9.]*\.zip$")) {
+        $m = @($assets | Where-Object { $_.name -match $rx })
+        if ($m.Count -eq 1) { return $m[0] }
+        if ($m.Count -gt 1) {
+            throw ("'$DepsTag' carries $($m.Count) $component assets for $PlatformTag " +
+                   "($($m.name -join ', ')) and nothing says which to install. " +
+                   'Retire the stale one, or pin the version in BUILD_INFO.txt.')
+        }
+    }
+    throw ("no $component asset for $PlatformTag on the '$DepsTag' release " +
+           "(looked for $component-<ver>-$PlatformTag.zip, then $component-<ver>.zip; " +
+           "release carries: $(($assets.name | Where-Object { $_ -notlike '*.sha256' }) -join ', ')).")
+}
+
 function Select-Release($releases) {
     # Annotate every entry with what it actually resolves to. Bare tag names are
     # not enough to tell the rolling channels apart: 'latest' and 'v0.9.0-alpha'
@@ -232,10 +300,9 @@ try {
     # download of the packed asset needs no git and no ref resolution.
     Write-Host "Fetching the native runtime from the '$DepsTag' release ..."
     $depsRelease = Invoke-RestMethod -UseBasicParsing -Uri "$Api/releases/tags/$DepsTag" -Headers $Headers
-    # Version-named: take whatever the release currently carries, so bumping the
-    # SUMO version in dependencies.yaml + publishing the asset is the whole change.
-    $sumoAsset = $depsRelease.assets | Where-Object { $_.name -like 'libsumo-*.zip' } | Select-Object -First 1
-    if (-not $sumoAsset) { throw "no 'libsumo-*.zip' asset on the '$DepsTag' release." }
+    # Pinned to the SUMO version this bundle was built against, and to this
+    # platform. See Select-NativeAsset for why neither is optional.
+    $sumoAsset = Select-NativeAsset $depsRelease.assets 'libsumo' (Get-BundleDepVersion 'SUMO')
     Write-Host "  downloading $($sumoAsset.name) ..."
     $SumoZip = Join-Path $TempDir $sumoAsset.name
     Get-Asset -Url $sumoAsset.browser_download_url -Dest $SumoZip
@@ -276,7 +343,7 @@ Zip: $($asset.name)
     Write-Error "FIXS update failed: $_"
     Write-Host "$OutputDir is incomplete. Re-run, or download the assets by hand from"
     Write-Host "  https://github.com/$Repo/releases/tag/$Version"
-    Write-Host "  https://github.com/$Repo/releases/tag/$DepsTag   (libsumo-<ver>.zip -> <Root>\FIXS\CommonLib\)"
+    Write-Host "  https://github.com/$Repo/releases/tag/$DepsTag   (libsumo-<ver>-$PlatformTag.zip -> <Root>\FIXS\CommonLib\)"
     exit 1
 } finally {
     if (Test-Path $TempDir) { Remove-Item -Path $TempDir -Recurse -Force }

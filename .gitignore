@@ -36,6 +36,14 @@
 
 **/__pycache__/*
 
+# Python virtualenvs - never commit one. 158 MiB of a committed .venv/ is already
+# stranded in this repo's history (#255) and cannot be removed without a rewrite;
+# this entry is what stops it happening again.
+.venv/
+**/.venv/
+venv/
+**/venv/
+
 **/x64/*
 **/.vs/*
 

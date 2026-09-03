@@ -63,9 +63,42 @@ struct SimulationSetup_t {
 
 	int TrafficSimulatorPort;
 
-	int SimulationMode;
+	// Warm-up (#86). While the warm-up is running the FIXS boundary is CLOSED:
+	// the traffic simulator advances, but no message reaches any client and no
+	// client is even accepted yet, so CarMaker/Carla start-up overlaps the
+	// warm-up instead of queueing ahead of it.
+	//
+	//   WarmUpUntilEgoEntry - end the warm-up when the first subscribed ego is in
+	//                         the network. The controller owns the entry time by
+	//                         inserting the vehicle; no time is duplicated here.
+	//   WarmUpTime          - end the warm-up at this ABSOLUTE simulation time.
+	//                         Runs as ONE batch step, so nothing is observed in
+	//                         between - which is why the two are exclusive.
+	//
+	// Both unset: no warm-up (sync from the first step). Both set: ego entry wins
+	// and getConfig warns, because a batch step cannot also watch for an ego.
+	bool WarmUpUntilEgoEntry;
 
-	double SimulationModeParameter;
+	double WarmUpTime;
+
+	// Client ports that must be SERVED THROUGH the warm-up instead of joining
+	// when it ends. Empty (the default) = the original behaviour: the boundary is
+	// closed to everyone.
+	//
+	// This has to be declared because it cannot be derived. Whether a client can
+	// skip the warm-up is a property of ITS OWN state, and nothing FIXS can see
+	// distinguishes the two kinds: a renderer and a signal-aware controller are
+	// both just a subscription with a port. A controller that learns the signal
+	// timing by watching it change (any actuated network -- SUMO's NEMA logics
+	// expose no phase countdown at all) arrives blind if the boundary was closed
+	// to it, and then plans the first approach on a nominal guess. A renderer or
+	// an XIL box loses nothing by joining late, which is the whole point of the
+	// warm-up. Only the scenario author knows which is which.
+	//
+	// A served client is accepted BEFORE the warm-up starts (so TrafficLayer
+	// blocks for it, as it did before warm-ups existed); everyone else is
+	// accepted when the warm-up ends.
+	std::vector<int> WarmUpServePorts;
 
 	std::string TrafficLayerIP;
 
@@ -348,6 +381,16 @@ public:
 	
 	void getSigSubscriptionList(Subscription_t SigSub);
 	void getDetSubscriptionList(Subscription_t DetSub);
+
+	// Ids the warm-up watches for when WarmUpUntilEgoEntry is set (#86): the UNION
+	// of the by-id vehicle subscriptions in ApplicationSetup and XilSetup.
+	//
+	// Deliberately NOT SubscriptionVehicleList.vehicleSubscribeId_v, which is
+	// either/or (XIL only when the application layer is off) and also drives what
+	// TrafficLayer subscribes to in SUMO and forwards downstream. Widening that
+	// would change the data path; this list only decides when the warm-up ends,
+	// so it can see both layers' egos without touching message routing.
+	std::unordered_set <std::string> WarmUpEgoIds;
 
 	// subscription abstraction, these variables are raw configuration specs
 	// users can use these raw specs to create their own subscription containers for different usages

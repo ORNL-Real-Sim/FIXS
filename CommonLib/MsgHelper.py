@@ -1,5 +1,6 @@
 from re import M
 from typing import List
+import typing
 
 from numpy import byte
 from CommonLib.VehDataMsgDefs import VehData, TrafficLightData, DetectorData
@@ -49,6 +50,7 @@ class MsgHelper:
             'length': False,
             'width': False,
             'height': False,
+            'lightIndicators': False,
             'activeLaneChange': False,
             # #174 EgoDriver command channel (L2/L4), serialized at the END
             'steerAngleDesired': False,
@@ -73,10 +75,104 @@ class MsgHelper:
         self.msg_header_size = 9
         self.msg_each_header_size = 3
 
+        # id-keyed exchange storage, the peer of the MsgHelper.h members of the
+        # same names. Filled by SocketHelper alongside its flat lists; see the
+        # note above clearRecvStorage().
+        self.VehDataRecv_um: typing.Dict[str, VehData] = {}
+        self.TlsDataRecv_um: typing.Dict[str, TrafficLightData] = {}
+        # C++ keys this by socket fd; here it is the socket INDEX (0 = the
+        # vehicle-data connection, 1 = the separate signal connection), which is
+        # what a caller actually addresses -- mainVirCarla.cpp uses `sock0 = 0`
+        # and then indexes serverSock with it.
+        self.VehDataSend_um: typing.Dict[int, typing.List[VehData]] = {}
+
+
+    # #86: the wire layout of a vehicle record, in order, with the struct code
+    # for each numeric field. Strings are length-prefixed so they cannot join a
+    # batch; everything between them can.
+    _VEH_LAYOUT = [
+        ('id', 's'), ('type', 's'), ('vehicleClass', 's'),
+        ('speed', 'f'), ('acceleration', 'f'), ('positionX', 'f'),
+        ('positionY', 'f'), ('positionZ', 'f'), ('heading', 'f'),
+        ('color', 'I'), ('linkId', 's'), ('laneId', 'i'),
+        ('distanceTravel', 'f'), ('speedDesired', 'f'),
+        ('accelerationDesired', 'f'), ('hasPrecedingVehicle', 'b'),
+        ('precedingVehicleId', 's'), ('precedingVehicleDistance', 'f'),
+        ('precedingVehicleSpeed', 'f'), ('signalLightId', 's'),
+        ('signalLightHeadId', 'i'), ('signalLightDistance', 'f'),
+        ('signalLightColor', 'b'), ('speedLimit', 'f'),
+        ('speedLimitNext', 'f'), ('speedLimitChangeDistance', 'f'),
+        ('linkIdNext', 's'), ('grade', 'f'), ('activeLaneChange', 'b'),
+        ('length', 'f'), ('width', 'f'), ('height', 'f'),
+        ('lightIndicators', 'H'),
+        ('steerAngleDesired', 'f'), ('acceleratorPedalDesired', 'f'),
+        ('brakePedalDesired', 'f'), ('speedFreeFlow', 'f'),
+    ]
+
+    # ---- id-keyed exchange storage (parity with MsgHelper.h) --------------
+    # The C++ MsgHelper owns this storage and VirEnvCore reads it directly
+    # (Msg_c.VehDataRecv_um / TlsDataRecv_um / VehDataSend_um). Python kept only
+    # the flat lists on SocketHelper, so the Python core had no id-keyed feed to
+    # walk and the two seven-step bodies could not read the same. These are
+    # ADDITIVE -- SocketHelper.recv_data fills both, and every existing caller
+    # (fixs.py, the apps, the echo clients) reads the lists exactly as before.
+    #
+    # Keys are the RAW wire id / TLS name, not a stripped copy, matching
+    # SocketHelper.cpp:1030. Records arrive length-prefixed, so a received id
+    # carries no padding to strip; only a fabricated VehData does, and one of
+    # those never lands here.
+
+    def clearRecvStorage(self):
+        """() -> None -- drop this tick's received records. Peer of MsgHelper.h."""
+        self.VehDataRecv_um.clear()
+        self.TlsDataRecv_um.clear()
+
+    def clearSendStorage(self):
+        """() -> None -- drop this tick's outgoing records. Peer of MsgHelper.h."""
+        self.VehDataSend_um.clear()
+
+    @property
+    def VehicleMessageField_set(self):
+        """() -> set -- the enabled vehicle fields, as the C++ member of that name.
+
+        The C++ MsgHelper stores VehicleMessageField_set directly; Python stores
+        the same information as the vehicle_msg_field_valid flag dict. Exposing it
+        under the C++ name lets VirEnvCore.py test subscriptions with the same
+        expression VirEnvCore.cpp uses.
+        """
+        return {name for name, on in self.vehicle_msg_field_valid.items() if on}
+
+    def _build_decode_plan(self):
+        """Group the enabled fields into string reads and batched unpacks.
+
+        depack_veh_data used to make one dict lookup, one branch and one
+        struct.unpack per field -- ~36 python calls per vehicle, 4514
+        struct.unpack calls per exchange at 160 vehicles. The layout is fixed
+        once the field set is known, so consecutive numeric fields are unpacked
+        in a single call instead. '<' (not native) so there is no alignment
+        padding: the C++ side packs them contiguously.
+        """
+        plan, run = [], []
+        for name, code in self._VEH_LAYOUT:
+            if not self.vehicle_msg_field_valid.get(name):
+                continue
+            if code == 's':
+                if run:
+                    plan.append(('n', struct.Struct('<' + ''.join(c for _, c in run)),
+                                 [n for n, _ in run]))
+                    run = []
+                plan.append(('s', name))
+            else:
+                run.append((name, code))
+        if run:
+            plan.append(('n', struct.Struct('<' + ''.join(c for _, c in run)),
+                         [n for n, _ in run]))
+        self._decode_plan = plan
 
     def set_vehicle_message_field(self, vehicle_msg_field: List[str]):
         for field in vehicle_msg_field:
             self.vehicle_msg_field_valid[field] = True
+        self._build_decode_plan()
 
     def set_traffic_light_message_field(self, traffic_light_msg_field: List[str]):
         for field in traffic_light_msg_field:
@@ -115,127 +211,44 @@ class MsgHelper:
         return value, index + 1
     
     def depack_veh_data(self, byte_data: bytes)-> VehData:
+        """Decode one vehicle record.
+
+        #86: walks the plan built by _build_decode_plan instead of testing and
+        unpacking each field separately. On the MLK corridor that is 12
+        operations per vehicle (7 string reads, 5 batched unpacks) rather than
+        36 dict lookups + 36 branches + 36 struct.unpack calls. Byte layout is
+        unchanged -- this reads the same bytes in the same order.
+        """
         veh_data = VehData()
-        byte_index = 0  # Index in byte_data
-        # byte_index += self.msg_header_size  # Skip the message header
-        # byte_index += self.msg_each_header_size  # Skip the message type header
-        # Helper function to unpack a single float
-        
-        # Unpack fields based on vehicle_msg_field_valid
-        if self.vehicle_msg_field_valid.get('id'):
-            str_data, str_len, byte_index, uint8Arr = MsgHelper.depack_string(byte_data, byte_index)
-            veh_data.id = str_data
+        byte_index = 0
 
-        if self.vehicle_msg_field_valid.get('type'):
-            str_data, str_len, byte_index, uint8Arr = MsgHelper.depack_string(byte_data, byte_index)
-            veh_data.type = str_data
+        if getattr(self, '_decode_plan', None) is None:
+            self._build_decode_plan()
 
-        if self.vehicle_msg_field_valid.get('vehicleClass'):
-            str_data, str_len, byte_index, uint8Arr = MsgHelper.depack_string(byte_data, byte_index)
-            veh_data.vehicleClass = str_data
+        # Write through the instance dict rather than setattr per field. VehData is
+        # a plain dataclass with no custom __setattr__, so this stores the same
+        # thing -- but a numeric segment becomes ONE C-level dict.update instead of
+        # N Python-level setattr calls. Measured on the MLK corridor: 5,224 setattr
+        # calls per exchange, 7.8 million over 1501 exchanges.
+        #
+        # It has to stay a plain __dict__ write: fixs.py adopts a decoded record by
+        # assigning record.__class__ = Vehicle, and Vehicle overrides __setattr__ to
+        # make records read-only. Going through setattr here would be writing to a
+        # VehData that is about to become a Vehicle -- harmless today, but it means
+        # the decode path and the read-only contract share no code, which is what
+        # keeps the contract enforceable.
+        vd = veh_data.__dict__
+        for seg in self._decode_plan:
+            if seg[0] == 's':
+                str_data, _sl, byte_index, _u = MsgHelper.depack_string(byte_data, byte_index)
+                vd[seg[1]] = str_data
+            else:
+                _kind, packer, names = seg
+                values = packer.unpack_from(byte_data, byte_index)
+                byte_index += packer.size
+                vd.update(zip(names, values))
 
-        if self.vehicle_msg_field_valid.get('speed'):
-            veh_data.speed, byte_index = MsgHelper.unpack_float(byte_data, byte_index)
-
-        if self.vehicle_msg_field_valid.get('acceleration'):
-            veh_data.acceleration, byte_index = MsgHelper.unpack_float(byte_data, byte_index)
-
-        if self.vehicle_msg_field_valid.get('positionX'):
-            veh_data.positionX, byte_index = MsgHelper.unpack_float(byte_data, byte_index)
-
-        if self.vehicle_msg_field_valid.get('positionY'):
-            veh_data.positionY, byte_index = MsgHelper.unpack_float(byte_data, byte_index)
-
-        if self.vehicle_msg_field_valid.get('positionZ'):
-            veh_data.positionZ, byte_index = MsgHelper.unpack_float(byte_data, byte_index)
-
-        if self.vehicle_msg_field_valid.get('heading'):
-            veh_data.heading, byte_index = MsgHelper.unpack_float(byte_data, byte_index)
-
-        if self.vehicle_msg_field_valid.get('color'):
-            veh_data.color, byte_index = MsgHelper.unpack_uint32(byte_data, byte_index)
-
-        if self.vehicle_msg_field_valid.get('linkId'):
-            str_data, str_len, byte_index, uint8Arr = MsgHelper.depack_string(byte_data, byte_index)
-            veh_data.linkId = str_data
-
-        if self.vehicle_msg_field_valid.get('laneId'):
-            veh_data.laneId, byte_index = MsgHelper.unpack_int32(byte_data, byte_index)
-
-        if self.vehicle_msg_field_valid.get('distanceTravel'):
-            veh_data.distanceTravel, byte_index = MsgHelper.unpack_float(byte_data, byte_index)
-
-        if self.vehicle_msg_field_valid.get('speedDesired'):
-            veh_data.speedDesired, byte_index = MsgHelper.unpack_float(byte_data, byte_index)
-
-        if self.vehicle_msg_field_valid.get('accelerationDesired'):
-            veh_data.accelerationDesired, byte_index = MsgHelper.unpack_float(byte_data, byte_index)
-
-        if self.vehicle_msg_field_valid.get('hasPrecedingVehicle'):
-            veh_data.hasPrecedingVehicle, byte_index = MsgHelper.unpack_int8(byte_data, byte_index)
-
-        if self.vehicle_msg_field_valid.get('precedingVehicleId'):
-            str_data, str_len, byte_index, uint8Arr = MsgHelper.depack_string(byte_data, byte_index)
-            veh_data.precedingVehicleId = str_data
-
-        if self.vehicle_msg_field_valid.get('precedingVehicleDistance'):
-            veh_data.precedingVehicleDistance, byte_index = MsgHelper.unpack_float(byte_data, byte_index)
-
-        if self.vehicle_msg_field_valid.get('precedingVehicleSpeed'):
-            veh_data.precedingVehicleSpeed, byte_index = MsgHelper.unpack_float(byte_data, byte_index)
-
-        if self.vehicle_msg_field_valid.get('signalLightId'):
-            str_data, str_len, byte_index, uint8Arr = MsgHelper.depack_string(byte_data, byte_index)
-            veh_data.signalLightId = str_data
-
-        if self.vehicle_msg_field_valid.get('signalLightHeadId'):
-            veh_data.signalLightHeadId, byte_index = MsgHelper.unpack_int32(byte_data, byte_index)
-
-        if self.vehicle_msg_field_valid.get('signalLightDistance'):
-            veh_data.signalLightDistance, byte_index = MsgHelper.unpack_float(byte_data, byte_index)
-
-        if self.vehicle_msg_field_valid.get('signalLightColor'):
-            veh_data.signalLightColor, byte_index = MsgHelper.unpack_int8(byte_data, byte_index)
-
-        if self.vehicle_msg_field_valid.get('speedLimit'):
-            veh_data.speedLimit, byte_index = MsgHelper.unpack_float(byte_data, byte_index)
-
-        if self.vehicle_msg_field_valid.get('speedLimitNext'):
-            veh_data.speedLimitNext, byte_index = MsgHelper.unpack_float(byte_data, byte_index)
-
-        if self.vehicle_msg_field_valid.get('speedLimitChangeDistance'):
-            veh_data.speedLimitChangeDistance, byte_index = MsgHelper.unpack_float(byte_data, byte_index)
-
-        if self.vehicle_msg_field_valid.get('linkIdNext'):
-            str_data, str_len, byte_index, uint8Arr = MsgHelper.depack_string(byte_data, byte_index)
-            veh_data.linkIdNext = str_data
-
-        if self.vehicle_msg_field_valid.get('grade'):
-            veh_data.grade, byte_index = MsgHelper.unpack_float(byte_data, byte_index)
-
-        if self.vehicle_msg_field_valid.get('activeLaneChange'):
-            veh_data.activeLaneChange, byte_index = MsgHelper.unpack_int8(byte_data, byte_index)
-            
-        if self.vehicle_msg_field_valid.get('length'):
-            veh_data.length, byte_index = MsgHelper.unpack_float(byte_data, byte_index)
-            
-        if self.vehicle_msg_field_valid.get('width'):
-            veh_data.width, byte_index = MsgHelper.unpack_float(byte_data, byte_index)
-            
-        if self.vehicle_msg_field_valid.get('height'):
-            veh_data.height, byte_index = MsgHelper.unpack_float(byte_data, byte_index)
-
-        # #174 EgoDriver command channel (serialized at the END, matching C++)
-        if self.vehicle_msg_field_valid.get('steerAngleDesired'):
-            veh_data.steerAngleDesired, byte_index = MsgHelper.unpack_float(byte_data, byte_index)
-        if self.vehicle_msg_field_valid.get('acceleratorPedalDesired'):
-            veh_data.acceleratorPedalDesired, byte_index = MsgHelper.unpack_float(byte_data, byte_index)
-        if self.vehicle_msg_field_valid.get('brakePedalDesired'):
-            veh_data.brakePedalDesired, byte_index = MsgHelper.unpack_float(byte_data, byte_index)
-        if self.vehicle_msg_field_valid.get('speedFreeFlow'):
-            veh_data.speedFreeFlow, byte_index = MsgHelper.unpack_float(byte_data, byte_index)
-
-        return  veh_data
+        return veh_data
 
     def pack_veh_data(self, byte_data: bytearray, byte_index, veh_data: VehData):
         # Calculate nMsgSize based on vehicle_msg_field_valid flags and veh_data field lengths
@@ -274,6 +287,7 @@ class MsgHelper:
                   + self.vehicle_msg_field_valid.get('length', 0) * 4  # length
                   + self.vehicle_msg_field_valid.get('width', 0) * 4  # width
                   + self.vehicle_msg_field_valid.get('height', 0) * 4  # height
+                  + self.vehicle_msg_field_valid.get('lightIndicators', 0) * 2  # lightIndicators
                   + self.vehicle_msg_field_valid.get('steerAngleDesired', 0) * 4  # steerAngleDesired
                   + self.vehicle_msg_field_valid.get('acceleratorPedalDesired', 0) * 4  # acceleratorPedalDesired
                   + self.vehicle_msg_field_valid.get('brakePedalDesired', 0) * 4  # brakePedalDesired
@@ -411,6 +425,11 @@ class MsgHelper:
         if self.vehicle_msg_field_valid.get('height'):
             byte_data[byte_index:byte_index+4] = struct.pack('f', veh_data.height)
             byte_index += 4
+
+        # uint16, between height and the EgoDriver block -- MsgHelper.cpp:395.
+        if self.vehicle_msg_field_valid.get('lightIndicators'):
+            byte_data[byte_index:byte_index+2] = struct.pack('H', veh_data.lightIndicators)
+            byte_index += 2
 
         # #174 EgoDriver command channel (serialized at the END, matching C++)
         if self.vehicle_msg_field_valid.get('steerAngleDesired'):
@@ -581,21 +600,16 @@ class MsgHelper:
 
         byte_index += 1
 
-        # Initialize a string of size 50 and a uint8 array of size 50
-        str_data = [''] * strLen
-        uint8Arr = [0] * strLen
+        # #86: one slice + one decode. The old loop built the string a character
+        # at a time -- 21.7M chr() calls per 3000 exchanges on the MLK corridor.
+        # latin-1 because chr(byte) maps a byte to the codepoint of the same
+        # value; utf-8 would differ for anything above 127 and corrupt ids.
+        # The 4th return was a per-character uint8 array that no caller reads
+        # (all 8 call sites discard it), so it is no longer built.
+        str_data = bytes(byte_data[byte_index:byte_index + strLen]).decode('latin-1')
+        byte_index += strLen
 
-        # Read characters from byte_data according to strLen
-        for i in range(strLen):
-            byte_value = byte_data[byte_index]
-            str_data[i] = chr(byte_value)  # Convert byte to character
-            uint8Arr[i] = byte_value
-            byte_index += 1
-
-        # Convert list of characters to a single string
-        str_data = ''.join(str_data[:strLen])
-
-        return str_data, strLen, byte_index, uint8Arr
+        return str_data, strLen, byte_index, None
     
     @ staticmethod
     def pack_string(byte_data: bytearray, byte_index: int, str_data: str):

@@ -326,10 +326,9 @@ void SocketHelper::rsDebugLog(const char* msg) {
 #endif
 
 int SocketHelper::initConnection(std::string errorLogName) {
-	const int RECVCLIENTBUFSIZE = 2048;
-	const int SENDCLIENTBUFSIZE = 8096;
 	// const int RECVSERVERBUFSIZE = 8096;
 	// const int SENDSERVERBUFSIZE = 2048;
+	// (the client buffer sizes moved to acceptClients with the code that uses them)
 
 	if (N_ACT_CLIENT < 1) {
 		AllClientConnected = 1;
@@ -522,26 +521,70 @@ int SocketHelper::initConnection(std::string errorLogName) {
 		}
 	}
 
+	// #86: a host running a warm-up binds and listens NOW -- so every client's
+	// connect() still succeeds immediately and lands in the listen backlog -- but
+	// does not block here waiting for them. It calls acceptClients() itself once
+	// the warm-up ends, which is what lets the warm-up overlap client start-up.
+	if (DeferAcceptClients) {
+		cout << "Sockets listening; waiting for clients is deferred until warm-up completes." << endl;
+		return 0;
+	}
+
+	return acceptClients(errorLogName);
+}
+
+// ===========================================================================
+//  acceptClients -- block until every declared client has connected (and then
+//  VISSIM, when VISSIM is one of the peers).
+//
+//  Split out of initConnection for #86: bind/listen and accept used to be one
+//  indivisible step, which forced TrafficLayer to wait for CarMaker/CARLA to
+//  exist before it could start warming up the traffic simulator. Run
+//  automatically by initConnection unless DeferAcceptClients is set.
+// ===========================================================================
+int SocketHelper::acceptClients(std::string errorLogName, const std::vector<int>* requiredIdx) {
+	const int RECVCLIENTBUFSIZE = 2048;
+	const int SENDCLIENTBUFSIZE = 8096;
+
 	//+++++++++
 	// Wait for clients to connections
 	//+++++++++
 	if (ENABLE_CLIENT) {
-		//set of socket descriptors  
+		//set of socket descriptors
 		fd_set readfds;
 
 		int activity;
 
 		int max_sd = selfServerSock[0];
 
-		cout << "Waiting for all clients to connect...." << endl;
+		// Which clients this call must see before it returns. A subset is how a
+		// warm-up serves some clients from the first step and lets the rest join
+		// at the end; ClientConnected[] persists across calls, so the later call
+		// only blocks on whoever is still missing.
+		std::vector<int> required;
+		if (requiredIdx) required = *requiredIdx;
+		else for (int iS = 0; iS < N_ACT_CLIENT; iS++) required.push_back(iS);
+		if (required.empty()) return 0;
 
+		if (requiredIdx) {
+			cout << "Waiting for " << required.size() << " of " << N_ACT_CLIENT
+			     << " client(s) to connect (the rest join when the warm-up ends)...." << endl;
+		}
+		else cout << "Waiting for all clients to connect...." << endl;
+
+		AllClientConnected = 0;
 		while (!AllClientConnected) {
 			//clear the socket set  
 			FD_ZERO(&readfds);
 
 			//add master socket to set  
 
-			for (int iS = 0; iS < N_ACT_CLIENT; iS++) {
+			// Only the sockets this call is waiting for. Accepting whatever else
+			// happens to arrive would take a connection nobody is going to serve
+			// -- a readiness probe on a deferred client's port, say -- and mark
+			// that client connected, after which the real one is left unaccepted
+			// in the backlog for the whole warm-up.
+			for (int iS : required) {
 				FD_SET(selfServerSock[iS], &readfds);
 				if (selfServerSock[iS] > max_sd) {
 					max_sd = selfServerSock[iS];
@@ -577,7 +620,7 @@ int SocketHelper::initConnection(std::string errorLogName) {
 
 			//If something happened on the master socket ,  
 		   //then its an incoming connection  
-			for (int iS = 0; iS < N_ACT_CLIENT; iS++) {
+			for (int iS : required) {
 				if (FD_ISSET(selfServerSock[iS], &readfds))
 				{
 					clientAddrLen[iS] = sizeof(clientAddr[iS]);
@@ -620,7 +663,7 @@ int SocketHelper::initConnection(std::string errorLogName) {
 			}
 
 			AllClientConnected = 1;
-			for (int iS = 0; iS < N_ACT_CLIENT; iS++) {
+			for (int iS : required) {
 				if (!ClientConnected[iS]) {
 					AllClientConnected = 0;
 					break;

@@ -18,7 +18,8 @@
 #     -> copy <carla_root>/PythonAPI/carla/dependencies/{lib,include} into CommonLib/libcarla
 #
 #   { "mode": "prebuilt" }  (or explicit -Mode prebuilt; CI uses this)
-#     -> download libcarla-<carla_ver>.zip from the release, verify SHA-256, extract.
+#     -> download libcarla-<carla_ver>-windows-x86_64.zip from the release,
+#        verify SHA-256, extract.
 #
 # libsumo has no 'source' mode: rebuilding it from SUMO source is a separate,
 # rarely-run utility (scripts/build_libsumo.ps1). -Mode applies to libcarla only.
@@ -53,6 +54,7 @@ $LibSumo       = Join-Path $CommonLib 'libsumo'
 $SentinelCarla = Join-Path $LibCarla 'lib\carla_client.lib'
 $SentinelSumo  = Join-Path $LibSumo  'bin\libsumocpp.lib'
 $Tag           = 'fixs-native-deps'   # rolling release tag
+$PlatformTag   = 'windows-x86_64'     # this script builds Windows; .sh fetches linux-x86_64
 
 . (Join-Path $PSScriptRoot 'libsumo_verify.ps1')
 
@@ -69,6 +71,30 @@ function Get-DepVersion([string]$block) {
     }
     return $null
 }
+function Get-AssetName([string]$component, [string]$version) {
+    # The platform-qualified name is what pack_native_deps.ps1 publishes now; the
+    # bare one is what it published before the Linux port put linux-x86_64 assets
+    # on the same release and made an unqualified name ambiguous. Both are EXACT -
+    # this script never pattern-matches, which is why it was immune to the
+    # mis-selection that hit the consumer updater. Drop the legacy candidate once
+    # the bare assets are off the release.
+    $names = @("$component-$version-$PlatformTag.zip", "$component-$version.zip")
+    foreach ($n in $names) {
+        $url = "https://github.com/$Repo/releases/download/$Tag/$n"
+        try {
+            Invoke-WebRequest -UseBasicParsing -Uri $url -Method Head -TimeoutSec 30 | Out-Null
+            return $n
+        } catch {
+            # Only a genuine "not published" advances to the next candidate. A
+            # timeout or DNS failure must NOT silently demote us to the legacy
+            # asset - that would hide an outage as a successful older fetch.
+            $code = $_.Exception.Response.StatusCode.value__
+            if ($code -ne 404) { throw "could not reach $url ($code $($_.Exception.Message))." }
+        }
+    }
+    throw "the '$Tag' release carries none of: $($names -join ', ')."
+}
+
 function Get-Asset([string]$name) {
     # download <name> + verify its .sha256 sidecar, then extract into CommonLib/
     $url = "https://github.com/$Repo/releases/download/$Tag/$name"
@@ -103,13 +129,14 @@ function Get-LibSumo {
     }
     $sver = Get-DepVersion 'sumo'
     if (-not $sver) { throw "could not read the sumo version from dependencies.yaml - cannot pick the libsumo asset." }
-    Write-Host "Acquiring libsumo $sver (prebuilt, from the '$Tag' release)..."
-    Get-Asset "libsumo-$sver.zip"
+    Write-Host "Acquiring libsumo $sver (prebuilt, $PlatformTag, from the '$Tag' release)..."
+    $sumoName = Get-AssetName 'libsumo' $sver
+    Get-Asset $sumoName
 
     # The zip is now the only source of the SUMO runtime, so verify it actually
     # loads rather than trusting that the file count looks right (#70 / #237).
     Test-LibsumoLoadable -BinDir (Join-Path $LibSumo 'bin') `
-        -Context "The published libsumo-$sver.zip asset is incomplete - re-pack and re-publish it with scripts/dispatch/pack_native_deps.ps1 -Component sumo -Publish."
+        -Context "The published $sumoName asset is incomplete - re-pack and re-publish it with scripts/dispatch/pack_native_deps.ps1 -Component sumo -Publish."
     Write-Host "libsumo ready: $LibSumo"
 }
 
@@ -143,7 +170,7 @@ function Get-LibCarla {
     }
     elseif ($m -eq 'prebuilt') {
         $cver = Get-DepVersion 'carla'; if (-not $cver) { $cver = '0.9.15' }
-        Get-Asset "libcarla-$cver.zip"
+        Get-Asset (Get-AssetName 'libcarla' $cver)
     }
     else { throw "Unknown mode: '$m' (expected source|prebuilt)." }
 

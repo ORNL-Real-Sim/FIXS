@@ -105,7 +105,11 @@ public:
     carla::SharedPtr<carla::client::Vehicle> egoActor() { return egoActor_; }
 
     // ---- driver hooks (not part of IVirEnvBackend) ------------------------
-    void flushBatch();                                                     // ApplyBatch(the transform commands)
+    void flushBatch();                                                     // ApplyBatchSync(the transform commands)
+    // Put ANY actor's transform into this tick's batch -- used for the spectator,
+    // so the camera lands in the same atomic apply as the vehicles it follows
+    // rather than in a separate RPC that can miss the tick.
+    void queueTransform(carla::rpc::ActorId id, const carla::geom::Transform& tf);
     void freezeAndMatchTrafficLights();                                    // map traffic.traffic_light actors -> junctions
     carla::SharedPtr<carla::client::Vehicle> actorOf(VehHandle h);         // for interested readback / spectator
 
@@ -138,6 +142,7 @@ private:
     std::unordered_map<VehHandle, carla::SharedPtr<carla::client::Vehicle>> actors_;
     std::unordered_map<VehHandle, carla::geom::Transform> lastApplied_;   // A/B instrumentation
     std::unordered_map<std::string, std::unordered_map<int, TrafficLight>> trafficLightMap_;
+    int zAuditPhase_ = -1;                                                 // rotating slice for the z audit
 
     static carla::geom::Transform sumoTransformOf(const Pose& p);
 };

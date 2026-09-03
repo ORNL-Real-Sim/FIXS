@@ -170,3 +170,52 @@ class TestPackDepackVehData:
         assert sim_state == 1
         assert abs(sim_time - 5.5) < 0.001
         assert total == 100
+
+
+class TestLightIndicators:
+    """lightIndicators is a uint16 between `height` and the EgoDriver block.
+
+    It exists in VehFullData_t and is packed at MsgHelper.cpp:395, but was absent
+    from this Python port entirely -- no dataclass field, no layout entry, no size
+    term. VirEnvCore's step-6 light path reads it, so the port could not drive
+    setVehicleLights at all; worse, a config that DID subscribe it would have left
+    the Python decoder two bytes out of phase for every field after `height`.
+    """
+
+    WIRE = ['id', 'height', 'lightIndicators', 'steerAngleDesired']
+
+    def test_it_is_a_subscribable_field(self):
+        mh = make_msg_helper_with_fields('lightIndicators')
+        assert mh.vehicle_msg_field_valid['lightIndicators'] is True
+        assert 'lightIndicators' in mh.VehicleMessageField_set
+
+    def test_round_trip_preserves_the_bitfield(self):
+        mh = make_msg_helper_with_fields(*self.WIRE)
+        veh = VehData(id='v1', height=1.5, lightIndicators=0b1010,
+                      steerAngleDesired=0.25)
+        buf = bytearray(256)
+        buf, size, end = mh.pack_veh_data(buf, 0, veh)
+        assert size == end, 'the declared record size does not match what was written'
+
+        out = mh.depack_veh_data(bytes(buf[mh.msg_each_header_size:end]))
+        assert out.lightIndicators == 0b1010
+
+    def test_the_field_after_it_stays_in_phase(self):
+        """The real failure mode: a two-byte slip corrupts everything downstream."""
+        mh = make_msg_helper_with_fields(*self.WIRE)
+        veh = VehData(id='v1', height=1.5, lightIndicators=9, steerAngleDesired=0.25)
+        buf = bytearray(256)
+        buf, _, end = mh.pack_veh_data(buf, 0, veh)
+
+        out = mh.depack_veh_data(bytes(buf[mh.msg_each_header_size:end]))
+        assert out.height == pytest.approx(1.5)
+        assert out.steerAngleDesired == pytest.approx(0.25)
+
+    def test_it_costs_two_bytes_not_four(self):
+        withField = make_msg_helper_with_fields('id', 'lightIndicators')
+        without = make_msg_helper_with_fields('id')
+        veh = VehData(id='v1')
+        buf = bytearray(256)
+        _, sizeWith, _ = withField.pack_veh_data(buf, 0, veh)
+        _, sizeWithout, _ = without.pack_veh_data(buf, 0, veh)
+        assert sizeWith - sizeWithout == 2

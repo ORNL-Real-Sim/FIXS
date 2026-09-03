@@ -125,14 +125,34 @@ Key configuration parameters:
 - `SelectedTrafficSimulator`: 'VISSIM' or 'SUMO'
 - `EnableExternalDynamics`: Allow external control of vehicle dynamics (SUMO)
 - `VehicleMessageField`: Array of fields to exchange (see [README.md](README.md) Appendix for full field list)
-- `SimulationMode`: Bitfield controlling sync behavior (0=sync at start, 1=wait for ego entry, 4=wait for specified time)
+- `WarmUpUntilEgoEntry` / `WarmUpTime`: warm-up triggers (see below)
 
-### Simulation Modes
+### Warm-up (#86, replaced SimulationMode)
 
-SimulationMode is a bitfield:
-- 0 (binary 000): Sync from simulation start
-- 1 (binary 001): Wait mode until ego vehicle enters network, then sync
-- 4 (binary 100): Wait mode until SimulationModeParameter seconds, then sync
+`SimulationMode` / `SimulationModeParameter` were removed in 0.9.0. They were documented
+as a bitfield but never were one — the code tested `4||5` and `1||2` as identical
+branches, and 3/6/7 silently meant 0. No config in FIXS or FIXS_Applications set them, so
+they were dropped outright with no compatibility shim.
+
+Two mutually exclusive keys in `SimulationSetup`, both SUMO-only:
+
+- `WarmUpUntilEgoEntry: true` — tick until the first subscribed ego is in the network.
+  The watched ids are the **union** of the by-id vehicle subscriptions in
+  `ApplicationSetup` and `XilSetup` (`ConfigHelper::WarmUpEgoIds`), deliberately not
+  `vehicleSubscribeId_v`, which is either/or and also drives message routing.
+- `WarmUpTime: <absolute sim time>` — one batch `Simulation::step(T)`.
+
+While the warm-up runs, the main loop returns to the top before any client I/O **and the
+clients are not accepted yet** (`SocketHelper::DeferAcceptClients` / `acceptClients()`),
+so client start-up overlaps the warm-up. Measured on MLK's 185 s warm-up: batch step
+2.70 s, tick loop + ego poll 3.29 s — both against minutes for a fully synced warm-up,
+because what dominates is client I/O, not stepping. A batch `step(T)` from TrafficLayer
+was verified to coexist with a second TraCI client stepping 1:1 (both land exactly on
+the target time), though SUMO then advances only as fast as that other client steps.
+
+VISSIM parity is not implemented: TrafficLayer does not own the VISSIM clock, and the
+DriverModel DLL still has its own hardcoded `ENABLE_WARMUP`. A VISSIM config that sets
+either key is rejected at startup.
 
 ## Running Tests
 
@@ -349,6 +369,31 @@ ABSOLUTE X/Y, so VISSIM and CM **must** derive from the same geometry. If the VI
 off-road — regen VISSIM from the xodr, **never edit the CM side to match**. `parse_signals.py`
 + `build_demand.py` must read the PROBE-LOCAL `simple_traffic_light.net.xml`, not the
 stale `tests/Python/SimpleTrafficLight/` copy.
+
+**The turnaround geometry is shared, and lives in
+[`Carla/utils/sumo_uturn.py`](Carla/utils/sumo_uturn.py) (#327).** `gen_loop_net.py`
+imports `curved_uturn()` from it rather than carrying its own copy of the curvature
+integration. Do NOT re-inline that math here: the regression that keeps it honest is
+that `gen_loop_net.py` still regenerates the committed `nodes.nod.xml`/`edges.edg.xml`
+byte-for-byte, and two copies would drift silently.
+
+Why a curved loop and not SUMO's own turnaround: SUMO's point turnaround is a short
+internal link that pivots the vehicle 180° on the spot (on MLK, 4.97 m at 3.73 m/s —
+about a 1.6 m turning radius). That is fine for queue statistics and undrivable for
+anything tracking the OpenDRIVE export, so a CM/CARLA ego stalls at the terminus or
+leaves the road. The teardrop replaces it with a tangent-continuous path at a 45 m
+radius.
+
+`sumo_uturn.py` also runs standalone, to put that same loop on a network that ALREADY
+exists — a real digital twin (MLK and the rest of the Digital-Twin-Library) has no
+plain-XML sources to regenerate from. It adds edges and never renames or removes any,
+so route files stay valid; it emits node/edge/connection patches for `netconvert -s`
+instead of hand-editing the net; and it attaches to the LANE CENTRELINES that carry the
+traffic, not to the junction centroid. That last point is not cosmetic — at MLK's west
+end the arriving lane is 8.5 m to one side of the junction centre, and anchoring on the
+centre makes netconvert bridge the gap with a connector that crabs the vehicle sideways
+(measured: a ±37° S-jog at an 11 m radius), reintroducing exactly the geometry the loop
+exists to remove.
 
 **Signal identity is faithful SUMO → xodr → CM (1:1).** netconvert emits one
 `<signal id="<tls_id>_<linkIndex>">` per SUMO controlled connection, with the turn

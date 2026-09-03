@@ -11,11 +11,15 @@
 //============================================================================
 #include "../../CommonLib/VirEnvCore.h"
 #include "MockVirEnvBackend.h"
+#include "replay_trace.h"
 
 #include <iostream>
+#include <cstdlib>
 #include <cassert>
 #include <string>
 #include <vector>
+#include <sstream>
+#include <iomanip>
 
 using namespace virenv;
 using std::string;
@@ -31,7 +35,10 @@ static VehFullData_t veh(const string& id, const string& vclass,
     return v;
 }
 
-static void step(VirEnvCore& core, double simTime, bool onUpdate, const vector<VehFullData_t>& vs) {
+static void step(VirEnvCore& core, MockVirEnvBackend& mock, double simTime,
+                 bool onUpdate, const vector<VehFullData_t>& vs) {
+    { std::ostringstream os; os << "step t=" << std::fixed << std::setprecision(2) << simTime
+                               << " onUpdate=" << (onUpdate ? 1 : 0); mock.mark(os.str()); }
     core.Msg_c.clearRecvStorage();
     for (const auto& v : vs) core.Msg_c.VehDataRecv_um[v.id] = v;
     const char* err = nullptr;
@@ -50,7 +57,47 @@ static void dump(const char* title, const vector<string>& ev) {
     std::cout.flush();  // so the transcript survives an assert() abort
 }
 
-int main() {
+// A recorded corridor (--trace) drives the SAME core through thousands of real
+// appear / disappear / skip events; the scripted scenarios below pin four steps and
+// two vehicles. tests/VirEnv/replay_core.py takes the same flags and emits the same
+// digests, and test_core_parity.py compares the two lists index by index.
+static int runTrace(int argc, char** argv) {
+    std::string tracePath, digestOut, egoId;
+    int substeps = 1;
+    for (int i = 1; i < argc; i++) {
+        const std::string a = argv[i];
+        if (a == "--trace" && i + 1 < argc) tracePath = argv[++i];
+        else if (a == "--substeps" && i + 1 < argc) substeps = std::atoi(argv[++i]);
+        else if (a == "--ego" && i + 1 < argc) egoId = argv[++i];
+        else if (a == "--digest-out" && i + 1 < argc) digestOut = argv[++i];
+    }
+    if (substeps < 1) substeps = 1;
+    virenv::trace::Result res;
+    if (!virenv::trace::replayTrace(tracePath, substeps, egoId, res)) return 1;
+    std::cout << "[replay] " << res.exchanges << " exchanges x " << res.substeps
+              << " substeps, ego=" << res.egoId << "\n";
+    std::cout << "[replay] spawn " << res.counts["spawn"]
+              << "  despawn " << res.counts["despawn"]
+              << "  pose " << res.counts["pose"]
+              << "  tls " << res.counts["tls"] << "\n";
+    std::string all;
+    for (std::size_t n = 0; n < res.digests.size(); n++) {
+        if (n) all += "\n";
+        all += res.digests[n];
+    }
+    std::cout << "[replay] overall digest "
+              << virenv::trace::hex16(virenv::trace::fnv1a64(all)) << "\n";
+    if (!digestOut.empty()) {
+        if (!virenv::trace::writeDigestJson(digestOut, res)) return 1;
+        std::cout << "[replay] digests -> " << digestOut << "\n";
+    }
+    return 0;
+}
+
+int main(int argc, char** argv) {
+    for (int i = 1; i < argc; i++)
+        if (std::string(argv[i]) == "--trace") return runTrace(argc, argv);
+
     // ===== Scenario 1: Carla-style -- interpolate=false, 1:1 @ 0.1 s =====
     {
         MockVirEnvBackend mock;
@@ -61,11 +108,11 @@ int main() {
         core.Msg_c.VehicleMessageField_set = { "vehicleClass","heading","grade","lightIndicators" };
         mock.setMockEgo({}, false);  // readEgoState -> false (keeps transcript clean)
 
-        step(core, 0.00, false, {});                                            // initTrafficPool
-        step(core, 0.10, true,  { veh("v1","passenger", 10,0,0.1, 90) });       // v1 appears @ A
-        step(core, 0.20, true,  { veh("v1","passenger", 20,0,0.1, 90),
+        step(core, mock, 0.00, false, {});                                            // initTrafficPool
+        step(core, mock, 0.10, true,  { veh("v1","passenger", 10,0,0.1, 90) });       // v1 appears @ A
+        step(core, mock, 0.20, true,  { veh("v1","passenger", 20,0,0.1, 90),
                                   veh("v2","truck",      5,5,0.1, 0) });          // v1 @ B, v2 appears
-        step(core, 0.30, true,  { veh("v2","truck",      6,5,0.1, 0) });          // v1 gone
+        step(core, mock, 0.30, true,  { veh("v2","truck",      6,5,0.1, 0) });          // v1 gone
 
         dump("Carla-style", mock.events());
         assert(hasInOrder(mock.events(), {
@@ -88,10 +135,10 @@ int main() {
         core.Msg_c.VehicleMessageField_set = { "vehicleClass","heading","grade" };
         mock.setMockEgo({}, false);
 
-        step(core, 0.00, false, {});
-        step(core, 0.10, true,  { veh("v1","passenger", 10,0,0.1, 90) });  // first sight -> A
-        step(core, 0.20, true,  { veh("v1","passenger", 20,0,0.1, 90) });  // stage prev=A@0.2, next=B@0.3
-        step(core, 0.25, false, {});                                       // sub-step -> interp midpoint
+        step(core, mock, 0.00, false, {});
+        step(core, mock, 0.10, true,  { veh("v1","passenger", 10,0,0.1, 90) });  // first sight -> A
+        step(core, mock, 0.20, true,  { veh("v1","passenger", 20,0,0.1, 90) });  // stage prev=A@0.2, next=B@0.3
+        step(core, mock, 0.25, false, {});                                       // sub-step -> interp midpoint
 
         dump("CarMaker-style", mock.events());
         // f=(0.25-0.2)/(0.3-0.2)=0.5 -> midpoint (15,0,0.1)

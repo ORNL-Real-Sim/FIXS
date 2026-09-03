@@ -37,12 +37,10 @@ SimulationSetup:
 
     EnableExternalDynamics: true
 
-    # start RealSim until ego vehicle in the network
-    # refer to README.md for specific meanings of SimulationMode
-    SimulationMode: 4
-    
-    # only needed for Mode 4
-    SimulationModeParameter: 450
+    # Warm-up: run SUMO with the FIXS boundary closed until 450 s of simulation
+    # time, then accept the clients and start exchanging. See README.md.
+    # (was SimulationMode: 4 / SimulationModeParameter: 450 before #86)
+    WarmUpTime: 450
 
 # setup Application Layer
 ApplicationSetup:

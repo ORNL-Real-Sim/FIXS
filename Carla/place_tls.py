@@ -162,7 +162,8 @@ def place_tls(name, tl_table, carla_root=None, ue4_root=None, force=False,
     umap = import_map.cooked_map_path(carla_root, name)
     before = os.path.getmtime(umap) if os.path.isfile(umap) else None
 
-    cmd = [editor, uproject, content_map_path(name), f"-ExecutePythonScript={AUTO_PLACE}"]
+    cmd = [editor, uproject, content_map_path(name), f"-ExecutePythonScript={AUTO_PLACE}",
+           *env.EDITOR_LAUNCH_FLAGS]
     print("[tls] placing traffic lights via the editor (a window opens briefly, "
           "no clicking needed) ...")
     print(f"[tls] {' '.join(cmd)}")
@@ -186,7 +187,7 @@ def place_tls(name, tl_table, carla_root=None, ue4_root=None, force=False,
 
 
 def main():
-    # Run under the interpreter carla.json names, whatever python place_tls.sh was
+    # Run under the interpreter carla.json names, whatever python this script was
     # started with. run_cosim imports this module rather than spawning it, so that
     # path is already on the right interpreter and this is a no-op there.
     env.reexec_under_configured(__file__, tag="tls")
