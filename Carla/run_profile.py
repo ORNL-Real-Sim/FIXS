@@ -400,7 +400,16 @@ def choose_setup(doc, interactive=True):
                 for n in doomed:
                     delete(n)
                 print(f"[cosim] deleted {', '.join(repr(n) for n in doomed)}.")
-                doc = load_doc()
+                # IN PLACE, not `doc = load_doc()`. The caller passed this dict and
+                # goes on using it after we return - to name the setup, to suggest a
+                # free name, to decide whether switching is possible - so rebinding a
+                # local here left every one of those reading setups that no longer
+                # exist. It showed up as "'uga_default' exists. Overwrite it?" for a
+                # setup deleted moments earlier in this very menu. Nothing was ever
+                # resurrected by it: save/save_partial/delete each re-read the file,
+                # so the damage was confined to decisions made from the stale view.
+                doc.clear()
+                doc.update(load_doc())
                 names = order(doc)
                 if not names:
                     return None
