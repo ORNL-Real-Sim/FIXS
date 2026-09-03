@@ -12,24 +12,31 @@ live separately under `tests/`.
 ```
 Carla/                        <- self-contained co-sim component (shipped in the zip)
   sumo/                       <- the SUMO <-> CARLA co-sim runtime
-    run_synchronization/      full CARLA<->SUMO co-sim (vehicles + TL table)
+    (run_synchronization moved to ../standalone/ -- #330: it speaks no FIXS)
       sumo_integration/       CARLA's bridge (bridge_helper, sumo/carla simulation, ...)
     sumo_carla_tl_sync.py     standalone SUMO->CARLA TL mirror
     auto_place_tls.py         headless TL-actor placement (run inside the UE4 editor)
     unreal_placing_tls.py     spawns BP_TrafficLight actors from the table
-    set_spectator_view.py     move the CARLA spectator over the junctions
   utils/                      <- co-sim helpers (kept inside Carla/ so it ships self-contained)
     extract_sumo_tls_as_table.py   generate traffic_light_table.csv from a SUMO net
     trafficlight_helper.py         SUMO<->CARLA<->Unreal coordinate transforms
     unreal_remove_tl.py            remove placed TL actors
+  run_cosim.py                cross-platform launcher (Windows/Linux) - the entry point
   carla_env_setup.py          one-time/reconfigure CARLA env picker (saves ~/.fixs/carla.json)
-  setup_carla.bat / setup_carla.sh  thin per-OS wrappers for the picker
   import_map.py               import a RoadRunner/OpenDRIVE map into a source build
-  import_map.bat / import_map.sh    thin per-OS wrappers for the importer
   place_tls.py                place SUMO traffic lights into a cooked map (editor)
-  place_tls.bat / place_tls.sh      thin per-OS wrappers for the placer
-  run_cosim.py                cross-platform launcher (Windows/Linux)
-  run_cosim.bat / run_cosim.sh  thin per-OS wrappers
+  place_signs.py              place the RoadRunner sign meshes CARLA's import culled
+  unreal_place_signs.py       the editor-side half of place_signs.py
+  app_catalog.py              the apps/ manifest contract for FIXS application repos
+  run_profile.py              named run setups (~/.fixs/run_profiles.json) + review loop
+  props.py                    placement props and their manifest, from the map library
+  doctor.py                   check this machine can run a co-sim, before it tries
+  peer.py                     control channel between the halves of a distributed co-sim
+  set_spectator_view.py       point the CARLA spectator at a scene (top-down, or --follow)
+  load_opendrive_world.py     mesh an .xodr into a running server - no map package, no cook
+  launch_carla.bat            hand-launch a server from carla.env, for that no-cook path
+  carla.env.example           copy to carla.env and edit; read by launch_carla.bat
+  wait_for_rpc.ps1            block until that server accepts RPC
   README.md                   (this file)
 
 tests/Sumo/Carla/             <- tests only (no runtime code)
@@ -41,6 +48,15 @@ tests/Sumo/Carla/             <- tests only (no runtime code)
 
 (`sumo/` is named for the partner simulator &mdash; a future CARLA co-sim with another
 tool would slot in as e.g. `Carla/vissim/`.)
+
+**Every entry point here is run as `python Carla/<script>.py`**, on either OS. There
+are deliberately no `.bat`/`.sh` wrappers beside them: each script re-execs itself
+under the configured interpreter (see [Environment](#environment)), so the python
+you start with does not matter and a wrapper would add nothing. An application repo
+built on a fetched FIXS bundle exposes its own front door &mdash; `run_cosim.bat` /
+`run_cosim.sh` at the repo root &mdash; and that is what users should type; it sets
+the app's `FIXS_ENV_NAME` and bootstraps the bundle before calling in here. A
+same-named wrapper in this directory only shadowed it (ORNL-Real-Sim/FIXS#287).
 
 ## Environment
 
@@ -87,13 +103,9 @@ Run setup explicitly only to **switch CARLA** (packaged &harr; source build, or 
 different install/version):
 
 ```bash
-# Windows
-Carla\setup_carla.bat
-# Linux/macOS
-Carla/setup_carla.sh
-# or directly, on either OS:
-python Carla/carla_env_setup.py          # interactive picker
-python Carla/carla_env_setup.py --show   # print the current config
+python Carla/carla_env_setup.py                   # interactive picker
+python Carla/carla_env_setup.py --show            # print the current config
+python Carla/carla_env_setup.py --update-python   # rebind ONLY the python env
 ```
 
 Setup asks **packaged** vs **source build**, then opens a native folder picker:
@@ -247,7 +259,7 @@ package=RP_Ver0529
 url=https://.../RP_Ver0529_carla_import.zip
 ```
 ```bash
-import_map.bat --package-pick --map-config apps/roosevelt/roosevelt_map.txt
+python Carla/import_map.py --package-pick --map-config apps/roosevelt/roosevelt_map.txt
 ```
 
 A **re-import** (`--force` / `--reimport`, or answering the prompt) moves the old
@@ -263,8 +275,8 @@ from the table into the map's level (running `sumo/auto_place_tls.py` in the ful
 editor) and writes a marker so it isn't repeated:
 
 ```bash
-place_tls.bat --map-config apps/roosevelt/roosevelt_map.txt \
-              --tl-table apps/roosevelt/Roosevelt_Sumo_Scenario/traffic_light_table.csv
+python Carla/place_tls.py --map-config apps/roosevelt/roosevelt_map.txt \
+                          --tl-table apps/roosevelt/Roosevelt_Sumo_Scenario/traffic_light_table.csv
 ```
 
 A re-import wipes the map's content (and the marker), so the lights are re-placed
@@ -387,7 +399,7 @@ starts from the list of them rather than from a blank prompt:
    1) app       roosevelt
    2) map       roosevelt_full            (Digital-Twin-Library)
    3) scenario  config.yaml               (generated, this app on this map)
-   4) engine    py                        (run_synchronization.py)
+   4) engine    py                        (Python VirEnvCore: VirEnv/mainVirCarla.py)
    5) CARLA     source  C:/src_ext/Carla  ->  127.0.0.1:2000
    6) SUMO      gui, step 0.05
 

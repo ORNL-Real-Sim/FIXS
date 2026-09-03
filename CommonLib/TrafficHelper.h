@@ -43,11 +43,14 @@ public:
 	int sendToTrafficSimulator(double simTime, MsgHelper Msg_c);
 	void runOneStepSimulation();
 	int runSimulation(double endTime);
+	// Ids the warm-up watches for (#86) -- the union of both layers' by-id vehicle
+	// subscriptions, copied from ConfigHelper::WarmUpEgoIds in getConfig().
+	std::unordered_set <std::string> warmupEgoId_v;
 	int recvFromTrafficSimulator(double* simTime, MsgHelper& Msg_c);
 
 	int addEgoVehicle(double simTime);
 	int addEgoVehicleFromXY(double simTime, std::string vehicleId, std::string vehicleType, double positionX, double positionY);
-	int checkIfEgoExist(double* simTime);
+	bool isWarmUpEgoInNetwork(double* simTime);
 
 	int getSimulationTime(double* simTime);
 
@@ -153,6 +156,21 @@ public:
 	// needed for the signalLight* fields, getLeader/getSpeed for precedingVehicle*.
 	bool NEED_NEXT_TLS = false;
 	bool NEED_PRECEDING_VEH = false;
+
+#ifdef RS_DEBUG
+	// #86: how many vehicles per reporting window still needed a DIRECT TraCI
+	// query for their leader instead of reading it out of the subscription.
+	// A direct query is Vehicle::getLeader / getSpeed -- the same call every
+	// vehicle made before #86, so the answer is identical; only the transport
+	// differs. Counts, hence the n prefix and a 0 start.
+	//
+	// Reported every 3000 steps: a config that quietly queries every vehicle is
+	// paying the pre-#86 cost, which is invisible otherwise -- the output is
+	// still correct, only slower. Build with -p:RS_DEBUG=1 to see it.
+	long nLeaderIdQueried = 0;
+	long nLeaderSpeedQueried = 0;
+	long nStepsSinceLeaderReport = 0;
+#endif
 
 	double tSimuEnd = 90000;
 

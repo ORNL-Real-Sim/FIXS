@@ -14,6 +14,12 @@ Please visit [Visual Studio Installer Download](https://visualstudio.microsoft.c
 
 To build the CARLA 0.9.15 under Visual Studio 2019, a practical guide is shown below (For detailed build steps, please refer to [CARLA Windows Build Guide](./Carla_Windows_building.md).):
 
+> **Building 0.9.16 instead?** Use [CARLA 0.9.16 Windows Build Guide](./Carla_0916_Windows_building.md).
+> 0.9.16 requires **Visual Studio 2022**, not 2019, and most of the 0.9.15 workarounds do
+> not apply. FIXS itself still targets 0.9.15 — 0.9.16 migration is tracked in issue
+> [#319](https://github.com/ORNL-Real-Sim/FIXS/issues/319). On Linux, see
+> [CARLA Linux Build Guide](./Carla_Linux_building.md).
+
 The MSVC toolset version changed to v142 after Visual Studio 2019. Since the official installation script supports MSVC 142, we use Visual Studio 2019 for simplicity. 
 
 The documentation for building CARLA on windows can be found [Carla Windows Build](https://carla.readthedocs.io/en/0.9.15/build_windows/). Please note that, we need to use "X64 Native Tools Command Prompt for VS 2019" for compilation.
@@ -35,7 +41,7 @@ which will provide the necessary dependencies for the FIXS-CARLA
 (dispatch step **4c**), driven by a per-machine `~/.fixs/carla.json`:
 
 - **`"mode": "prebuilt"`** *(recommended — no Carla source build needed):* downloads
-  the **public** rolling `fixs-native-deps` release's `libcarla-<carla_version>.zip` (Release subset),
+  the **public** rolling `fixs-native-deps` release's `libcarla-<carla_version>-windows-x86_64.zip` (Release subset),
   verifies its SHA-256, and extracts it into `CommonLib/`. This is the exact artifact
   the release CI uses.
 - **`"mode": "source"`** *(for developers who build Carla from source):* after

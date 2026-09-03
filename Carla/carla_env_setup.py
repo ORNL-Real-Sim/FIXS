@@ -19,7 +19,6 @@ install/version):
     python carla_env_setup.py                  # interactive
     python carla_env_setup.py --show           # print the current config
     python carla_env_setup.py --update-python  # rebind the env, keep the CARLA paths
-    setup_carla.bat / setup_carla.sh           # thin per-OS wrappers
 
 Everything that runs a co-sim runs under the interpreter recorded here - see
 reexec_under_configured, which every entry point calls first, so which script you
@@ -84,6 +83,75 @@ def save_config(cfg):
 
 REEXEC_GUARD = "FIXS_REEXEC"
 
+# A conda env has no pyvenv.cfg, so CPython leaves ENABLE_USER_SITE on and puts the
+# PER-USER site directory (%APPDATA%\Python\PythonXY\site-packages on Windows,
+# ~/.local/lib/pythonX.Y/site-packages elsewhere) AHEAD of the env's own
+# site-packages. One `pip install --user` therefore shadows an env-installed package
+# in every env on the machine at once, and naming the right interpreter here is not
+# enough to stop it: a carla built from a source tree landed in the user directory
+# and won over the wheel this config installed, so the client spoke a different
+# protocol version than the server and died inside libcarla on ImageTmpl.h's
+# `GetWidth() * GetHeight() == size()` assertion - a C++ assert, so it took the
+# process down instead of raising something python could report. The version banner
+# said so ("Client API version = <hash>" vs "Simulator API version = 0.9.15.2") but
+# CARLA only warns there and connects anyway.
+#
+# carla.json names ONE interpreter; that interpreter has to mean one set of packages.
+# Two moves, because an env var alone cannot repair a process that has already booted:
+#   - export PYTHONNOUSERSITE, so every child - the re-exec below, TrafficLayer, the
+#     app's own launch command, the placers - starts without the directory at all;
+#   - drop it from THIS process's sys.path, for the case where we are already on the
+#     configured interpreter and so never re-exec.
+
+USER_SITE_OPT_OUT = "PYTHONNOUSERSITE"
+
+
+def quarantine_user_site():
+    """Keep per-user site-packages out of this run. Returns the paths dropped.
+
+    Empty on a healthy machine, and empty in a child we re-exec'd, which never
+    added the directory - so the caller's notice prints once, where it is news."""
+    os.environ[USER_SITE_OPT_OUT] = "1"
+    try:
+        import site
+        user_site = getattr(site, "USER_SITE", None) or site.getusersitepackages()
+    except Exception:
+        return []          # no usable site module: nothing to quarantine
+    if not user_site:
+        return []
+    target = os.path.normcase(os.path.normpath(user_site))
+    dropped = [p for p in sys.path
+               if p and os.path.normcase(os.path.normpath(p)) == target]
+    for path in dropped:
+        sys.path.remove(path)
+    return dropped
+
+
+# Run at import, not from a call each entry point has to remember: this module is the
+# first FIXS import in every one of them, and the quarantine has to beat `import carla`
+# on ALL paths - including the ones that answer and exit before
+# reexec_under_configured. run_cosim --version is the sharp case: its whole job is to
+# report which packages a run will use ("what to paste into a bug report"), and it
+# returns at the --doctor/--version branch, well above the re-exec - so it was
+# fingerprinting the shadowed copy and calling it present.
+USER_SITE_DROPPED = quarantine_user_site()
+_python_reported = False
+
+
+def report_python(tag="fixs"):
+    """Name the interpreter this run uses - once, and only when something had been
+    shadowing it.
+
+    Which directory got dropped is our problem, not the reader's. The question a
+    shadowed import makes unanswerable is "which python am I actually getting",
+    so answer that and say nothing else. Silent on a machine with no user-site
+    install, which is most of them."""
+    global _python_reported
+    if not USER_SITE_DROPPED or _python_reported:
+        return
+    _python_reported = True
+    print(f"[{tag}] python: {sys.executable}")
+
 
 def configured_python():
     """The interpreter carla.json names, if it is on disk. Else None."""
@@ -106,11 +174,18 @@ def reexec_under_configured(script, cfg=None, drop=(), tag="fixs"):
     arguments the child must not see again (run_cosim's --reconfigure has already
     been honoured by the time we switch). REEXEC_GUARD stops a config that points
     at a shim or a symlink - where the path comparison cannot tell parent from
-    child - from re-execing forever."""
+    child - from re-execing forever.
+
+    The user-site quarantine already happened at import. Naming the interpreter is
+    done here, and only on the paths that RETURN - if we re-exec, sys.executable is
+    not the python that ends up running, and the switch line below names the one
+    that does."""
     target = (cfg if cfg is not None else load_config() or {}).get("python")
     if not target or not os.path.isfile(target):
+        report_python(tag)
         return                       # nothing configured yet, or it has been removed
     if _same_python(target, sys.executable) or os.environ.get(REEXEC_GUARD) == "1":
+        report_python(tag)
         return
     print(f"[{tag}] switching to the configured python env:\n        {target}")
     cmd = [target, os.path.abspath(script), *[a for a in sys.argv[1:] if a not in drop]]
@@ -140,13 +215,39 @@ def source_paths(carla_root, ue4_root):
     return uproject, editor
 
 
+# Carried by every UE4Editor launch FIXS makes. CARLA's CarlaUE4.uproject enables
+# UE4's RenderDocPlugin, and its loader looks for renderdoc.dll in the Engine.ini
+# cvar, then in the registry, then - having found neither, which is the case on
+# every machine without RenderDoc installed - by ASKING: a modal "Locate main
+# RenderDoc executable..." file dialog. It opens at PostConfigInit, long before the
+# engine has a window of its own, and is built through COM - which the game thread
+# has not initialized that early, so the dialog usually fails to be created and the
+# launch is none the wiser. When some module loaded ahead of it did initialize COM,
+# the dialog appears and blocks the game thread until a human cancels it: measured
+# at 138 s on a run nobody was watching, against the 180 s wait_for_port budget,
+# and unbounded on the placers, which give the editor no timeout at all (#311).
+# -DisableFrameTraceCapture makes the loader return before it searches anything.
+#
+# What that gives up is RenderDoc frame capture from a FIXS-launched editor, which
+# no co-sim run uses - capturing a frame means driving the editor by hand anyway.
+# Source builds only: a packaged CarlaUE4.exe never loads the plugin (its module is
+# UncookedOnly), so that path needs nothing.
+EDITOR_LAUNCH_FLAGS = ["-DisableFrameTraceCapture"]
+
+
 # ------------------------------------------------ python interpreter / carla
 # The CARLA + SUMO clients live in a conda env (built from environment.yml). The
 # env name is NOT fixed (it may be `realsim`, `realsim_dev`, ...), so we resolve
-# the interpreter by *capability* - we scan standard conda locations and the
-# current interpreter, then test which one can actually import the modules. This
-# is fully generic: it works on any machine / any cloner, with a manual picker
-# fallback when auto-detection comes up empty.
+# the interpreter by *capability* - we scan standard conda locations, the system
+# interpreters and the current interpreter, then test which one can actually
+# import the modules. This is fully generic: it works on any machine / any
+# cloner, with a manual picker fallback when auto-detection comes up empty.
+#
+# System interpreters are offered because on Linux they are frequently the only
+# ones that can import traci/sumolib - apt's SUMO packages drop their bindings
+# into the system dist-packages - so a box without conda has nothing else to
+# bind. They are also exactly the interpreters we must not install into without
+# asking: see _interpreter_kind / _confirm_install below.
 
 def _env_python(env_dir):
     if platform.system() == "Windows":
@@ -196,9 +297,31 @@ def _conda_roots():
     return out
 
 
-def _conda_candidates():
-    """Candidate python executables: the current interpreter + every conda env
-    under the discovered roots (and each root's base env). Existing files only."""
+def _system_candidates():
+    """Non-conda interpreters: whatever `python3` / `python` resolve to on PATH,
+    plus the usual absolute locations.
+
+    On Linux these routinely carry traci/sumolib, because that is where apt's
+    SUMO packages install them. Scanning conda alone therefore reported 'no env
+    with the co-sim deps' on a machine that had a perfectly usable interpreter
+    sitting at /usr/bin/python3."""
+    cands = [shutil.which(n) for n in ("python3", "python")]
+    if platform.system() != "Windows":
+        cands += ["/usr/bin/python3", "/usr/local/bin/python3", "/usr/bin/python"]
+    # Windows Store alias stubs are 0-byte reparse points that pop open the
+    # Store when executed - never hand one to the import probe.
+    return [c for c in cands
+            if c and "windowsapps" not in c.replace("\\", "/").lower()]
+
+
+def _python_candidates():
+    """Candidate python executables: the current interpreter, every conda env
+    under the discovered roots (and each root's base env), then the system
+    interpreters.
+
+    Existing files only, deduped by their symlink-resolved target rather than by
+    path text: conda ships bin/python -> bin/python3 -> bin/python3.N, so the
+    same binary reached under two names used to be offered as two choices."""
     cands = [sys.executable]
     for root in _conda_roots():
         cands.append(_env_python(root))  # base env
@@ -206,14 +329,37 @@ def _conda_candidates():
         if os.path.isdir(envs):
             for name in sorted(os.listdir(envs)):
                 cands.append(_env_python(os.path.join(envs, name)))
+    cands += _system_candidates()
     seen, out = set(), []
     for c in cands:
         c = os.path.normpath(c)
-        key = os.path.normcase(c)
-        if key not in seen and os.path.isfile(c):
+        if not os.path.isfile(c):
+            continue
+        key = os.path.normcase(os.path.realpath(c))
+        if key not in seen:
             seen.add(key)
             out.append(c)
     return out
+
+
+def _interpreter_kind(py_exe):
+    """(label, shared) for a candidate interpreter: which env it belongs to, and
+    whether that env is SHARED - a system python (owned by the OS and its
+    package manager) or a conda base env (shared by every other env on the
+    machine). Installing into a shared interpreter reaches well beyond FIXS,
+    which is why every install path gates on this via _confirm_install."""
+    real = os.path.normcase(os.path.realpath(py_exe))
+    roots = _conda_roots()
+    # Named envs first: <root>/envs/<name> also lives under <root>, so testing
+    # the roots first would report every named env as the base env.
+    for root in roots:
+        envs = os.path.normcase(os.path.realpath(os.path.join(root, "envs"))) + os.sep
+        if real.startswith(envs):
+            return "conda env '%s'" % real[len(envs):].split(os.sep)[0], False
+    for root in roots:
+        if real.startswith(os.path.normcase(os.path.realpath(root)) + os.sep):
+            return "conda BASE env (%s)" % os.path.basename(os.path.normpath(root)), True
+    return "SYSTEM python", True
 
 
 def _canonical_env_name():
@@ -372,23 +518,30 @@ def _resolve_python():
     elif not conda:
         print("[setup] conda/mamba not found on PATH.")
 
-    # 3. fall back: any env that already imports the co-sim deps, else pick.
-    cands = _conda_candidates()
+    # 3. fall back: any interpreter that already imports the co-sim deps - conda
+    #    env, conda base or system python - else pick.
+    cands = _python_candidates()
     full = [p for p in cands if _python_can_import(p, ("carla",) + SUMO_MODULES)]
     sumo_only = [p for p in cands if p not in full and _python_can_import(p, SUMO_MODULES)]
     ranked = full + sumo_only
     if len(ranked) == 1:
-        print(f"[setup] using python env: {ranked[0]}")
+        label, _ = _interpreter_kind(ranked[0])
+        print(f"[setup] using python env: {ranked[0]}  [{label}]")
         return ranked[0]
     if len(ranked) > 1:
         print("[setup] found these python envs with the co-sim deps:")
         for i, p in enumerate(ranked):
-            tag = " (carla+sumo)" if p in full else " (sumo only)"
-            print(f"   [{i}] {p}{tag}")
+            deps = "carla+sumo" if p in full else "sumo only"
+            label, shared = _interpreter_kind(p)
+            note = "  <- shared, not FIXS-private" if shared else ""
+            print(f"   [{i}] {p}")
+            print(f"       ({deps} | {label}){note}")
+        print("       FIXS may pip-install into whichever you pick; it says what, "
+              "and asks\n       first before writing into a shared one.")
         sel = input(f"pick 0-{len(ranked) - 1} (default 0): ").strip()
         return ranked[int(sel)] if sel.isdigit() and int(sel) < len(ranked) else ranked[0]
 
-    print("[setup] no conda env with the co-sim deps found automatically.")
+    print("[setup] no python env with the co-sim deps found automatically.")
     return _no_env_fallback(name)
 
 
@@ -508,6 +661,13 @@ def ensure_app_deps(py_exe, app_id, req_path, refresh=False):
         except OSError:
             pass                          # no stamp, or unreadable -> apply
 
+    if not _confirm_install(py_exe, f"'{app_id}' dependencies "
+                                    f"(-r {os.path.basename(req_path)})"):
+        print(f"[setup] '{app_id}' dependencies not installed; the app will run "
+              f"without them.\n"
+              f"        Install them yourself with:\n"
+              f"            \"{py_exe}\" -m pip install -r \"{req_path}\"")
+        return False
     print(f"[setup] applying '{app_id}' dependencies "
           f"({os.path.basename(req_path)}) to {py_exe} ...")
     rc = subprocess.call([py_exe, "-m", "pip", "install", "-r", req_path])
@@ -555,8 +715,14 @@ def _no_env_fallback(name):
             # environment.yml is a conda spec, so there is no conda-free way to
             # replay it; these are its importable dependencies. NB it does not
             # list shapely at all, though the TL-table generator needs it (#221).
-            if not _pip_install(here, ["pyyaml", "pandas", "shapely",
-                                       "eclipse-sumo", "traci", "sumolib"]):
+            pkgs = ["pyyaml", "pandas", "shapely", "eclipse-sumo", "traci", "sumolib"]
+            # This is the riskiest install in the file: reached precisely when
+            # conda is absent or broken, which is when `here` is most likely to
+            # BE the OS python.
+            if not _confirm_install(here, " ".join(pkgs)):
+                sys.exit("[setup] nothing installed; create a dedicated env with:\n"
+                         f"            conda env create -f {ENV_YML}")
+            if not _pip_install(here, pkgs):
                 sys.exit("[setup] pip install failed; fix the environment by hand.")
             still = missing_runtime(here)
             if still:
@@ -597,6 +763,48 @@ def _pip_install(py_exe, args):
     cmd = [py_exe, "-m", "pip", "install", *args]
     print(f"[setup] {' '.join(cmd)}")
     return subprocess.call(cmd) == 0
+
+
+def _confirm_install(py_exe, what, question=None):
+    """Say what FIXS is about to install and into which interpreter; return True
+    to go ahead.
+
+    A FIXS-private conda env is written to without asking - that env exists for
+    this. A SHARED interpreter is gated behind an explicit yes, because the
+    install does not stay inside FIXS: on a system python it can replace
+    packages the OS itself imports (and Debian/Ubuntu pip refuses outright under
+    PEP 668, externally-managed-environment), and on a conda base env it changes
+    the versions every other env on the machine solves against. Now that the
+    ranked list offers system interpreters, this is the difference between
+    'FIXS bound /usr/bin/python3' and 'FIXS rewrote /usr/bin/python3'.
+
+    Pass `question` to ask whatever the interpreter."""
+    label, shared = _interpreter_kind(py_exe)
+    print(f"[setup] about to install: {what}")
+    print(f"        into:             {py_exe}  [{label}]")
+    if shared:
+        print("        WARNING: that is not a FIXS-private env.")
+        if label.startswith("SYSTEM"):
+            print("          It belongs to the operating system. Installing here can")
+            print("          overwrite packages your OS tools import, and on Debian/Ubuntu")
+            print("          pip may refuse it (externally-managed-environment).")
+        else:
+            print("          It is the conda base env, shared by every other env and")
+            print("          project on this machine; this can break their pinned versions.")
+        print(f"        Safer: build the FIXS env instead ->")
+        print(f"            conda env create -f {ENV_YML}")
+    if question is None:
+        if not shared:
+            return True
+        question = "install there anyway? [y/N]: "
+    try:
+        return input("        " + question).strip().lower() in ("y", "yes")
+    except EOFError:
+        # No console to answer on (piped run, CI). Declining is the only safe
+        # default: the whole point is that this install is not reversible by
+        # deleting an env.
+        print("        (no console to confirm on - not installing.)")
+        return False
 
 
 _VERSION_PROBE = """\
@@ -649,7 +857,10 @@ def ensure_carla(py_exe, mode, carla_root=None):
         if has_carla:
             print(f"[setup] carla {_carla_version(py_exe)} already importable.")
             return
-        print("[setup] carla missing in this env; installing carla==0.9.15 (PyPI) ...")
+        print("[setup] carla missing in this env.")
+        if not _confirm_install(py_exe, "carla==0.9.15 (PyPI wheel, with its deps)"):
+            sys.exit("[setup] carla not installed; re-run and bind a dedicated env "
+                     "(--update-python).")
         if not _pip_install(py_exe, ["carla==0.9.15"]):
             sys.exit("[setup] pip install carla==0.9.15 failed.")
         return None
@@ -659,9 +870,12 @@ def ensure_carla(py_exe, mode, carla_root=None):
     if has_carla:
         print(f"[setup] carla {_carla_version(py_exe)} already importable.")
         if wheel:
-            ans = input(f"[setup] reinstall carla from this source build's wheel to guarantee\n"
-                        f"        client/server match? {os.path.basename(wheel)} [y/N]: ").strip().lower()
-            if ans != "y":
+            ok = _confirm_install(
+                py_exe,
+                f"{os.path.basename(wheel)} (this source build's wheel, "
+                f"--force-reinstall --no-deps)",
+                "reinstall it to guarantee client/server match? [y/N]: ")
+            if not ok:
                 # Return nothing: the caller records what came back as the config's
                 # carla_wheel, i.e. as the wheel this env is running. Naming one that
                 # was declined would describe an install that never happened.
@@ -673,11 +887,16 @@ def ensure_carla(py_exe, mode, carla_root=None):
         return wheel
     # carla not importable -> must install the source wheel
     if not wheel:
-        print(f"[setup] no wheel auto-found under {carla_root}\\PythonAPI\\carla\\dist.")
+        print("[setup] no wheel auto-found under "
+              f"{os.path.join(carla_root, 'PythonAPI', 'carla', 'dist')}.")
         wheel = _pick_file("Select the source build's carla wheel (PythonAPI/carla/dist/*.whl)")
     if not wheel or not os.path.isfile(wheel):
         sys.exit("[setup] no carla wheel available; build CARLA's PythonAPI first "
                  "(make PythonAPI) or select the wheel manually.")
+    if not _confirm_install(py_exe, f"{os.path.basename(wheel)} (this source "
+                                    f"build's wheel, --no-deps)"):
+        sys.exit("[setup] carla not installed; re-run and bind a dedicated env "
+                 "(--update-python).")
     print(f"[setup] installing source carla wheel: {wheel}")
     if not _pip_install(py_exe, ["--no-deps", wheel]):
         sys.exit("[setup] wheel install failed.")

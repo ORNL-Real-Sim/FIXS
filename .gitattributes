@@ -10,3 +10,11 @@
 # these files, which is what lets the installer's unpack-time CRLF normalization
 # be retired once a release ships built from a checkout with this in place.
 *.sh text eol=lf
+
+# Office documents are binary: never attempt a text diff or a line-based merge on
+# them. doc/xil/AxleDynoCarMakerCoupling.pptx is a build product of
+# doc/xil/make_slides_pptx.py -- on a conflict, regenerate from the script rather
+# than trying to reconcile the blobs.
+*.pptx binary
+*.docx binary
+*.xlsx binary

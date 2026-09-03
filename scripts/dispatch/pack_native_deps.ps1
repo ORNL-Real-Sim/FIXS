@@ -3,9 +3,15 @@
 # publish them to ONE rolling public release: fixs-native-deps. Issue #109.
 # ----------------------------------------------------------------------------
 # Assets (each with a .sha256 sidecar):
-#   libcarla-<carla_ver>.zip   - Carla client SDK, RELEASE subset (drops the
-#                                319 MB carla_client_debug.lib; Release-only)
-#   libsumo-<sumo_ver>.zip     - SUMO libsumo/libtraci headers + bin/
+#   libcarla-<carla_ver>-windows-x86_64.zip  - Carla client SDK, RELEASE subset
+#                                (drops the 319 MB carla_client_debug.lib)
+#   libsumo-<sumo_ver>-windows-x86_64.zip    - SUMO libsumo/libtraci headers + bin/
+#
+# The -windows-x86_64 suffix is NOT decoration. These assets share one rolling
+# release with the Linux ones from scripts/pack_native_deps.sh, which have always
+# been platform-qualified. While the Windows names were bare, 'libsumo-*.zip' in
+# the consumer updater matched the Linux zip too and installed a .so on Windows.
+# Every name on this release states its platform, so no consumer has to infer it.
 #
 # Versions come from dependencies.yaml; the release TAG is version-less so
 # multiple versions can coexist as separate assets. CI + developers fetch via
@@ -28,6 +34,10 @@ $ErrorActionPreference = 'Stop'
 $RepoRoot  = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $CommonLib = Join-Path $RepoRoot 'CommonLib'
 $Tag       = 'fixs-native-deps'
+# This packer runs on Windows and stages Windows binaries; the Linux counterpart
+# is scripts/pack_native_deps.sh, which stamps linux-x86_64. Named here once so
+# both assets carry it.
+$PlatformTag = 'windows-x86_64'
 if (-not $OutDir) { $OutDir = Join-Path $RepoRoot 'dist' }
 New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
 
@@ -70,7 +80,7 @@ if ($Component -in 'both', 'carla') {
         Where-Object { $_.Name -ne 'carla_client_debug.lib' } |
         ForEach-Object { Copy-Item $_.FullName -Destination (Join-Path $sc 'lib') -Force }
     Write-Host "libcarla ${cver}: staged Release subset (dropped carla_client_debug.lib)"
-    $assets.Add((New-Zip $stage "libcarla-$cver.zip"))
+    $assets.Add((New-Zip $stage "libcarla-$cver-$PlatformTag.zip"))
     Remove-Item $stage -Recurse -Force
 }
 
@@ -89,7 +99,7 @@ if ($Component -in 'both', 'sumo') {
         # gets zipped, so a staging bug cannot slip past the check either.
         Test-LibsumoLoadable -BinDir (Join-Path $ss 'bin') `
             -Context 'Re-run scripts/build_libsumo.ps1, or restore the missing DLL from the official SUMO Windows distribution, before packing.'
-        $assets.Add((New-Zip $stage "libsumo-$sver.zip"))
+        $assets.Add((New-Zip $stage "libsumo-$sver-$PlatformTag.zip"))
         Remove-Item $stage -Recurse -Force
     } else { Write-Warning "CommonLib/libsumo not present - skipping libsumo." }
 }

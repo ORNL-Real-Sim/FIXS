@@ -3,8 +3,9 @@
 # Test-LibsumoLoadable <binDir>.
 #
 # Why this exists: since #238 the SUMO runtime is no longer vendored in git, so
-# the libsumo-<ver>.zip release asset is the ONLY source of it. A silently
-# incomplete bin/ is therefore a repo-wide breakage, not a local annoyance.
+# the libsumo-<ver>-windows-x86_64.zip release asset is the ONLY source of it. A
+# silently incomplete bin/ is therefore a repo-wide breakage, not a local
+# annoyance.
 #
 # It stayed hidden for months before: CommonLib/libsumo/bin shipped without
 # geos_c.dll + geos.dll (imported by gdal.dll, which libsumocpp.dll pulls in),

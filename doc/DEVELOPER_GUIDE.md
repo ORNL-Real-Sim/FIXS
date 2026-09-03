@@ -149,7 +149,7 @@ It initializes the `ProprietaryFiles` submodule (optional — private repo), acq
 `scripts/update_fixs.ps1` and `scripts/update_fixs.sh` are a different thing: they are the **consumer-side** installers for a published FIXS release zip, not for setting up a developer checkout.
 
 ### Native dependencies (`CommonLib/libsumo`, `CommonLib/libcarla`)
-Neither is committed to git. Both are gitignored and fetched at setup time from the public rolling release `fixs-native-deps` as version-named, SHA-256-verified assets (`libsumo-<ver>.zip`, `libcarla-<ver>.zip`); versions come from `dependencies.yaml`.
+Neither is committed to git. Both are gitignored and fetched at setup time from the public rolling release `fixs-native-deps` as version- and platform-named, SHA-256-verified assets (`libsumo-<ver>-windows-x86_64.zip`, `libcarla-<ver>-windows-x86_64.zip`; the same release carries the `-linux-x86_64` pair); versions come from `dependencies.yaml`.
 
 - **libsumo is required** — `TrafficLayer.vcxproj` links `CommonLib\libsumo\bin\libsumocpp.lib` directly, so nothing core builds without it. A failed fetch is a hard error.
 - **libcarla is optional** — only `VirCarlaEnv` needs it; a failed or unconfigured fetch just skips that component.
