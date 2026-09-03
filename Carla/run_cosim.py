@@ -3546,42 +3546,6 @@ def main():
             sys.exit(f"[cosim] '{app['id']}' is missing its declared dependencies; "
                      f"not starting the run.")
 
-    # The application starts HERE, before anything reaches for a map bundle, because
-    # it may be the one that says which scenario to run - and an app that generates
-    # its own needs no sumo/ half at all, so asking for one would prompt over a ~380MB
-    # archive whose SUMO content is about to be thrown away. It keeps running from
-    # this point: it is the controller, and it waits for TrafficLayer while the map is
-    # cooked and CARLA comes up. A first cook is minutes, so its wait for the bridge
-    # has to be patient - run_cosim stops it if anything below fails.
-    app_proc, app_sumocfg = (None, None)
-    if app and app.get("launch"):
-        # The yaml this run will hand TrafficLayer. Known already for a config that
-        # was chosen (--config, or the one the profile remembers); a first run that
-        # GENERATES a per-map config has none yet, and the app falls back to its own.
-        app_proc, app_sumocfg = start_app(app, args.config or setup.get("config"),
-                                          sumo_only=args.sumo_only,
-                                          sumocfg=args.sumocfg)
-
-    def cached_sumo_dir(name):
-        """An already-extracted ~/.fixs/maps/<name>/sumo, or None.
-
-        Consulted at EVERY site that would otherwise reach for the map bundle,
-        because opening the bundle is not free: download_release_zip prompts
-        "[U]se it / [R]e-download" over a ~380MB archive that a map with its
-        sumo/ already extracted would immediately throw away. There is more than
-        one such site - the source-build preflight, and the SUMO slot below that
-        also runs for --no-launch / packaged builds - and fixing only one of them
-        just moves the prompt. --sumocfg, an app-reported scenario and --reimport
-        deliberately bypass it: the first two supply the scenario outright, the
-        last means "refresh from the bundle"."""
-        if args.sumocfg is not None or app_sumocfg is not None or args.reimport:
-            return None
-        found = import_map.map_sumo_dir(name)
-        if found:
-            print(f"[cosim] using cached SUMO scenario for '{name}': "
-                  f"{import_map.bundle_sumocfg(found)}")
-        return found
-
     # Two slots to fill: a CARLA map (to cook + load) and a SUMO scenario. A
     # Digital-Twin-Library bundle fills both. The map itself was settled above; what
     # is derived here is how to GET it - the release to download, the per-map
@@ -3636,6 +3600,69 @@ def main():
             picked_local = import_map._select_package("map", None,
                                                        inside=("xodr", "fbx"))
             _sumo_for_local_pick(setup, ctx, picked_local, args)
+    # An app that BUILDS its scenario from the map's needs the map's scenario on disk
+    # BEFORE it starts, which is the opposite of the default the comment below
+    # describes - so it is opened here, and only for an app that says it needs it.
+    # `sumo_dir` is the same one the SUMO slot further down reuses; opening the
+    # bundle twice would prompt twice over the same archive.
+    sumo_dir = None              # dir holding the chosen bundle's .sumocfg (set on open)
+    map_sumocfg = None
+    if app and app.get("needs_map_sumo") and args.sumocfg is None:
+        sumo_dir = import_map.map_sumo_dir(target_map)
+        if sumo_dir is None and (picked_local or picked_tag):
+            bundle = picked_local
+            if not bundle and picked_tag:
+                bundle = import_map.download_release_zip(
+                    repo, picked_tag, force_redownload=args.reimport,
+                    cache_name=target_map, asset=(ent or {}).get("asset"))
+            # A precooked .tar.gz is the CARLA half only - there is no sumo/ in it.
+            if bundle and not str(bundle).lower().endswith(".tar.gz"):
+                _carla_src, sumo_dir = import_map.open_bundle(bundle,
+                                                              cache_name=target_map)
+        map_sumocfg = import_map.bundle_sumocfg(sumo_dir)
+        if map_sumocfg:
+            print(f"[cosim] '{app['id']}' builds its scenario from the map's: "
+                  f"{map_sumocfg}")
+        else:
+            print(f"[cosim] '{app['id']}' declares needs_map_sumo, but '{target_map}' "
+                  f"ships no SUMO scenario to build from; it falls back to its own.")
+
+    # The application starts HERE, and (needs_map_sumo above aside) before anything
+    # reaches for a map bundle, because it may be the one that says which scenario to
+    # run - and an app that generates its own from scratch needs no sumo/ half at all,
+    # so asking for one would prompt over a ~380MB archive whose SUMO content is about
+    # to be thrown away. It keeps running from this point: it is the controller, and
+    # it waits for TrafficLayer while the map is cooked and CARLA comes up. A first cook is minutes, so its wait for the bridge
+    # has to be patient - run_cosim stops it if anything below fails.
+    app_proc, app_sumocfg = (None, None)
+    if app and app.get("launch"):
+        # The yaml this run will hand TrafficLayer. Known already for a config that
+        # was chosen (--config, or the one the profile remembers); a first run that
+        # GENERATES a per-map config has none yet, and the app falls back to its own.
+        app_proc, app_sumocfg = start_app(app, args.config or setup.get("config"),
+                                          sumo_only=args.sumo_only,
+                                          sumocfg=args.sumocfg or map_sumocfg)
+
+    def cached_sumo_dir(name):
+        """An already-extracted ~/.fixs/maps/<name>/sumo, or None.
+
+        Consulted at EVERY site that would otherwise reach for the map bundle,
+        because opening the bundle is not free: download_release_zip prompts
+        "[U]se it / [R]e-download" over a ~380MB archive that a map with its
+        sumo/ already extracted would immediately throw away. There is more than
+        one such site - the source-build preflight, and the SUMO slot below that
+        also runs for --no-launch / packaged builds - and fixing only one of them
+        just moves the prompt. --sumocfg, an app-reported scenario and --reimport
+        deliberately bypass it: the first two supply the scenario outright, the
+        last means "refresh from the bundle"."""
+        if args.sumocfg is not None or app_sumocfg is not None or args.reimport:
+            return None
+        found = import_map.map_sumo_dir(name)
+        if found:
+            print(f"[cosim] using cached SUMO scenario for '{name}': "
+                  f"{import_map.bundle_sumocfg(found)}")
+        return found
+
     # Checkpoint. Everything the questionnaire asked is now decided, and the next
     # thing that runs - the map import - is the one that fails for reasons outside
     # this script (a cook that crashes the editor, a bundle that will not open).
@@ -3672,7 +3699,6 @@ def main():
                      else settings.get("net_offset") != "keep")
     tls_manager = args.tls_manager or settings.get("tls_manager") or "sumo"
 
-    sumo_dir = None              # dir holding the chosen bundle's .sumocfg (set on open)
     # /Game/... path to boot CARLA into (set by the source-build preflight). None
     # (packaged build / --no-launch) = let the engine pick.
     target_level = None
