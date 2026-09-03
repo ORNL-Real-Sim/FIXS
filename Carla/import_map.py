@@ -1584,6 +1584,54 @@ def _app_map_choice(name, catalog, cooked):
     return None
 
 
+def library_bundles(releases, catalog, tag_prefix=""):
+    """The source bundles `releases` publish, one row per bundle.
+
+    A release can carry more than one source bundle - `mlk` holds the corridor
+    and its U-turn variant - and the thing anyone picks between is the bundle,
+    not the tag it happens to be hosted on. catalog.json already calls itself
+    the index for the picker and already says which bundles exist and which .zip
+    each one is, so that is what the menu is built from. Listing releases
+    instead made a second bundle on a tag unreachable from the menu, and left
+    `--map <tag>` resolving to whichever entry happened to come first.
+
+    Each row: {name, label, asset, release}.
+      name    what the caller returns and what --map takes (the `location`)
+      label   the real cooked map name, so an Online row and its Local twin read
+              as the same map ('roosevelt_full' in both) rather than as two
+              unrelated things ('roosevelt' vs 'roosevelt_full')
+      asset   the exact .zip to download - what stops a release carrying several
+              from being a lottery, the same way catalog_cooked_asset does for
+              the precooked tier
+      release the release it is published on
+
+    A release no catalog entry claims still gets one row, named from its tag: a
+    bundle published before its catalog entry lands must not be invisible.
+
+    Precooked packages are not rows here. They are .tar.gz published beside the
+    source zips, they carry the same map, and which one a packaged CARLA needs is
+    answered by catalog_cooked_asset at download time - not by a second menu
+    line for the same map.
+    """
+    by_release = {}
+    for m in catalog or []:
+        by_release.setdefault(m.get("release"), []).append(m)
+    rows = []
+    for r in releases:
+        pkg = _package_from_tag(r["tag"], tag_prefix)
+        entries = by_release.get(r["tag"]) or by_release.get(pkg) or []
+        if not entries:
+            rows.append({"name": pkg, "label": pkg, "asset": None, "release": r})
+            continue
+        for ent in entries:
+            name = ent.get("location") or pkg
+            rows.append({"name": name,
+                         "label": ent.get("map_name") or name,
+                         "asset": ent.get("asset"),
+                         "release": r})
+    return rows
+
+
 def choose_map(repo, tag_prefix="", carla_root=None, catalog=None,
                preferred=None, app_label=None, current=None):
     """Interactive chooser. Two sections plus `L` for a file the user downloaded by
@@ -1625,31 +1673,28 @@ def choose_map(repo, tag_prefix="", carla_root=None, catalog=None,
     resolved_app = [r for r in (_app_map_choice(n, catalog, cooked) for n in preferred) if r]
     app_tags = {tag for _k, _l, _f, tag in resolved_app if tag}
     app_names = {label for _k, label, _f, _t in resolved_app}
+    bundles = library_bundles(releases, catalog, tag_prefix)
+    # Narrow to the app's own maps by matching the BUNDLE, not its tag: two
+    # bundles can share a release, so an app pinned to one of them must not be
+    # offered the other as if the two were interchangeable.
     if app_tags:
-        releases = [r for r in releases if r["tag"] in app_tags]
+        bundles = [b for b in bundles
+                   if b["label"] in app_names or b["release"]["tag"] in app_tags]
 
     print("\n[import] Pick a map to run:")
-    menu = []          # menu number -> ("release", release) | ("cooked", name)
+    menu = []          # menu number -> ("bundle", bundle) | ("cooked", name)
     default_idx = 1    # menu number Enter selects; the app's map when there is one
     current_idx = 0    # ... unless the setup already runs one of these
-    if releases:
+    if bundles:
         who = f" for {app_label}" if app_tags and app_label else ""
         print(f"  Online (Digital-Twin-Library){who}:")
-        for r in releases:
-            menu.append(("release", r))
-            pkg = _package_from_tag(r["tag"], tag_prefix)
-            # Label with the REAL cooked map name when the catalog knows one, so an
-            # Online entry and its Local twin read as the same map ('roosevelt_full'
-            # in both lists) instead of two unrelated things ('roosevelt' vs
-            # 'roosevelt_full'). The release tag stays the identifier we return and
-            # what --map accepts; only the display changes. Safe because
-            # catalog_entry() resolves location, map_name and release alike.
-            ent = catalog_entry(catalog, pkg)
-            label = (ent or {}).get("map_name") or pkg
+        for b in bundles:
+            menu.append(("bundle", b))
+            r, label = b["release"], b["label"]
             flag = "  (pre-release)" if r["prerelease"] else ""
             if label in cooked:
                 flag += "  (already imported)"
-            if label == current:
+            if current in (label, b["name"]):
                 flag += "  (current)"
                 current_idx = len(menu)
             print(f"   {len(menu):>2}) {label:<26} {r['date']}{flag}")
@@ -1669,7 +1714,7 @@ def choose_map(repo, tag_prefix="", carla_root=None, catalog=None,
                 current_idx = len(menu)     # cooked beats the library copy
             print(f"   {len(menu):>2}) {name}{mark}")
     if not menu:
-        print("   (no online releases or imported maps found)")
+        print("   (no online bundles or imported maps found)")
     print("   L) select a local precooked *_cooked.tar.gz instead" if packaged
           else "   L) select a local .zip / folder instead")
     if current_idx:
@@ -1720,8 +1765,8 @@ def choose_map(repo, tag_prefix="", carla_root=None, catalog=None,
             return name, None, path
         if ans.isdigit() and 1 <= int(ans) <= len(menu):
             kind, payload = menu[int(ans) - 1]
-            if kind == "release":
-                return _package_from_tag(payload["tag"], tag_prefix), payload["tag"], None
+            if kind == "bundle":
+                return payload["name"], payload["release"]["tag"], None
             return payload, None, None  # cooked: already imported, run as-is
         print("[import] invalid choice; enter a number, or L for a local file.")
 
@@ -2067,20 +2112,32 @@ def _download_release_asset(repo, tag, pattern, suffix, force_redownload=False,
     got = [f for f in os.listdir(tag_dir) if f.lower().endswith(suffix)]
     if not got:
         sys.exit(f"[import] release '{tag}' has no {what} matching '{pattern}'.")
+    # An exact asset name wins over whatever else the cache dir holds. The
+    # download itself already fetched only that one, but a dir shared by two
+    # bundles would otherwise hand back a sibling by listing order.
+    if pattern in got:
+        return os.path.join(tag_dir, pattern)
     # Note WHICH asset this is, while we still know. The cache dir is named for the
     # map, not the release, so nothing else here can answer that afterwards.
     _write_sha(tag_dir, _release_asset_sha(repo, tag, pattern))
     return os.path.join(tag_dir, got[0])
 
 
-def download_release_zip(repo, tag, force_redownload=False, cache_name=None):
+def download_release_zip(repo, tag, force_redownload=False, cache_name=None,
+                         asset=None):
     """Return a local path to the release's .zip asset, downloading it via gh into
     the ~/.fixs/maps/<cache_name or tag>/ cache (cache_name = the cooked map name,
     so the zip sits beside the extracted carla/+sumo/). If a cached copy already
     exists, ask whether to reuse or re-download (default reuse); force_redownload
-    skips the prompt. The zip stays in the cache so re-imports are free."""
-    return _download_release_asset(repo, tag, "*.zip", ".zip", force_redownload,
-                                   cache_name, what="source bundle (.zip)")
+    skips the prompt. The zip stays in the cache so re-imports are free.
+
+    `asset` is the exact published name, from the catalog entry. Without it the
+    glob picks whichever .zip the release happens to list first, which is wrong
+    the moment a release carries more than one bundle - the same reason
+    download_cooked_tar has always taken its asset by name."""
+    return _download_release_asset(repo, tag, asset or "*.zip", ".zip",
+                                   force_redownload, cache_name,
+                                   what="source bundle (.zip)")
 
 
 def download_cooked_tar(repo, tag, asset, force_redownload=False, cache_name=None):
@@ -2126,7 +2183,7 @@ def pick_and_import(repo, tag_prefix="", carla_root=None, ue4_root=None, force=F
     catalog = fetch_catalog(repo)
     name, tag, local = choose_map(repo, tag_prefix, carla_root, catalog=catalog)
 
-    # The picker returns what the RELEASE is called ('mlk'); the cooked map inside
+    # The picker returns what the BUNDLE is called ('mlk'); the cooked map inside
     # it is often named differently ('mlk_no_signal'). Everything below - the
     # already-imported check, the install, the message - is about the map, so
     # resolve it here, exactly as run_cosim does before its own preflight.
@@ -2151,7 +2208,9 @@ def pick_and_import(repo, tag_prefix="", carla_root=None, ue4_root=None, force=F
                           local=local, force=force)
         return 0
 
-    zip_path = local if local else download_release_zip(repo, tag, force_redownload=force)
+    zip_path = local if local else download_release_zip(
+        repo, tag, force_redownload=force,
+        asset=(entry or {}).get("asset"))
     return ensure_map(name, carla_root=carla_root, ue4_root=ue4_root,
                       package_dir=zip_path, force=force,
                       source_sha=_read_sha(os.path.dirname(zip_path)))
