@@ -584,6 +584,14 @@ int ConfigHelper::getConfig(string configName) {
 	else {
 		SumoSetup.PrecedingVehicleLookahead = 1000.0;
 	}
+	// keepRoute for the externally-driven ego's moveToXY. 6 is what that call
+	// site hardcoded, so an absent key changes nothing. See SumoSetup_t.
+	if (node["EgoKeepRoute"]) {
+		SumoSetup.EgoKeepRoute = parserInteger(node, "EgoKeepRoute");
+	}
+	else {
+		SumoSetup.EgoKeepRoute = 6;
+	}
 	if (node["EnableAutoLaunch"]) {
 		SumoSetup.EnableAutoLaunch = parserFlag(node, "EnableAutoLaunch");
 	}
@@ -681,6 +689,84 @@ int ConfigHelper::getConfig(string configName) {
 	CarlaSetup.EgoMode      = node["EgoMode"]      ? parserInteger(node, "EgoMode") : 0;
 	// L0 driver: native Carla TM by default; "Pursuit" selects the fallback module.
 	CarlaSetup.EgoL0Driver  = node["EgoL0Driver"]  ? parserString(node, "EgoL0Driver") : "TM";
+
+	// #305 the two-knob surface. Read AFTER the legacy keys so that when a scenario
+	// declares them they win, and a scenario that does not keeps today's behaviour
+	// byte for byte. See ConfigHelper.h for what the values mean.
+	CarlaSetup.EgoDynamics        = node["EgoDynamics"]        ? parserString(node, "EgoDynamics") : "";
+	CarlaSetup.EgoActuationSource = node["EgoActuationSource"] ? parserString(node, "EgoActuationSource") : "";
+	{
+		// dependency-free ASCII fold, so "carlaTM"/"CarlaTM"/"carlatm" all read alike
+		auto lowerAscii = [](const std::string& s) {
+			std::string out = s;
+			for (size_t i = 0; i < out.size(); i++)
+				if (out[i] >= 'A' && out[i] <= 'Z') out[i] = (char)(out[i] - 'A' + 'a');
+			return out;
+		};
+		auto hasMsgField = [&](const char* f) {
+			for (size_t i = 0; i < SimulationSetup.VehicleMessageField.size(); i++)
+				if (SimulationSetup.VehicleMessageField[i] == f) return true;
+			return false;
+		};
+
+		if (!CarlaSetup.EgoDynamics.empty()) {
+			const std::string dyn = lowerAscii(CarlaSetup.EgoDynamics);
+			if (dyn == "traffic") {
+				CarlaSetup.EgoMode = 0;
+				CarlaSetup.EnableExternalControl = false;
+			}
+			else if (dyn == "carla") {
+				// 2, not 1, on purpose: "advisory-capable" costs nothing when no
+				// controller is wired in (the advisory read falls back to
+				// EgoTargetSpeed), and it keeps L0 and L2 ONE configuration --
+				// which, in every respect the bridge can see, they are.
+				CarlaSetup.EgoMode = 2;
+				// This is also what TrafficLayer's carlaOwnsId reads. Deriving both
+				// from one key is the point: the two processes decide ego ownership
+				// together and have no arbiter, so they must not be able to disagree.
+				CarlaSetup.EnableExternalControl = true;
+			}
+			else if (dyn == "xil") {
+				printf("ERROR: EgoDynamics: 'xil' is a declared value but is not implemented yet.\n"
+				       "       Use 'traffic' or 'carla'.\n");
+				exit(-1);
+			}
+			else {
+				printf("ERROR: EgoDynamics must be one of traffic|carla|xil, got '%s'\n",
+				       CarlaSetup.EgoDynamics.c_str());
+				exit(-1);
+			}
+		}
+
+		if (!CarlaSetup.EgoActuationSource.empty()) {
+			const std::string src = lowerAscii(CarlaSetup.EgoActuationSource);
+			if      (src == "carlatm")  CarlaSetup.EgoL0Driver = "TM";
+			else if (src == "internal") CarlaSetup.EgoL0Driver = "Pursuit";
+			else if (src == "external") CarlaSetup.EgoL0Driver = "Actuation";
+			else {
+				printf("ERROR: EgoActuationSource must be one of carlaTM|internal|external, got '%s'\n",
+				       CarlaSetup.EgoActuationSource.c_str());
+				exit(-1);
+			}
+
+			// A controller can only produce a field that is ON THE WIRE. Without
+			// this the omission is invisible: the client computes pedals, FIXS
+			// strips them, and the ego simply ignores its controller -- which reads
+			// as a controller bug for as long as you care to look for one.
+			if (src == "external") {
+				const char* need[] = { "acceleratorPedalDesired", "brakePedalDesired", "steerAngleDesired" };
+				for (int i = 0; i < 3; i++) {
+					if (!hasMsgField(need[i])) {
+						printf("ERROR: EgoActuationSource: external needs '%s' in VehicleMessageField;\n"
+						       "       without it the controller's command is stripped before it "
+						       "reaches the ego.\n", need[i]);
+						exit(-1);
+					}
+				}
+			}
+		}
+	}
+
 	CarlaSetup.EgoId        = node["EgoId"]        ? parserString(node, "EgoId") : "ego";
 	CarlaSetup.EgoSumoType  = node["EgoSumoType"]  ? parserString(node, "EgoSumoType") : "car";
 	CarlaSetup.EgoBlueprint = node["EgoBlueprint"] ? parserString(node, "EgoBlueprint") : "vehicle.tesla.model3";

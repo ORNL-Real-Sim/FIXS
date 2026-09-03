@@ -1,0 +1,505 @@
+#!/usr/bin/env python
+"""Run CARLA's BasicAgent against a FIXS record instead of a live CARLA world.
+
+CARLA's agent is already a pure function of (ego state, world) -> VehicleControl:
+PythonAPI/examples/automatic_control.py calls `agent.run_step()` and then
+`player.apply_control(control)` itself, so the agent never touches the vehicle.
+That is what makes this possible -- both ends can be replaced without touching
+the control law.
+
+    automatic_control.py                    a FIXS client
+    ------------------------------------    -----------------------------------
+    world.player (a live carla.Vehicle) ->  the ego's FIXS record, via EgoAdapter
+    agent.set_destination(loc)          ->  EgoRoutePoints -> set_global_plan
+    agent.run_step()                    ->  IDENTICAL, from agents/ next door
+    player.apply_control(control)       ->  3 fields on the wire; VirCarlaEnv
+                                            calls apply_control on the physics ego
+
+Everything in agents/ is vendored BYTE-IDENTICAL from CARLA (see VERSION.txt).
+This file holds every FIXS-specific line there is, and there are three kinds:
+
+  EgoAdapter      stands in for `world.player`, and converts frames
+  FixsBasicAgent  BasicAgent with its two DETECTORS overridden -- nothing else
+  densify         resample a decimated route to CARLA's own waypoint spacing
+
+FRAMES. CARLA/UE4 is LEFT-handed, so its yaw increases clockwise and
+VehicleControl.steer is positive-right consistently with that. SUMO/FIXS is
+right-handed with y north. Converting once, here, is what lets CARLA's code run
+in the frame it was written for:
+
+    carla_x = fixs_x      carla_y = -fixs_y      carla_yaw = fixs_heading - 90
+
+Checked against the MLK scenario's own data: the ego enters at FIXS heading
+113.36 deg -> yaw 23.36, and its first motion (dx=+0.33, dy=-0.15) gives atan2
+24.44 deg. The steer that comes back is already CARLA's positive-right, which is
+what VirCarlaEnv's applyEgoActuation expects -- so there is no sign correction
+anywhere here, and there cannot be one. Getting this wrong is not subtle: taking
+the probe client's convention on faith span the car through 180 deg and drove it
+off the map in 40 s.
+
+Selftest (no CARLA server, no FIXS needed):
+    python fixs_adapter.py
+"""
+from __future__ import annotations
+
+import json
+import math
+import os
+import sys
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+
+SIGNAL_RED = 1          # CommonLib/TrafficHelper.cpp tlsStateToColor()
+MAX_STEER_RAD = 0.7     # must match mainVirCarla.cpp kMaxSteerRad
+
+
+# ---------------------------------------------------------------------------
+# importing the agent code
+# ---------------------------------------------------------------------------
+
+def vendored_version():
+    """The CARLA version agents/ was copied from, per VERSION.txt."""
+    try:
+        for line in open(os.path.join(_HERE, "VERSION.txt"), encoding="utf-8"):
+            if line.startswith("source"):
+                for tok in line.split():
+                    if tok[:1].isdigit():
+                        return tok
+    except OSError:
+        pass
+    return None
+
+
+def _installed_carla_version(carla_mod):
+    for attr in ("__version__", "VERSION"):
+        v = getattr(carla_mod, attr, None)
+        if v:
+            return str(v)
+    try:                                    # the wheel name is the fallback
+        root = json.load(open(os.path.expanduser("~/.fixs/carla.json"),
+                              encoding="utf-8")).get("carla_wheel", "")
+        base = os.path.basename(root)
+        if base.startswith("carla-"):
+            return base.split("-")[1]
+    except Exception:
+        pass
+    return None
+
+
+def import_carla_agents(explicit_root=None, warn_on_drift=True):
+    """-> (carla, BasicAgent, RoadOption).
+
+    Uses the VENDORED agents/ next to this file. `carla` itself still comes from
+    the installed package, because it is a compiled extension and cannot be
+    vendored as source.
+
+    DRIFT is the cost of vendoring: agents/ is pinned to one CARLA version while
+    the simulator is whatever carla.json launches. A mismatch means the control
+    code and the physics come from different releases, which is the kind of
+    divergence you only notice as results that moved. So it is reported, not
+    silently tolerated.
+
+    explicit_root overrides the vendored copy with a live CARLA install's
+    PythonAPI/carla -- useful for testing against a different CARLA without
+    re-vendoring.
+    """
+    if explicit_root:
+        if not os.path.isdir(os.path.join(explicit_root, "agents", "navigation")):
+            raise SystemExit(f"[adapter] no agents/navigation under {explicit_root}")
+        sys.path.insert(0, explicit_root)
+    else:
+        sys.path.insert(0, _HERE)           # agents/ lives here
+
+    try:
+        import carla                                              # noqa: F401
+        from agents.navigation.basic_agent import BasicAgent
+        from agents.navigation.local_planner import RoadOption
+    except ImportError as exc:
+        raise SystemExit(
+            f"[adapter] cannot import the agent code ({exc}).\n"
+            f"[adapter]   `carla` itself must be installed (pip/conda); agents/ is\n"
+            f"[adapter]   vendored next to this file. basic_agent also needs\n"
+            f"[adapter]   networkx and shapely.")
+
+    if warn_on_drift and not explicit_root:
+        want, have = vendored_version(), _installed_carla_version(carla)
+        if want and have and not have.startswith(want):
+            print(f"[adapter] WARNING: agents/ is vendored from CARLA {want} but the "
+                  f"installed CARLA is {have}.\n"
+                  f"[adapter]   The control code and the simulator are different "
+                  f"releases. Re-vendor (see VERSION.txt) or expect drift.",
+                  file=sys.stderr)
+    return carla, BasicAgent, RoadOption
+
+
+# ---------------------------------------------------------------------------
+# the CARLA objects the agent touches
+# ---------------------------------------------------------------------------
+
+class _Control:
+    """get_control() -- LocalPlanner reads .steer once, at construction."""
+    steer = 0.0
+
+
+class Waypoint:
+    """carla.Waypoint is opaque; the agent only ever reads .transform.
+
+    Takes FIXS coordinates and stores CARLA ones, so callers never do the y-flip.
+    """
+    __slots__ = ("transform",)
+
+    def __init__(self, carla_mod, fixs_x, fixs_y):
+        self.transform = carla_mod.Transform(
+            carla_mod.Location(x=fixs_x, y=-fixs_y, z=0.0))
+
+
+class _ActorList(list):
+    """world.get_actors() -- always empty, because both sweeps over it are
+    overridden in FixsBasicAgent."""
+
+    def filter(self, _pattern):
+        return []
+
+
+class _Map:
+    def __init__(self, carla_mod):
+        self._carla = carla_mod
+
+    def get_waypoint(self, location, *_a, **_k):
+        wp = Waypoint.__new__(Waypoint)
+        wp.transform = self._carla.Transform(
+            self._carla.Location(x=location.x, y=location.y, z=0.0))
+        return wp
+
+    def get_topology(self):
+        # BasicAgent.__init__ builds a GlobalRoutePlanner unconditionally
+        # (basic_agent.py:99) even though the route is supplied here. An empty
+        # topology gives it an empty graph, which is safe precisely because
+        # trace_route is never called. Measured: 0.1 ms, 0 nodes, never read.
+        return []
+
+
+class _World:
+    def __init__(self, carla_mod):
+        self._map = _Map(carla_mod)
+
+    def get_map(self):
+        return self._map
+
+    def get_actors(self):
+        return _ActorList()
+
+
+class EgoAdapter:
+    """Stands in for `world.player`.
+
+    Quacks like carla.Vehicle for exactly the calls LocalPlanner and
+    VehiclePIDController make -- get_world, get_control, get_transform,
+    get_location, get_velocity. No actor id, no bounding box, no physics
+    control, because the code that wanted those is the two overridden detectors.
+    """
+
+    def __init__(self, carla_mod):
+        self._carla = carla_mod
+        self._world = _World(carla_mod)
+        self._yaw = 0.0
+        self._prev_xy = None
+        self.set_state(0.0, 0.0, 0.0, 0.0)
+
+    # --- the carla.Vehicle interface ---
+    def get_world(self):     return self._world
+    def get_control(self):   return _Control()
+    def get_transform(self): return self._tf
+    def get_location(self):  return self._tf.location
+    def get_velocity(self):  return self._vel
+
+    # --- the FIXS side ---
+    def set_state(self, fixs_x, fixs_y, carla_yaw_deg, speed_ms):
+        c = self._carla
+        self._tf = c.Transform(c.Location(x=fixs_x, y=-fixs_y, z=0.0),
+                               c.Rotation(yaw=carla_yaw_deg))
+        r = math.radians(carla_yaw_deg)
+        self._vel = c.Vector3D(x=speed_ms * math.cos(r),
+                               y=speed_ms * math.sin(r), z=0.0)
+
+    def update_from_record(self, ego):
+        """One call per tick: take the ego's FIXS record and become it.
+
+        Heading comes from MOTION once the car is moving, which is convention-
+        free: no assumption about whether the wire's `heading` is navigational
+        or mathematical, or which way it turns. Seeded from the wire on the
+        first tick because the ego is inserted at ~0 m/s and sits there.
+        """
+        if self._prev_xy is None:
+            self._yaw = fixs_heading_to_carla_yaw(ego.heading or 0.0)
+        else:
+            dx = ego.positionX - self._prev_xy[0]
+            dy = ego.positionY - self._prev_xy[1]
+            if math.hypot(dx, dy) > 0.05:
+                self._yaw = motion_heading_to_carla_yaw(dx, dy)
+        self._prev_xy = (ego.positionX, ego.positionY)
+        self.set_state(ego.positionX, ego.positionY, self._yaw, ego.speed)
+        return self._yaw
+
+
+def fixs_heading_to_carla_yaw(fixs_heading_deg):
+    """FIXS navigational degrees (0 = N, clockwise) -> CARLA yaw."""
+    return fixs_heading_deg - 90.0
+
+
+def motion_heading_to_carla_yaw(dx_fixs, dy_fixs):
+    """CARLA yaw from a FIXS displacement, independent of any wire convention."""
+    return math.degrees(math.atan2(-dy_fixs, dx_fixs))
+
+
+# ---------------------------------------------------------------------------
+# BasicAgent, with two methods replaced
+# ---------------------------------------------------------------------------
+
+def make_agent_class(BasicAgent):
+    """CARLA's BasicAgent with SUMO's answers behind its two detectors.
+
+    A factory rather than a module-scope class because BasicAgent is only
+    importable after import_carla_agents() has resolved the path.
+
+    Both overrides keep the STOCK SIGNATURE and are handed CARLA's own
+    max_distance -- base_threshold + speed_ratio * speed, computed inside
+    run_step -- so the thresholds stay stock too. Only the source of the answer
+    changes.
+
+    Why replace them at all: stock has no notion of "my next signal", so it
+    sweeps every light actor and keeps those whose trigger volume shares its
+    road_id and faces the same way (basic_agent.py:296-309); and no notion of
+    "the vehicle ahead of me on my route", so it sweeps a polygon along its own
+    plan and intersects it with every nearby bounding box (:324-347). Both are
+    geometric reconstructions of something SUMO computes from the actual route
+    and connection topology and publishes on the wire.
+    """
+
+    class FixsBasicAgent(BasicAgent):
+        ego_record = None       # set from the tick loop before each run_step
+
+        def _vehicle_obstacle_detected(self, vehicle_list=None, max_distance=None,
+                                       up_angle_th=90, low_angle_th=0, lane_offset=0):
+            e = self.ego_record
+            if e is None or not getattr(e, "hasPrecedingVehicle", 0):
+                return (False, None, -1)
+            gap = e.precedingVehicleDistance or 0.0
+            if gap <= 0.0:
+                return (False, None, -1)
+            return (gap < (max_distance or self._base_vehicle_threshold), None, gap)
+
+        def _affected_by_traffic_light(self, lights_list=None, max_distance=None):
+            e = self.ego_record
+            if e is None or e.signalLightColor != SIGNAL_RED:
+                return (False, None)
+            dist = e.signalLightDistance or 0.0
+            if dist <= 0.0:
+                return (False, None)
+            return (dist < (max_distance or self._base_tlight_threshold), None)
+
+    return FixsBasicAgent
+
+
+# ---------------------------------------------------------------------------
+# route helpers
+# ---------------------------------------------------------------------------
+
+def planner_options(dt, sampling_resolution=2.0):
+    """opt_dict for BasicAgent/LocalPlanner with `dt` ACTUALLY applied.
+
+    LocalPlanner.__init__ captures self._dt into the two gain dicts by value
+    (local_planner.py:81-82) and only then reads opt_dict, where 'dt' rebinds
+    the attribute -- which nothing reads afterwards; line 94 is its last
+    occurrence in the file. So opt_dict={'dt': 0.1} is a no-op and both PIDs
+    keep CARLA's 20 Hz default, even though the docstring lists dt as a
+    supported parameter. The dicts are only replaced wholesale, by
+    lateral_control_dict / longitudinal_control_dict.
+
+    Left uncorrected against the 10 Hz FIXS feed that silently doubles the
+    derivative term and halves the integral one:
+
+        _de = (e[-1] - e[-2]) / dt        dt too small -> D too strong
+        _ie = sum(buffer) * dt            dt too small -> I too weak
+
+    Measured before this helper existed: lateral PID _dt = 0.05 while the loop
+    ran at 0.1. Gains below are CARLA's own defaults, untouched; only dt is
+    carried through. Lives here rather than in a controller script so the next
+    controller does not have to rediscover it.
+    """
+    return {
+        "dt": dt,
+        "sampling_radius": sampling_resolution,
+        "lateral_control_dict":      {"K_P": 1.95, "K_I": 0.05, "K_D": 0.2, "dt": dt},
+        "longitudinal_control_dict": {"K_P": 1.0,  "K_I": 0.05, "K_D": 0.0, "dt": dt},
+    }
+
+
+def densify(points, spacing=2.0):
+    """Resample a polyline to ~spacing metres.
+
+    CARLA's own plans are 2 m apart and LocalPlanner's purge distance
+    (3.0 + 0.5*v) is tuned for that. EgoRoutePoints is decimated to ~14 m on
+    MLK, which would leave the lateral controller aiming at a point whose
+    distance depends on how the geometry happened to be sampled.
+    """
+    if len(points) < 2:
+        return list(points)
+    out = []
+    for i in range(len(points) - 1):
+        ax, ay = points[i]
+        bx, by = points[i + 1]
+        n = max(1, int(math.hypot(bx - ax, by - ay) / spacing))
+        for k in range(n):
+            out.append((ax + (bx - ax) * k / n, ay + (by - ay) * k / n))
+    out.append(points[-1])
+    return out
+
+
+def route_from_carla(carla_mod, host, port, start_xy, end_xy, spacing=2.0):
+    """CARLA's own GlobalRoutePlanner against the LIVE map -- the one path that
+    needs a running server."""
+    from agents.navigation.global_route_planner import GlobalRoutePlanner
+    client = carla_mod.Client(host, port)
+    client.set_timeout(20.0)
+    grp = GlobalRoutePlanner(client.get_world().get_map(), spacing)
+    trace = grp.trace_route(carla_mod.Location(x=start_xy[0], y=-start_xy[1]),
+                            carla_mod.Location(x=end_xy[0], y=-end_xy[1]))
+    return [(wp.transform.location.x, -wp.transform.location.y) for wp, _ in trace]
+
+
+# ---------------------------------------------------------------------------
+# scenario yaml bits the FIXS client API does not parse
+#
+# Connecting, framing, answering once per tick, shutdown and record echo are all
+# CommonLib/fixs.py's job (#316) -- none of it belongs here any more. What is
+# left is the two CarlaSetup values a CARLA-side controller needs and the python
+# ConfigHelper does not expose.
+# ---------------------------------------------------------------------------
+
+def read_route_points(config_path):
+    """EgoRoutePoints from a scenario yaml, read textually.
+
+    Not via a YAML parser on purpose: the block is machine-generated between
+    marker comments, the surrounding file carries `#pragma once` and other
+    non-YAML noise, and the python ConfigHelper does not parse
+    CarlaSetup.EgoRoutePoints at all.
+    """
+    import re
+    text = open(config_path, encoding="utf-8", errors="replace").read()
+    m = re.search(r"EgoRoutePoints:\s*\[(.*?)\n\s*\]", text, re.S)
+    if not m:
+        return []
+    return [(float(a), float(b))
+            for a, b in re.findall(r"\[\s*([-\d.]+)\s*,\s*([-\d.]+)\s*\]", m.group(1))]
+
+
+def read_ego_id(config_path, default="ego"):
+    import re
+    text = open(config_path, encoding="utf-8", errors="replace").read()
+    m = re.search(r"^\s*EgoId:\s*[\"']?(\S+?)[\"']?\s*$", text, re.M)
+    return m.group(1) if m else default
+
+
+def middle_port(config_path, explicit=None):
+    """The port between the advisory controller's and the bridge's.
+
+    fixs.connect() requires the port when a config declares more than one
+    subscription, and requires it rather than guessing -- silently taking entry
+    0 is how two clients end up sharing one endpoint. This picks it for the one
+    arrangement where the answer is not a guess: an actuation client must sit
+    ABOVE the advisory controller, to see its speedDesired, and BELOW
+    VirCarlaEnv, so the bridge sees the pedals. With three subscriptions that is
+    the middle one, and the choice is printed rather than assumed.
+    """
+    if explicit is not None:
+        return explicit
+    from CommonLib.ConfigHelper import ConfigHelper
+    cfg = ConfigHelper()
+    cfg.getConfig(config_path)
+    subs = cfg.application_setup.get("VehicleSubscription") or []
+    ports = sorted({p for s in subs for p in s["port"]})
+    if len(ports) < 3:
+        raise SystemExit(
+            f"[adapter] this config declares ports {ports}; an actuation client "
+            f"needs one between the controller's and VirCarlaEnv's. Pass --port.")
+    print(f"[adapter] ports {ports} -> taking {ports[1]} "
+          f"(above {ports[0]}, below {ports[-1]})", flush=True)
+    return ports[1]
+
+
+# ---------------------------------------------------------------------------
+# selftest
+# ---------------------------------------------------------------------------
+
+def _selftest():
+    """Everything that can be checked without a CARLA server or a FIXS feed."""
+    carla, BasicAgent, RoadOption = import_carla_agents()
+    import agents.navigation.basic_agent as ba
+    print(f"vendored from : {vendored_version()}")
+    print(f"agents/       : {os.path.relpath(ba.__file__, _HERE)}")
+
+    Agent = make_agent_class(BasicAgent)
+    overrides = sorted(k for k in Agent.__dict__ if not k.startswith("__"))
+    print(f"overrides     : {overrides}")
+    assert overrides == ["_affected_by_traffic_light", "_vehicle_obstacle_detected",
+                         "ego_record"], overrides
+
+    # frames, against the MLK scenario's measured entry state
+    assert abs(fixs_heading_to_carla_yaw(113.36) - 23.36) < 1e-6
+    assert abs(motion_heading_to_carla_yaw(0.33, -0.15) - 24.44) < 0.01
+    print("frames        : 113.36 deg -> yaw 23.36; motion -> 24.44  OK")
+
+    class _Rec:
+        hasPrecedingVehicle = 0
+        precedingVehicleDistance = 0.0
+        signalLightColor = -1
+        signalLightDistance = 0.0
+        heading = 90.0
+    rec = _Rec()
+
+    # closed loop on a straight line, both signs, through CARLA's real planner
+    for y0 in (1.5, -1.5):
+        ego = EgoAdapter(carla)
+        ag = Agent(ego, target_speed=8.0 * 3.6,
+                   opt_dict={"dt": 0.1, "sampling_radius": 2.0})
+        ag.set_global_plan([(Waypoint(carla, float(x), 0.0), RoadOption.LANEFOLLOW)
+                            for x in range(0, 600, 2)])
+        ag.ego_record = rec
+        x, y, yaw, v = 0.0, y0, 0.0, 8.0
+        for _ in range(200):
+            ego.set_state(x, y, yaw, v)
+            c = ag.run_step()
+            yaw += math.degrees((v / 2.9) * math.tan(c.steer * 1.22) * 0.1)
+            x += v * math.cos(math.radians(yaw)) * 0.1
+            y -= v * math.sin(math.radians(yaw)) * 0.1
+        assert abs(y) < 0.2, f"offset {y0} did not converge: {y}"
+        print(f"lateral       : {y0:+.1f} m -> {y:+.3f} m after 20 s  OK")
+
+    # hazards, with CARLA's own thresholds (5 + 1.0*v)
+    ego = EgoAdapter(carla)
+    ag = Agent(ego, target_speed=8.0 * 3.6, opt_dict={"dt": 0.1})
+    ag.set_global_plan([(Waypoint(carla, float(x), 0.0), RoadOption.LANEFOLLOW)
+                        for x in range(0, 600, 2)])
+    ego.set_state(0.0, 0.0, 0.0, 8.0)
+    ag.ego_record = rec
+    rec.hasPrecedingVehicle, rec.precedingVehicleDistance = 1, 8.0
+    c = ag.run_step()
+    assert c.brake > 0.4 and c.throttle == 0.0, (c.throttle, c.brake)
+    print(f"leader  8 m   : throttle {c.throttle:.2f} brake {c.brake:.2f}  OK")
+    rec.precedingVehicleDistance = 40.0
+    c = ag.run_step()
+    assert c.brake == 0.0, c.brake
+    print(f"leader 40 m   : throttle {c.throttle:.2f} brake {c.brake:.2f}  OK")
+    rec.hasPrecedingVehicle = 0
+    rec.signalLightColor, rec.signalLightDistance = SIGNAL_RED, 6.0
+    c = ag.run_step()
+    assert c.brake > 0.4, c.brake
+    print(f"red     6 m   : throttle {c.throttle:.2f} brake {c.brake:.2f}  OK")
+
+    print("\nselftest passed")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(_selftest())
