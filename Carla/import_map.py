@@ -60,6 +60,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import zipfile
 
 import carla_env_setup as env
@@ -2132,7 +2133,6 @@ def record_source(cache_name, half, path):
     shared identity to compare - only an origin to record. Best effort: a missing
     note costs bookkeeping, not a run."""
     import json
-    import time
     if not cache_name or not path:
         return
     dest = os.path.join(_map_cache_dir(cache_name), "source.json")
@@ -2520,7 +2520,6 @@ def _mb(n):
 
 
 def _stamp(t):
-    import time
     return time.strftime("%Y-%m-%d %H:%M", time.localtime(t))
 
 
@@ -2682,7 +2681,6 @@ def capture_import_evidence(carla_root, name, dest_root=None, tag=""):
     usually been pushed out. A cook that dies is exactly when those files matter,
     so they are taken at that moment rather than hunted for afterwards. Returns
     the directory, or None if there was nothing to take."""
-    import time
     saved = os.path.join(carla_root, "Unreal", "CarlaUE4", "Saved")
     logs, crashes = os.path.join(saved, "Logs"), os.path.join(saved, "Crashes")
     if not os.path.isdir(logs):
@@ -2781,10 +2779,14 @@ def _purge_ask(msg):
         return ""
 
 
-def _parse_selection(answer, count):
+def parse_selection(answer, count):
     """0-based indices named by a picker answer: '2', '1,3,4', '2-5', 'all'. None
     when the answer does not parse or names nothing - the caller re-asks or
-    cancels rather than acting on a guess, because what follows is a deletion."""
+    cancels rather than acting on a guess, because what follows is a deletion.
+
+    Public, and shared with run_profile's setup picker. Two lists a user deletes
+    from should not accept two different syntaxes, and the only way to be sure they
+    do not drift apart is for there to be one of them."""
     answer = (answer or "").strip().lower()
     if answer in ("a", "all", "*"):
         return list(range(count))
@@ -2825,7 +2827,7 @@ def _purge_table(records, indent="   "):
 
 
 def purge(carla_root, mode=None, named="", drop_cache=None, interactive=False,
-          carla_busy=None):
+          carla_busy=None, carla_kill=None):
     """Delete imported maps from this machine. Returns a shell exit code.
 
     A map occupies three places that age independently, so all three are shown
@@ -2846,6 +2848,10 @@ def purge(carla_root, mode=None, named="", drop_cache=None, interactive=False,
     `interactive` is the caller's answer to "may this stop and ask?", the same
     contract choose_imported_map takes and for the same reason: a --serve host has
     a terminal and nobody sitting at it, and isatty() cannot tell the difference.
+
+    `carla_kill` is an optional callable taking that pid and ending the process
+    tree; when both it and a terminal are present, a running CARLA is offered up to
+    be closed instead of the purge simply refusing.
 
     `carla_busy` is an optional zero-argument callable returning the pid of a
     CARLA holding this machine's Content/ open, or None. Injected rather than
@@ -2892,7 +2898,7 @@ def purge(carla_root, mode=None, named="", drop_cache=None, interactive=False,
         sys.exit("[purge] non-interactive session: name what to purge "
                  "(--purge-map NAME[,NAME] or --purge-map all).")
     else:
-        picked = _parse_selection(
+        picked = parse_selection(
             _purge_ask(f"[purge] Purge which? [1-{len(records)}, a list like "
                        f"1,3,4, or 'all'; Enter to cancel]: "), len(records))
         if picked is None:
@@ -2932,9 +2938,39 @@ def purge(carla_root, mode=None, named="", drop_cache=None, interactive=False,
     # anything, rather than leaving the wreckage that a half-delete makes.
     busy = carla_busy() if (carla_busy and carla_root) else None
     if busy:
-        sys.exit(f"[purge] CARLA is running (pid {busy}) and holds files under "
-                 f"Content/ open, so a delete would fail part-way through. "
-                 f"Close it and run this again.")
+        print(f"[purge] CARLA is running (pid {busy}) and holds files under "
+              f"Content/ open, so a delete would fail part-way through.")
+        # Offer rather than refuse. The delete cannot proceed either way, so the
+        # only question is who closes CARLA - and sending the user away to do it by
+        # hand costs a whole round trip to reach the identical state. Only offered
+        # when there is someone to ask AND a way to do it; `carla_kill` is passed in
+        # by the caller for the same reason carla_busy is - this module knows what
+        # holds the files, not how to end a process tree on this platform.
+        if interactive and carla_kill:
+            if not _purge_ask(f"[purge] Close CARLA (pid {busy}) now and continue? "
+                              f"[y/N]: ").lower().startswith("y"):
+                sys.exit("[purge] cancelled; nothing was deleted and CARLA is "
+                         "still running.")
+            print(f"[purge] closing CARLA (pid {busy}) ...")
+            carla_kill(busy)
+            # Confirm rather than assume: taskkill returns before the process tree
+            # is actually gone, and deleting while a handle survives is the
+            # half-delete this guard exists to prevent. A few seconds is generous
+            # for a kill that landed and short enough to be worth waiting out.
+            for _ in range(20):
+                time.sleep(0.5)
+                busy = carla_busy()
+                if not busy:
+                    break
+            if busy:
+                sys.exit(f"[purge] CARLA (pid {busy}) is still holding files after "
+                         f"the close request; nothing was deleted. Close it by hand "
+                         f"and run this again.")
+            print("[purge] CARLA closed.")
+        else:
+            sys.exit(f"[purge] close it and run this again"
+                     + ("" if interactive else " (non-interactive: not closing it "
+                        "for you)") + ".")
 
     if interactive and not _purge_ask(
             "[purge] Proceed? [y/N]: ").lower().startswith("y"):

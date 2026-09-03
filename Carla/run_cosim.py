@@ -3427,7 +3427,8 @@ def main():
             None if mode == "client" else cfg.get("carla_root"),
             mode=mode, named=args.purge_map, drop_cache=args.purge_cache,
             interactive=_interactive(args),
-            carla_busy=lambda: _carla_pid_on(port))
+            carla_busy=lambda: _carla_pid_on(port),
+            carla_kill=_kill_pid_tree)
 
     # --carla-only holds a CARLA this machine launched, so the flags that mean
     # "launch nothing" contradict it outright. Caught here rather than later
