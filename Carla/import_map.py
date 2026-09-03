@@ -2527,45 +2527,42 @@ def resolve_existing_staging(carla_root, name, have_source, interactive=None):
     """Report an Import/ staging that already exists for `name`, and decide what to
     do about it. Returns "use", "restage" or "abort".
 
-    This is deliberately loud. Import/<name>/ is the input CARLA cooks, so a copy
-    left by an earlier import of a DIFFERENT export under the same name is cooked
-    in silence - the map builds, it is simply not the map that was picked. The old
-    behaviour said one quiet "package already staged" line for exactly that case.
+    Only INTERRUPTS when have_source is False - when nothing tells this call where
+    to copy from, so reusing whatever is already in Import/<name>/ is a guess: it
+    could be a leftover from an earlier import of a DIFFERENT export that happened
+    to share this name. That guess is what deserves a human's eyes.
 
-    The default is what this function would have done before it existed - reuse
-    when nothing else was supplied, re-stage when a source was - so pressing Enter
-    changes nothing. Non-interactive keeps that default and still prints the
-    report, which is the part that has to survive into the log."""
+    have_source=True means the opposite: a path, a URL, or an explicit pick was
+    already given, so there is nothing to decide - restaging from it is not a
+    guess, it is what was just asked for. Interrupting there anyway (every prior
+    version of this function did) turned a certainty into a keystroke on every
+    single --reimport, forever, for a caller who by definition already knows the
+    answer before being asked."""
     existing = staging_report(carla_root, name)
     if not existing:
         return "restage" if have_source else "use"
 
-    default = "restage" if have_source else "use"
+    if have_source:
+        print(f"[import] replacing the staged package for '{name}' with the "
+              f"source you gave.")
+        return "restage"
+
     print("")
     print(f"[import] Import/ ALREADY holds a staged package for '{name}':")
     for path, size, mtime in existing:
         kind = "folder" if os.path.isdir(path) else "file  "
         print(f"[import]   {kind} {path}  ({_mb(size)}, {_stamp(mtime)})")
-    if default == "use":
-        print(f"[import]   Nothing else was supplied, so THIS copy is what would be "
-              f"cooked - not a fresh one.")
-    else:
-        print(f"[import]   A source was supplied, so this copy would be REPLACED.")
+    print(f"[import]   Nothing else was supplied, so THIS copy is what would be "
+          f"cooked - not a fresh one.")
 
     if not (sys.stdin.isatty() if interactive is None else interactive):
-        print(f"[import]   non-interactive: continuing with '{default}'.")
-        return default
+        print("[import]   non-interactive: continuing with 'use'.")
+        return "use"
 
-    prompt = ("[U]se the staged copy / [R]e-stage from the source / [A]bort"
-              if have_source else "[U]se the staged copy / [A]bort")
     while True:
-        ans = _prompt(f"[import] {prompt}? [{default[0].upper()}]: ").strip().lower()
-        if ans == "":
-            return default
-        if ans.startswith("u"):
+        ans = _prompt("[import] [U]se the staged copy / [A]bort? [U]: ").strip().lower()
+        if ans in ("", "u"):
             return "use"
-        if ans.startswith("r") and have_source:
-            return "restage"
         if ans.startswith("a"):
             sys.exit("[import] aborted at the staging prompt; nothing was changed.")
         print("[import] please answer with one of the letters shown.")

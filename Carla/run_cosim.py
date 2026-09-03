@@ -3171,8 +3171,14 @@ def main():
                     help="URL of the map package zip for --auto-import (e.g. a release asset)")
     ap.add_argument("--map-config", default=None,
                     help="text file declaring the import package (package= and url= lines)")
-    ap.add_argument("--reimport", action="store_true",
-                    help="re-import the map even if already cooked (re-download + re-cook)")
+    ap.add_argument("--reimport", nargs="?", const=True, default=False,
+                    metavar="PATH",
+                    help="re-import the map even if already cooked (re-download + "
+                         "re-cook). With PATH: for a LOCAL map, re-import from "
+                         "that .fbx/.xodr file or folder directly, skipping the "
+                         "file dialog, and remember it for next time - PATH is "
+                         "ignored (with a note) for a Digital-Twin-Library map, "
+                         "which has nothing local to browse to.")
     ap.add_argument("--purge-map", nargs="?", const="", default=None,
                     metavar="NAME[,NAME]",
                     help="delete imported maps from this machine, then stop. With no "
@@ -3364,6 +3370,11 @@ def main():
                     help="[cpp] launch sumo-gui but omit --start, so it opens loaded "
                          "and waits for you to press Play (overrides SumoSetup.AutoStart)")
     args = ap.parse_args()
+    # --reimport PATH parses as a string in args.reimport; split it out here so
+    # every OTHER site in this file - there are over a dozen - can go on reading
+    # args.reimport as the plain bool it has always been.
+    args.reimport_path = args.reimport if isinstance(args.reimport, str) else None
+    args.reimport = bool(args.reimport)
 
     # Resolved before anything reads the endpoint, so --doctor, --version and the
     # run itself all see one setting rather than two spellings of it.
@@ -3589,6 +3600,26 @@ def main():
     picked_local = ctx.get("picked_local") or setup.get("map_local")
     if picked_local and not os.path.exists(picked_local):
         picked_local = None
+
+    # --reimport on a LOCAL map used to silently trust whatever path this setup
+    # remembered from however long ago - which goes stale the moment the export
+    # moves, and re-cooks last week's files with no error at all if the old
+    # folder is still sitting there with old content in it. A path given on the
+    # command line, or a fresh pick made just now in the editor (ctx), always
+    # wins; a bare --reimport with neither reopens the same browse dialog used at
+    # first setup instead of trusting the old one. The result becomes this run's
+    # picked_local, which the checkpoint save right below writes back into
+    # map_local - so the NEXT --reimport remembers whatever was just chosen here.
+    if args.reimport:
+        if map_origin != "local file":
+            if args.reimport_path:
+                print(f"[cosim] --reimport {args.reimport_path!r} ignored: "
+                      f"'{target_map}' is a {map_origin} map, not a local pick.")
+        elif args.reimport_path:
+            picked_local = args.reimport_path
+        elif not ctx.get("picked_local"):
+            picked_local = import_map._select_package("map", None,
+                                                       inside=("xodr", "fbx"))
     # Checkpoint. Everything the questionnaire asked is now decided, and the next
     # thing that runs - the map import - is the one that fails for reasons outside
     # this script (a cook that crashes the editor, a bundle that will not open).
