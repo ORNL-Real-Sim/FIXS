@@ -60,6 +60,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import zipfile
 
 import carla_env_setup as env
@@ -669,9 +670,15 @@ def stage_package(carla_root, name, package_url=None, package_dir=None, package_
     download of --package-url, else a file picker for a hand-downloaded copy."""
     import_dir = os.path.join(carla_root, "Import")
     descriptor = _descriptor(carla_root, name)
-    if os.path.isfile(descriptor) and not package_url and not package_dir and not package_pick:
-        print(f"[import] package already staged: {descriptor}")
-        return import_dir
+    # What is already in Import/ under this name is what CARLA would cook, so it is
+    # announced and offered before anything is written over it - see
+    # resolve_existing_staging. The defaults reproduce the previous behaviour.
+    have_source = bool(package_url or package_dir or package_pick)
+    if resolve_existing_staging(carla_root, name, have_source) == "use":
+        if os.path.isfile(descriptor):
+            print(f"[import] using the staged package: {descriptor}")
+            return import_dir
+        print(f"[import] no descriptor beside the staged folder; staging afresh.")
 
     os.makedirs(import_dir, exist_ok=True)
     tmpdir = None
@@ -766,7 +773,11 @@ def open_bundle(src, cache_name=None):
         sumo = os.path.join(src, "sumo")
         if os.path.isdir(carla):
             return carla, (sumo if os.path.isdir(sumo) else None)
-        return src, None
+        # Handed something INSIDE carla/ - what the picker returns for an
+        # already-extracted bundle, where the user clicks the .xodr rather
+        # than the .zip. Recover the sibling sumo/ instead of dropping it;
+        # carla_src stays `src`, so staging and naming are unchanged.
+        return src, _bundle_sumo_beside(src)
     if os.path.isfile(src) and src.lower().endswith(".zip"):
         with zipfile.ZipFile(src) as z:
             if not _looks_like_bundle(z.namelist()):
@@ -928,6 +939,52 @@ def classify_source(src, cache_name=None):
     if sdir is not None:
         return None, sdir                           # sumo-only
     return carla_src, None                          # carla-only
+
+
+def _bundle_sumo_beside(src):
+    """The sumo/ half of the bundle `src` sits inside, or None.
+
+    Ascends, because the file picker returns the folder holding the clicked
+    .xodr/.fbx and its depth inside carla/ varies across the library (atlanta ships
+    carla/<name>.xodr, roosevelt and mlk ship carla/<name>/<name>.xodr). Bounded,
+    and the ascent must pass through the bundle's own carla/, so an export sitting
+    beside an unrelated sumo/ is never adopted."""
+    if not src or not os.path.isdir(src):
+        return None
+    cur = os.path.normpath(src)
+    for _ in range(4):
+        parent = os.path.dirname(cur)
+        if not parent or parent == cur:
+            return None
+        if os.path.basename(cur).lower() == "carla" and \
+                os.path.isdir(os.path.join(parent, "sumo")):
+            return os.path.join(parent, "sumo")
+        cur = parent
+    return None
+
+
+def local_pick_carries_sumo(path):
+    """Does a locally-picked map source already come with a SUMO scenario?
+
+    Read-only and cheap - a zip is listed, a folder walked, nothing extracted or
+    copied - which is what lets the run questionnaire ask it while it is still only
+    making decisions. classify_source answers the same question but EXTRACTS a
+    bundle to do it, so it stays after the decisions rather than inside them.
+
+    False for a raw RoadRunner export and for a precooked *_cooked.tar.gz: the two
+    picks that leave run_cosim's SUMO slot empty."""
+    if not path:
+        return False
+    if os.path.isfile(path) and path.lower().endswith(".zip"):
+        try:
+            with zipfile.ZipFile(path) as z:
+                return any(n.lower().endswith(".sumocfg") for n in z.namelist())
+        except (OSError, zipfile.BadZipFile):
+            return False               # unreadable: let the late chain report it
+    if os.path.isdir(path):
+        return (_dir_with_sumocfg(path) is not None
+                or _bundle_sumo_beside(path) is not None)
+    return False
 
 
 def fetch_catalog(repo):
@@ -1174,6 +1231,28 @@ def ensure_map(name, carla_root=None, ue4_root=None, package_url=None,
 
     rc = run_import(carla_root, ue4_root, name)
     ok = os.path.isfile(umap)
+
+    # An Unreal commandlet that dies takes Import.py's remaining steps with it
+    # (invoke_commandlet uses check_call). Report it every time - the exit code is
+    # otherwise swallowed by the .umap check below - and retry ONCE when the map
+    # did not survive. Retrying is worth doing because the crash we see is not
+    # deterministic: the same commandlet on the same package succeeds on a re-run.
+    # It is deliberately not retried when the map IS there; that work succeeded,
+    # and repeating a multi-minute cook to re-attempt one skipped step is a worse
+    # trade than saying clearly what was skipped.
+    if rc != 0:
+        _report_import_failure(name, rc, ok,
+                               capture_import_evidence(carla_root, name))
+        if not ok:
+            print(f"[import] retrying the import for '{name}' (attempt 2 of 2) ...")
+            rc = run_import(carla_root, ue4_root, name)
+            ok = os.path.isfile(umap)
+            if rc != 0:
+                _report_import_failure(name, rc, ok,
+                                       capture_import_evidence(carla_root, name,
+                                                               tag="_retry"))
+            elif ok:
+                print(f"[import] the retry succeeded; '{name}' imported.")
 
     if os.path.isdir(backup):
         if ok:
@@ -1788,6 +1867,8 @@ def choose_sumo_source(cache_name=None):
     _carla_src, sumo_dir = classify_source(path, cache_name)
     if sumo_dir is None:
         print(f"[cosim] no .sumocfg found in {path}")
+    else:
+        record_source(cache_name, "sumo", path)
     return sumo_dir
 
 
@@ -2039,6 +2120,34 @@ def _write_sha(directory, sha):
         with open(os.path.join(directory, SHA_FILE), "w", encoding="utf-8") as f:
             f.write(sha.strip() + "\n")
     except OSError:
+        pass
+
+
+def record_source(cache_name, half, path):
+    """Note where a locally-picked half came from, in ~/.fixs/maps/<name>/source.json.
+
+    A local pick otherwise leaves no trace: .source_sha is written only for release
+    downloads, so _check_map_source declines to check a hand-picked map at all. A
+    note per HALF rather than one digest, because the two halves of a local map come
+    from unrelated trees (a RoadRunner export and a SUMO folder), so there is no
+    shared identity to compare - only an origin to record. Best effort: a missing
+    note costs bookkeeping, not a run."""
+    import json
+    if not cache_name or not path:
+        return
+    dest = os.path.join(_map_cache_dir(cache_name), "source.json")
+    try:
+        doc = {}
+        if os.path.isfile(dest):
+            with open(dest, encoding="utf-8") as f:
+                doc = json.load(f) or {}
+        doc[half] = {"path": os.path.abspath(path),
+                     "mtime": int(os.stat(path).st_mtime),
+                     "recorded": int(time.time())}
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        with open(dest, "w", encoding="utf-8") as f:
+            json.dump(doc, f, indent=2, sort_keys=True)
+    except (OSError, ValueError):
         pass
 
 
@@ -2391,6 +2500,244 @@ def staged_import_paths(carla_root, name):
             if os.path.exists(p)]
 
 
+# --------------------------------------------------------------------------- #
+# Import/ hygiene. CARLA's Import.py cooks whatever it finds in that one folder,
+# so what is left there from previous imports is not inert - it is input. The two
+# helpers below make that visible: one before a map is staged over an existing
+# copy, one to clear the copies nothing is going to use again.
+# --------------------------------------------------------------------------- #
+def staging_report(carla_root, name):
+    """What Import/ already holds for `name`, as [(path, bytes, mtime), ...]."""
+    out = []
+    for p in staged_import_paths(carla_root, name):
+        size = _dir_size(p) if os.path.isdir(p) else os.path.getsize(p)
+        out.append((p, size, os.path.getmtime(p)))
+    return out
+
+
+def _mb(n):
+    return "%.1f MB" % (n / (1024.0 * 1024.0)) if n >= 1024 * 1024 else "%.0f KB" % (n / 1024.0)
+
+
+def _stamp(t):
+    return time.strftime("%Y-%m-%d %H:%M", time.localtime(t))
+
+
+def resolve_existing_staging(carla_root, name, have_source, interactive=None):
+    """Report an Import/ staging that already exists for `name`, and decide what to
+    do about it. Returns "use", "restage" or "abort".
+
+    This is deliberately loud. Import/<name>/ is the input CARLA cooks, so a copy
+    left by an earlier import of a DIFFERENT export under the same name is cooked
+    in silence - the map builds, it is simply not the map that was picked. The old
+    behaviour said one quiet "package already staged" line for exactly that case.
+
+    The default is what this function would have done before it existed - reuse
+    when nothing else was supplied, re-stage when a source was - so pressing Enter
+    changes nothing. Non-interactive keeps that default and still prints the
+    report, which is the part that has to survive into the log."""
+    existing = staging_report(carla_root, name)
+    if not existing:
+        return "restage" if have_source else "use"
+
+    default = "restage" if have_source else "use"
+    print("")
+    print(f"[import] Import/ ALREADY holds a staged package for '{name}':")
+    for path, size, mtime in existing:
+        kind = "folder" if os.path.isdir(path) else "file  "
+        print(f"[import]   {kind} {path}  ({_mb(size)}, {_stamp(mtime)})")
+    if default == "use":
+        print(f"[import]   Nothing else was supplied, so THIS copy is what would be "
+              f"cooked - not a fresh one.")
+    else:
+        print(f"[import]   A source was supplied, so this copy would be REPLACED.")
+
+    if not (sys.stdin.isatty() if interactive is None else interactive):
+        print(f"[import]   non-interactive: continuing with '{default}'.")
+        return default
+
+    prompt = ("[U]se the staged copy / [R]e-stage from the source / [A]bort"
+              if have_source else "[U]se the staged copy / [A]bort")
+    while True:
+        ans = _prompt(f"[import] {prompt}? [{default[0].upper()}]: ").strip().lower()
+        if ans == "":
+            return default
+        if ans.startswith("u"):
+            return "use"
+        if ans.startswith("r") and have_source:
+            return "restage"
+        if ans.startswith("a"):
+            sys.exit("[import] aborted at the staging prompt; nothing was changed.")
+        print("[import] please answer with one of the letters shown.")
+
+
+# Files in Import/ that belong to CARLA (or to us) rather than to a staged map.
+IMPORT_KEEP = {"readme.md", "roadpainter_decals.json"}
+
+
+def import_staging_inventory(carla_root, keep=None):
+    """Split CARLA's Import/ into (staged, other).
+
+    `staged` is one record per package - {"name", "paths", "bytes"} - built from a
+    <name>.json descriptor, a <name>/ asset folder, or both, since either can
+    outlive the other. `keep` (the map about to be imported) is excluded.
+
+    `other` is everything this must not decide about: CARLA's own files, and the
+    strays that accumulate in Import/ by hand (a .zip, a .bak). They are reported,
+    never removed - guessing at a file nobody staged is how a clean-up becomes a
+    data loss."""
+    import_dir = os.path.join(carla_root, "Import")
+    if not os.path.isdir(import_dir):
+        return [], []
+    names, other = set(), []
+    for entry in sorted(os.listdir(import_dir)):
+        full = os.path.join(import_dir, entry)
+        low = entry.lower()
+        if low in IMPORT_KEEP or entry == os.path.basename(_stash_dir(import_dir)):
+            continue
+        if os.path.isdir(full):
+            names.add(entry)
+        elif low.endswith(".json"):
+            names.add(entry[:-len(".json")])
+        else:
+            other.append((full, os.path.getsize(full)))
+    staged = []
+    for name in sorted(n for n in names if n != keep):
+        paths = staged_import_paths(carla_root, name)
+        if not paths:
+            continue
+        total = sum(_dir_size(p) if os.path.isdir(p) else os.path.getsize(p)
+                    for p in paths)
+        staged.append({"name": name, "paths": paths, "bytes": total})
+    return staged, other
+
+
+def clean_import_dir(carla_root, keep=None, interactive=None, assume_yes=False):
+    """Clear stale per-map staging out of CARLA's Import/. Returns bytes reclaimed.
+
+    Complements --purge-map rather than duplicating it: a purge removes everything
+    ONE map owns (cooked content, staging, cache), and deliberately will not let a
+    lone Import/<name>.json qualify a name on its own. This is the other axis -
+    every staged package except the one being imported now - which is what clears
+    the descriptors a purge leaves behind and the packages of maps that are long
+    gone.
+
+    Never touches CARLA's own files, the set-aside stash, or anything it cannot
+    identify as staging: those are listed instead, for a human to judge."""
+    staged, other = import_staging_inventory(carla_root, keep)
+    if not staged:
+        print(f"[import] Import/ has no stale staging to clear"
+              + (f" (keeping '{keep}')." if keep else "."))
+        return 0
+
+    total = sum(s["bytes"] for s in staged)
+    print("")
+    print(f"[import] Import/ holds staging for {len(staged)} package(s) "
+          f"not being imported now ({_mb(total)}):")
+    for s in staged:
+        print(f"[import]   {s['name']:<24} {_mb(s['bytes'])}")
+        for p in s["paths"]:
+            print(f"[import]       {p}")
+    if keep:
+        print(f"[import]   (keeping '{keep}', which this run imports)")
+    if other:
+        print(f"[import]   NOT touching {len(other)} unrecognised item(s) - "
+              f"remove by hand if you want them gone:")
+        for path, size in other:
+            print(f"[import]       {path}  ({_mb(size)})")
+
+    if not assume_yes:
+        if not (sys.stdin.isatty() if interactive is None else interactive):
+            print("[import] non-interactive and no confirmation: nothing removed.")
+            return 0
+        ans = _prompt(f"[import] remove the {len(staged)} staged package(s) above? "
+                      f"[y/N]: ").strip().lower()
+        if not ans.startswith("y"):
+            print("[import] left Import/ as it was.")
+            return 0
+
+    freed = 0
+    for s in staged:
+        for p in s["paths"]:
+            try:
+                if os.path.isdir(p):
+                    shutil.rmtree(p)
+                else:
+                    os.remove(p)
+            except OSError as exc:
+                print(f"[import]   could not remove {p}: {exc}")
+                continue
+        freed += s["bytes"]
+        print(f"[import]   removed staging for '{s['name']}'")
+    print(f"[import] Import/ cleaned: {_mb(freed)} reclaimed.")
+    return freed
+
+
+def capture_import_evidence(carla_root, name, dest_root=None, tag=""):
+    """Copy Unreal's logs and its newest crash dump somewhere they will survive.
+
+    Unreal rotates Saved/Logs on EVERY editor launch, and one import is four
+    launches - so by the time anyone looks, the log of the run that failed has
+    usually been pushed out. A cook that dies is exactly when those files matter,
+    so they are taken at that moment rather than hunted for afterwards. Returns
+    the directory, or None if there was nothing to take."""
+    saved = os.path.join(carla_root, "Unreal", "CarlaUE4", "Saved")
+    logs, crashes = os.path.join(saved, "Logs"), os.path.join(saved, "Crashes")
+    if not os.path.isdir(logs):
+        return None
+    dest_root = dest_root or os.path.join(os.getcwd(), "RealSim_tmp")
+    stamp = time.strftime("%Y%m%d_%H%M%S")
+    dest = os.path.join(dest_root, f"import_crash_{name}{tag}_{stamp}")
+    try:
+        os.makedirs(dest, exist_ok=True)
+        shutil.copytree(logs, os.path.join(dest, "Logs"), dirs_exist_ok=True)
+        if os.path.isdir(crashes):
+            dumps = [os.path.join(crashes, d) for d in os.listdir(crashes)]
+            dumps = [d for d in dumps if os.path.isdir(d)]
+            if dumps:
+                newest = max(dumps, key=os.path.getmtime)
+                shutil.copytree(newest, os.path.join(dest, os.path.basename(newest)),
+                                dirs_exist_ok=True)
+    except OSError as exc:
+        print(f"[import] could not save crash evidence: {exc}")
+        return None
+    return dest
+
+
+def _report_import_failure(name, rc, produced, evidence):
+    """Say plainly that Unreal failed, what it cost, and where to look.
+
+    Never silent, and never dressed up as a warning: Import.py exiting non-zero
+    means an Unreal process died. When the .umap survives it (the cook writes it
+    one step before the step that usually crashes) the run can go on, but 'went on'
+    is not 'was fine' - the steps after the crash did not run, and this is the only
+    place that difference is visible."""
+    bar = "=" * 68
+    signed = rc - (1 << 32) if rc and rc > 0x7FFFFFFF else rc
+    hexrc = f" (0x{rc & 0xFFFFFFFF:08X})" if rc and rc not in (1, 2) else ""
+    print(f"\n[import] {bar}")
+    print(f"[import] Import.py FAILED for '{name}': exit {signed}{hexrc}")
+    if hexrc and (rc & 0xFFFFFFFF) == 0xC0000005:
+        print(f"[import]   0xC0000005 = access violation: an Unreal commandlet crashed.")
+    if produced:
+        print(f"[import]   The map WAS written, so the run can continue - but "
+              f"Import.py")
+        print(f"[import]   stopped at the crash, so the steps after it did not run "
+              f"(the")
+        print(f"[import]   Traffic-Manager binary Maps/{name}/TM/ is the one that "
+              f"goes missing;")
+        print(f"[import]   a SUMO-driven co-sim never reads it).")
+    else:
+        print(f"[import]   The map was NOT written. Retrying once.")
+    if evidence:
+        print(f"[import]   Unreal's logs + crash dump saved to:")
+        print(f"[import]     {evidence}")
+        print(f"[import]   (Unreal rotates Saved/Logs on every launch; without this "
+              f"copy they")
+        print(f"[import]    are usually gone within minutes.)")
+    print(f"[import] {bar}\n")
+
+
 def record_bytes(record, with_cache=False):
     """Bytes a purge of `record` would actually reclaim, given the cache choice."""
     return sum(b for label, _p, b in record["pieces"]
@@ -2432,10 +2779,14 @@ def _purge_ask(msg):
         return ""
 
 
-def _parse_selection(answer, count):
+def parse_selection(answer, count):
     """0-based indices named by a picker answer: '2', '1,3,4', '2-5', 'all'. None
     when the answer does not parse or names nothing - the caller re-asks or
-    cancels rather than acting on a guess, because what follows is a deletion."""
+    cancels rather than acting on a guess, because what follows is a deletion.
+
+    Public, and shared with run_profile's setup picker. Two lists a user deletes
+    from should not accept two different syntaxes, and the only way to be sure they
+    do not drift apart is for there to be one of them."""
     answer = (answer or "").strip().lower()
     if answer in ("a", "all", "*"):
         return list(range(count))
@@ -2476,7 +2827,7 @@ def _purge_table(records, indent="   "):
 
 
 def purge(carla_root, mode=None, named="", drop_cache=None, interactive=False,
-          carla_busy=None):
+          carla_busy=None, carla_kill=None):
     """Delete imported maps from this machine. Returns a shell exit code.
 
     A map occupies three places that age independently, so all three are shown
@@ -2497,6 +2848,10 @@ def purge(carla_root, mode=None, named="", drop_cache=None, interactive=False,
     `interactive` is the caller's answer to "may this stop and ask?", the same
     contract choose_imported_map takes and for the same reason: a --serve host has
     a terminal and nobody sitting at it, and isatty() cannot tell the difference.
+
+    `carla_kill` is an optional callable taking that pid and ending the process
+    tree; when both it and a terminal are present, a running CARLA is offered up to
+    be closed instead of the purge simply refusing.
 
     `carla_busy` is an optional zero-argument callable returning the pid of a
     CARLA holding this machine's Content/ open, or None. Injected rather than
@@ -2543,7 +2898,7 @@ def purge(carla_root, mode=None, named="", drop_cache=None, interactive=False,
         sys.exit("[purge] non-interactive session: name what to purge "
                  "(--purge-map NAME[,NAME] or --purge-map all).")
     else:
-        picked = _parse_selection(
+        picked = parse_selection(
             _purge_ask(f"[purge] Purge which? [1-{len(records)}, a list like "
                        f"1,3,4, or 'all'; Enter to cancel]: "), len(records))
         if picked is None:
@@ -2583,9 +2938,39 @@ def purge(carla_root, mode=None, named="", drop_cache=None, interactive=False,
     # anything, rather than leaving the wreckage that a half-delete makes.
     busy = carla_busy() if (carla_busy and carla_root) else None
     if busy:
-        sys.exit(f"[purge] CARLA is running (pid {busy}) and holds files under "
-                 f"Content/ open, so a delete would fail part-way through. "
-                 f"Close it and run this again.")
+        print(f"[purge] CARLA is running (pid {busy}) and holds files under "
+              f"Content/ open, so a delete would fail part-way through.")
+        # Offer rather than refuse. The delete cannot proceed either way, so the
+        # only question is who closes CARLA - and sending the user away to do it by
+        # hand costs a whole round trip to reach the identical state. Only offered
+        # when there is someone to ask AND a way to do it; `carla_kill` is passed in
+        # by the caller for the same reason carla_busy is - this module knows what
+        # holds the files, not how to end a process tree on this platform.
+        if interactive and carla_kill:
+            if not _purge_ask(f"[purge] Close CARLA (pid {busy}) now and continue? "
+                              f"[y/N]: ").lower().startswith("y"):
+                sys.exit("[purge] cancelled; nothing was deleted and CARLA is "
+                         "still running.")
+            print(f"[purge] closing CARLA (pid {busy}) ...")
+            carla_kill(busy)
+            # Confirm rather than assume: taskkill returns before the process tree
+            # is actually gone, and deleting while a handle survives is the
+            # half-delete this guard exists to prevent. A few seconds is generous
+            # for a kill that landed and short enough to be worth waiting out.
+            for _ in range(20):
+                time.sleep(0.5)
+                busy = carla_busy()
+                if not busy:
+                    break
+            if busy:
+                sys.exit(f"[purge] CARLA (pid {busy}) is still holding files after "
+                         f"the close request; nothing was deleted. Close it by hand "
+                         f"and run this again.")
+            print("[purge] CARLA closed.")
+        else:
+            sys.exit(f"[purge] close it and run this again"
+                     + ("" if interactive else " (non-interactive: not closing it "
+                        "for you)") + ".")
 
     if interactive and not _purge_ask(
             "[purge] Proceed? [y/N]: ").lower().startswith("y"):
