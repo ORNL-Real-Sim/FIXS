@@ -1202,13 +1202,63 @@ def confirm_world_ready(client, expected_map, timeout):
     return None
 
 
-def wait_for_port(host, port, timeout=180):
+def _unreal_log_dir(cfg):
+    """Where the editor writes CarlaUE4.log for this build, or None."""
+    root = (cfg or {}).get("carla_root")
+    if not root:
+        return None
+    d = os.path.join(root, "Unreal", "CarlaUE4", "Saved", "Logs")
+    return d if os.path.isdir(d) else None
+
+
+def report_unreal_crash(cfg):
+    """Print the newest Unreal log's fatal lines, and its path.
+
+    A CARLA that dies during LoadMap leaves everything needed to diagnose it in
+    that file - the map it was loading and the exception - while the console says
+    only that a port did not open. Reading three greps out of it here is the
+    difference between a one-line answer and an afternoon.
+    """
+    d = _unreal_log_dir(cfg)
+    if not d:
+        return
+    logs = [os.path.join(d, f) for f in os.listdir(d) if f.lower().endswith(".log")]
+    if not logs:
+        return
+    newest = max(logs, key=os.path.getmtime)
+    print(f"[cosim]   its log: {newest}")
+    try:
+        with open(newest, encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
+    except OSError:
+        return
+    keep = [ln.rstrip() for ln in lines
+            if ("LoadMap:" in ln
+                or "Critical error" in ln
+                or "Fatal error" in ln
+                or "Unhandled Exception" in ln)]
+    for ln in keep[-6:]:
+        print(f"[cosim]   | {ln.strip()}")
+
+
+def wait_for_port(host, port, timeout=180, proc=None, cfg=None):
+    """True once `port` accepts. False on timeout, or as soon as `proc` is gone.
+
+    Watching the process matters: a server that crashed at second 13 and one still
+    compiling shaders at second 179 are the same to a socket poll, and reporting
+    both as a timeout sends you to wait longer for something that is not running.
+    """
     deadline = time.time() + timeout
     while time.time() < deadline:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.settimeout(2)
             if s.connect_ex((host, port)) == 0:
                 return True
+        if proc is not None and proc.poll() is not None:
+            print(f"[cosim] the CARLA server exited ({proc.returncode}) before "
+                  f"opening port {port} - it did not time out, it stopped.")
+            report_unreal_crash(cfg)
+            return False
         time.sleep(2)
     return False
 
@@ -1953,7 +2003,15 @@ def derived_from_yaml(config_yaml, staged, args=None):
                 "carla_tick": getattr(args, "carla_tick", None),
                 "realtime": None}
     host, port = read_carla_endpoint(config_yaml)
-    return {"engine": declared_engine(staged, config_yaml) or read_backend(config_yaml),
+    # An EXPLICIT EnablePythonBackend wins over the app's declaration: the
+    # declaration exists because a hand-written yaml usually omits the key and
+    # ConfigHelper then defaults it to py, but once the key is in the file it is
+    # the answer - edit_engine writes it there, and the row is labelled "from the
+    # yaml". Reporting the declaration regardless made a menu change that HAD been
+    # written look like it was ignored.
+    return {"engine": (read_backend(config_yaml) if _declares_backend(config_yaml)
+                       else declared_engine(staged, config_yaml)
+                       or read_backend(config_yaml)),
             "carla_host": host, "carla_port": port,
             "carla_local": _is_local_host(host) if host else None,
             # The cadence and the pacing live here too, so the summary shows what
@@ -3121,6 +3179,21 @@ def edit_config(staged, app_title, map_name, setup_app_id, current=None,
     return picked, ("app" if picked in app_paths else "map")
 
 
+def _declares_backend(config_yaml):
+    """Whether the yaml sets CarlaSetup.EnablePythonBackend itself.
+
+    read_backend cannot say: it answers 'py' both for "the file says py" and for
+    "the file says nothing", which is exactly the ambiguity declared_engine exists
+    to cover. A textual check distinguishes them without a second parse.
+    """
+    try:
+        with open(config_yaml, encoding="utf-8", errors="replace") as f:
+            return any(ln.split("#", 1)[0].strip().startswith("EnablePythonBackend:")
+                       for ln in f)
+    except OSError:
+        return False
+
+
 def declared_engine(staged, config_yaml):
     """The bridge an app declares its yaml is written for, or None.
 
@@ -4273,8 +4346,10 @@ def main():
             _tell_peer(ctl_sock, "launch", "starting the CARLA server")
             carla_proc = launch_carla(cfg, args.carla_port, args.render_offscreen,
                                       args.quality_level, target_level)
-            if not wait_for_port(args.carla_host, args.carla_port):
-                sys.exit("CARLA RPC port did not open in time.")
+            if not wait_for_port(args.carla_host, args.carla_port,
+                                 proc=carla_proc, cfg=cfg):
+                sys.exit("[cosim] CARLA never became reachable; not starting the "
+                         "stack. See the lines above for why.")
 
         # A remote CARLA with a peer listening: ask it to serve this map rather
         # than requiring someone to have started it by hand with the right one.
