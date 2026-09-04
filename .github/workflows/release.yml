@@ -50,6 +50,12 @@ jobs:
     # windows-2022 = VS 2022 (v17), matching the generator dispatch derives from
     # dependencies.yaml. windows-latest ships VS 2026 (v18), incompatible.
     runs-on: windows-2022
+    # Consumed by the Linux bundle jobs below, so the two platforms land on ONE
+    # release under ONE channel tag rather than each resolving it separately.
+    outputs:
+      should_build: ${{ steps.detect.outputs.should_build }}
+      publish:      ${{ steps.channel.outputs.publish }}
+      tag:          ${{ steps.channel.outputs.tag }}
     steps:
       # Decide BEFORE checking out. This gate used to run AFTER a fetch-depth:0
       # checkout, so a PR with nothing to build still paid the full ~1 GB clone
@@ -352,3 +358,104 @@ jobs:
             scripts/dispatch/build.log
             scripts/dispatch/build_summary.log
           if-no-files-found: ignore
+
+  # ===========================================================================
+  # The Linux half of the same release: fixs-build-<ver>-linux-x86_64.zip beside
+  # the Windows bundle, selected by platform in update_fixs.{sh,ps1}.
+  #
+  # Built in a STOCK ubuntu:20.04 container, and that is the whole point. glibc
+  # and libstdc++ are forward-compatible only, so a focal-built binary runs on
+  # 20.04, 22.04 and 24.04 while a noble-built one runs on noble alone --
+  # measured by running both across all three. The jammy/noble legs in
+  # linux-build.yml stay a COMPILE gate; their artifacts must never ship.
+  # ===========================================================================
+  linux-bundle:
+    name: Linux bundle (focal)
+    needs: build-publish
+    if: needs.build-publish.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    container: ubuntu:20.04
+    steps:
+      - name: Install toolchain
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update -qq
+          # No SUMO or CARLA build dependencies: both runtimes are fetched
+          # prebuilt from the rolling native-deps release.
+          apt-get install -y -qq --no-install-recommends \
+            build-essential cmake ninja-build git ca-certificates curl unzip zip python3
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # git describe needs tags for the version stamp
+          submodules: false     # ProprietaryFiles is private and not needed here
+
+      # git refuses to run in a checkout owned by another uid (container vs runner).
+      - name: Trust the workspace
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Guard - MSBuild and CMake TU lists agree
+        run: python3 scripts/check_source_lists.py
+
+      - name: Fetch native deps (prebuilt libtraci + libcarla)
+        run: |
+          ./scripts/fetch_native_deps.sh
+          ./scripts/fetch_native_deps.sh --component carla
+
+      - name: Build
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j "$(nproc)"
+          # A skipped VirCarlaEnv is right for a developer without the SDK and
+          # wrong here: the fetch above was supposed to provide it, so a bundle
+          # missing it would ship silently reduced.
+          test -x build/VirCarlaEnv || { echo "VirCarlaEnv was skipped despite a fetched SDK"; exit 1; }
+
+      # Packs, and re-checks that neither binary requires anything newer than
+      # focal provides -- the check that catches a build environment which IS
+      # 20.04 but carries a newer libstdc++.
+      - name: Pack the Linux bundle
+        run: |
+          # Empty on a branch with no release channel (any feature branch), and
+          # the packer then derives the label from `git describe` -- which is
+          # what the Windows side does too. Passing a literal 'v0.0.0' fallback
+          # instead produced fixs-build-v0.0.0-linux-x86_64.zip on PR runs, a
+          # version that does not exist and tells a reviewer nothing.
+          ./scripts/dispatch/pack_linux_bundle.sh \
+            --version "${{ needs.build-publish.outputs.tag }}" \
+            --out-dir dist
+
+      - name: Upload bundle as a workflow artifact (inspect on PRs)
+        uses: actions/upload-artifact@v4
+        with:
+          name: fixs-build-zip-linux
+          path: dist/fixs-build-*-linux-x86_64.zip
+          if-no-files-found: error
+
+  # Separate job because the ubuntu:20.04 container has no gh CLI, and adding
+  # GitHub's apt repo to a build container to upload one file is worse than a
+  # second job on the runner image, which ships gh.
+  #
+  # Runs AFTER build-publish has created/updated the release, so this only ever
+  # adds an asset to a tag that already exists.
+  linux-publish:
+    name: Publish Linux bundle
+    needs: [build-publish, linux-bundle]
+    if: needs.build-publish.outputs.publish == 'true' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: fixs-build-zip-linux
+          path: dist
+
+      - name: Upload to the channel release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHANNEL_TAG: ${{ needs.build-publish.outputs.tag }}
+        run: |
+          zip="$(ls dist/fixs-build-*-linux-x86_64.zip)"
+          echo "Uploading $(basename "$zip") to $CHANNEL_TAG"
+          # --clobber replaces only this asset name; the Windows bundle on the
+          # same rolling release is untouched.
+          gh release upload "$CHANNEL_TAG" "$zip" --repo "$GITHUB_REPOSITORY" --clobber

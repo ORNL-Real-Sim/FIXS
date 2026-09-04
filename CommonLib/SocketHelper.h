@@ -7,6 +7,7 @@
 //#include <event2/util.h>
 //#include <event2/event.h>
 
+#include <cstdint>   // #65: uint8_t in sendData(); don't rely on a transitive include
 #include "MsgHelper.h"
 
 #ifndef WIN32
@@ -245,12 +246,14 @@ public:
 
 	std::vector <struct sockaddr_in> selfServerAddr; /* Local a ddress */
 	std::vector <struct sockaddr_in> clientAddr; /* Client address */
-#ifdef RS_DSPACE
-	std::vector <socklen_t> clientAddrLen;            /* Length of client address data structure */
-#elif WIN32
-	std::vector <int> clientAddrLen;            /* Length of client address data structure */
+#ifdef WIN32
+	std::vector <int> clientAddrLen;                  /* Length of client address data structure */
 #else
-	std::vector <size_t> clientAddrLen;            /* Length of client address data structure */
+	// #65: every POSIX target -- dSPACE/RT and plain Linux alike -- must use
+	// socklen_t here, because that is what accept()'s third parameter points to.
+	// The plain-POSIX branch previously said size_t, which no compiler had ever
+	// checked: it is 64-bit where socklen_t is 32-bit, so it could not compile.
+	std::vector <socklen_t> clientAddrLen;            /* Length of client address data structure */
 #endif
 	std::vector <int> sendClientByte;
 	std::vector <int> recvClientMsgSize;                    /* Size of received message */

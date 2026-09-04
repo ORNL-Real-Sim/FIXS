@@ -11,8 +11,9 @@ simulators:
   carla:
     version: "0.9.15"
     source: "https://github.com/carla-simulator/carla"
-    location: "VirCarlaEnv"
-    notes: "CARLA client library"
+    location: "CommonLib/libcarla"
+    boost: "1.81.0"
+    notes: "CARLA C++ client SDK, needed only by VirCarlaEnv. NOT committed to git - gitignored, and acquired into 'location' (which is where fetch_native_deps.ps1 has always installed it; the old 'VirCarlaEnv' value here was documentation that never matched). CARLA publishes no release assets at all, so the SDK exists only inside a built CARLA source tree and both platforms take it from <carla_root>/PythonAPI/carla/dependencies: on Windows via fetch_native_deps.ps1 -Mode source, on Linux as the libcarla-<version>-linux-x86_64.zip asset published by scripts/pack_native_deps.sh --component carla. Bumping this version requires publishing a matching asset first, exactly as sumo does. 'boost' records which boost the Linux SDK was built with - CARLA 0.9.15 ships 1.80.0 but needs a one-line Setup.sh bump to 1.81.0 to build on a modern toolchain, and the asset carries its own boost headers, so it is self-consistent even though the Windows SDK is on 1.80."
 
   carmaker:
     version: "13.1.3"

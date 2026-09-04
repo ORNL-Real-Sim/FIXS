@@ -1,0 +1,212 @@
+name: Linux build (TrafficLayer + VirCarlaEnv)
+
+# Portability gate for #65. Compiles, links and smoke-tests both Linux targets,
+# alongside (not instead of) the Windows MSBuild job in release.yml.
+#
+# Distro choice: 20.04, 22.04 and 24.04, all as `container:` rather than
+# `runs-on:` images -- ubuntu-20.04 was retired from hosted runners in 2025 and
+# is only reachable as a container, and pinning them all the same way keeps the
+# toolchain (glibc/gcc) determined by the image instead of by whatever GitHub
+# currently ships.
+#
+# 20.04 is the artifact-worthy leg: glibc is forward-incompatible only, so a
+# binary built on focal's 2.31 runs on jammy and noble, not the other way round.
+#
+# 24.04 earns its place by catching what the older two cannot. gcc 13 dropped a
+# pile of transitive includes, so a header that uses uint32_t without including
+# <cstdint> compiles on gcc 9/11 and MSVC and fails only here -- exactly the bug
+# it caught on its first run (VehDataMsgDefs.h). Compile coverage, not new
+# users: 24.04 users can already run the focal binary.
+#
+# VirCarlaEnv is compiled and linked against the prebuilt CARLA client SDK, but
+# never RUN against Carla: that needs a GPU, which hosted runners do not have.
+# The SDK is also where this job earns its distro spread twice over -- the asset
+# is built on focal with UE4's clang-10 and consumed here by gcc 9/11/13, so a
+# libstdc++ ABI break would surface as a link failure on the newer legs.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [dev, dev_v0.9.0, main]
+    paths:
+      - 'CommonLib/**'
+      - 'TrafficLayer/**'
+      - 'VirCarlaEnv/**'
+      - 'CMakeLists.txt'
+      - 'cmake/**'
+      - 'scripts/check_source_lists.py'
+      - 'scripts/fetch_native_deps.sh'
+      - 'dependencies.yaml'
+      - '.github/workflows/linux-build.yml'
+  push:
+    branches: [main, dev_v0.9.0]
+
+jobs:
+  linux-build:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ubuntu-20.04 (focal, glibc 2.31, gcc 9)
+            image: ubuntu:20.04
+            slug: focal
+          - name: ubuntu-22.04 (jammy, glibc 2.35, gcc 11)
+            image: ubuntu:22.04
+            slug: jammy
+          - name: ubuntu-24.04 (noble, glibc 2.39, gcc 13)
+            image: ubuntu:24.04
+            slug: noble
+
+    steps:
+      - name: Install toolchain
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update -qq
+          # No SUMO build dependencies (xerces/proj/gdal) any more: libtraci is
+          # fetched prebuilt from the rolling release, so the runner needs only a
+          # C++ toolchain, curl/unzip to fetch it, and python3 for the TU guard.
+          apt-get install -y -qq --no-install-recommends \
+            build-essential cmake ninja-build git ca-certificates curl unzip python3
+          echo "--- toolchain ---"
+          cmake --version | head -1
+          g++ --version | head -1
+          ldd --version | head -1
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # git describe needs tags for RealSimVersion.h
+          submodules: false     # ProprietaryFiles is private and not needed here
+
+      # git refuses to run in a checkout owned by another uid (container vs runner).
+      - name: Trust the workspace
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      # Cheap and fails fast: catches "added a TU to the .vcxproj, forgot CMake",
+      # which would otherwise mean Linux silently never compiles the new file.
+      - name: Guard - MSBuild and CMake TU lists agree
+        run: python3 scripts/check_source_lists.py
+
+      - name: Resolve SUMO version from dependencies.yaml
+        id: sumo
+        run: |
+          # tr also strips \r: dependencies.yaml is CRLF in the repo, and a
+          # trailing carriage return would silently poison the clone tag.
+          ver=$(grep -A2 '^  sumo:' dependencies.yaml | grep 'version:' | head -1 | tr -d ' "\r' | cut -d: -f2)
+          echo "version=$ver"           >> "$GITHUB_OUTPUT"
+          echo "tag=v$(echo $ver | tr . _)" >> "$GITHUB_OUTPUT"
+          echo "Resolved SUMO $ver"
+
+      # Caches the INSTALLED result (CommonLib/libsumo), which is what
+      # fetch_native_deps.sh's sentinel check looks for -- so a cache hit skips
+      # the SUMO build entirely. CommonLib/libsumo is gitignored, so restoring
+      # into the workspace cannot dirty the checkout.
+      - name: Cache libsumo
+        id: cache-libsumo
+        uses: actions/cache@v4
+        with:
+          path: CommonLib/libsumo
+          # Keyed on the whole dependencies.yaml, matching release.yml's Windows
+          # step. Keying on the version alone would reuse a stale cache if the
+          # 'source' URL changed while the version did not -- and the fetch
+          # script now reads that URL from the same file.
+          key: libsumo-${{ matrix.slug }}-${{ hashFiles('dependencies.yaml') }}
+
+      # Deliberately the same script a developer runs locally, not a copy of its
+      # steps -- so CI failing means the documented path is broken, and the
+      # documented path staying green means CI will be too.
+      #
+      # Prebuilt by default, exactly as release.yml does on Windows. A SUMO
+      # version bump therefore requires publishing the matching asset first
+      # (scripts/pack_native_deps.sh --publish) -- the same contract the Windows
+      # asset already carries.
+      - name: Fetch native deps (prebuilt libtraci)
+        run: ./scripts/fetch_native_deps.sh
+
+      - name: Cache libcarla
+        id: cache-libcarla
+        uses: actions/cache@v4
+        with:
+          path: CommonLib/libcarla
+          key: libcarla-${{ matrix.slug }}-${{ hashFiles('dependencies.yaml') }}
+
+      # Prebuilt only. Building the SDK needs UE4's clang (Setup.sh derives
+      # CC/CXX from $UE4_ROOT) and tens of GB, so a runner can only consume the
+      # asset a dev box published with pack_native_deps.sh --component carla.
+      - name: Fetch native deps (prebuilt libcarla)
+        run: ./scripts/fetch_native_deps.sh --component carla
+
+      - name: Configure and build
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j "$(nproc)"
+          # ls, not file(1): the minimal ubuntu:* images do not ship file, and
+          # a missing diagnostic tool must not fail an otherwise-green build.
+          ls -lh build/TrafficLayer build/VirCarlaEnv
+
+      # Configure SKIPS VirCarlaEnv when the SDK is missing, which is right for
+      # a developer and wrong for this job: the fetch step above is supposed to
+      # have provided it, so a skip here means the asset is broken and must fail
+      # the build rather than quietly shrink its scope.
+      - name: Guard - VirCarlaEnv was actually built
+        run: |
+          test -x build/VirCarlaEnv \
+            || { echo "FAIL: VirCarlaEnv was skipped despite a fetched SDK"; exit 1; }
+
+      # No LD_LIBRARY_PATH on purpose: the executable carries an $ORIGIN-relative
+      # RUNPATH, so if that regressed to an absolute build path this fails here
+      # rather than in a user's hands after downloading the artifact.
+      - name: Smoke - starts and prints usage (no LD_LIBRARY_PATH)
+        run: |
+          readelf -d build/TrafficLayer | grep RUNPATH
+          ./build/TrafficLayer --help
+
+      # The Linux build must REFUSE a VISSIM config rather than hang on a
+      # connect() that can never succeed (VISSIM is Windows-only).
+      - name: Smoke - a VISSIM config is rejected on Linux
+        run: |
+          cat > /tmp/vissim.yaml <<'EOF'
+          SimulationSetup:
+            EnableFIXS: true
+            SelectedTrafficSimulator: VISSIM
+            TrafficSimulatorPort: 1337
+          EOF
+          if ./build/TrafficLayer -f /tmp/vissim.yaml > /tmp/out.txt 2>&1; then
+            echo "FAIL: a VISSIM config was accepted on Linux"; cat /tmp/out.txt; exit 1
+          fi
+          grep -q "VISSIM is Windows-only" /tmp/out.txt \
+            || { echo "FAIL: wrong diagnostic:"; cat /tmp/out.txt; exit 1; }
+          echo "OK: rejected with the expected message"
+
+      # Carla is never started (no GPU), so this is what CI can prove about the
+      # SDK: the statically linked client loads and main() runs. ldd doubles as
+      # the check that nothing CARLA-shaped leaked into the dynamic deps -- the
+      # binary must need only libstdc++/libm/libgcc_s/libpthread/libc.
+      - name: Smoke - VirCarlaEnv starts and prints usage
+        run: |
+          ldd build/VirCarlaEnv
+          ./build/VirCarlaEnv --help
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: TrafficLayer-${{ matrix.slug }}
+          # Ship libtracicpp.so alongside, with the relative layout preserved,
+          # so the extracted artifact runs as-is: $ORIGIN/../CommonLib/libsumo/bin
+          # resolves inside the extracted tree. The binary alone would be useless.
+          path: |
+            build/TrafficLayer
+            CommonLib/libsumo/bin/libtracicpp.so
+          if-no-files-found: error
+
+      # Separate artifact, not another path on the one above: VirCarlaEnv needs
+      # no companion library at all (the CARLA client is linked statically), so
+      # bundling it would only make the TrafficLayer artifact ambiguous.
+      - name: Upload VirCarlaEnv binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: VirCarlaEnv-${{ matrix.slug }}
+          path: build/VirCarlaEnv
+          if-no-files-found: error
