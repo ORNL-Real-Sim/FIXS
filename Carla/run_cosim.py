@@ -2839,7 +2839,10 @@ def _edit_slots(slots, rec, ctx, cfg, apps, catalog, repo, tag_prefix, args=None
             # No yaml to write to yet? Park it on args, which is where the CLI
             # flags live and what generate_config_yaml reads - so a menu choice
             # and --engine take the identical path instead of one being dropped.
-            if args is not None and not _yaml_exists(rec.get("config")):
+            # Park it on args either way. With no yaml this is the only record of
+            # the choice; with one, edit_engine has just written it there, and
+            # args.engine is what makes THIS run honour it regardless of read order.
+            if args is not None:
                 args.engine = picked
         elif slot == "carla":
             now = derived_from_yaml(rec.get("config"), ctx.get("staged"), args)
@@ -4125,8 +4128,16 @@ def main():
     # the saved profile records the bridge that ACTUALLY ran instead of the raw
     # (usually empty) --engine flag. An app may declare which stack its yaml is
     # written for; --engine still wins over everything.
-    backend = args.engine or declared_engine(staged_configs, config_yaml) \
-        or read_backend(config_yaml)
+    # An EXPLICIT EnablePythonBackend outranks the app's declaration, for the same
+    # reason the summary row does: the declaration covers a yaml that OMITS the key,
+    # and edit_engine's whole job is to put it there. Ranking the declaration first
+    # made the engine menu unreachable for any config an app declares an engine for -
+    # the choice was written into the file and then ignored on this very line.
+    backend = (args.engine
+               or (read_backend(config_yaml) if _declares_backend(config_yaml)
+                   else None)
+               or declared_engine(staged_configs, config_yaml)
+               or read_backend(config_yaml))
     args.engine = backend
 
     # CARLA RPC endpoint: the scenario yaml is the source of truth, because that is
