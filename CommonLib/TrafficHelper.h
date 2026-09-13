@@ -220,6 +220,13 @@ public:
 	// vehicle id->edge list
 	std::unordered_map<std::string, std::vector<std::string>> VehicleId2EdgeList_um;
 
+	// Last speed limit / free-flow speed SUMO actually reported for a vehicle.
+	// The subscription does not always carry VAR_ALLOWED_SPEED -- and reading it
+	// through map::operator[] when it is absent inserts a NULL pointer and
+	// dereferences it, which published -815417536 on the wire. A limit does not
+	// vanish between two ticks of the same road, so the last real one stands.
+	std::unordered_map<std::string, std::pair<double, double>> VehicleId2LastSpeedLimit_um;
+
 	// #177 Phase 2: cache the upcoming-TLS list so getNextTLS (O(remaining route
 	// length)) runs ONCE PER VEHICLE instead of every step. A vehicle's getNextTLS
 	// captures every TLS from its current position to route end; it only ever PASSES

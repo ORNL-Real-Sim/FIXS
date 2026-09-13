@@ -2019,14 +2019,44 @@ void TrafficHelper::parserSumoSubscription(libsumo::TraCIResults VehDataSubscrib
 	// get speed limit
 	//=================
 	// retrieve current speed limit
-	tempDoublePtr = static_pointer_cast<libsumo::TraCIDouble> (VehDataSubscribeTraciResults[libsumo::VAR_ALLOWED_SPEED]);
-	tempDoublePtr2 = static_pointer_cast<libsumo::TraCIDouble> (VehDataSubscribeTraciResults[libsumo::VAR_SPEED_FACTOR]);
-	CurVehData.speedLimit = tempDoublePtr->value / tempDoublePtr2->value;
+	// Looked up, not indexed. map::operator[] INSERTS a null shared_ptr when the
+	// subscription did not carry the variable this tick, and the dereference that
+	// follows reads uninitialised memory: measured, this published a speed limit
+	// of -815417536 on the wire for 160 consecutive seconds. The eco controller
+	// consuming it had its allowed speed go garbage at the same instant and its
+	// command collapsed from 10 m/s to 0.1, stopping the ego 240 m short of a red
+	// light it could have crossed.
+	//
 	// VAR_ALLOWED_SPEED is "max speed on the current lane AND speed factor", i.e.
 	// what this particular vehicle will cruise at. Reported as-is so consumers do
 	// not have to reconstruct it (a speedLimit * speedFactor product would also
 	// miss the vType maxSpeed cap that SUMO already applies here).
-	CurVehData.speedFreeFlow = tempDoublePtr->value;
+	auto itAllowed = VehDataSubscribeTraciResults.find(libsumo::VAR_ALLOWED_SPEED);
+	auto itFactor = VehDataSubscribeTraciResults.find(libsumo::VAR_SPEED_FACTOR);
+	bool haveSpeedLimit = false;
+	if (itAllowed != VehDataSubscribeTraciResults.end() && itAllowed->second
+		&& itFactor != VehDataSubscribeTraciResults.end() && itFactor->second) {
+		double allowed = static_pointer_cast<libsumo::TraCIDouble>(itAllowed->second)->value;
+		double factor = static_pointer_cast<libsumo::TraCIDouble>(itFactor->second)->value;
+		if (allowed > 0.0 && factor > 0.0) {
+			CurVehData.speedLimit = allowed / factor;
+			CurVehData.speedFreeFlow = allowed;
+			VehicleId2LastSpeedLimit_um[vehId] = make_pair(CurVehData.speedLimit, allowed);
+			haveSpeedLimit = true;
+		}
+	}
+	if (!haveSpeedLimit) {
+		// A limit does not vanish between two ticks of the same road.
+		auto itLast = VehicleId2LastSpeedLimit_um.find(vehId);
+		if (itLast != VehicleId2LastSpeedLimit_um.end()) {
+			CurVehData.speedLimit = itLast->second.first;
+			CurVehData.speedFreeFlow = itLast->second.second;
+		}
+		else {
+			CurVehData.speedLimit = -1;      // unknown, as speedLimitNext uses
+			CurVehData.speedFreeFlow = -1;
+		}
+	}
 
 	// retrieve next speed limit
 	vector <string> edgeRouteList = VehicleId2EdgeList_um[vehId];
