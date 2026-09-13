@@ -203,30 +203,6 @@ class ConfigHelper:
         self.Carla_setup["EgoTargetSpeed"] = self.parserDouble(carla_node, "EgoTargetSpeed", 8.33)
         self.Carla_setup["TrafficManagerPort"] = self.parserInteger(carla_node, "TrafficManagerPort", 8000)
 
-        # Which of the two plant interfaces the ego controller commands
-        # through. Both are real and both are supported by ego.set(): FIXS
-        # reads the shape off the fields a controller wrote (fixs.commandKind).
-        #   pedals -- the controller closes the speed loop  (apply_control)
-        #   speed  -- the vehicle closes it       (apply_ackermann_control)
-        # Whether the ego controller follows an external speed advisory at all.
-        # False drives the scenario's EgoTargetSpeed instead, which takes the
-        # advisory loop out of a run: what is left is route following.
-        self.Carla_setup["EgoUseAdvisory"] = self.parserFlag(
-            carla_node, "EgoUseAdvisory", True)
-
-        self.Carla_setup["EgoCommandShape"] = self.parserString(
-            carla_node, "EgoCommandShape", "pedals")
-
-        # An ABLATION knob, not a scenario setting. It stiffens CARLA's own
-        # Ackermann speed loop until the ego tracks a commanded speed almost
-        # exactly, so that a run isolates what the controller DECIDES from what
-        # the vehicle can physically do. It only bites for a controller that
-        # commands a speed (fixs.commandKind == 'speedsteer'); a pedal
-        # controller never reaches that loop. Off is the honest default: real
-        # vehicles do not track like this.
-        self.Carla_setup["EgoIdealSpeedTracking"] = self.parserFlag(
-            carla_node, "EgoIdealSpeedTracking", False)
-
         # Signal Subscription -- which junctions this client is served. The bridge
         # matches these ids to its traffic-light table; a junction subscribed with
         # no row there is a light that never changes.
