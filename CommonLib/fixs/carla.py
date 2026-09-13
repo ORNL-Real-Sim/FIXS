@@ -228,11 +228,12 @@ _view = None
 _lapsLaid = 0
 #: Waypoints left at which the next lap is appended (~400 m at 2 m spacing).
 _kPlanMargin = 200
+_routeOwned = True
 #: Whether the vehicle feed has already reported itself unreadable.
 _feedFailed = False
 
 
-def bind(agent, egoId=''):
+def bind(agent, egoId='', route=True):
     """Give an agent FIXS's corrected view of the world, and the ego's route.
 
     Its class, its methods and its logic are untouched -- this swaps what the
@@ -246,9 +247,13 @@ def bind(agent, egoId=''):
     agent gets instead is the scenario's own corridor, as CARLA waypoints on
     real lanes -- which is what its planner reads lane_id, road_id and
     is_junction off.
+
+    `route=False` binds the view but leaves the plan alone, for a caller that
+    wants to compare against an agent routing itself. Nothing else changes.
     """
-    global _view, _lapsLaid
+    global _view, _lapsLaid, _routeOwned
     _lapsLaid = 0
+    _routeOwned = bool(route)
     _view = _WorldView(__getattr__('map'), __getattr__('world'), _signalHeads())
     agent._world = _view
     agent._map = _view.get_map()
@@ -264,7 +269,8 @@ def bind(agent, egoId=''):
             c = getattr(vc, sub, None)
             if c is not None and hasattr(c, '_vehicle'):
                 c._vehicle = ego
-    _layRoute(agent, first=True)
+    if _routeOwned:
+        _layRoute(agent, first=True)
     return agent
 
 
@@ -289,7 +295,8 @@ def refresh(record):
         _view.ego.setSpeedLimit(
             float(getattr(record, 'speedFreeFlow', 0.0) or 0.0)
             or float(getattr(record, 'speedLimit', 0.0) or 0.0))
-    _layRoute(_view.agent)
+    if _routeOwned:
+        _layRoute(_view.agent)
 
 
 def _feedVehicles():
@@ -343,75 +350,157 @@ def _layRoute(agent, first=False):
 
 
 def _routePlan():
-    """The scenario's corridor as (waypoint, RoadOption) pairs on real lanes.
+    """The scenario's corridor as (waypoint, RoadOption) pairs, on SUMO's lanes.
 
-    Traced with CARLA's OWN GlobalRoutePlanner, leg by leg between the route's
-    points. That is the part worth insisting on: a route is a path through a
-    road network, and CARLA already knows the network. Snapping each point to
-    the nearest lane instead -- which is what this did -- answers a different
-    question, and answers it wrongly wherever the nearest lane is not the lane
-    the route is on. The measured cost of that was the ego turning into a
-    junction at 10.7 m/s onto a lane 54.8 degrees off its route and stopping
-    there, 79.81 m off route at the 90th percentile.
+    THE ROUTE IS THE AUTHORITY. The traffic simulator already chose the lane the
+    ego drives, edge by edge, and EgoRoutePoints is that choice as geometry:
+    sumo_route_points emits LANE CENTRELINES (lane.getShape(), via-lanes and
+    all), not edge centrelines. So each point already names a lane; snapping it
+    only has to read which one back, and CARLA's own get_waypoint does that.
 
-    trace_route also returns the REAL RoadOption for each waypoint. The snapping
-    version could only ever say LANEFOLLOW, so an agent reading its plan never
-    knew it was about to turn.
+    What this deliberately does NOT do is ask CARLA's route planner. Measured,
+    GlobalRoutePlanner put 24 lane changes into a 5.39 km loop -- and 14 into a
+    plan stock CARLA built for itself -- because _lane_change_link adds them as
+    ZERO-COST graph edges, so the shortest-path search takes one whenever it
+    shortens the route at all. Executing one saturates the steer at 0.800.
+    Deriving the lane from the route instead leaves no such freedom: measured on
+    the same corridor, 2 same-road lane transitions, both a single flicker.
 
-    The y flip is FIXS's: FIXS is north-positive and CARLA is not.
+    Snapping is trustworthy here because the points are lane centres: the median
+    distance from a route point to the lane CARLA returns is 0.06 m.
     """
     pts = _configured('EgoRoutePoints', None) or []
     if len(pts) < 2:
         return []
-    from agents.navigation.global_route_planner import GlobalRoutePlanner
+    from agents.navigation.local_planner import RoadOption
+    from Carla.carla_agents.fixs_adapter import densify
     real, cmap = _real(), __getattr__('map')
-    spacing = float(_configured('EgoRouteSpacing', 2.0) or 2.0)
-    grp = GlobalRoutePlanner(cmap, spacing)
+    dense = densify([(float(a), float(b)) for a, b in pts],
+                    float(_configured('EgoRouteSpacing', 2.0) or 2.0))
 
-    out, skipped = [], 0
-    here = real.Location(x=float(pts[0][0]), y=-float(pts[0][1]), z=0.0)
-    for nxt in _anchors(pts):
-        there = real.Location(x=float(nxt[0]), y=-float(nxt[1]), z=0.0)
-        try:
-            leg = grp.trace_route(here, there)
-        except Exception:                                       # noqa: BLE001
-            leg = []
-        if leg:
-            out.extend(leg[1:] if out else leg)
-            # Start the next leg where this one ACTUALLY ended, not at the route
-            # point that asked for it. trace_route snaps its origin and
-            # destination to lanes, so consecutive legs need not meet: measured,
-            # a gap left the plan discontinuous and the agent steered for a
-            # waypoint 400 m away, accelerating to 22.5 m/s off the road.
-            here = leg[-1][0].transform.location
-        else:
-            skipped += 1                 # no path: keep the origin, try the next
-    print('[fixs] ego route: %d waypoints traced through the road network'
-          '%s' % (len(out), '' if not skipped else ', %d legs had no path' % skipped),
-          flush=True)
+    # THE QUERY NEEDS AN ELEVATION. EgoRoutePoints is (x, y) only, and CARLA
+    # searches in 3D: asking at z=0 on a corridor whose road surface is at
+    # z=205 puts every query 205 m underground, and get_waypoint then returns
+    # whichever road wins that skewed comparison rather than the lane the point
+    # is on. Measured at (667.73, 824.31): z=0 gave road 1108 lane -1, 4.68 m
+    # away, while road 1109 lane -1 -- the lane the point is actually on -- sat
+    # 0.98 m away. At the right z the same point lands on 1109 within 0.04 m.
+    #
+    # That one wrong constant produced the wrong lanes, the hops onto parallel
+    # roads, 180 duplicated waypoints and the lateral jumps that steered the ego
+    # out of its lane.
+    #
+    # The elevation is carried forward from the previous waypoint so the query
+    # follows the road's own profile, seeded from the ego, which is standing on
+    # it.
+    z = _routeElevation()
+    out, held, missing = [], None, 0
+    for i, (x, y) in enumerate(dense):
+        wp = cmap.get_waypoint(real.Location(x=x, y=-y, z=z), project_to_road=True)
+        if wp is None:
+            missing += 1
+            continue
+        z = wp.transform.location.z
+        wp = _holdLane(wp, held)
+        held = wp
+        out.append((wp, _turnAt(dense, i)))
+    changes = sum(1 for j in range(1, len(out))
+                  if out[j][0].road_id == out[j-1][0].road_id
+                  and out[j][0].lane_id != out[j-1][0].lane_id)
+    print('[fixs] ego route: %d waypoints on the route own lanes, '
+          '%d same-road lane changes%s'
+          % (len(out), changes,
+             '' if not missing else ', %d points had no lane' % missing), flush=True)
+    _dumpPlan(out)
     return out
 
 
-#: Shortest leg, in metres, worth asking the route planner to trace.
-#: The planner searches a graph whose nodes are the ENDS of road edges, so a leg
-#: shorter than an edge is answered by running to the end of one and back:
-#: tracing the route own ~14 m spacing produced 15049 waypoints for a 5 km
-#: corridor and drove the ego up to 66.56 m off it. Anchors far enough apart to
-#: span whole edges give the search something real to solve.
-_kAnchorSpacing = 250.0
+def _routeElevation():
+    """The height the route sits at, for querying the map.
+
+    The ego is standing on the road, so its own z is the road's. Falls back to
+    the map's first waypoint, and then to zero -- which is only correct for a
+    map at sea level, and is what this exists to stop being assumed.
+    """
+    try:
+        ego = __getattr__('ego')
+        if ego is not None:
+            return float(ego.get_transform().location.z)
+    except Exception:                                           # noqa: BLE001
+        pass
+    try:
+        spawn = __getattr__('map').get_spawn_points()
+        if spawn:
+            return float(spawn[0].location.z)
+    except Exception:                                           # noqa: BLE001
+        pass
+    return 0.0
 
 
-def _anchors(pts):
-    """The route points, thinned to legs long enough to be worth tracing."""
-    out, last = [], pts[0]
-    for p in pts[1:]:
-        if math.hypot(float(p[0]) - float(last[0]),
-                      float(p[1]) - float(last[1])) >= _kAnchorSpacing:
-            out.append(p)
-            last = p
-    if not out or out[-1] is not pts[-1]:
-        out.append(pts[-1])
-    return out
+def _holdLane(wp, held):
+    """Keep the lane the route was on when the snap wobbles off it.
+
+    Consecutive lane-centre points occasionally snap to the neighbouring lane
+    and straight back -- measured once in 2561 points. A plan must not contain a
+    lane change the route never asked for, so a same-road lane hop is undone by
+    stepping back to the held lane when one is adjacent.
+    """
+    if held is None or wp.road_id != held.road_id or wp.lane_id == held.lane_id:
+        return wp
+    for step in ('get_left_lane', 'get_right_lane'):
+        side = getattr(wp, step, lambda: None)()
+        if side is not None and side.lane_id == held.lane_id:
+            return side
+    return wp
+
+
+def _turnAt(points, i, span=12, straightDeg=25.0):
+    """The turn the route takes here, as a RoadOption.
+
+    An agent reads this to know a junction is a turn rather than a through
+    movement, and slows for one. Taken from the ROUTE's own heading change
+    rather than from a planner, for the same reason the lane is.
+    """
+    from agents.navigation.local_planner import RoadOption
+    a = max(0, i - span)
+    b = min(len(points) - 1, i + span)
+    if b - a < 2:
+        return RoadOption.LANEFOLLOW
+    import math as _m
+    h0 = _m.atan2(points[i][1] - points[a][1], points[i][0] - points[a][0])
+    h1 = _m.atan2(points[b][1] - points[i][1], points[b][0] - points[i][0])
+    d = _m.degrees((h1 - h0 + _m.pi) % (2 * _m.pi) - _m.pi)
+    if abs(d) <= straightDeg:
+        return RoadOption.LANEFOLLOW
+    return RoadOption.LEFT if d > 0 else RoadOption.RIGHT
+
+
+def _dumpPlan(plan):
+    """Write the plan's lane identity to a csv, once, if asked.
+
+    A plan is a list of lane poses, and the only way to tell a plan that enters
+    a dedicated turn lane from a follower that drifts into one is to look at
+    which lane each waypoint is actually on. The per-tick log records how many
+    waypoints remain, not where they are.
+
+    Off unless FIXS_PLAN_DUMP names a file.
+    """
+    import os
+    path = os.environ.get('FIXS_PLAN_DUMP')
+    if not path or not plan:
+        return
+    try:
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write('i,x,y,road_id,lane_id,s,is_junction,road_option\n')
+            for i, (wp, opt) in enumerate(plan):
+                t = wp.transform.location
+                f.write('%d,%.3f,%.3f,%s,%s,%.3f,%s,%s\n'
+                        % (i, t.x, -t.y, wp.road_id, wp.lane_id,
+                           getattr(wp, 's', 0.0),
+                           bool(getattr(wp, 'is_junction', False)), opt))
+        print('[fixs] plan written to %s (%d waypoints)' % (path, len(plan)), flush=True)
+    except Exception as exc:                                    # noqa: BLE001
+        print('[fixs] could not write the plan dump: %s' % exc, flush=True)
 
 
 def _configured(key, default=None):
@@ -537,8 +626,9 @@ def __getattr__(name):
 def _reset():
     """Drop everything cached per run -- for tests, and for a backend swapped
     mid-process."""
-    global _mapCache, _view, _lapsLaid, _feedFailed
+    global _mapCache, _view, _lapsLaid, _feedFailed, _routeOwned
     _mapCache = None
     _view = None
     _lapsLaid = 0
+    _routeOwned = True
     _feedFailed = False
