@@ -1012,7 +1012,17 @@ def dyno(configPath=None):
     ``inprocess`` runs CommonLib.xil here in this process, so the coupling can
     be exercised with no hardware and over the same call the cell takes.
     """
-    configPath = configPath or os.environ.get('FIXS_CONFIG_YAML') or 'config.yaml'
+    configPath = configPath or os.environ.get('FIXS_CONFIG_YAML')
+    if not configPath or not os.path.exists(configPath):
+        # NOT 'assume no bench'. Whether one is declared is a fact about the
+        # scenario, and a scenario that cannot be read does not answer it --
+        # guessing 'no' would quietly run the plant the yaml did not ask for.
+        raise FixsError(
+            'cannot tell whether this scenario declares a dynamometer: '
+            + ('$FIXS_CONFIG_YAML is not set' if not configPath
+               else f'{configPath} does not exist')
+            + '. Pass the scenario yaml to fixs.dyno(path), or set '
+              '$FIXS_CONFIG_YAML to the one this run is using.')
     config = ConfigHelper()
     config.getConfig(configPath)
     xil = config.Xil_setup
