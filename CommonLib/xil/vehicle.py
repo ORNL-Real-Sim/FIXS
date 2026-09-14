@@ -8,6 +8,8 @@ Nothing here knows about a dyno. A vehicle is the same vehicle on the road, on
 rollers, or on hub units.
 """
 
+import math
+
 __all__ = ['Powertrain', 'Driveline', 'Vehicle']
 
 
@@ -75,6 +77,29 @@ class Powertrain(object):
         return max(0.0, min(1.0, (self.max_speed_mps - speed) / taper))
 
 
+class _Lag(object):
+    """Second order: xdd + 2*z*wn*xd + wn^2*x = wn^2*u, RK4."""
+
+    def __init__(self, hz, zeta):
+        self.wn = 2.0 * math.pi * hz
+        self.zeta = zeta
+        self.x = 0.0
+        self.xd = 0.0
+
+    def _d(self, x, xd, u):
+        return xd, self.wn * self.wn * (u - x) - 2.0 * self.zeta * self.wn * xd
+
+    def step(self, u, dt):
+        x, xd = self.x, self.xd
+        k1 = self._d(x, xd, u)
+        k2 = self._d(x + 0.5 * dt * k1[0], xd + 0.5 * dt * k1[1], u)
+        k3 = self._d(x + 0.5 * dt * k2[0], xd + 0.5 * dt * k2[1], u)
+        k4 = self._d(x + dt * k3[0], xd + dt * k3[1], u)
+        self.x += dt / 6.0 * (k1[0] + 2 * k2[0] + 2 * k3[0] + k4[0])
+        self.xd += dt / 6.0 * (k1[1] + 2 * k2[1] + 2 * k3[1] + k4[1])
+        return self.x
+
+
 class Driveline(object):
     """Wheels, brakes, and how fast commanded torque actually arrives.
 
@@ -95,6 +120,10 @@ class Driveline(object):
         self.max_brake_torque_Nm = max_brake_torque_Nm
         self.torque_bandwidth_Hz = torque_bandwidth_Hz
         self.torque_damping = torque_damping
+
+    def lag(self):
+        """A fresh torque-delivery lag for one axle."""
+        return _Lag(self.torque_bandwidth_Hz, self.torque_damping)
 
 
 class Vehicle(object):

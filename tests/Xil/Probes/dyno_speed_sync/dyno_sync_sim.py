@@ -8,7 +8,7 @@ THE QUESTION
     cost?
 
 WHAT IS REAL HERE AND WHAT IS NOT
-    The bench is ``CommonLib.xil.DynoSimulator`` in chassis mode -- the shipped
+    The bench is ``CommonLib.xil.DynoSim`` in chassis mode -- the shipped
     simulator, not a copy. The CARLA side is a surrogate: a longitudinal ODE
     written here, parameterised from constants measured off a live 0.9.16 server
     (``CdA = 0.377 m^2``, ``rho = 1.25``, ``mass = 1845 kg``). No CARLA server is
@@ -65,7 +65,7 @@ _REPO = os.path.abspath(os.path.join(os.path.dirname(__file__),
 if _REPO not in sys.path:
     sys.path.insert(0, _REPO)
 
-from CommonLib.xil import (Bench, Dyno, LocalLink,  # noqa: E402
+from CommonLib.xil import (DynoSim, Dyno, LocalLink,  # noqa: E402
                            RobotDriver, Vehicle)
 
 G = 9.80665
@@ -112,14 +112,14 @@ def carla_resistance_N(p: CarlaParams, v: float) -> float:
     return s * (aero + roll)
 
 
-def steady_state_gap_N(bench, carla, speeds):
+def steady_state_gap_N(sim, carla, speeds):
     """The part of F_sync that is pure model disagreement, not dynamics.
 
     At constant speed the bench holds against its road load while CARLA holds
     against its own aero plus rolling. Whatever the two differ by has to come out
     of the sync, for as long as the vehicle sits at that speed.
     """
-    return [(v, bench.dyno.resistance(v) - carla_resistance_N(carla, v))
+    return [(v, sim.dyno.resistance(v) - carla_resistance_N(carla, v))
             for v in speeds]
 
 
@@ -197,10 +197,10 @@ def build_dyno(**kw):
     dyno_keys = set(Dyno().__dict__)
     d = dict((k, kw.pop(k)) for k in list(kw) if k in dyno_keys)
     d.pop('mode', None)
-    return Bench(Vehicle(**kw), Dyno(mode='chassis', **d))
+    return DynoSim(Vehicle(**kw), Dyno(mode='chassis', **d))
 
 
-def simulate(cycle, dyno: DynoSimulator, carla: CarlaParams, run: RunParams,
+def simulate(cycle, sim: DynoSim, carla: CarlaParams, run: RunParams,
              coupling: str):
     """Integrate both plants. See COUPLINGS for the four modes."""
     if coupling not in COUPLINGS:
@@ -208,18 +208,16 @@ def simulate(cycle, dyno: DynoSimulator, carla: CarlaParams, run: RunParams,
 
     dt = run.dt_s
     sync_every = max(1, int(round(run.sync_dt_s / dt)))
-    dyno.reset()
-
-    bench = dyno
-    bench.driver = RobotDriver(run.driver_kp, run.driver_ki)
+    sim.reset()
+    sim.driver = RobotDriver(run.driver_kp, run.driver_ki)
     drv_c = RobotDriver(run.driver_kp, run.driver_ki)
     link = LocalLink() if run.use_link else None
 
     # The surrogate shares the bench's powertrain envelope so that the two plants
     # differ only in resistance, mass and the bench's delivery lag.
-    carla_powertrain = dyno.vehicle.axle_torque
-    r = dyno.vehicle.wheel_radius_m
-    max_brake = dyno.vehicle.max_brake_torque_Nm
+    carla_powertrain = sim.vehicle.axle_torque
+    r = sim.vehicle.wheel_radius_m
+    max_brake = sim.vehicle.max_brake_torque_Nm
 
     v_c = x_d = x_c = 0.0
     rec = {k: [] for k in TRACE_COLS}
@@ -232,14 +230,14 @@ def simulate(cycle, dyno: DynoSimulator, carla: CarlaParams, run: RunParams,
         if link is not None:
             link.send_reference(v_ref)
             ref = link.recv_reference()
-            st = bench.step(ref[0] if ref else 0.0, dt)
+            st = sim.step(ref[0] if ref else 0.0, dt)
             link.send_measurement(st.speed)
             meas = link.recv_measurement()
             v_d = meas[0] if meas else 0.0
         else:
-            st = bench.step(v_ref, dt)
+            st = sim.step(v_ref, dt)
             v_d = st.speed
-        thr, brk = bench.throttle, bench.brake
+        thr, brk = sim.throttle, sim.brake
 
         # ---- the CARLA surrogate ---------------------------------------
         if coupling in ('free', 'forced_driven'):

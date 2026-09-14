@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import dyno_sync_sim as sim  # noqa: E402
 
-from CommonLib.xil import Bench  # noqa: E402
+from CommonLib.xil import DynoSim  # noqa: E402
 
 
 def _cycle(secs=60.0):
@@ -32,7 +32,7 @@ def _cycle(secs=60.0):
 def test_the_study_drives_the_shipped_bench_not_a_copy():
     """If this ever stops being the CommonLib simulator, the study is measuring
     something the rest of FIXS does not use."""
-    assert isinstance(sim.build_dyno(), Bench)
+    assert isinstance(sim.build_dyno(), DynoSim)
     assert sim.build_dyno().dyno.mode == 'chassis'
 
 

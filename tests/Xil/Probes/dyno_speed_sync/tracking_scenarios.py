@@ -148,8 +148,7 @@ def run(command: str, scenario: str, duration_s=90.0, dt=0.005,
     if scenario not in ('free', 'leader'):
         raise ValueError("scenario must be 'free' or 'leader'")
 
-    bench = study.build_dyno()
-    sim = bench
+    sim = study.build_dyno()
     link = LocalLink()
     powertrain = sim.vehicle.axle_torque
     r = sim.vehicle.wheel_radius_m
@@ -175,12 +174,12 @@ def run(command: str, scenario: str, duration_s=90.0, dt=0.005,
             x_l += v_l * dt
             # The IDM plans against the BENCH's state, because the bench is the
             # vehicle: it is what the reference is for.
-            v_ref = max(0.0, v_ref + idm_accel(bench.speed, x_l - x_d,
-                                               bench.speed - v_l, idm) * dt)
+            v_ref = max(0.0, v_ref + idm_accel(sim.speed, x_l - x_d,
+                                               sim.speed - v_l, idm) * dt)
 
         link.send_reference(v_ref)
         ref = link.recv_reference()
-        st = bench.step(ref[0] if ref else 0.0, dt)
+        st = sim.step(ref[0] if ref else 0.0, dt)
         link.send_measurement(st.speed)
         meas = link.recv_measurement()
         v_d = meas[0] if meas else 0.0

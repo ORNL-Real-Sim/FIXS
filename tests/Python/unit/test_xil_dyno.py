@@ -1,4 +1,4 @@
-"""Invariants for the simulated dyno bench (CommonLib/xil).
+"""Invariants for the simulated dyno sim (CommonLib/xil).
 
 Physics checks, not regression snapshots. Each pins a property something
 downstream relies on, so that changing the model cannot quietly change what a
@@ -16,7 +16,7 @@ import pytest
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__),
                                                 '..', '..', '..')))
 
-from CommonLib.xil import Bench, Dyno, RobotDriver, Vehicle  # noqa: E402
+from CommonLib.xil import DynoSim, Dyno, RobotDriver, Vehicle  # noqa: E402
 
 DT = 0.001
 RL = 2
@@ -39,16 +39,16 @@ def test_bad_configuration_is_rejected():
     with pytest.raises(ValueError):
         Vehicle(front_share=1.5)
     with pytest.raises(ValueError):
-        Bench().step_pedals(0.0, 0.0, 0.0)
+        DynoSim().step_pedals(0.0, 0.0, 0.0)
 
 
 # -------------------------------------------------------------- sub-stepping
 
 def test_a_large_dt_is_chopped_into_steps_it_can_integrate():
-    """A caller sets the outer rate and should not need the bench's time
+    """A caller sets the outer rate and should not need the sim's time
     constants. Integrated whole, 0.1 s diverged to 1e81 and the clamps then read
     it back as a stopped vehicle."""
-    sim = Bench()
+    sim = DynoSim()
     assert sim.step_pedals(0.5, 0.0, 0.001).substeps == 1
     assert sim.step_pedals(0.5, 0.0, 0.100).substeps > 1
 
@@ -56,9 +56,9 @@ def test_a_large_dt_is_chopped_into_steps_it_can_integrate():
 def test_the_answer_does_not_depend_on_the_callers_rate():
     reference = None
     for dt in (0.001, 0.02, 0.05, 0.1, 0.2):
-        bench = Bench()
+        sim = DynoSim()
         for _ in range(int(40.0 / dt)):
-            state = bench.step(15.0, dt)
+            state = sim.step(15.0, dt)
         if reference is None:
             reference = state.speed
         assert state.speed == pytest.approx(reference, abs=1e-3), \
@@ -66,8 +66,8 @@ def test_the_answer_does_not_depend_on_the_callers_rate():
 
 
 def test_the_inner_step_follows_the_fastest_dynamic():
-    slow = Bench(Vehicle(torque_bandwidth_Hz=1.0))
-    fast = Bench(Vehicle(torque_bandwidth_Hz=20.0))
+    slow = DynoSim(Vehicle(torque_bandwidth_Hz=1.0))
+    fast = DynoSim(Vehicle(torque_bandwidth_Hz=20.0))
     assert fast.inner_dt < slow.inner_dt
     assert slow.inner_dt == pytest.approx(0.1)
 
@@ -77,14 +77,14 @@ def test_the_inner_step_follows_the_fastest_dynamic():
 def test_a_parked_vehicle_stays_parked():
     """Road resistance must not accelerate a stopped car. It is a reaction
     force, and summing it as a signed term makes one roll backwards."""
-    state = run(Bench(), 0.0, 0.0, 5.0)
+    state = run(DynoSim(), 0.0, 0.0, 5.0)
     assert state.speed == pytest.approx(0.0, abs=1e-9)
     assert state.standstill
     assert state.force == pytest.approx(0.0, abs=1e-9)
 
 
 def test_brake_brings_it_to_rest_and_holds():
-    sim = Bench()
+    sim = DynoSim()
     run(sim, 1.0, 0.0, 6.0)
     assert sim.speed > 10.0
     state = run(sim, 0.0, 1.0, 8.0)
@@ -93,7 +93,7 @@ def test_brake_brings_it_to_rest_and_holds():
 
 
 def test_it_settles_where_tractive_effort_meets_road_resistance():
-    sim = Bench()
+    sim = DynoSim()
     state = run(sim, 1.0, 0.0, 400.0, dt=0.01)
     assert abs(state.force) < 25.0, 'not settled: %.1f N' % state.force
     assert state.resistance == pytest.approx(
@@ -102,8 +102,8 @@ def test_it_settles_where_tractive_effort_meets_road_resistance():
 
 def test_the_speed_limiter_holds_the_top_speed():
     """Real EVs are limited below what their power would reach. Without one this
-    bench settled at 229 km/h against an EV6's actual 185."""
-    sim = Bench()
+    sim settled at 229 km/h against an EV6's actual 185."""
+    sim = DynoSim()
     state = run(sim, 1.0, 0.0, 400.0, dt=0.01)
     limit = sim.vehicle.powertrain.max_speed_mps
     assert state.speed <= limit
@@ -119,20 +119,20 @@ def test_road_resistance_matches_its_coefficients():
 def test_roller_inertia_slows_the_acceleration():
     """Referred to the road through r^2, so a heavier roller must accelerate
     more slowly on identical torque."""
-    light = Bench(dyno=Dyno(roller_inertia_kgm2=0.0))
-    heavy = Bench(dyno=Dyno(roller_inertia_kgm2=200.0))
+    light = DynoSim(dyno=Dyno(roller_inertia_kgm2=0.0))
+    heavy = DynoSim(dyno=Dyno(roller_inertia_kgm2=200.0))
     assert run(heavy, 1.0, 0.0, 3.0).speed < run(light, 1.0, 0.0, 3.0).speed
 
 
 def test_wheels_are_rigidly_coupled_to_the_roller():
-    sim = Bench()
+    sim = DynoSim()
     state = run(sim, 0.6, 0.0, 4.0)
     for w in state.omega:
         assert w == pytest.approx(state.speed / sim.vehicle.wheel_radius_m)
 
 
 def test_a_hill_rolls_it_back_with_the_brake_off():
-    sim = Bench(dyno=Dyno(grade_rad=math.radians(15.0)))
+    sim = DynoSim(dyno=Dyno(grade_rad=math.radians(15.0)))
     assert run(sim, 0.0, 0.0, 4.0).speed < -0.5
 
 
@@ -140,7 +140,7 @@ def test_axle_torque_is_the_measured_one():
     """It is drive minus brake minus what spun the wheel up, so during a
     transient it must differ from drive minus brake, and at steady state it
     must not."""
-    sim = Bench()
+    sim = DynoSim()
     early = sim.step_pedals(1.0, 0.0, 0.01)
     settled = run(sim, 1.0, 0.0, 400.0, dt=0.01)
     produced = sum(early.drive_torque) - sum(early.brake_torque)
@@ -152,7 +152,7 @@ def test_axle_torque_is_the_measured_one():
 # ---------------------------------------------------------------------- axle
 
 def test_an_axle_bench_spins_up_on_its_own():
-    state = run(Bench(dyno=Dyno(mode='axle')), 0.5, 0.0, 6.0)
+    state = run(DynoSim(dyno=Dyno(mode='axle')), 0.5, 0.0, 6.0)
     assert state.omega[RL] > 10.0
     assert state.speed > 3.0
     assert state.resistance > 0.0
@@ -161,21 +161,21 @@ def test_an_axle_bench_spins_up_on_its_own():
 def test_the_hubs_have_to_accelerate_the_body_too():
     """There is no body on an axle dyno, so its inertia is added electrically.
     A heavier vehicle must spin up more slowly."""
-    light = Bench(Vehicle(mass_kg=500.0), Dyno(mode='axle'))
-    heavy = Bench(Vehicle(mass_kg=4000.0), Dyno(mode='axle'))
+    light = DynoSim(Vehicle(mass_kg=500.0), Dyno(mode='axle'))
+    heavy = DynoSim(Vehicle(mass_kg=4000.0), Dyno(mode='axle'))
     assert heavy.axle_inertia_kgm2 > light.axle_inertia_kgm2
     assert run(heavy, 0.5, 0.0, 3.0).omega[RL] < run(light, 0.5, 0.0, 3.0).omega[RL]
 
 
 def test_an_axle_bench_holds_still_with_no_pedal():
-    state = run(Bench(dyno=Dyno(mode='axle')), 0.0, 0.0, 5.0)
+    state = run(DynoSim(dyno=Dyno(mode='axle')), 0.0, 0.0, 5.0)
     assert state.standstill
     for w in state.omega:
         assert w == pytest.approx(0.0, abs=1e-9)
 
 
 def test_brake_never_spins_the_wheel_backwards():
-    sim = Bench(dyno=Dyno(mode='axle'))
+    sim = DynoSim(dyno=Dyno(mode='axle'))
     run(sim, 0.4, 0.0, 3.0)
     for w in run(sim, 0.0, 1.0, 6.0).omega:
         assert w > -1e-3, 'brake drove the wheel backwards to %.4f rad/s' % w
@@ -217,20 +217,20 @@ def test_constant_torque_then_constant_power():
 
 
 def test_the_powertrain_can_be_replaced_wholesale():
-    """The hook for making the bench agree with another simulator's torque map
+    """The hook for making the sim agree with another simulator's torque map
     instead of guessing at it."""
 
     class Flat(Vehicle):
         def axle_torque(self, throttle, omega_front, omega_rear):
             return 0.0, 800.0
 
-    state = run(Bench(Flat()), 0.5, 0.0, 3.0)
+    state = run(DynoSim(Flat()), 0.5, 0.0, 3.0)
     assert state.drive_torque[RL] == pytest.approx(400.0, rel=1e-3)
     assert state.drive_torque[0] == pytest.approx(0.0, abs=1e-6)
 
 
 def test_torque_delivery_lags_the_command():
-    sim = Bench(Vehicle(torque_bandwidth_Hz=2.0))
+    sim = DynoSim(Vehicle(torque_bandwidth_Hz=2.0))
     first = sim.step_pedals(1.0, 0.0, DT).drive_torque[RL]
     settled = run(sim, 1.0, 0.0, 4.0).drive_torque[RL]
     assert abs(first) < 0.05 * abs(settled)
@@ -241,9 +241,9 @@ def test_torque_delivery_lags_the_command():
 def test_the_driver_drives_the_speed_error_to_zero():
     """The whole specification. A proportional-only law would sit permanently
     below the reference by however much error makes the pedal it needs."""
-    bench = Bench()
+    sim = DynoSim()
     for _ in range(int(60.0 / DT)):
-        state = bench.step(15.0, DT)
+        state = sim.step(15.0, DT)
     assert state.speed == pytest.approx(15.0, abs=1e-3)
 
 
@@ -253,11 +253,11 @@ def test_the_pedal_is_pinned_by_physics_not_by_history():
     settle on the same pedal."""
     parked = []
     for ramp in (None, 5.0, 20.0):
-        bench = Bench()
+        sim = DynoSim()
         for k in range(int(60.0 / DT)):
             ref = 15.0 if ramp is None else min(15.0, 15.0 * k * DT / ramp)
-            bench.step(ref, DT)
-        parked.append(bench.throttle)
+            sim.step(ref, DT)
+        parked.append(sim.throttle)
     assert max(parked) - min(parked) < 1e-4, 'history-dependent: %s' % parked
 
 
@@ -278,11 +278,11 @@ def test_the_integral_does_not_wind_up_against_a_rail():
 
 def test_a_standstill_reference_is_held_on_the_brake():
     """A PI chasing zero from zero dithers; a driver stops."""
-    bench = Bench()
+    sim = DynoSim()
     for _ in range(int(5.0 / DT)):
-        state = bench.step(0.0, DT)
+        state = sim.step(0.0, DT)
     assert state.speed == pytest.approx(0.0, abs=1e-9)
-    assert bench.brake > 0.0 and bench.throttle == 0.0
+    assert sim.brake > 0.0 and sim.throttle == 0.0
 
 
 def test_separate_throttle_and_brake_ceilings():
@@ -294,18 +294,18 @@ def test_separate_throttle_and_brake_ceilings():
 
 def test_the_bench_can_fail_to_reach_the_reference():
     """The gap between asked and achieved is the point of having a plant."""
-    bench = Bench()
+    sim = DynoSim()
     for _ in range(int(3.0 / DT)):
-        state = bench.step(60.0, DT)
+        state = sim.step(60.0, DT)
     assert state.speed < 40.0
-    assert bench.throttle == pytest.approx(1.0)
+    assert sim.throttle == pytest.approx(1.0)
 
 
 def test_reset_restores_a_known_state():
-    bench = Bench()
+    sim = DynoSim()
     for _ in range(int(5.0 / DT)):
-        bench.step(15.0, DT)
-    bench.reset(speed=7.0)
-    assert bench.speed == pytest.approx(7.0)
-    assert bench.driver.integral == 0.0
-    assert bench.time == 0.0
+        sim.step(15.0, DT)
+    sim.reset(speed=7.0)
+    assert sim.speed == pytest.approx(7.0)
+    assert sim.driver.integral == 0.0
+    assert sim.time == 0.0

@@ -1,13 +1,18 @@
-"""The bench: a vehicle on a dyno, with somebody working the pedal.
+"""The simulation: a vehicle on a dyno, with somebody working the pedal.
 
-    bench.step(v_ref, dt)                 the driver chases a speed reference
-    bench.step_pedals(throttle, brake, dt) you work the pedal yourself
+Not a part of the setup -- the other four modules are that. This one owns the
+equations of motion, because the acceleration of a car on a dyno belongs to
+neither the car nor the dyno alone. It emerges once they are coupled, and the
+effective mass it turns on is the car plus the roller plus four wheels referred
+to the road through the tyre radius.
+
+    sim.step(v_ref, dt)                   the driver chases a speed reference
+    sim.step_pedals(throttle, brake, dt)  you work the pedal yourself
 
 Both return a State. The first is what the wire carries -- a speed reference in,
 the speed achieved out -- and the gap between those two is the point: a
-pass-through always delivers what was asked, a bench does not.
+pass-through always delivers what was asked, a dyno does not.
 """
-
 import math
 from collections import namedtuple
 
@@ -15,7 +20,7 @@ from .driver import RobotDriver
 from .dyno import Dyno
 from .vehicle import Vehicle
 
-__all__ = ['Bench', 'State', 'FL', 'FR', 'RL', 'RR', 'NWHEEL']
+__all__ = ['DynoSim', 'State', 'FL', 'FR', 'RL', 'RR', 'NWHEEL']
 
 FL, FR, RL, RR = 0, 1, 2, 3
 NWHEEL = 4
@@ -27,29 +32,6 @@ G = 9.80665
 #: are upstream of that and are not what a transducer reads.
 State = namedtuple('State', 'time speed omega axle_torque drive_torque '
                             'brake_torque resistance force standstill substeps')
-
-
-class _Lag(object):
-    """Second order: xdd + 2*z*wn*xd + wn^2*x = wn^2*u, RK4."""
-
-    def __init__(self, hz, zeta):
-        self.wn = 2.0 * math.pi * hz
-        self.zeta = zeta
-        self.x = 0.0
-        self.xd = 0.0
-
-    def _d(self, x, xd, u):
-        return xd, self.wn * self.wn * (u - x) - 2.0 * self.zeta * self.wn * xd
-
-    def step(self, u, dt):
-        x, xd = self.x, self.xd
-        k1 = self._d(x, xd, u)
-        k2 = self._d(x + 0.5 * dt * k1[0], xd + 0.5 * dt * k1[1], u)
-        k3 = self._d(x + 0.5 * dt * k2[0], xd + 0.5 * dt * k2[1], u)
-        k4 = self._d(x + dt * k3[0], xd + dt * k3[1], u)
-        self.x += dt / 6.0 * (k1[0] + 2 * k2[0] + 2 * k3[0] + k4[0])
-        self.xd += dt / 6.0 * (k1[1] + 2 * k2[1] + 2 * k3[1] + k4[1])
-        return self.x
 
 
 def _oppose(cap, motion, applied, inertia, dt):
@@ -67,7 +49,7 @@ def _oppose(cap, motion, applied, inertia, dt):
     return math.copysign(cap, applied), False
 
 
-class Bench(object):
+class DynoSim(object):
     """A Vehicle on a Dyno, driven by a RobotDriver. No threads, no clock."""
 
     def __init__(self, vehicle=None, dyno=None, driver=None):
@@ -95,10 +77,8 @@ class Bench(object):
         self.omega = [0.0] * NWHEEL
         self.throttle = 0.0
         self.brake = 0.0
-        self._lag_f = _Lag(v.driveline.torque_bandwidth_Hz,
-                           v.driveline.torque_damping)
-        self._lag_r = _Lag(v.driveline.torque_bandwidth_Hz,
-                           v.driveline.torque_damping)
+        self._lag_f = v.driveline.lag()
+        self._lag_r = v.driveline.lag()
 
     # -- running -----------------------------------------------------------
 
@@ -129,10 +109,8 @@ class Bench(object):
         self.omega = [speed / v.driveline.wheel_radius_m] * NWHEEL
         self.throttle = self.brake = 0.0
         self.driver.reset()
-        self._lag_f = _Lag(v.driveline.torque_bandwidth_Hz,
-                           v.driveline.torque_damping)
-        self._lag_r = _Lag(v.driveline.torque_bandwidth_Hz,
-                           v.driveline.torque_damping)
+        self._lag_f = v.driveline.lag()
+        self._lag_r = v.driveline.lag()
 
     # -- physics -----------------------------------------------------------
 
