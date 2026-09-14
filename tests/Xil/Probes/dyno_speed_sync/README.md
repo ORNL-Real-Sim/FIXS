@@ -99,6 +99,58 @@ Coasting makes the overwrite supply the whole tractive effort. With CARLA's own
 driver, the sync supplies only the residual — 867 N rms, and 83 kJ against
 4235 kJ of tractive work, **1.95 %**.
 
+## The other script: `tracking_scenarios.py`
+
+`dyno_sync_sim.py` prices the couplings. `tracking_scenarios.py` answers a
+narrower question — **how should CARLA be told to follow the bench?** — and
+writes a plotly page, `out/tracking_scenarios.html`.
+
+Two scenarios side by side. **Free driving** isolates the tracking law: nothing
+is in front, so any disagreement is the law and the plant with no planner
+reacting to it. **Following a braking leader** gives that disagreement a
+consequence, because an IDM sized the reference on the ego achieving it.
+
+Two things a controller can write through `ego.set`, which is the same choice
+`COMMAND_SHAPE` makes in `ego_agent_controller.py`:
+
+| command | who closes the speed loop | gains |
+|---|---|---|
+| `speed` | CARLA's own Ackermann controller | kp 50, ki 5 — the MLK app's |
+| `pedals` | we do, writing throttle and brake | kp 0.55, ki 0.5, pedal = a/3.2 |
+
+`kp = 0.55` and the `a/3.2` map come from ORNL's `carla_standalone_drive.py`.
+**The integral term does not** — their law is proportional only, and without it
+CARLA sits 0.44 m/s slow and drifts 40 m back over 90 s. Set `PEDAL_KI = 0` to
+reproduce theirs.
+
+```
+  scenario command   err_rms  err_mean  x_diverge[m]  T_bench_pk  T_carla_pk  ratio  %capac
+  free     speed      0.0173   -0.0004         -0.03        2207        1712   0.78     58%
+  free     pedals     0.3770   -0.0213         -1.92        2207        2349   1.06     57%
+  leader   speed      0.0095    0.0006          0.05        1517        1191   0.79     21%
+  leader   pedals     0.1216   -0.0010         -0.09        1517        1422   0.94     22%
+```
+
+### Why the torque columns are there
+
+Tracking well is not the same as tracking honestly. The two plants are **33 %
+apart in effective inertia** (2452 kg against 1845) and their resistance curves
+cross — 166 N against 241 N at 10 m/s, 546 N against 429 N at 30 m/s. For CARLA
+to hold the bench's speed it must therefore produce a *different* force than the
+bench did, and a stiff loop will deliver that difference without complaint while
+the speed trace looks perfect.
+
+So the figure plots wheel torque for both sides on one axis, and the table
+reports the peak ratio and how much of CARLA's capability it used. Under a speed
+command CARLA peaks at **0.78x** the bench's torque — which is what the mass
+ratio predicts, `1845 / 2452 = 0.75` — and never exceeds **58 %** of what its
+powertrain can deliver. The tracking is being bought with plausible torque, not
+by driving CARLA to something no vehicle would do.
+
+That check is the point. Had the ratio come back at 3x, or the capability
+fraction at 100 %, the speed command would be producing a correct-looking
+trajectory out of a fictional vehicle.
+
 ## Parameters, and which are trustworthy
 
 | value | source |

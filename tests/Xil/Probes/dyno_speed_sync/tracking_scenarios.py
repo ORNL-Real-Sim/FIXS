@@ -26,10 +26,20 @@ the same choice ``COMMAND_SHAPE`` makes in ego_agent_controller.py:
              deliver. That clip is what makes it a controller rather than an
              assignment, and it tracks closely but NOT exactly.
   'pedals'   we close the loop ourselves and write throttle and brake:
-             a = 0.55*(v_dyno - v_ego), mapped to a pedal by a/3.2. Those two
-             constants are lifted from ORNL's carla_standalone_drive.py, which
-             is the only rig doing this today. Proportional only, so it carries
-             a standing offset of (3.2/0.55) x pedal by construction.
+             a = kp*(v_dyno - v_ego) + ki*integral, mapped to a pedal by a/3.2.
+             kp and the 3.2 are lifted from ORNL's carla_standalone_drive.py;
+             the integral term is NOT theirs. Their law is proportional only,
+             which leaves a standing offset of (3.2/kp) x pedal -- measured at
+             -0.44 m/s mean and 40 m of position divergence over 90 s. Set
+             PEDAL_KI to 0 to get their law back.
+
+AND WATCH THE TORQUE, NOT ONLY THE SPEED
+Tracking well is not the same as tracking honestly. The two plants differ by 33%
+in effective inertia and their resistance curves cross, so for CARLA to hold the
+bench's speed it must produce a DIFFERENT force than the bench did. A stiff loop
+will deliver that difference without complaint, and the speed trace will look
+perfect while CARLA is being driven to a torque no real vehicle would produce.
+Row 2 of the figure is there to catch that: wheel torque, both sides, same axis.
 
 A third option exists and is not here: overwriting CARLA's speed outright, which
 is what set_target_velocity does. It belongs in dyno_sync_sim.py's forced
@@ -105,8 +115,10 @@ def idm_accel(v: float, gap: float, closing: float, p: IdmParams) -> float:
 
 # ---------------------------------------------------------------- the run
 
-#: The pedal law's gains, from ORNL's carla_standalone_drive.py.
+#: The pedal law. kp and the acceleration cap are from ORNL's
+#: carla_standalone_drive.py; the integral term is ours, and 0 restores theirs.
 PEDAL_KP = 0.55             # DYNO_SPEED_KP
+PEDAL_KI = 0.5
 PEDAL_MAX_ACCEL = 3.2       # MAX_ACCEL_CMD
 
 #: CARLA's own Ackermann speed loop, as the MLK app configures it.
@@ -149,7 +161,8 @@ def run(command: str, scenario: str, duration_s=90.0, dt=0.005,
     x_l = leader.start_gap_m
     x_d = x_c = v_c = v_ref = ack_i = 0.0
     rec = {k: [] for k in ('t', 'v_lead', 'v_ref', 'v_dyno', 'v_carla',
-                           'gap_dyno', 'gap_carla', 'x_divergence')}
+                           'gap_dyno', 'gap_carla', 'x_divergence',
+                           'T_bench', 'T_carla', 'T_carla_capacity')}
 
     for i in range(int(duration_s / dt)):
         t = i * dt
@@ -176,25 +189,35 @@ def run(command: str, scenario: str, duration_s=90.0, dt=0.005,
         # ---- the CARLA side follows the bench --------------------------
         e = v_d - v_c
         w = v_c / r
+        cap_f, cap_r = powertrain(1.0, 0.0, w, w)
+        a_max = (cap_f + cap_r) / r / carla.mass_kg
+        a_min = -4.0 * max_brake / r / carla.mass_kg
         if command == 'speed':
-            ack_i += e * dt
             # The controller asks for an acceleration; the vehicle delivers what
             # it can. That clip is what stops this being an assignment.
-            Tf, Tr = powertrain(1.0, 0.0, w, w)
-            a_max = (Tf + Tr) / r / carla.mass_kg
-            a_min = -4.0 * max_brake / r / carla.mass_kg
+            if a_min < SPEED_KP * e + SPEED_KI * ack_i < a_max:
+                ack_i += e * dt
             a_cmd = max(a_min, min(a_max, SPEED_KP * e + SPEED_KI * ack_i))
             F = carla.mass_kg * a_cmd
         else:
-            thr, brk = accel_to_pedal(PEDAL_KP * e)
+            a_raw = PEDAL_KP * e + PEDAL_KI * ack_i
+            if -PEDAL_MAX_ACCEL < a_raw < PEDAL_MAX_ACCEL:
+                ack_i += e * dt
+            thr, brk = accel_to_pedal(PEDAL_KP * e + PEDAL_KI * ack_i)
             Tf, Tr = powertrain(thr, brk, w, w)
             F = (Tf + Tr) / r - brk * 4.0 * max_brake / r
         v_c = max(0.0, v_c + (F - study.carla_resistance_N(carla, v_c))
                   / carla.mass_kg * dt)
+
+        # What each side had to produce at the wheel to do that. Comparable
+        # because both are net wheel torque in Nm.
+        T_bench = sum(st.drive_torque_Nm) - sum(st.brake_torque_Nm)
+        T_carla = F * r
         x_c += v_c * dt
 
         for k, val in zip(rec, (t, v_l, v_ref, v_d, v_c,
-                                x_l - x_d, x_l - x_c, x_c - x_d)):
+                                x_l - x_d, x_l - x_c, x_c - x_d,
+                                T_bench, T_carla, (cap_f + cap_r))):
             rec[k].append(val)
     return rec
 
@@ -210,6 +233,13 @@ def summarise(rec, command, scenario):
         'speed_err_max': a[-1],
         'speed_err_mean': sum(err) / len(err),
         'x_divergence_m': rec['x_divergence'][-1],
+        'T_carla_peak': max(abs(v) for v in rec['T_carla']),
+        'T_bench_peak': max(abs(v) for v in rec['T_bench']),
+        'T_ratio_peak': max(abs(rec['T_carla'][i]) for i in range(len(rec['t'])))
+        / max(1e-9, max(abs(v) for v in rec['T_bench'])),
+        'T_frac_of_capacity': max(
+            abs(rec['T_carla'][i]) / max(1e-9, rec['T_carla_capacity'][i])
+            for i in range(len(rec['t']))),
     }
     out['min_gap_dyno'] = (min(rec['gap_dyno']) if scenario == 'leader'
                            else float('nan'))
@@ -227,14 +257,17 @@ def write_html(runs, path):
     from plotly.subplots import make_subplots
 
     titles = []
-    for row in ('speed', 'CARLA speed minus bench speed',
-                'position divergence, x_carla - x_bench', 'gap to leader'):
+    for row in ('speed',
+                'wheel torque each side had to produce',
+                'CARLA speed minus bench speed',
+                'position divergence, x_carla - x_bench',
+                'gap to leader'):
         for sc in SCENARIOS:
             titles.append('%s  --  %s' % (row, 'free driving' if sc == 'free'
                                           else 'following a leader'))
 
-    fig = make_subplots(rows=4, cols=2, shared_xaxes='all',
-                        vertical_spacing=0.055, horizontal_spacing=0.07,
+    fig = make_subplots(rows=5, cols=2, shared_xaxes='all',
+                        vertical_spacing=0.045, horizontal_spacing=0.07,
                         subplot_titles=titles)
 
     for col, sc in enumerate(SCENARIOS, start=1):
@@ -255,6 +288,10 @@ def write_html(runs, path):
         fig.add_trace(go.Scatter(x=base['t'], y=base['v_dyno'],
                                  line=dict(color='#1f77b4', width=2),
                                  **named('bench (dyno)')), row=1, col=col)
+        fig.add_trace(go.Scatter(x=base['t'], y=base['T_bench'],
+                                 legendgroup='bench (dyno)', showlegend=False,
+                                 line=dict(color='#1f77b4', width=2)),
+                      row=2, col=col)
 
         for cmd in COMMANDS:
             rec = runs[(sc, cmd)]
@@ -262,32 +299,36 @@ def write_html(runs, path):
             line = dict(color=COLOUR[cmd], width=1.4)
             fig.add_trace(go.Scatter(x=rec['t'], y=rec['v_carla'], line=line,
                                      **named(LABEL[cmd])), row=1, col=col)
+            fig.add_trace(go.Scatter(x=rec['t'], y=rec['T_carla'],
+                                     legendgroup=LABEL[cmd], showlegend=False,
+                                     line=line), row=2, col=col)
             fig.add_trace(go.Scatter(
                 x=rec['t'], y=[rec['v_carla'][i] - rec['v_dyno'][i]
                                for i in range(n)],
                 legendgroup=LABEL[cmd], showlegend=False,
-                line=line), row=2, col=col)
+                line=line), row=3, col=col)
             fig.add_trace(go.Scatter(x=rec['t'], y=rec['x_divergence'],
                                      legendgroup=LABEL[cmd],
-                                     showlegend=False, line=line), row=3, col=col)
+                                     showlegend=False, line=line), row=4, col=col)
             if sc == 'leader':
                 fig.add_trace(go.Scatter(x=rec['t'], y=rec['gap_carla'],
                                          legendgroup=LABEL[cmd],
                                          showlegend=False, line=line),
-                              row=4, col=col)
+                              row=5, col=col)
 
         if sc == 'leader':
             fig.add_trace(go.Scatter(x=base['t'], y=base['gap_dyno'],
                                      legendgroup='bench (dyno)',
                                      showlegend=False,
                                      line=dict(color='#1f77b4', width=2)),
-                          row=4, col=col)
-        for row in (2, 3):
+                          row=5, col=col)
+        for row in (2, 3, 4):
             fig.add_hline(y=0.0, line=dict(color='black', width=1),
                           row=row, col=col)
 
-    for row, label in ((1, 'speed [m/s]'), (2, 'v_carla - v_dyno [m/s]'),
-                       (3, 'x_carla - x_bench [m]'), (4, 'gap [m]')):
+    for row, label in ((1, 'speed [m/s]'), (2, 'wheel torque [Nm]'),
+                       (3, 'v_carla - v_dyno [m/s]'),
+                       (4, 'x_carla - x_bench [m]'), (5, 'gap [m]')):
         fig.update_yaxes(title_text=label, row=row, col=1)
 
     # Ticks and a crosshair on every panel, not just the bottom one. Reading a
@@ -304,10 +345,10 @@ def write_html(runs, path):
     fig.update_yaxes(showgrid=True, gridcolor='rgba(0,0,0,0.12)',
                      zeroline=True, zerolinecolor='rgba(0,0,0,0.35)')
     for col in (1, 2):
-        fig.update_xaxes(title_text='time [s]', row=4, col=col)
+        fig.update_xaxes(title_text='time [s]', row=5, col=col)
 
     fig.update_layout(
-        height=1250, hovermode='x unified', spikedistance=-1,
+        height=1500, hovermode='x unified', spikedistance=-1,
         plot_bgcolor='white',
         title='Does the CARLA side keep up with the bench? '
               'Left: free driving. Right: following a braking leader.',
@@ -332,16 +373,17 @@ def main(argv=None):
 
     print('\nCARLA following the bench. Leader brakes at %.0f s.\n'
           % LeaderParams().brake_at_s)
-    print('  %-8s %-8s %10s %10s %10s %13s %12s %13s'
-          % ('scenario', 'command', 'err_rms', 'err_max', 'err_mean', 'x_diverge[m]',
-             'min_gap_bench', 'min_gap_carla'))
+    print('  %-8s %-8s %9s %9s %12s %10s %10s %8s %8s'
+          % ('scenario', 'command', 'err_rms', 'err_mean', 'x_diverge[m]',
+             'T_bench_pk', 'T_carla_pk', 'ratio', '%capac'))
     for sc in SCENARIOS:
         for cmd in COMMANDS:
             r = summarise(runs[(sc, cmd)], cmd, sc)
-            print('  %-8s %-8s %10.4f %10.4f %10.4f %13.2f %12.2f %13.2f'
+            print('  %-8s %-8s %9.4f %9.4f %12.2f %10.0f %10.0f %8.2f %7.0f%%'
                   % (r['scenario'], r['command'], r['speed_err_rms'],
-                     r['speed_err_max'], r['speed_err_mean'],
-                     r['x_divergence_m'], r['min_gap_dyno'], r['min_gap_carla']))
+                     r['speed_err_mean'], r['x_divergence_m'],
+                     r['T_bench_peak'], r['T_carla_peak'], r['T_ratio_peak'],
+                     100 * r['T_frac_of_capacity']))
 
     path = write_html(runs, os.path.join(outdir, 'tracking_scenarios.html'))
     print('\n  wrote %s\n' % path)
