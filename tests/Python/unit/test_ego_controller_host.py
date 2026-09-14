@@ -299,3 +299,77 @@ def test_a_pedal_controller_is_untouched(tmp_path):
 
     assert [a[0] for a in backend.applied] == ["actuation", "actuation"]
     assert ego.acceleratorPedalDesired == pytest.approx(0.4)
+
+
+# ---------------------------------------------------------------------------
+# the CARLA-shaped actuation call
+# ---------------------------------------------------------------------------
+#
+# A user bringing a CARLA script should be able to keep `apply_control(control)`.
+# It writes the same record `ego.set` writes, so there is still ONE writer on the
+# actuator, the command still reaches DataLogSetup and every other subscriber,
+# and the controller still runs against a non-CARLA backend. The conversion from
+# CARLA's normalised steer to the record's radians happens there rather than in
+# every controller by hand.
+
+RELAYED_PEDALS = """
+import fixs.carla as carla
+
+
+def control(ego, dt):
+    carla.apply_control(carla.VehicleControl(throttle=0.4, brake=0.0, steer=0.5))
+"""
+
+RELAYED_SPEED = """
+import fixs.carla as carla
+
+
+def control(ego, dt):
+    carla.apply_ackermann_control(
+        carla.VehicleAckermannControl(speed=7.5, steer=-0.25))
+"""
+
+
+def loadRelayed(tmp_path, source, name):
+    p = tmp_path / name
+    p.write_text(source, encoding="utf-8")
+    ctl = loadController(str(p))
+    ctl.setup({}, "ego")
+    return ctl
+
+
+def test_apply_control_lands_on_the_record_as_pedals(tmp_path):
+    backend = StubBackend(5.0)
+    ctl = loadRelayed(tmp_path, RELAYED_PEDALS, "relayed_pedals.py")
+    ego = makeEgo()
+    kind = runController(backend, ctl, ego, 0.05, True, maxSteerRad=fixs.MAX_STEER_RAD)
+
+    assert kind == "actuation", kind
+    assert ego.acceleratorPedalDesired == pytest.approx(0.4)
+    assert ego.brakePedalDesired == pytest.approx(0.0)
+    # normalised steer -> radians, once, here
+    assert ego.steerAngleDesired == pytest.approx(0.5 * fixs.MAX_STEER_RAD)
+    # and the backend was handed the normalised value back
+    assert backend.applied[-1][0] == "actuation"
+    assert backend.applied[-1][3] == pytest.approx(0.5)
+
+
+def test_apply_ackermann_control_lands_on_the_record_as_a_speed(tmp_path):
+    backend = StubBackend(5.0)
+    ctl = loadRelayed(tmp_path, RELAYED_SPEED, "relayed_speed.py")
+    ego = makeEgo()
+    kind = runController(backend, ctl, ego, 0.05, True, maxSteerRad=fixs.MAX_STEER_RAD)
+
+    assert kind == "speedsteer", kind
+    assert ego.speedDesired == pytest.approx(7.5)
+    assert ego.steerAngleDesired == pytest.approx(-0.25 * fixs.MAX_STEER_RAD)
+    assert backend.applied[-1][0] == "speedsteer"
+    assert backend.applied[-1][1] == pytest.approx(7.5)
+
+
+def test_the_relayed_call_is_refused_outside_a_controller_step():
+    """It writes the record for the step in progress, so outside one there is
+    nothing to write and saying so beats writing somewhere harmless."""
+    import fixs.carla as fixscarla
+    with pytest.raises(Exception):
+        fixscarla.apply_control(fixscarla.VehicleControl(throttle=0.1))

@@ -373,3 +373,38 @@ def test_without_a_free_flow_speed_the_limit_still_stands(wired):
     relay.bind(agent, 'ego')
     relay.refresh(rec)
     assert agent._vehicle.get_speed_limit() == pytest.approx(11.18 * 3.6)
+
+
+# ---------------------------------------------------------------------------
+# the blueprint draw is seeded
+# ---------------------------------------------------------------------------
+#
+# A blueprint decides an actor's bounding box, and extent.x is the pose anchor
+# CarlaBackend steps back by to turn the traffic simulator's front-bumper
+# position into the centre CARLA wants. An unseeded draw therefore puts the same
+# traffic in different places on every run.
+
+def test_the_blueprint_draw_is_reproducible():
+    from Carla.VirEnv.BridgeHelper import BridgeHelper
+    first = [BridgeHelper.map_Sumo_vClass_to_Carla_blueprintId('passenger')
+             for _ in range(40)]
+    BridgeHelper.setBlueprintSeed(20260913)
+    again = [BridgeHelper.map_Sumo_vClass_to_Carla_blueprintId('passenger')
+             for _ in range(40)]
+    BridgeHelper.setBlueprintSeed(20260913)
+    third = [BridgeHelper.map_Sumo_vClass_to_Carla_blueprintId('passenger')
+             for _ in range(40)]
+    assert again == third
+    assert len(set(again)) > 1, 'a seeded draw should still vary the mix'
+
+
+def test_a_different_seed_gives_a_different_mix():
+    from Carla.VirEnv.BridgeHelper import BridgeHelper
+    BridgeHelper.setBlueprintSeed(1)
+    a = [BridgeHelper.map_Sumo_vClass_to_Carla_blueprintId('passenger')
+         for _ in range(40)]
+    BridgeHelper.setBlueprintSeed(2)
+    b = [BridgeHelper.map_Sumo_vClass_to_Carla_blueprintId('passenger')
+         for _ in range(40)]
+    assert a != b
+    BridgeHelper.setBlueprintSeed(20260913)

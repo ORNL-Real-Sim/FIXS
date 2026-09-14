@@ -88,6 +88,11 @@ class TrafficLight:
         self.carlaTrafficLightActorPtr = None
 
 
+#: Default seed for the blueprint draw. Any fixed value does; what matters is
+#: that it IS fixed -- see BridgeHelper._blueprintRng.
+_kBlueprintSeed = 20260913
+
+
 class BridgeHelper:
     """Static frame / blueprint / signal mappings, mirroring the C++ class."""
 
@@ -219,6 +224,32 @@ class BridgeHelper:
     #: on every spawn, which on a corridor with one unmapped class buries the log.
     _warnedVClasses = set()
 
+    #: The blueprint draw's OWN generator, seeded, not the module RNG.
+    #:
+    #: This is not cosmetic. A blueprint decides the actor's bounding box, and
+    #: extent.x is the POSE ANCHOR: the traffic simulator reports a vehicle at
+    #: its front bumper and CarlaBackend._extentXOf steps back by that
+    #: half-length to the centre CARLA wants. So an unseeded draw puts the SAME
+    #: traffic in DIFFERENT places run to run, moves every rear bumper with it,
+    #: and changes both what an agent's obstacle sweep intersects and what the
+    #: physics ego can hit. Two builds then cannot be compared on anything as
+    #: rare as a contact.
+    #:
+    #: Its own Random instance rather than random.seed(): seeding the module RNG
+    #: would reach into every other user of it in the process, which is a side
+    #: effect this has no business having.
+    _blueprintRng = random.Random(_kBlueprintSeed)
+
+    @staticmethod
+    def setBlueprintSeed(seed):
+        """Re-seed the blueprint draw.
+
+        For a caller that deliberately wants a different traffic mix. The
+        default is fixed, so a run is reproducible unless someone asks for it
+        not to be.
+        """
+        BridgeHelper._blueprintRng = random.Random(seed)
+
     @staticmethod
     def map_Sumo_vClass_to_Carla_blueprintId(vClass):
         """(string) -> string -- a blueprint id for one SUMO vehicle class."""
@@ -232,7 +263,7 @@ class BridgeHelper:
                       'Defaulting to vehicle.tesla.model3.'
                       % (vClass, ', '.join(sorted(BridgeHelper._BY_VCLASS))))
             return 'vehicle.tesla.model3'          # default to a passenger car
-        return random.choice(pool)
+        return BridgeHelper._blueprintRng.choice(pool)
 
     # --------------------------------------------------------- signal states
     @staticmethod

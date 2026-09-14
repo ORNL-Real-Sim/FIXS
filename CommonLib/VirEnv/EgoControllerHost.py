@@ -347,6 +347,17 @@ _heldInputs = {}
 _DUAL_USE = ('speedDesired',)
 
 
+#: The ego record this step's controller call is holding. Published so
+#: ``fixs.carla.apply_control`` can write a CARLA-shaped command onto the same
+#: record ``ego.set`` writes to, without the controller having to pass it.
+_egoRecord = [None]
+
+
+def currentEgoRecord():
+    """The ego's fixs.Vehicle for the call in progress, or None outside one."""
+    return _egoRecord[0]
+
+
 def resetFeedAge():
     """Call when a new feed arrives, before the sub-steps that follow it."""
     _feedAge[0] = 0.0
@@ -415,7 +426,11 @@ def runController(backend, controller, ego, dt, onFeed, maxSteerRad):
     # real and useful answer -- could never be observed again.
     object.__setattr__(ego, '_written', frozenset())
 
-    controller.control(ego, dt)
+    _egoRecord[0] = ego
+    try:
+        controller.control(ego, dt)
+    finally:
+        _egoRecord[0] = None
 
     kind = fixs.commandKind(ego)
     if kind == 'actuation':
