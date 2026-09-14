@@ -13,7 +13,11 @@ cost?**
 ## What is real here and what is not
 
 The bench is [`CommonLib/xil`](../../../../CommonLib/xil/) `DynoSimulator` in
-chassis mode — the shipped simulator, not a copy of it. The CARLA side is a
+`mode='chassis', control='road_load'` — the shipped simulator, not a copy of it.
+That is the standalone-bench configuration: pedals in, speed out. The other three
+combinations exist and are tested; `control='speed'` is the one to reach for once
+CARLA rather than the bench owns the vehicle dynamics, since then the bench holds
+CARLA's speed and reports the torque it took. The CARLA side is a
 **surrogate**: a longitudinal ODE written in this file, parameterised from
 constants measured off a live 0.9.16 server. No server is contacted.
 
@@ -36,7 +40,7 @@ if you want the plot.
 ```bash
 PY=~/miniconda3/envs/realsim/python.exe
 
-$PY -m pytest tests/Python/unit/test_xil_dyno.py -q        # the bench, 23 tests
+$PY -m pytest tests/Python/unit/test_xil_dyno.py -q        # the bench, 33 tests
 $PY -m pytest tests/Xil/Probes/dyno_speed_sync/ -q         # the coupling, 12 tests
 $PY tests/Xil/Probes/dyno_speed_sync/dyno_sync_sim.py --sync-sweep 0.002,0.005,0.02,0.05,0.10
 ```
@@ -113,7 +117,7 @@ it. Two independent error sources, one test each.
 |---|---|
 | CARLA `CdA = 0.377 m^2`, `rho = 1.25` | CARLA source, **confirmed in motion**: `drag/v^2` constant to 3.2 % over 941 samples |
 | CARLA `mass = 1845 kg` | `get_physics_control()` on the stock Tesla Model 3 |
-| bench `wheel_radius = 0.3596 m` | **measured**: `median(v / omega_rear)` over 2.2 M samples of EV6 log |
+| bench `wheel_radius = 0.36 m` | round default. An EV6 log gives 0.3596 from `median(v/omega_rear)` over 2.2 M samples, so the round number is not far off, but set it for your own vehicle |
 | CARLA `roll_coeff = 0.012` | **not measured.** CARLA's rolling resistance lives inside the tire model and only appears lumped into `sum(long_force)`. It decides where the sign change in finding (1) sits |
 | bench road load A/B/C | representative EV6 AWD values, not measured from our dyno |
 | bench powertrain peaks | manufacturer-derived, **not measured**. The instrumented cycles reached 41 kW at the wheels against a rated 239 kW, so that data bounds demand and cannot confirm capability |

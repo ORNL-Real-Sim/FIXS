@@ -18,24 +18,24 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__),
 
 from CommonLib.xil import (  # noqa: E402
     NWHEEL, RL, AxleDynoParams, ChassisDynoParams, DrivelineParams, DynoConfig,
-    DynoSimulator, PowertrainParams, RoadLoadParams,
+    DynoSimulator, PowertrainParams, RoadLoadParams, ServoParams,
 )
 
 DT = 0.001
 
 
-def _chassis(**kw):
-    return DynoSimulator(DynoConfig(mode='chassis', **kw))
+def _chassis(control='road_load', **kw):
+    return DynoSimulator(DynoConfig(mode='chassis', control=control, **kw))
 
 
-def _axle(**kw):
-    return DynoSimulator(DynoConfig(mode='axle', **kw))
+def _axle(control='speed', **kw):
+    return DynoSimulator(DynoConfig(mode='axle', control=control, **kw))
 
 
-def _run(dyno, thr, brk, secs, omega_cmd=None):
+def _run(dyno, thr, brk, secs, **cmd):
     s = None
     for _ in range(int(secs / DT)):
-        s = dyno.step(thr, brk, DT, omega_cmd=omega_cmd)
+        s = dyno.step(thr, brk, DT, **cmd)
     return s
 
 
@@ -46,32 +46,50 @@ def test_mode_must_be_one_of_two():
         DynoSimulator(DynoConfig(mode='rollers'))
 
 
-def test_chassis_refuses_a_speed_command():
-    """Passing omega_cmd to chassis mode means the caller has the wrong picture
-    of who owns the body, and silently ignoring it would hide that."""
+def test_control_must_be_one_of_two():
+    with pytest.raises(ValueError):
+        DynoSimulator(DynoConfig(control='torque'))
+
+
+def test_each_mode_takes_only_its_own_command():
+    """Passing the wrong command means the caller has the wrong picture of who
+    owns what, and silently ignoring it would hide that."""
     with pytest.raises(ValueError):
         _chassis().step(0.5, 0.0, DT, omega_cmd=[10.0] * NWHEEL)
-
-
-def test_axle_requires_a_speed_command():
     with pytest.raises(ValueError):
-        _axle().step(0.5, 0.0, DT)
+        _axle().step(0.5, 0.0, DT, speed_cmd=10.0)
+
+
+def test_a_speed_controlled_bench_requires_its_command():
+    with pytest.raises(ValueError):
+        _axle(control='speed').step(0.5, 0.0, DT)
+    with pytest.raises(ValueError):
+        _chassis(control='speed').step(0.5, 0.0, DT)
+
+
+def test_a_road_load_bench_refuses_a_command_it_would_ignore():
+    """Under road_load the bench PRODUCES the speed, so accepting a setpoint
+    would silently do nothing."""
+    with pytest.raises(ValueError):
+        _chassis(control='road_load').step(0.5, 0.0, DT, speed_cmd=10.0)
+    with pytest.raises(ValueError):
+        _axle(control='road_load').step(0.5, 0.0, DT, omega_cmd=[10.0] * NWHEEL)
 
 
 def test_an_unstable_servo_is_rejected_at_construction():
     """A speed loop crossing over near its own actuator oscillates, and that
     oscillation looks like a physics result. Refuse to build it."""
-    bad = AxleDynoParams(speed_loop_Hz=60.0, current_loop_Hz=25.0)
+    bad = AxleDynoParams(servo=ServoParams(loop_Hz=60.0, actuator_Hz=25.0))
     with pytest.raises(ValueError, match='phase margin'):
-        DynoSimulator(DynoConfig(mode='axle', axle=bad))
+        DynoSimulator(DynoConfig(mode='axle', control='speed', axle=bad))
 
 
 def test_servo_gains_scale_with_inertia():
     """Gains are derived so the requested bandwidth is what you actually get,
-    whatever the inertia."""
-    a = AxleDynoParams(speed_loop_Hz=20.0)
-    kp1, _ = a.gains(1.0)
-    kp2, _ = a.gains(4.0)
+    whatever the inertia -- which is why they are not quoted as raw numbers."""
+    p = ServoParams(loop_Hz=20.0)
+    kp1, _ = p.gains(1.0)
+    kp2, _ = p.gains(4.0)
     assert kp2 == pytest.approx(4.0 * kp1)
     assert kp1 / 1.0 == pytest.approx(2 * math.pi * 20.0)
 
@@ -159,9 +177,13 @@ def test_measured_torque_tracks_the_pedal():
     assert high == pytest.approx(3.0 * low, rel=0.05)
 
 
-def test_the_bench_owns_no_body_in_axle_mode():
-    s = _run(_axle(), 0.3, 0.0, 1.0, omega_cmd=[20.0] * NWHEEL)
-    assert s.speed_mps is None
+def test_axle_mode_reports_only_an_implied_speed():
+    """There is no body, so speed_mps is mean(omega)*r offered as a convenience.
+    It must follow the wheels rather than being integrated independently."""
+    d = _axle()
+    s = _run(d, 0.3, 0.0, 3.0, omega_cmd=[20.0] * NWHEEL)
+    assert s.speed_mps == pytest.approx(20.0 * d.cfg.driveline.wheel_radius_m,
+                                        rel=1e-6)
 
 
 def test_the_servo_follows_a_changing_command():
@@ -186,7 +208,7 @@ def test_brake_never_spins_the_wheel_backwards():
 def test_the_envelope_is_constant_torque_then_constant_power():
     p = PowertrainParams(rear_peak_torque_Nm=1000.0, rear_peak_power_W=10.0e3,
                          front_share=0.0)
-    d = DynoSimulator(DynoConfig(mode='axle', powertrain=p))
+    d = DynoSimulator(DynoConfig(mode='axle', control='speed', powertrain=p))
     # base speed is where peak power meets peak torque: 10 kW / 1000 Nm = 10 rad/s
     below = _run(d, 1.0, 0.0, 2.0, omega_cmd=[5.0] * NWHEEL).drive_torque_Nm[RL]
     d.reset()
@@ -204,7 +226,7 @@ def test_a_caller_can_replace_the_powertrain_entirely():
         calls.append((throttle, w_r))
         return 0.0, 800.0
 
-    d = DynoSimulator(DynoConfig(mode='axle'), powertrain=flat)
+    d = DynoSimulator(DynoConfig(mode='axle', control='speed'), powertrain=flat)
     s = _run(d, 0.5, 0.0, 2.0, omega_cmd=[20.0] * NWHEEL)
     assert calls, 'the override was never called'
     assert s.drive_torque_Nm[RL] == pytest.approx(400.0, rel=1e-3)
@@ -235,3 +257,75 @@ def test_reset_restores_a_known_state():
 def test_dt_must_be_positive():
     with pytest.raises(ValueError):
         _chassis().step(0.0, 0.0, 0.0)
+
+
+# ------------------------------------------------------- chassis, speed mode
+
+def test_a_speed_controlled_chassis_holds_its_command():
+    s = _run(_chassis(control='speed'), 0.3, 0.0, 4.0, speed_cmd=15.0)
+    assert s.speed_mps == pytest.approx(15.0, abs=1e-4)
+
+
+def test_speed_control_measures_the_effort_it_took():
+    """Holding a speed means the dyno force ends up equal and opposite to what
+    the vehicle is producing, so the net on the vehicle is zero. That force IS
+    the measurement -- it is why you run this mode."""
+    d = _chassis(control='speed')
+    s = _run(d, 0.3, 0.0, 4.0, speed_cmd=15.0)
+    drive_force = sum(s.drive_torque_Nm) / d.cfg.driveline.wheel_radius_m
+    assert s.dyno_force_N == pytest.approx(-drive_force, rel=1e-3)
+    assert s.tractive_force_N == pytest.approx(0.0, abs=1.0)
+
+
+def test_speed_control_imposes_no_road_load():
+    """The servo has replaced the road. Whoever owns the vehicle dynamics owns
+    the road load, and applying it here as well would double-count it."""
+    s = _run(_chassis(control='speed'), 0.3, 0.0, 4.0, speed_cmd=15.0)
+    assert s.road_load_N == 0.0
+
+
+def test_the_measured_force_tracks_the_pedal():
+    low = _run(_chassis(control='speed'), 0.2, 0.0, 4.0, speed_cmd=15.0)
+    high = _run(_chassis(control='speed'), 0.6, 0.0, 4.0, speed_cmd=15.0)
+    assert abs(high.dyno_force_N) > abs(low.dyno_force_N) > 0.0
+    assert abs(high.dyno_force_N) == pytest.approx(3.0 * abs(low.dyno_force_N),
+                                                   rel=0.05)
+
+
+def test_a_speed_controlled_chassis_follows_a_ramp():
+    d = _chassis(control='speed')
+    cmd = 0.0
+    for k in range(8000):
+        cmd = 2.0 * (k * DT)
+        s = d.step(0.3, 0.0, DT, speed_cmd=cmd)
+    assert s.speed_mps == pytest.approx(cmd, abs=0.05)
+
+
+# ---------------------------------------------------- axle, road-load mode
+
+def test_a_road_load_axle_bench_accelerates_on_its_own():
+    """No external speed command: the hubs absorb the road-load share and the
+    wheels spin up, so the bench is a whole vehicle again."""
+    d = _axle(control='road_load')
+    s = _run(d, 0.5, 0.0, 6.0)
+    assert s.wheel_omega_radps[RL] > 10.0
+    assert s.speed_mps > 3.0
+    assert s.road_load_N > 0.0
+
+
+def test_the_simulated_mass_is_what_the_hubs_have_to_accelerate():
+    """There is no body on an axle dyno, so the vehicle's translational inertia
+    has to be added electrically. A heavier simulated vehicle must spin up more
+    slowly on identical torque."""
+    light = _axle(control='road_load', axle=AxleDynoParams(simulated_mass_kg=500.0))
+    heavy = _axle(control='road_load', axle=AxleDynoParams(simulated_mass_kg=4000.0))
+    assert heavy.axle_inertia_kgm2 > light.axle_inertia_kgm2
+    assert (_run(heavy, 0.5, 0.0, 3.0).wheel_omega_radps[RL]
+            < _run(light, 0.5, 0.0, 3.0).wheel_omega_radps[RL])
+
+
+def test_a_road_load_axle_bench_holds_still_with_no_pedal():
+    s = _run(_axle(control='road_load'), 0.0, 0.0, 5.0)
+    assert s.at_standstill
+    for w in s.wheel_omega_radps:
+        assert w == pytest.approx(0.0, abs=1e-9)

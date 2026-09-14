@@ -14,16 +14,16 @@ dynamics -- see ``dyno.py`` for the picture.
 """
 
 from .dyno import (
-    FL, FR, RL, RR, NWHEEL,
+    CONTROLS, FL, FR, MODES, NWHEEL, RL, RR,
     AxleDynoParams, ChassisDynoParams, DrivelineParams, DynoConfig,
-    DynoSimulator, DynoState, PowertrainParams, RoadLoadParams,
+    DynoSimulator, DynoState, PowertrainParams, RoadLoadParams, ServoParams,
     envelope_powertrain,
 )
 
 __all__ = [
     'DynoSimulator', 'DynoConfig', 'DynoState',
-    'PowertrainParams', 'DrivelineParams', 'RoadLoadParams',
+    'PowertrainParams', 'DrivelineParams', 'RoadLoadParams', 'ServoParams',
     'ChassisDynoParams', 'AxleDynoParams',
     'envelope_powertrain',
-    'FL', 'FR', 'RL', 'RR', 'NWHEEL',
+    'MODES', 'CONTROLS', 'FL', 'FR', 'RL', 'RR', 'NWHEEL',
 ]
