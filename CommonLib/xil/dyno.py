@@ -6,43 +6,38 @@ the vehicle bolted to it -- because that pair is what the rest of the system
 talks to. Nothing here imports CARLA, FIXS or numpy; it is standard library, so
 it runs anywhere and can be unit-tested without a simulator.
 
-THE PEDAL IS ALWAYS AN INPUT
------------------------------
+THE PEDAL IS THE INPUT
+----------------------
 The bench never decides throttle. A real bench has a real vehicle on it whose
-pedal is worked by somebody -- a driver robot following a trace, or in our case
-the same command the CARLA ego receives. ``step()`` therefore always takes
-``throttle`` and ``brake``, in every mode. What changes between modes is what the
-DYNO does, not who drives the car.
+pedal is worked by somebody -- a driver robot following a speed trace, which is
+what ``RobotDriver`` in this package stands in for. ``step()`` takes ``throttle``
+and ``brake``, and gives back what the vehicle did.
 
-TWO INDEPENDENT CHOICES
------------------------
-``mode`` -- where the dyno couples to the vehicle::
+THE DYNO APPLIES ROAD RESISTANCE
+--------------------------------
+That is the only thing it does. It pretends to be the road: it absorbs
+``A + B*v + C*v^2`` and lets the vehicle accelerate against simulated inertia.
+Speed is therefore an OUTPUT, and the driver is the only authority over it.
 
-    'chassis'   the vehicle sits on rollers; the dyno acts at the roller surface
-    'axle'      the wheels come off and hub units bolt to the hubs; the vehicle
-                never moves, so there is no body here at all
+An earlier revision also offered a speed-controlled mode, where the dyno servo
+forced a commanded speed and the measurement was the force it took. That is a
+real bench, but it does not compose with a speed-tracking driver: both would be
+steering the same degree of freedom, the driver's error would sit at zero, and
+its pedal would park on whatever its integrator happened to hold. Measured: the
+same 15 m/s setpoint reached three ways parked the throttle at 0.040, 0.206 and
+0.696. Under road resistance the pedal is pinned by physics instead -- 0.0283
+every time, because that is the value whose tractive force balances the
+resistance. Git has the speed mode if a torque-coupled bench ever needs it.
 
-``control`` -- what the dyno's servo is doing::
-
-    'road_load'  the dyno pretends to be the road: it absorbs A + B*v + C*v^2 and
-                 lets the vehicle accelerate against simulated inertia. Speed is
-                 an OUTPUT. This is a coastdown/emissions-cycle bench.
-    'speed'      the dyno FORCES the commanded speed and measures the effort
-                 needed to hold it. Speed is an INPUT, torque is the measurement.
-                 Road load is NOT applied -- the servo has replaced it, and
-                 whoever owns the vehicle dynamics owns the road load too.
-
-All four combinations are real benches, and they sit in a loop differently::
-
-    chassis + road_load   pedals ─────────────▶ speed, wheel omega
-    chassis + speed       pedals, speed_cmd ──▶ measured tractive force
-    axle    + road_load   pedals ─────────────▶ wheel omega  (inertia simulated)
-    axle    + speed       pedals, omega_cmd ──▶ measured axle torque
-
-For coupling to a simulator that already owns the vehicle dynamics -- CARLA, or
-CarMaker over CM4SL -- ``control='speed'`` is the one you want: the simulator says
-what the speed should be, the bench holds it, and the torque it took is the
-measurement that goes back. ``'road_load'`` is for running the bench standalone.
+WHERE THE DYNO COUPLES
+----------------------
+``mode='chassis'``
+    The vehicle sits on rollers. The dyno acts at the roller surface and the
+    rotating parts refer to the road through ``r^2``.
+``mode='axle'``
+    The wheels come off and hub units bolt to the hubs. The vehicle never moves,
+    so the body has no physical representation and its translational inertia is
+    added electrically -- ``simulated_mass_kg``, split across the hubs.
 
 WHAT IS MODELLED
 ----------------
@@ -54,10 +49,6 @@ WHAT IS MODELLED
   speed-matched coupling that lag is a first-class error source.
 * Friction brake torque per wheel, summing with the powertrain the way PhysX does.
 * Rotating inertia, kept separate throughout: wheel/driveline, roller, hub rotor.
-  A chassis roller refers to the road through r^2 and adds to the vehicle mass; a
-  hub rotor adds directly to its wheel.
-* Servos with finite bandwidth and an effort ceiling, gains DERIVED from the
-  bandwidth and the inertia they act on.
 
 WHAT IS NOT
 -----------
@@ -65,7 +56,7 @@ WHAT IS NOT
   exactly in chassis mode. A longitudinal bench study does not need a tyre; a
   traction-limit study does, and this is the wrong tool for that.
 * Lateral anything. Thermal derate, battery limits, state of charge.
-* Transport: no sockets, no threads, no clock. One ``step(dt)``, you own the loop.
+* Transport: no sockets, no threads, no clock. See ``link.py`` for the wire.
 """
 
 from __future__ import annotations
@@ -81,7 +72,6 @@ FL, FR, RL, RR = 0, 1, 2, 3
 NWHEEL = 4
 
 MODES = ('chassis', 'axle')
-CONTROLS = ('road_load', 'speed')
 
 
 # --------------------------------------------------------------------- config
@@ -102,8 +92,19 @@ class PowertrainParams:
     front_peak_power_W: float = 74.0e3
     rear_peak_torque_Nm: float = 3700.0
     rear_peak_power_W: float = 165.0e3
-    #: Fraction of the pedal reaching the front axle; the rest goes rear.
+    #: How the demand is SPLIT between the axles -- not a scale on each axle's
+    #: capability. An earlier revision multiplied each axle's cap by its share,
+    #: which meant full throttle delivered 51 % of the vehicle (3280 of 6400 Nm,
+    #: 127 of 239 kW) and terminal speed was wrong for a reason that had nothing
+    #: to do with the road. A split decides who gets what; it must not throw half
+    #: the car away. Demand above an axle's cap spills to the other one.
     front_share: float = 0.42
+    #: Electronically limited top speed. Real EVs have one and it is usually well
+    #: below what the power would reach: an EV6 stops at ~185 km/h against a road
+    #: load it could push through to nearly 290. Drive torque tapers to zero over
+    #: the last ``limiter_taper_mps`` rather than cutting, which would chatter.
+    max_speed_mps: float = 51.4                 # 185 km/h
+    limiter_taper_mps: float = 2.0
     #: Regen commanded through the brake pedal, appearing as negative wheel
     #: torque split like drive torque. 0 disables it.
     regen_fraction: float = 0.0
@@ -122,46 +123,12 @@ class DrivelineParams:
 
 
 @dataclass
-class RoadLoadParams:
-    """EPA-style coastdown, already in SI. Used by ``control='road_load'``."""
+class RoadResistanceParams:
+    """EPA-style coastdown, already in SI: ``F = A + B*v + C*v^2``."""
 
     A_N: float = 111.0
     B_Npms: float = 0.99
     C_Npms2: float = 0.45
-
-
-@dataclass
-class ServoParams:
-    """A dyno servo. Gains are derived, never quoted.
-
-    For a plant ``I * dx/dt = u`` a PI crosses over at ``kp/I``, so a gain quoted
-    without the inertia it acts on is meaningless -- and is the easy way to build
-    an unstable bench by accident. Ask for a bandwidth instead and the gains
-    follow from whatever inertia this mode presents.
-    """
-
-    #: Closed-loop bandwidth of the outer loop. This decides how faithfully the
-    #: bench holds its command, and therefore how much of a measurement is real.
-    loop_Hz: float = 20.0
-    #: The drive's inner torque/current loop, as a second-order lag. Must sit
-    #: well above loop_Hz or the outer loop has no phase margin.
-    actuator_Hz: float = 200.0
-    actuator_damping: float = 0.9
-    #: PI zero placement as a fraction of crossover. 1/5 is the textbook choice
-    #: and contributes about 79 degrees of phase.
-    zero_ratio: float = 0.2
-
-    def gains(self, inertia: float):
-        wc = 2.0 * math.pi * self.loop_Hz
-        kp = inertia * wc
-        return kp, kp * (wc * self.zero_ratio)
-
-    def phase_margin_deg(self) -> float:
-        """Approximate, PI zero and actuator lag included. Inertia cancels."""
-        wc = 2.0 * math.pi * self.loop_Hz
-        wa = 2.0 * math.pi * self.actuator_Hz
-        return (math.degrees(math.atan(1.0 / self.zero_ratio))
-                - 2.0 * math.degrees(math.atan(wc / wa)))
 
 
 @dataclass
@@ -171,77 +138,68 @@ class ChassisDynoParams:
     #: the vehicle mass; a real dyno's rollers are heavy and this is not small.
     roller_inertia_kgm2: float = 40.0
     grade_rad: float = 0.0
-    #: Ceiling on the speed servo's force. control='speed' only.
-    max_force_N: float = 30000.0
-    servo: ServoParams = field(default_factory=ServoParams)
 
 
 @dataclass
 class AxleDynoParams:
-    """One hub unit per wheel."""
+    """One hub unit per wheel, absorbing the road-resistance share."""
 
     #: Rotor inertia of one hub unit, adding directly to that wheel's inertia.
     hub_inertia_kgm2: float = 0.9
-    #: Absorber ceiling, both directions.
-    max_torque_Nm: float = 4000.0
-    #: control='road_load' only: the vehicle mass the hubs must emulate, since
-    #: there is no real body. Split evenly and referred to each wheel through r^2.
+    #: The vehicle mass the hubs must emulate, since there is no real body.
+    #: Split evenly and referred to each wheel through r^2.
     simulated_mass_kg: float = 2100.0
-    servo: ServoParams = field(default_factory=ServoParams)
 
 
 @dataclass
 class DynoConfig:
-    """``mode`` picks where the dyno couples, ``control`` picks what it does."""
-
     mode: str = 'chassis'
-    control: str = 'road_load'
     powertrain: PowertrainParams = field(default_factory=PowertrainParams)
     driveline: DrivelineParams = field(default_factory=DrivelineParams)
-    road_load: RoadLoadParams = field(default_factory=RoadLoadParams)
+    road_resistance: RoadResistanceParams = field(
+        default_factory=RoadResistanceParams)
     chassis: ChassisDynoParams = field(default_factory=ChassisDynoParams)
     axle: AxleDynoParams = field(default_factory=AxleDynoParams)
+    #: Largest step the bench will integrate internally. Whatever ``dt`` a caller
+    #: hands ``step()`` is chopped into pieces no larger than this, so the caller
+    #: never has to know the bench's time constants. 0 derives it from the
+    #: torque bandwidth, which is the fastest thing in here.
+    max_internal_dt_s: float = 0.0
 
     def validate(self) -> None:
         if self.mode not in MODES:
             raise ValueError('mode must be one of %s, got %r' % (MODES, self.mode))
-        if self.control not in CONTROLS:
-            raise ValueError('control must be one of %s, got %r'
-                             % (CONTROLS, self.control))
         if self.driveline.wheel_radius_m <= 0.0:
             raise ValueError('wheel_radius_m must be positive')
         if not 0.0 <= self.powertrain.front_share <= 1.0:
             raise ValueError('front_share must be in [0, 1]')
-        if self.control == 'speed':
-            # A servo asked to cross over near its own actuator has no phase
-            # margin, and the bench then oscillates instead of holding its
-            # command -- which reads as a physics result and is not one.
-            s = (self.chassis.servo if self.mode == 'chassis' else self.axle.servo)
-            pm = s.phase_margin_deg()
-            if pm < 30.0:
-                raise ValueError(
-                    'the %s speed servo has %.0f deg phase margin: loop_Hz=%g is '
-                    'too close to actuator_Hz=%g. Lower the first or raise the '
-                    'second.' % (self.mode, pm, s.loop_Hz, s.actuator_Hz))
+        if self.driveline.torque_bandwidth_Hz <= 0.0:
+            raise ValueError('torque_bandwidth_Hz must be positive')
+
+    def internal_dt(self) -> float:
+        """The inner step, derived unless it was set explicitly.
+
+        The torque lag is the fastest dynamic here, and integrating it with a
+        step comparable to its own period diverges -- at 0.1 s the speed reached
+        1e81 before the clamps snapped it to zero, which reads as a stopped
+        vehicle rather than a broken integration. A tenth of the period keeps
+        that comfortably away.
+        """
+        if self.max_internal_dt_s > 0.0:
+            return self.max_internal_dt_s
+        return 0.1 / self.driveline.torque_bandwidth_Hz
 
 
 # ---------------------------------------------------------------------- state
 
 @dataclass
 class DynoState:
-    """One tick of bench output. Every mode fills what it can.
-
-    Which field is the MEASUREMENT depends on ``control``. Under ``'road_load'``
-    the bench is telling you what the vehicle did, so read ``speed_mps`` or
-    ``wheel_omega_radps``. Under ``'speed'`` the bench was told what to do, so
-    read ``axle_torque_Nm`` or ``tractive_force_N`` -- the effort it took.
-    """
+    """One tick of bench output."""
 
     t_s: float = 0.0
     #: Vehicle speed. Real in chassis mode; in axle mode there is no body, so it
-    #: is the speed the wheels IMPLY, ``mean(omega) * r``, offered as a
-    #: convenience and not as a measurement.
-    speed_mps: Optional[float] = None
+    #: is the speed the wheels IMPLY, ``mean(omega) * r``.
+    speed_mps: float = 0.0
     wheel_omega_radps: Sequence[float] = (0.0,) * NWHEEL
     #: Torque at the hub coupling, per wheel. Positive drives the vehicle. This
     #: is the powertrain's net torque less what accelerated the vehicle-side
@@ -249,17 +207,13 @@ class DynoState:
     axle_torque_Nm: Sequence[float] = (0.0,) * NWHEEL
     drive_torque_Nm: Sequence[float] = (0.0,) * NWHEEL
     brake_torque_Nm: Sequence[float] = (0.0,) * NWHEEL
-    #: What the dyno itself applied, and how well it is holding its command.
-    dyno_torque_Nm: Sequence[float] = (0.0,) * NWHEEL
-    dyno_force_N: float = 0.0
-    omega_error_radps: Sequence[float] = (0.0,) * NWHEEL
-    speed_error_mps: float = 0.0
-    #: Road load actually acting. Zero under control='speed', which does not
-    #: impose one.
-    road_load_N: float = 0.0
+    #: Road resistance actually acting.
+    road_resistance_N: float = 0.0
     #: Net longitudinal force on the vehicle: what actually accelerated it.
     tractive_force_N: float = 0.0
     at_standstill: bool = False
+    #: How many inner steps this call took. 1 unless the caller's dt was large.
+    substeps: int = 1
 
 
 # ----------------------------------------------------------------- components
@@ -287,57 +241,54 @@ class _SecondOrder:
         return self.x
 
 
-class _PI:
-    """PI with the integral frozen while the output is saturated."""
-
-    def __init__(self, kp: float, ki: float, limit: float):
-        self.kp, self.ki, self.limit = kp, ki, limit
-        self.i = 0.0
-
-    def step(self, err: float, dt: float) -> float:
-        raw = self.kp * err + self.ki * self.i
-        if abs(raw) < self.limit:
-            self.i += err * dt
-        out = self.kp * err + self.ki * self.i
-        return max(-self.limit, min(self.limit, out))
-
-
-class _Servo:
-    """A dyno axis: PI on the tracking error through a second-order drive."""
-
-    def __init__(self, p: ServoParams, inertia: float, limit: float):
-        kp, ki = p.gains(inertia)
-        self.pi = _PI(kp, ki, limit)
-        self.lag = _SecondOrder(p.actuator_Hz, p.actuator_damping)
-
-    def step(self, err: float, dt: float) -> float:
-        return self.lag.step(self.pi.step(err, dt), dt)
-
-    def reset(self) -> None:
-        self.pi.i = 0.0
-        self.lag.x = self.lag.xd = 0.0
-
-
-def envelope_powertrain(p: PowertrainParams):
+def envelope_powertrain(p: PowertrainParams, wheel_radius_m: float = 0.36):
     """Default pedal-to-axle-torque map: constant torque, then constant power.
 
     Returns ``f(throttle, brake, omega_front, omega_rear) -> (T_front, T_rear)``
     as axle torque demand in Nm, before the delivery lag.
+
+    The pedal asks for a fraction of what the vehicle can do; ``front_share``
+    then decides how that demand is divided, and anything an axle cannot take
+    spills to the other. So full throttle delivers the whole vehicle whatever the
+    split, which is the property an earlier revision got wrong.
     """
 
     def cap(peak_T: float, peak_P: float, omega: float) -> float:
         return peak_T if omega <= 1e-3 else min(peak_T, peak_P / omega)
+
+    def limiter(omega: float) -> float:
+        """1 below the limited speed, tapering to 0 at it."""
+        if p.max_speed_mps <= 0.0:
+            return 1.0
+        v = abs(omega) * wheel_radius_m
+        taper = max(1e-6, p.limiter_taper_mps)
+        return max(0.0, min(1.0, (p.max_speed_mps - v) / taper))
+
+    def split(demand: float, cf: float, cr: float):
+        """Divide demand by share, each axle clipped at its own capability.
+
+        Deliberately no spill-over. An earlier attempt let an axle's unmet share
+        flow to the other one, which sounds generous but makes ``front_share=0``
+        -- rear-drive only, a real vehicle -- quietly send torque to the front.
+        Where the share and the capability ratio disagree the total comes up
+        short, and that shortfall is information: it is the vehicle telling you
+        the split you asked for is not one it can deliver.
+        """
+        return min(cf, p.front_share * demand), min(cr, (1.0 - p.front_share) * demand)
 
     def f(throttle: float, brake: float, w_f: float, w_r: float):
         thr = max(0.0, min(1.0, throttle))
         brk = max(0.0, min(1.0, brake))
         cf = cap(p.front_peak_torque_Nm, p.front_peak_power_W, abs(w_f))
         cr = cap(p.rear_peak_torque_Nm, p.rear_peak_power_W, abs(w_r))
-        T_f = thr * p.front_share * cf
-        T_r = thr * (1.0 - p.front_share) * cr
+
+        drive = thr * limiter(0.5 * (abs(w_f) + abs(w_r))) * (cf + cr)
+        T_f, T_r = split(drive, cf, cr)
         if p.regen_fraction > 0.0:
-            T_f -= brk * p.regen_fraction * p.front_share * cf
-            T_r -= brk * p.regen_fraction * (1.0 - p.front_share) * cr
+            regen = brk * p.regen_fraction * (cf + cr)
+            R_f, R_r = split(regen, cf, cr)
+            T_f -= R_f
+            T_r -= R_r
         return T_f, T_r
 
     return f
@@ -346,13 +297,15 @@ def envelope_powertrain(p: PowertrainParams):
 # -------------------------------------------------------------------- the sim
 
 class DynoSimulator:
-    """The bench. One object, one ``step`` per tick, no threads and no clock."""
+    """The bench. One ``step`` per tick, no threads and no clock."""
 
     def __init__(self, config: Optional[DynoConfig] = None,
                  powertrain: Optional[Callable] = None):
         self.cfg = config or DynoConfig()
         self.cfg.validate()
-        self.powertrain = powertrain or envelope_powertrain(self.cfg.powertrain)
+        self.powertrain = powertrain or envelope_powertrain(self.cfg.powertrain,
+                                                    self.cfg.driveline.wheel_radius_m)
+        self.inner_dt = self.cfg.internal_dt()
 
         d, c, a = self.cfg.driveline, self.cfg.chassis, self.cfg.axle
         r = d.wheel_radius_m
@@ -362,18 +315,13 @@ class DynoSimulator:
         self.chassis_effective_mass_kg = (
             c.vehicle_mass_kg + c.roller_inertia_kgm2 / (r * r)
             + NWHEEL * d.wheel_inertia_kgm2 / (r * r))
-        #: Rotational inertia one hub axis presents. Under road_load the hubs
-        #: must also emulate the body, which has no other representation there.
-        self.axle_inertia_kgm2 = d.wheel_inertia_kgm2 + a.hub_inertia_kgm2
-        if self.cfg.control == 'road_load':
-            self.axle_inertia_kgm2 += a.simulated_mass_kg * r * r / NWHEEL
+        #: Rotational inertia one hub axis presents, body included since there
+        #: is no other representation of it on an axle dyno.
+        self.axle_inertia_kgm2 = (d.wheel_inertia_kgm2 + a.hub_inertia_kgm2
+                                  + a.simulated_mass_kg * r * r / NWHEEL)
 
         self._lagF = _SecondOrder(d.torque_bandwidth_Hz, d.torque_damping)
         self._lagR = _SecondOrder(d.torque_bandwidth_Hz, d.torque_damping)
-        self._chassis_servo = _Servo(c.servo, self.chassis_effective_mass_kg,
-                                     c.max_force_N)
-        self._axle_servo = [_Servo(a.servo, self.axle_inertia_kgm2, a.max_torque_Nm)
-                            for _ in range(NWHEEL)]
 
         self.t = 0.0
         self.v = 0.0
@@ -381,9 +329,9 @@ class DynoSimulator:
 
     # -- shared -----------------------------------------------------------
 
-    def road_load_N(self, v: float) -> float:
+    def road_resistance_N(self, v: float) -> float:
         """Signed so it always opposes motion."""
-        p = self.cfg.road_load
+        p = self.cfg.road_resistance
         s = 1.0 if v >= 0.0 else -1.0
         return s * (p.A_N + p.B_Npms * abs(v) + p.C_Npms2 * v * v)
 
@@ -400,11 +348,11 @@ class DynoSimulator:
         return drive, [brk] * NWHEEL
 
     @staticmethod
-    def _oppose(effort_cap: float, motion: float, applied: float, inertia: float,
+    def _oppose(cap: float, motion: float, applied: float, inertia: float,
                 dt: float):
         """Resistive effort that opposes motion and can at most arrest it.
 
-        Applied forces can push either way; resistive ones only ever oppose the
+        Applied efforts push either way; resistive ones only ever oppose the
         motion that exists. Summing both as signed terms is how a parked vehicle
         ends up rolling backwards under its own rolling resistance.
 
@@ -412,52 +360,41 @@ class DynoSimulator:
         """
         if abs(motion) > 1e-12:
             arresting = abs(motion) * inertia / dt + abs(applied)
-            return math.copysign(min(effort_cap, arresting), motion), False
-        if abs(applied) <= effort_cap:
+            return math.copysign(min(cap, arresting), motion), False
+        if abs(applied) <= cap:
             return applied, True                    # static, exactly balances
-        return math.copysign(effort_cap, applied), False
+        return math.copysign(cap, applied), False
 
     # -- chassis ----------------------------------------------------------
 
-    def _step_chassis(self, throttle: float, brake: float, dt: float,
-                      speed_cmd: Optional[float]) -> DynoState:
+    def _advance_chassis(self, throttle: float, brake: float, h: float) -> DynoState:
         c, d = self.cfg.chassis, self.cfg.driveline
         r = d.wheel_radius_m
         m_eff = self.chassis_effective_mass_kg
-        drive, brake_cap = self._torques(throttle, brake, dt)
+        drive, brake_cap = self._torques(throttle, brake, h)
 
         F_applied = sum(drive) / r - c.vehicle_mass_kg * G * math.sin(c.grade_rad)
-        F_brake_cap = sum(brake_cap) / r
+        cap_road = abs(self.road_resistance_N(self.v))
+        cap_brake = sum(brake_cap) / r
 
-        if self.cfg.control == 'speed':
-            # The servo replaces the road: it holds the commanded speed and the
-            # measurement is the effort that took. No road load is imposed.
-            err = speed_cmd - self.v
-            F_servo = self._chassis_servo.step(err, dt)
-            F_brake, held = self._oppose(F_brake_cap, self.v,
-                                         F_applied + F_servo, m_eff, dt)
-            F_road = 0.0
-            F_net = F_applied + F_servo - F_brake
-        else:
-            F_road_cap = abs(self.road_load_N(self.v))
-            F_resist, held = self._oppose(F_road_cap + F_brake_cap, self.v,
-                                          F_applied, m_eff, dt)
-            total = F_road_cap + F_brake_cap
-            F_road = F_resist * (F_road_cap / total) if total > 0.0 else 0.0
-            F_brake = F_resist - F_road
-            F_servo = 0.0
-            err = 0.0
-            F_net = F_applied - F_resist
-
+        F_resist, held = self._oppose(cap_road + cap_brake, self.v, F_applied,
+                                      m_eff, h)
         v_prev = self.v
-        self.v = 0.0 if held else self.v + F_net / m_eff * dt
+        self.v = 0.0 if held else self.v + (F_applied - F_resist) / m_eff * h
         if not held and v_prev != 0.0 and self.v * v_prev < 0.0:
             self.v = 0.0                            # decelerated onto rest
             held = True
 
+        # Attribute the resistance that acted, split by capacity: rolling, that
+        # is the full road resistance and the full brake; held at standstill, it
+        # is only the share that balanced the applied force.
+        total = cap_road + cap_brake
+        F_road = F_resist * (cap_road / total) if total > 0.0 else 0.0
+        F_brake = F_resist - F_road
+
         omega_prev = list(self.omega)
         self.omega = [self.v / r] * NWHEEL
-        alpha = [(self.omega[j] - omega_prev[j]) / dt for j in range(NWHEEL)]
+        alpha = [(self.omega[j] - omega_prev[j]) / h for j in range(NWHEEL)]
         axle = [drive[j] - F_brake * r / NWHEEL - d.wheel_inertia_kgm2 * alpha[j]
                 for j in range(NWHEEL)]
 
@@ -467,56 +404,38 @@ class DynoSimulator:
             axle_torque_Nm=tuple(axle),
             drive_torque_Nm=tuple(drive),
             brake_torque_Nm=tuple(F_brake * r / NWHEEL for _ in range(NWHEEL)),
-            dyno_force_N=F_servo,
-            speed_error_mps=err,
-            road_load_N=F_road,
-            tractive_force_N=F_net,
+            road_resistance_N=F_road,
+            tractive_force_N=F_applied - F_resist,
             at_standstill=held)
 
     # -- axle -------------------------------------------------------------
 
-    def _step_axle(self, throttle: float, brake: float, dt: float,
-                   omega_cmd: Optional[Sequence[float]]) -> DynoState:
+    def _advance_axle(self, throttle: float, brake: float, h: float) -> DynoState:
         d = self.cfg.driveline
         r = d.wheel_radius_m
         J = self.axle_inertia_kgm2
-        drive, brake_cap = self._torques(throttle, brake, dt)
+        drive, brake_cap = self._torques(throttle, brake, h)
 
         v_implied = sum(self.omega) / NWHEEL * r
-        road_share = (abs(self.road_load_N(v_implied)) * r / NWHEEL
-                      if self.cfg.control == 'road_load' else 0.0)
+        road_total = self.road_resistance_N(v_implied)
+        road_share = abs(road_total) * r / NWHEEL
 
-        dyno_T, err, axle, brk_out = [], [], [], []
+        axle, brk_out = [], []
         held = True
         for j in range(NWHEEL):
-            if self.cfg.control == 'speed':
-                e = omega_cmd[j] - self.omega[j]
-                T_servo = self._axle_servo[j].step(e, dt)
-                resist_cap = brake_cap[j]
-            else:
-                e = 0.0
-                T_servo = 0.0
-                resist_cap = brake_cap[j] + road_share
-
-            applied = drive[j] + T_servo
-            resist, wheel_held = self._oppose(resist_cap, self.omega[j], applied,
-                                              J, dt)
+            cap = brake_cap[j] + road_share
+            resist, wheel_held = self._oppose(cap, self.omega[j], drive[j], J, h)
             w_prev = self.omega[j]
-            w_new = 0.0 if wheel_held else w_prev + (applied - resist) / J * dt
+            w_new = 0.0 if wheel_held else w_prev + (drive[j] - resist) / J * h
             if not wheel_held and w_prev != 0.0 and w_new * w_prev < 0.0:
                 w_new = 0.0
                 wheel_held = True
-            alpha = (w_new - w_prev) / dt
+            alpha = (w_new - w_prev) / h
             self.omega[j] = w_new
             held = held and wheel_held
 
-            # A load cell between vehicle and rotor reads the vehicle's net
-            # torque less what accelerated the vehicle-side inertia.
-            brake_part = resist if self.cfg.control == 'speed' else \
-                resist * (brake_cap[j] / resist_cap if resist_cap > 0.0 else 0.0)
+            brake_part = resist * (brake_cap[j] / cap) if cap > 0.0 else 0.0
             axle.append(drive[j] - brake_part - d.wheel_inertia_kgm2 * alpha)
-            dyno_T.append(T_servo)
-            err.append(e)
             brk_out.append(brake_part)
 
         return DynoState(
@@ -526,104 +445,34 @@ class DynoSimulator:
             axle_torque_Nm=tuple(axle),
             drive_torque_Nm=tuple(drive),
             brake_torque_Nm=tuple(brk_out),
-            dyno_torque_Nm=tuple(dyno_T),
-            omega_error_radps=tuple(err),
-            road_load_N=(self.road_load_N(v_implied)
-                         if self.cfg.control == 'road_load' else 0.0),
+            road_resistance_N=road_total,
             at_standstill=held)
 
     # -- entry point -------------------------------------------------------
 
-    def step(self, throttle: float, brake: float, dt: float,
-             speed_cmd: Optional[float] = None,
-             omega_cmd: Optional[Sequence[float]] = None) -> DynoState:
-        """Advance one tick. Throttle and brake are ALWAYS inputs.
+    def step(self, throttle: float, brake: float, dt: float) -> DynoState:
+        """Advance ``dt``, chopped into inner steps the bench can integrate.
 
-        =====================  ==========================  ===================
-        mode / control         extra argument              read back
-        =====================  ==========================  ===================
-        chassis / road_load    --                          speed_mps
-        chassis / speed        speed_cmd (m/s)             tractive_force_N
-        axle    / road_load    --                          wheel_omega_radps
-        axle    / speed        omega_cmd (4x rad/s)        axle_torque_Nm
-        =====================  ==========================  ===================
+        The caller sets the outer rate -- CARLA's tick, the feed period, a
+        bench loop -- and does not have to know what is inside here.
         """
         if dt <= 0.0:
             raise ValueError('dt must be positive')
-        want_speed = self.cfg.control == 'speed'
-        if self.cfg.mode == 'chassis':
-            if omega_cmd is not None:
-                raise ValueError('chassis mode takes speed_cmd, not omega_cmd')
-            if want_speed and speed_cmd is None:
-                raise ValueError("control='speed' needs speed_cmd")
-            if not want_speed and speed_cmd is not None:
-                raise ValueError("control='road_load' produces the speed; "
-                                 'speed_cmd is not accepted')
-        else:
-            if speed_cmd is not None:
-                raise ValueError('axle mode takes omega_cmd, not speed_cmd')
-            if want_speed and (omega_cmd is None or len(omega_cmd) != NWHEEL):
-                raise ValueError("control='speed' needs omega_cmd with %d entries"
-                                 % NWHEEL)
-            if not want_speed and omega_cmd is not None:
-                raise ValueError("control='road_load' produces the wheel speeds; "
-                                 'omega_cmd is not accepted')
-
-        self.t += dt
-        if self.cfg.mode == 'chassis':
-            return self._step_chassis(throttle, brake, dt, speed_cmd)
-        return self._step_axle(throttle, brake, dt, omega_cmd)
+        n = max(1, int(math.ceil(dt / self.inner_dt - 1e-12)))
+        h = dt / n
+        advance = (self._advance_chassis if self.cfg.mode == 'chassis'
+                   else self._advance_axle)
+        state = None
+        for _ in range(n):
+            self.t += h
+            state = advance(throttle, brake, h)
+        state.substeps = n
+        return state
 
     def reset(self, speed_mps: float = 0.0) -> None:
         self.t = 0.0
         self.v = speed_mps
         self.omega = [speed_mps / self.cfg.driveline.wheel_radius_m] * NWHEEL
-        self._chassis_servo.reset()
-        for s in self._axle_servo:
-            s.reset()
         d = self.cfg.driveline
         self._lagF = _SecondOrder(d.torque_bandwidth_Hz, d.torque_damping)
         self._lagR = _SecondOrder(d.torque_bandwidth_Hz, d.torque_damping)
-
-
-# ------------------------------------------------------------------ self-test
-
-def _demo() -> int:
-    print('1. chassis / road_load -- pedals in, speed out')
-    d = DynoSimulator(DynoConfig(mode='chassis', control='road_load'))
-    for k in range(12000):
-        s = d.step(1.0 if k < 8000 else 0.0, 0.0 if k < 8000 else 1.0, 0.001)
-        if k % 3000 == 0 or k == 11999:
-            print('   t=%5.2f  v=%6.2f  road=%7.1f N  Fx=%9.1f N' %
-                  (s.t_s, s.speed_mps, s.road_load_N, s.tractive_force_N))
-
-    print('\n2. chassis / speed -- speed in, force out')
-    d = DynoSimulator(DynoConfig(mode='chassis', control='speed'))
-    for k in range(6000):
-        s = d.step(0.3, 0.0, 0.001, speed_cmd=15.0)
-        if k % 1500 == 0 or k == 5999:
-            print('   t=%5.2f  v=%7.3f  err=%9.2e  F_dyno=%9.1f N  Fx=%8.1f N' %
-                  (s.t_s, s.speed_mps, s.speed_error_mps, s.dyno_force_N,
-                   s.tractive_force_N))
-
-    print('\n3. axle / speed -- wheel speed in, axle torque out')
-    d = DynoSimulator(DynoConfig(mode='axle', control='speed'))
-    for k in range(4000):
-        s = d.step(0.3, 0.0, 0.001, omega_cmd=[20.0] * NWHEEL)
-        if k % 1000 == 0 or k == 3999:
-            print('   t=%5.2f  omega=%7.3f  err=%9.2e  T_axle=%8.1f  T_dyno=%8.1f' %
-                  (s.t_s, s.wheel_omega_radps[RL], s.omega_error_radps[RL],
-                   s.axle_torque_Nm[RL], s.dyno_torque_Nm[RL]))
-
-    print('\n4. axle / road_load -- pedals in, wheel speed out (inertia simulated)')
-    d = DynoSimulator(DynoConfig(mode='axle', control='road_load'))
-    for k in range(8000):
-        s = d.step(0.5, 0.0, 0.001)
-        if k % 2000 == 0 or k == 7999:
-            print('   t=%5.2f  omega=%7.3f  v_implied=%6.2f  road=%7.1f N' %
-                  (s.t_s, s.wheel_omega_radps[RL], s.speed_mps, s.road_load_N))
-    return 0
-
-
-if __name__ == '__main__':
-    raise SystemExit(_demo())

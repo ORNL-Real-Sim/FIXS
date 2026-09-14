@@ -36,15 +36,25 @@ def test_the_study_drives_the_shipped_bench_not_a_copy():
     assert sim.build_dyno().cfg.mode == 'chassis'
 
 
-def test_both_plants_are_driven_by_pedals():
-    """A CARLA agent writes throttle and brake, so the comparison has to feed
-    both plants that and not a force."""
-    d = sim.PedalDriver(0.45, 0.25)
+def test_the_bench_is_driven_by_the_shipped_robot_driver():
+    """The study must not carry its own driver: the thing under study is the
+    bench as it ships, driver included."""
+    from CommonLib.xil import RobotDriver
+    assert not hasattr(sim, 'PedalDriver')
+    d = RobotDriver()
     thr, brk = d.step(10.0, 0.0, 0.001)
     assert thr > 0.0 and brk == 0.0
     thr, brk = d.step(0.0, 10.0, 0.001)
     assert brk > 0.0 and thr == 0.0
-    assert 0.0 <= thr <= 1.0 and 0.0 <= brk <= 1.0
+
+
+def test_the_reference_crosses_the_link():
+    """Routed through the wire even in-process, so swapping to UDP is a
+    transport change and not a code change."""
+    from CommonLib.xil import InProcessPair
+    pair = InProcessPair()
+    pair.simulator.send_reference(12.0)
+    assert pair.dyno.latest_reference()[0] == pytest.approx(12.0)
 
 
 # ---------------------------------------------------------- the disagreement
@@ -72,9 +82,9 @@ def _matched():
     c = sim.CarlaParams(roll_coeff=0.0)
 
     def over(cfg):
-        cfg.road_load.A_N = 0.0
-        cfg.road_load.B_Npms = 0.0
-        cfg.road_load.C_Npms2 = 0.5 * c.air_density * c.aero_CdA_m2
+        cfg.road_resistance.A_N = 0.0
+        cfg.road_resistance.B_Npms = 0.0
+        cfg.road_resistance.C_Npms2 = 0.5 * c.air_density * c.aero_CdA_m2
         cfg.chassis.vehicle_mass_kg = c.mass_kg
         cfg.chassis.roller_inertia_kgm2 = 0.0
     return over, c

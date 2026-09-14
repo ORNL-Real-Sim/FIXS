@@ -1,29 +1,49 @@
-"""xil -- simulated hardware-in-the-loop benches (#323).
+"""xil -- a simulated hardware-in-the-loop dyno bench (#323).
 
-Stand-ins for XIL hardware, so a coupling can be built and argued about before
-the bench exists. Nothing in this package imports a simulator SDK or numpy: it
-is standard library only, so it loads on a machine with neither CARLA nor
-CarMaker and can be unit-tested without either.
+A stand-in for the XIL hardware, so a coupling can be built and argued about
+before the bench exists. Nothing in this package imports a simulator SDK or
+numpy: it is standard library only, so it loads on a machine with neither CARLA
+nor CarMaker and can be unit-tested without either.
 
-``DynoSimulator`` is a dynamometer plus the vehicle bolted to it, in one of two
-shapes. ``mode='chassis'`` puts the vehicle on rollers, applies road load, and
-gives you back a speed. ``mode='axle'`` replaces the wheels with speed-controlled
-hub units, owns no body at all, and gives you back measured axle torque for a
-wheel speed you command. Which one you want depends on who owns the vehicle
-dynamics -- see ``dyno.py`` for the picture.
+Three pieces, which is the same three pieces the real bench has::
+
+    v_ref ─▶ [RobotDriver] ─▶ pedals ─▶ [DynoSimulator] ─▶ v_measured
+             the driving                 the physics
+
+    ... and [link] carries v_ref out and v_measured back, either in one
+        process or over UDP in the format the ORNL cell speaks.
+
+``DynoVehicle`` bolts the first two together, so the pair presents the interface
+the wire carries: a speed reference in, the speed actually achieved out. The gap
+between those two is the whole reason there is a plant here.
+
+The dyno applies road resistance and nothing else; the driver is the only
+authority over speed. See ``dyno.py`` for why it does not also offer a
+speed-controlled mode.
 """
 
-from .dyno import (
-    CONTROLS, FL, FR, MODES, NWHEEL, RL, RR,
-    AxleDynoParams, ChassisDynoParams, DrivelineParams, DynoConfig,
-    DynoSimulator, DynoState, PowertrainParams, RoadLoadParams, ServoParams,
-    envelope_powertrain,
-)
+from .driver import (DynoVehicle, DynoVehicleConfig, RobotDriver,
+                     RobotDriverParams)
+from .dyno import (FL, FR, MODES, NWHEEL, RL, RR,
+                   AxleDynoParams, ChassisDynoParams, DrivelineParams,
+                   DynoConfig, DynoSimulator, DynoState, PowertrainParams,
+                   RoadResistanceParams, envelope_powertrain)
+from .link import (DEFAULT_MEASUREMENT_PORT, DEFAULT_REFERENCE_PORT,
+                   DEFAULT_STALE_S, PACKET_SIZE,
+                   InProcessDynoSide, InProcessPair, InProcessSimulatorSide,
+                   UdpDynoSide, UdpSimulatorSide, pack, unpack)
 
 __all__ = [
+    # the bench
     'DynoSimulator', 'DynoConfig', 'DynoState',
-    'PowertrainParams', 'DrivelineParams', 'RoadLoadParams', 'ServoParams',
-    'ChassisDynoParams', 'AxleDynoParams',
-    'envelope_powertrain',
-    'MODES', 'CONTROLS', 'FL', 'FR', 'RL', 'RR', 'NWHEEL',
+    'PowertrainParams', 'DrivelineParams', 'RoadResistanceParams',
+    'ChassisDynoParams', 'AxleDynoParams', 'envelope_powertrain',
+    'MODES', 'FL', 'FR', 'RL', 'RR', 'NWHEEL',
+    # the driving
+    'RobotDriver', 'RobotDriverParams', 'DynoVehicle', 'DynoVehicleConfig',
+    # the wire
+    'InProcessPair', 'InProcessSimulatorSide', 'InProcessDynoSide',
+    'UdpSimulatorSide', 'UdpDynoSide',
+    'pack', 'unpack', 'PACKET_SIZE',
+    'DEFAULT_REFERENCE_PORT', 'DEFAULT_MEASUREMENT_PORT', 'DEFAULT_STALE_S',
 ]
