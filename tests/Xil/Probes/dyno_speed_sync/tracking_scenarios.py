@@ -209,9 +209,21 @@ def run(command: str, scenario: str, duration_s=90.0, dt=0.005,
         v_c = max(0.0, v_c + (F - study.carla_resistance_N(carla, v_c))
                   / carla.mass_kg * dt)
 
-        # What each side had to produce at the wheel to do that. Comparable
-        # because both are net wheel torque in Nm.
-        T_bench = sum(st.drive_torque_Nm) - sum(st.brake_torque_Nm)
+        # Torque on the WHEEL AXIS -- what the bench actually measures, which
+        # is the powertrain's net torque less what went into spinning the wheel
+        # up rather than reaching the road:
+        #
+        #     J_wheel * alpha = T_drive - T_brake - T_axle
+        #
+        # An earlier revision plotted sum(drive) - sum(brake) instead, which is
+        # one term upstream of the transducer. Only 1.7 % different here, but it
+        # is not the measured quantity and on an axle dyno the wheel inertia is
+        # precisely what the hub unit senses.
+        #
+        # The CARLA surrogate is a point mass with no wheel, so its propulsive
+        # force at the road times the radius is the same quantity: contact
+        # torque, with no inertia term to subtract because there is no wheel.
+        T_bench = sum(st.axle_torque_Nm)
         T_carla = F * r
         x_c += v_c * dt
 
@@ -258,7 +270,7 @@ def write_html(runs, path):
 
     titles = []
     for row in ('speed',
-                'wheel torque each side had to produce',
+                'torque on the wheel axis (what the bench measures)',
                 'CARLA speed minus bench speed',
                 'position divergence, x_carla - x_bench',
                 'gap to leader'):

@@ -125,10 +125,10 @@ reproduce theirs.
 
 ```
   scenario command   err_rms  err_mean  x_diverge[m]  T_bench_pk  T_carla_pk  ratio  %capac
-  free     speed      0.0173   -0.0004         -0.03        2207        1712   0.78     58%
-  free     pedals     0.3770   -0.0213         -1.92        2207        2349   1.06     57%
-  leader   speed      0.0095    0.0006          0.05        1517        1191   0.79     21%
-  leader   pedals     0.1216   -0.0010         -0.09        1517        1422   0.94     22%
+  free     speed      0.0173   -0.0004         -0.03        2169        1712   0.79     58%
+  free     pedals     0.3770   -0.0213         -1.92        2169        2349   1.08     57%
+  leader   speed      0.0095    0.0006          0.05        1491        1191   0.80     21%
+  leader   pedals     0.1216   -0.0010         -0.09        1491        1422   0.95     22%
 ```
 
 ### Why the torque columns are there
@@ -136,20 +136,47 @@ reproduce theirs.
 Tracking well is not the same as tracking honestly. The two plants are **33 %
 apart in effective inertia** (2452 kg against 1845) and their resistance curves
 cross — 166 N against 241 N at 10 m/s, 546 N against 429 N at 30 m/s. For CARLA
-to hold the bench's speed it must therefore produce a *different* force than the
+to hold the bench's speed it must therefore produce a *different* torque than the
 bench did, and a stiff loop will deliver that difference without complaint while
 the speed trace looks perfect.
 
-So the figure plots wheel torque for both sides on one axis, and the table
-reports the peak ratio and how much of CARLA's capability it used. Under a speed
-command CARLA peaks at **0.78x** the bench's torque — which is what the mass
-ratio predicts, `1845 / 2452 = 0.75` — and never exceeds **58 %** of what its
-powertrain can deliver. The tracking is being bought with plausible torque, not
-by driving CARLA to something no vehicle would do.
+So the figure plots **torque on the wheel axis** for both sides on one axis, and
+the table reports the peak ratio and how much of CARLA's capability it took.
+Under a speed command CARLA peaks at **0.79x** the bench's torque — which is what
+the mass ratio predicts, `1845 / 2452 = 0.75` — and never exceeds **58 %** of
+what its powertrain can deliver. The tracking is bought with plausible torque,
+not by driving CARLA to something no vehicle would do.
 
 That check is the point. Had the ratio come back at 3x, or the capability
 fraction at 100 %, the speed command would be producing a correct-looking
 trajectory out of a fictional vehicle.
+
+### Which torque, exactly
+
+The bench publishes three per wheel and they are not interchangeable:
+
+| field | what it is |
+|---|---|
+| `drive_torque_Nm` | what the powertrain delivered, after the lag |
+| `brake_torque_Nm` | the friction brake share that actually acted |
+| `axle_torque_Nm` | `drive − brake − J_wheel · dω/dt` — **on the wheel axis** |
+
+`axle_torque_Nm` is the measured one. On a chassis dyno it is the contact force
+the roller senses times the radius; on an axle dyno it is the shaft torque the
+hub transducer reads. The others are upstream of the wheel inertia and are what
+the powertrain *produced*, not what the bench *measures*.
+
+An earlier revision of this table plotted `drive − brake`. The difference is the
+wheel-inertia term, 38 Nm peak against a 2207 Nm peak, **1.7 %** — so no
+conclusion moved — but it was the wrong quantity, and on an axle dyno the wheel
+inertia is precisely what the hub unit senses.
+
+The CARLA surrogate is a point mass with no wheel, so its propulsive force times
+the radius is the same quantity with no inertia term to subtract. One caveat: in
+the `speed` branch there is no powertrain on the CARLA side — `F = m · a_cmd`
+straight from the controller, clipped to the envelope — so `T_carla` there is a
+torque *implied* by the demanded acceleration rather than one a powertrain
+computed. In the `pedals` branch it does go through the envelope.
 
 ## Parameters, and which are trustworthy
 

@@ -201,9 +201,15 @@ class DynoState:
     #: is the speed the wheels IMPLY, ``mean(omega) * r``.
     speed_mps: float = 0.0
     wheel_omega_radps: Sequence[float] = (0.0,) * NWHEEL
-    #: Torque at the hub coupling, per wheel. Positive drives the vehicle. This
-    #: is the powertrain's net torque less what accelerated the vehicle-side
-    #: inertia, which is what a load cell there actually reads.
+    #: Torque on the WHEEL AXIS, per wheel, positive driving the vehicle:
+    #: the powertrain's net torque less what accelerated the wheel rather than
+    #: reaching the road, ``T_drive - T_brake - J_wheel * domega/dt``.
+    #:
+    #: This is the measured quantity in both modes. On a chassis dyno it is the
+    #: contact force the roller senses times the radius; on an axle dyno it is
+    #: the shaft torque the hub transducer reads. Use this rather than
+    #: ``drive_torque_Nm - brake_torque_Nm``, which is one term upstream and is
+    #: what the powertrain produced rather than what the bench measures.
     axle_torque_Nm: Sequence[float] = (0.0,) * NWHEEL
     drive_torque_Nm: Sequence[float] = (0.0,) * NWHEEL
     brake_torque_Nm: Sequence[float] = (0.0,) * NWHEEL
