@@ -1,0 +1,62 @@
+"""The robot driver on the bench (#323).
+
+A bench does not drive itself. Somebody works the pedal: on a real emissions cell
+that is a driver robot chasing a speed trace, and here it is this.
+
+The integral term is not optional. Under road resistance a steady speed needs a
+steady pedal, and a proportional-only law can only produce one from a standing
+error -- so it sits permanently below the reference by however much error makes
+the pedal it needs. Measured on the deployed rig's gains: 0.44 m/s slow and 40 m
+behind over 90 s.
+
+A PI is a placeholder and will flatter a real vehicle's controller, which has
+rate limits, an acceleration envelope and regen blending that this does not. That
+matters when the bench is asked to PREDICT hardware, not when it is used to build
+a coupling.
+"""
+
+
+class RobotDriver(object):
+    """PI on speed error, producing one pedal split into throttle and brake.
+
+    One axis, not two: positive is throttle, negative is brake, and they are
+    never both non-zero. That is what a driver does and what a VehicleControl
+    expects.
+    """
+
+    def __init__(self, kp=0.45, ki=0.25, max_throttle=1.0, max_brake=1.0,
+                 standstill_ref_mps=0.05, standstill_brake=0.3):
+        self.kp = kp
+        self.ki = ki
+        self.max_throttle = max_throttle
+        self.max_brake = max_brake
+        self.standstill_ref_mps = standstill_ref_mps
+        self.standstill_brake = standstill_brake
+        self.integral = 0.0
+        self.pedal = 0.0
+
+    def reset(self):
+        self.integral = 0.0
+        self.pedal = 0.0
+
+    def step(self, v_ref, v_measured, dt):
+        """Returns (throttle, brake), each in [0, 1], never both positive."""
+        if dt <= 0.0:
+            raise ValueError('dt must be positive')
+
+        if v_ref <= self.standstill_ref_mps \
+                and v_measured <= self.standstill_ref_mps:
+            # Asked to stand still and standing still. Hold the brake and stop
+            # integrating, or the integral winds on an error that cannot close.
+            self.integral = 0.0
+            self.pedal = -self.standstill_brake
+            return 0.0, min(self.max_brake, self.standstill_brake)
+
+        err = v_ref - v_measured
+        raw = self.kp * err + self.ki * self.integral
+        if -self.max_brake < raw < self.max_throttle:
+            self.integral += err * dt           # anti-windup: freeze at the rail
+        self.pedal = max(-self.max_brake,
+                         min(self.max_throttle,
+                             self.kp * err + self.ki * self.integral))
+        return (self.pedal, 0.0) if self.pedal >= 0.0 else (0.0, -self.pedal)
