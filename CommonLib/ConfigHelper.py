@@ -80,6 +80,14 @@ class ConfigHelper:
         xil_node = config.get("XilSetup", {})
         self.Xil_setup["EnableXil"] = self.parserFlag(xil_node, "EnableXil", False)
         self.Xil_setup["VehicleSubscription"] = self.parseVehicleSubscription(xil_node, "VehicleSubscription", [])
+        # How the XIL plant is reached. 'inprocess' simulates it here (no
+        # hardware, and the same code path as a cell), 'udp' and 'tcp' put it on
+        # the wire at the VehicleSubscription's ip and port.
+        self.Xil_setup["Transport"] = self.parserString(xil_node, "Transport", "inprocess").strip().lower()
+        if self.Xil_setup["Transport"] not in ("inprocess", "udp", "tcp"):
+            raise SystemExit(
+                "ERROR: XilSetup.Transport must be one of inprocess|udp|tcp, got '%s'"
+                % self.Xil_setup["Transport"])
 
         # Carla Setup
         carla_node = config.get("CarlaSetup", {})
@@ -170,6 +178,16 @@ class ConfigHelper:
             raise SystemExit(
                 "ERROR: EgoSetup.Dynamics must be one of traffic|virenv|xil, got '%s'" % dyn)
         self.Ego_setup["Dynamics"] = dyn
+        # A dynamometer in the controller's loop is not a plant that owns the
+        # ego -- the virtual environment still integrates position, heading and
+        # everything lateral, and the bench supplies one longitudinal number the
+        # controller consults. Say so, rather than let a run claim two different
+        # answers to who computes the ego's motion.
+        if self.Xil_setup["EnableXil"] and dyn and dyn != "virenv":
+            raise SystemExit(
+                "ERROR: XilSetup.EnableXil puts a dynamometer in the ego "
+                "controller's speed loop, which only exists while the virtual "
+                "environment owns the ego. EgoSetup.Dynamics is '%s'." % dyn)
 
         # ActuationSource -- WHO PRODUCES THE PEDALS AND STEER. "user" is ONE
         # value; the Controller key decides where it runs.
