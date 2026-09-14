@@ -18,11 +18,19 @@ Two scenarios, because they separate two things:
 
 Two CARLA-side tracking laws, because the choice is live:
 
-  ornl    a = 0.55*(v_dyno - v_ego), mapped to a pedal by a/3.2, applied.
-          Lifted from ORNL's carla_standalone_drive.py. Proportional only, so it
-          carries a standing offset of (3.2/0.55) x pedal by construction.
-  ideal   the ego is handed the speed directly, which is what
-          ego.set(speedDesired=...) with stiff Ackermann gains approximates.
+  ornl        a = 0.55*(v_dyno - v_ego) mapped to a pedal by a/3.2, applied.
+              Lifted from ORNL's carla_standalone_drive.py. Proportional only,
+              so it carries a standing offset of (3.2/0.55) x pedal.
+  ackermann   a PI at kp 50, ki 5 -- CARLA's own Ackermann speed controller with
+              the gains the MLK app ships (IDEAL_SPEED_TRACKING). The demanded
+              acceleration is clipped by what the vehicle can actually deliver,
+              so it tracks closely but NOT exactly.
+
+An earlier revision had an 'ideal' law that assigned v_carla = v_dyno outright.
+That put the two curves exactly on top of each other, which looked like a result
+and was a tautology: an assignment is not a controller. Overwriting the speed is
+a real option -- it is what set_target_velocity does -- but it belongs in
+dyno_sync_sim.py's forced couplings, where its cost is measured.
 
 Writes one plotly html: both scenarios side by side, both laws in each.
 
@@ -95,6 +103,12 @@ def idm_accel(v: float, gap: float, closing: float, p: IdmParams) -> float:
 ORNL_KP = 0.55              # DYNO_SPEED_KP
 ORNL_MAX_ACCEL = 3.2        # MAX_ACCEL_CMD
 
+#: CARLA's Ackermann speed loop as the MLK app configures it.
+ACK_KP, ACK_KI = 50.0, 5.0
+
+LAWS = ('ackermann', 'ornl')
+COLOUR = {'ackermann': '#2ca02c', 'ornl': '#d62728'}
+
 
 def accel_to_pedal(a: float):
     a = max(-ORNL_MAX_ACCEL, min(ORNL_MAX_ACCEL, a))
@@ -104,8 +118,8 @@ def accel_to_pedal(a: float):
 def run(law: str, scenario: str, duration_s=90.0, dt=0.005,
         leader=LeaderParams(), idm=IdmParams(), carla=study.CarlaParams()):
     """One run. ``law`` is 'ornl' or 'ideal'; ``scenario`` is 'free' or 'leader'."""
-    if law not in ('ornl', 'ideal'):
-        raise ValueError("law must be 'ornl' or 'ideal'")
+    if law not in LAWS:
+        raise ValueError('law must be one of %s' % (LAWS,))
     if scenario not in ('free', 'leader'):
         raise ValueError("scenario must be 'free' or 'leader'")
 
@@ -120,7 +134,7 @@ def run(law: str, scenario: str, duration_s=90.0, dt=0.005,
     cycle = study.synthetic_cycle(duration_s, dt) if scenario == 'free' else None
 
     x_l = leader.start_gap_m
-    x_d = x_c = v_c = v_ref = 0.0
+    x_d = x_c = v_c = v_ref = ack_i = 0.0
     rec = {k: [] for k in ('t', 'v_lead', 'v_ref', 'v_dyno', 'v_carla',
                            'gap_dyno', 'gap_carla', 'x_divergence')}
 
@@ -147,15 +161,23 @@ def run(law: str, scenario: str, duration_s=90.0, dt=0.005,
         x_d += v_d * dt
 
         # ---- the CARLA side follows the bench --------------------------
-        if law == 'ideal':
-            v_c = v_d
+        e = v_d - v_c
+        w = v_c / r
+        if law == 'ackermann':
+            ack_i += e * dt
+            # The controller asks for an acceleration; the vehicle delivers what
+            # it can. That clip is what stops this being an assignment.
+            Tf, Tr = powertrain(1.0, 0.0, w, w)
+            a_max = (Tf + Tr) / r / carla.mass_kg
+            a_min = -4.0 * max_brake / r / carla.mass_kg
+            a_cmd = max(a_min, min(a_max, ACK_KP * e + ACK_KI * ack_i))
+            F = carla.mass_kg * a_cmd
         else:
-            thr, brk = accel_to_pedal(ORNL_KP * (v_d - v_c))
-            w = v_c / r
+            thr, brk = accel_to_pedal(ORNL_KP * e)
             Tf, Tr = powertrain(thr, brk, w, w)
             F = (Tf + Tr) / r - brk * 4.0 * max_brake / r
-            v_c = max(0.0, v_c + (F - study.carla_resistance_N(carla, v_c))
-                      / carla.mass_kg * dt)
+        v_c = max(0.0, v_c + (F - study.carla_resistance_N(carla, v_c))
+                  / carla.mass_kg * dt)
         x_c += v_c * dt
 
         for k, val in zip(rec, (t, v_l, v_ref, v_d, v_c,
@@ -183,7 +205,6 @@ def summarise(rec, law, scenario):
     return out
 
 
-COLOUR = {'ideal': '#2ca02c', 'ornl': '#d62728'}
 SCENARIOS = ('free', 'leader')
 
 
@@ -199,49 +220,53 @@ def write_html(runs, path):
             titles.append('%s  --  %s' % (row, 'free driving' if sc == 'free'
                                           else 'following a leader'))
 
-    fig = make_subplots(rows=4, cols=2, shared_xaxes=True,
+    fig = make_subplots(rows=4, cols=2, shared_xaxes='all',
                         vertical_spacing=0.055, horizontal_spacing=0.07,
                         subplot_titles=titles)
 
     for col, sc in enumerate(SCENARIOS, start=1):
-        base = runs[(sc, 'ideal')]
+        base = runs[(sc, LAWS[0])]
         first = col == 1
-        if sc == 'leader':
-            fig.add_trace(go.Scatter(x=base['t'], y=base['v_lead'], name='leader',
-                                     legendgroup='lead', showlegend=first,
-                                     line=dict(color='#888', dash='dot')),
-                          row=1, col=col)
-        fig.add_trace(go.Scatter(x=base['t'], y=base['v_ref'], name='reference',
-                                 legendgroup='ref', showlegend=first,
-                                 line=dict(color='black', dash='dash', width=1)),
-                      row=1, col=col)
-        fig.add_trace(go.Scatter(x=base['t'], y=base['v_dyno'], name='bench (dyno)',
-                                 legendgroup='bench', showlegend=first,
-                                 line=dict(color='#1f77b4', width=2)),
-                      row=1, col=col)
+        # Names belong to column 1 only. Column 2 repeats every trace, so
+        # naming both put each entry in the legend twice under one label.
+        def named(label, _first=first):
+            return dict(name=label, legendgroup=label, showlegend=_first)
 
-        for law in ('ideal', 'ornl'):
+        if sc == 'leader':
+            fig.add_trace(go.Scatter(x=base['t'], y=base['v_lead'],
+                                     line=dict(color='#888', dash='dot'),
+                                     **named('leader')), row=1, col=col)
+        fig.add_trace(go.Scatter(x=base['t'], y=base['v_ref'],
+                                 line=dict(color='black', dash='dash', width=1),
+                                 **named('reference')), row=1, col=col)
+        fig.add_trace(go.Scatter(x=base['t'], y=base['v_dyno'],
+                                 line=dict(color='#1f77b4', width=2),
+                                 **named('bench (dyno)')), row=1, col=col)
+
+        for law in LAWS:
             rec = runs[(sc, law)]
             n = len(rec['t'])
             line = dict(color=COLOUR[law], width=1.4)
-            fig.add_trace(go.Scatter(x=rec['t'], y=rec['v_carla'],
-                                     name='CARLA, %s' % law, legendgroup=law,
-                                     showlegend=first, line=line), row=1, col=col)
+            fig.add_trace(go.Scatter(x=rec['t'], y=rec['v_carla'], line=line,
+                                     **named('CARLA, %s' % law)), row=1, col=col)
             fig.add_trace(go.Scatter(
                 x=rec['t'], y=[rec['v_carla'][i] - rec['v_dyno'][i]
                                for i in range(n)],
-                legendgroup=law, showlegend=False, line=line), row=2, col=col)
+                legendgroup='CARLA, %s' % law, showlegend=False,
+                line=line), row=2, col=col)
             fig.add_trace(go.Scatter(x=rec['t'], y=rec['x_divergence'],
-                                     legendgroup=law, showlegend=False,
-                                     line=line), row=3, col=col)
+                                     legendgroup='CARLA, %s' % law,
+                                     showlegend=False, line=line), row=3, col=col)
             if sc == 'leader':
                 fig.add_trace(go.Scatter(x=rec['t'], y=rec['gap_carla'],
-                                         legendgroup=law, showlegend=False,
-                                         line=line), row=4, col=col)
+                                         legendgroup='CARLA, %s' % law,
+                                         showlegend=False, line=line),
+                              row=4, col=col)
 
         if sc == 'leader':
             fig.add_trace(go.Scatter(x=base['t'], y=base['gap_dyno'],
-                                     legendgroup='bench', showlegend=False,
+                                     legendgroup='bench (dyno)',
+                                     showlegend=False,
                                      line=dict(color='#1f77b4', width=2)),
                           row=4, col=col)
         for row in (2, 3):
@@ -251,13 +276,29 @@ def write_html(runs, path):
     for row, label in ((1, 'speed [m/s]'), (2, 'v_carla - v_dyno [m/s]'),
                        (3, 'x_carla - x_bench [m]'), (4, 'gap [m]')):
         fig.update_yaxes(title_text=label, row=row, col=1)
-    fig.update_xaxes(title_text='time [s]', row=4, col=1)
-    fig.update_xaxes(title_text='time [s]', row=4, col=2)
+
+    # Ticks and a crosshair on every panel, not just the bottom one. Reading a
+    # divergence off row 3 against the brake event in row 1 is the whole job,
+    # and that needs the time axis legible where you are looking.
+    t_end = max(r['t'][-1] for r in runs.values())
+    step = 10.0 if t_end <= 120.0 else 20.0
+    fig.update_xaxes(
+        showticklabels=True, dtick=step, tick0=0.0, range=[0.0, t_end],
+        showgrid=True, gridcolor='rgba(0,0,0,0.12)',
+        showspikes=True, spikemode='across', spikesnap='cursor',
+        spikethickness=1, spikecolor='rgba(0,0,0,0.45)', spikedash='dot',
+        ticks='outside', ticklen=4)
+    fig.update_yaxes(showgrid=True, gridcolor='rgba(0,0,0,0.12)',
+                     zeroline=True, zerolinecolor='rgba(0,0,0,0.35)')
+    for col in (1, 2):
+        fig.update_xaxes(title_text='time [s]', row=4, col=col)
+
     fig.update_layout(
-        height=1150, hovermode='x unified',
+        height=1250, hovermode='x unified', spikedistance=-1,
+        plot_bgcolor='white',
         title='Does the CARLA side keep up with the bench? '
               'Left: free driving. Right: following a braking leader.',
-        legend=dict(orientation='h', y=1.05))
+        legend=dict(orientation='h', y=1.045))
     fig.write_html(path, include_plotlyjs='cdn')
     return path
 
@@ -274,17 +315,17 @@ def main(argv=None):
     os.makedirs(outdir, exist_ok=True)
 
     runs = {(sc, law): run(law, sc, args.duration, args.dt)
-            for sc in SCENARIOS for law in ('ideal', 'ornl')}
+            for sc in SCENARIOS for law in LAWS}
 
     print('\nCARLA following the bench. Leader brakes at %.0f s.\n'
           % LeaderParams().brake_at_s)
-    print('  %-8s %-7s %10s %10s %10s %13s %12s %13s'
+    print('  %-8s %-10s %10s %10s %10s %13s %12s %13s'
           % ('scenario', 'law', 'err_rms', 'err_max', 'err_mean', 'x_diverge[m]',
              'min_gap_bench', 'min_gap_carla'))
     for sc in SCENARIOS:
-        for law in ('ideal', 'ornl'):
+        for law in LAWS:
             r = summarise(runs[(sc, law)], law, sc)
-            print('  %-8s %-7s %10.4f %10.4f %10.4f %13.2f %12.2f %13.2f'
+            print('  %-8s %-10s %10.4f %10.4f %10.4f %13.2f %12.2f %13.2f'
                   % (r['scenario'], r['law'], r['speed_err_rms'],
                      r['speed_err_max'], r['speed_err_mean'],
                      r['x_divergence_m'], r['min_gap_dyno'], r['min_gap_carla']))
