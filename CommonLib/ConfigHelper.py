@@ -88,6 +88,12 @@ class ConfigHelper:
             raise SystemExit(
                 "ERROR: XilSetup.Transport must be one of inprocess|udp|tcp, got '%s'"
                 % self.Xil_setup["Transport"])
+        # The bench itself: what vehicle is on it, and what the dyno does. Both
+        # are passed to CommonLib.xil by name, so the yaml names the parameter
+        # rather than restating a list that would then have to be kept in step.
+        # An unknown one is refused there, not ignored.
+        self.Xil_setup["Vehicle"] = dict(xil_node.get("Vehicle") or {})
+        self.Xil_setup["Dyno"] = dict(xil_node.get("Dyno") or {})
 
         # Carla Setup
         carla_node = config.get("CarlaSetup", {})
