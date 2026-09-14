@@ -65,7 +65,7 @@ _REPO = os.path.abspath(os.path.join(os.path.dirname(__file__),
 if _REPO not in sys.path:
     sys.path.insert(0, _REPO)
 
-from CommonLib.xil import (Bench, Dyno, DynoSim, LocalLink,  # noqa: E402
+from CommonLib.xil import (Bench, Dyno, LocalLink,  # noqa: E402
                            RobotDriver, Vehicle)
 
 G = 9.80665
@@ -112,14 +112,14 @@ def carla_resistance_N(p: CarlaParams, v: float) -> float:
     return s * (aero + roll)
 
 
-def steady_state_gap_N(sim, carla, speeds):
+def steady_state_gap_N(bench, carla, speeds):
     """The part of F_sync that is pure model disagreement, not dynamics.
 
     At constant speed the bench holds against its road load while CARLA holds
     against its own aero plus rolling. Whatever the two differ by has to come out
     of the sync, for as long as the vehicle sits at that speed.
     """
-    return [(v, sim.dyno.resistance(v) - carla_resistance_N(carla, v))
+    return [(v, bench.dyno.resistance(v) - carla_resistance_N(carla, v))
             for v in speeds]
 
 
@@ -194,10 +194,10 @@ def build_dyno(**kw):
     Keywords are split between the two config objects by name, so a caller says
     ``build_dyno(mass_kg=1800, road_A_N=90)`` without knowing which is which.
     """
-    vehicle_keys = set(Vehicle().__dict__)
-    v = dict((k, kw[k]) for k in kw if k in vehicle_keys)
-    d = dict((k, kw[k]) for k in kw if k not in vehicle_keys)
-    return DynoSim(Vehicle(**v), Dyno(mode='chassis', **d))
+    dyno_keys = set(Dyno().__dict__)
+    d = dict((k, kw.pop(k)) for k in list(kw) if k in dyno_keys)
+    d.pop('mode', None)
+    return Bench(Vehicle(**kw), Dyno(mode='chassis', **d))
 
 
 def simulate(cycle, dyno: DynoSimulator, carla: CarlaParams, run: RunParams,
@@ -210,7 +210,8 @@ def simulate(cycle, dyno: DynoSimulator, carla: CarlaParams, run: RunParams,
     sync_every = max(1, int(round(run.sync_dt_s / dt)))
     dyno.reset()
 
-    bench = Bench(sim=dyno, driver=RobotDriver(run.driver_kp, run.driver_ki))
+    bench = dyno
+    bench.driver = RobotDriver(run.driver_kp, run.driver_ki)
     drv_c = RobotDriver(run.driver_kp, run.driver_ki)
     link = LocalLink() if run.use_link else None
 
@@ -484,7 +485,9 @@ def main(argv=None):
     png = None if args.no_plot else try_plot(runs, gap, outdir)
 
     with open(os.path.join(outdir, 'summary.json'), 'w') as fh:
-        json.dump({'vehicle': dict(dyno.vehicle.__dict__),
+        json.dump({'vehicle': dict(dyno.vehicle.powertrain.__dict__,
+                                   **dict(dyno.vehicle.driveline.__dict__,
+                                          mass_kg=dyno.vehicle.mass_kg)),
                    'dyno': dict(dyno.dyno.__dict__),
                    'carla': dict(carla.__dict__), 'run': dict(run.__dict__),
                    'results': summaries}, fh, indent=2)

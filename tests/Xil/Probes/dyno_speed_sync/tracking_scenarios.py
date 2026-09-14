@@ -64,7 +64,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import dyno_sync_sim as study  # noqa: E402
 
-from CommonLib.xil import Bench, LocalLink  # noqa: E402
+from CommonLib.xil import LocalLink  # noqa: E402
 
 
 # ------------------------------------------------------------------- leader
@@ -148,8 +148,8 @@ def run(command: str, scenario: str, duration_s=90.0, dt=0.005,
     if scenario not in ('free', 'leader'):
         raise ValueError("scenario must be 'free' or 'leader'")
 
-    sim = study.build_dyno()
-    bench = Bench(sim=sim)
+    bench = study.build_dyno()
+    sim = bench
     link = LocalLink()
     powertrain = sim.vehicle.axle_torque
     r = sim.vehicle.wheel_radius_m

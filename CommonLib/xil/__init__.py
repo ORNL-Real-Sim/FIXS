@@ -1,17 +1,26 @@
-"""xil -- a simulated XIL dyno bench.
+"""xil -- a simulated XIL dynamometer bench.
 
-    v_ref -> [RobotDriver] -> pedals -> [DynoSim] -> speed
-             Bench ties those two together
-             LocalLink / UdpLink carry v_ref out and the speed back
+A stand-in for the hardware, so a coupling can be built and argued about before
+the bench exists. Standard library only: it loads and unit-tests on a machine
+with neither CARLA nor CarMaker.
 
-Standard library only, so it loads and unit-tests on a machine with neither
-CARLA nor CarMaker. See dyno.py for the physics.
+    vehicle.py   Powertrain, Driveline, Vehicle    the car under test
+    dyno.py      Dyno                              the dynamometer
+    driver.py    RobotDriver                       whoever works the pedal
+    bench.py     Bench, State                      the three of them running
+    link.py      LocalLink, UdpLink                the wire to a simulator
+
+    bench = Bench()
+    state = bench.step(v_ref, dt)          # driver chases a speed reference
+    state = bench.step_pedals(thr, brk, dt)  # or work the pedal yourself
 """
 
-from .bench import Bench
+from .bench import NWHEEL, Bench, State
 from .driver import RobotDriver
-from .dyno import Dyno, DynoSim, State, Vehicle
+from .dyno import Dyno
 from .link import LocalLink, UdpLink
+from .vehicle import Driveline, Powertrain, Vehicle
 
-__all__ = ['Vehicle', 'Dyno', 'DynoSim', 'State',
-           'RobotDriver', 'Bench', 'LocalLink', 'UdpLink']
+__all__ = ['Bench', 'State', 'NWHEEL',
+           'Vehicle', 'Powertrain', 'Driveline', 'Dyno',
+           'RobotDriver', 'LocalLink', 'UdpLink']
