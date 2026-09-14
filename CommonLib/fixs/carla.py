@@ -38,10 +38,23 @@ WHAT IS REFUSED, and why it is refused rather than quietly allowed:
                               and the bridge is it. Return from control(ego, dt)
                               instead -- that IS the tick.
 
-Actuation is the third thing FIXS keeps, and it is not refused here because it
-never reaches here: the bridge applies the FIXS record to the physics ego, so a
-controller commands with ``ego.set(acceleratorPedalDesired=...)`` rather than
-``actor.apply_control()``. Two writers would fight over the actuator.
+ACTUATION is the third thing FIXS keeps, and it is relayed here like the rest::
+
+    -vehicle.apply_control(control)
+    +carla.apply_control(control)
+
+The command is written onto the ego record the bridge is already holding for this
+step, and the bridge applies it through its own backend verb after control()
+returns. That is not indirection for its own sake: it is what keeps ONE writer on
+the actuator, keeps the command visible to DataLogSetup and to every other
+subscriber on the wire, and keeps the same controller file running against a
+CarMaker or XIL plant, and against MockVirEnvBackend with no simulator at all.
+
+``ego.set(acceleratorPedalDesired=...)`` still works and says the same thing in
+FIXS's own vocabulary. The relayed form exists because a user bringing a CARLA
+script should not have to learn a second one -- and because the record's
+``steerAngleDesired`` is an ANGLE in radians while ``control.steer`` is
+normalised [-1, 1], a conversion every controller was otherwise doing by hand.
 
 See ORNL-Real-Sim/FIXS#305.
 """
