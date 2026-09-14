@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import dyno_sync_sim as sim  # noqa: E402
 
-from CommonLib.xil.sim import DynoSim  # noqa: E402
+from CommonLib.xil.dynosim import DynoSim  # noqa: E402
 
 
 def _cycle(secs=60.0):

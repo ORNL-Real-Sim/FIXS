@@ -1,10 +1,11 @@
-"""The simulation: a vehicle on a dyno, with somebody working the pedal.
+"""The dynamometer, and the simulation of a vehicle on it.
 
-Not a part of the setup -- the other four modules are that. This one owns the
-equations of motion, because the acceleration of a car on a dyno belongs to
-neither the car nor the dyno alone. It emerges once they are coupled, and the
-effective mass it turns on is the car plus the roller plus four wheels referred
-to the road through the tyre radius.
+The other three modules are the rest of the setup -- the car, whoever works the
+pedal, the wire out to CARLA. This one is the dyno side: the machine itself, and
+the equations of motion that only exist once a car is bolted to it. Those belong
+to neither the car nor the dyno alone, and the effective mass they turn on is
+the car plus the roller plus four wheels referred to the road through the tyre
+radius.
 
     sim.step(v_ref, dt)                   the driver chases a speed reference
     sim.step_pedals(throttle, brake, dt)  you work the pedal yourself
@@ -13,18 +14,57 @@ Both return a State. The first is what the wire carries -- a speed reference in,
 the speed achieved out -- and the gap between those two is the point: a
 pass-through always delivers what was asked, a dyno does not.
 """
+
 import math
 from collections import namedtuple
 
 from .driver import RobotDriver
-from .dyno import Dyno
 from .vehicle import Vehicle
 
-__all__ = ['DynoSim', 'State', 'FL', 'FR', 'RL', 'RR', 'NWHEEL']
+__all__ = ['Dyno', 'DynoSim', 'State', 'FL', 'FR', 'RL', 'RR', 'NWHEEL']
 
 FL, FR, RL, RR = 0, 1, 2, 3
 NWHEEL = 4
 G = 9.80665
+
+
+class Dyno(object):
+    """The machine: what it absorbs, what it weighs, where it couples.
+
+    ``mode='chassis'`` puts the vehicle on rollers, so its rotating parts refer
+    to the road through ``r^2``. ``mode='axle'`` bolts hub units to the hubs --
+    nothing moves, so the body's inertia has to be added electrically.
+
+    It applies road resistance ``A + B*v + C*v^2`` and nothing else, so speed is
+    an output and whoever works the pedal is the only authority over it. There
+    is deliberately no speed-controlled mode: a dyno servo holding a speed
+    fights a driver tracking the same speed, and the pedal then parks on
+    whatever the driver's integrator happened to hold rather than on what the
+    physics require. Measured, reaching 15 m/s three different ways parked the
+    throttle at 0.040, 0.206 and 0.696; under road resistance it is 0.0283 every
+    time.
+    """
+
+    def __init__(self, mode='chassis', road_A_N=111.0, road_B_Npms=0.99,
+                 road_C_Npms2=0.45, roller_inertia_kgm2=40.0,
+                 hub_inertia_kgm2=0.9, grade_rad=0.0):
+        if mode not in ('chassis', 'axle'):
+            raise ValueError("mode must be 'chassis' or 'axle', got %r" % (mode,))
+        self.mode = mode
+        self.road_A_N = road_A_N
+        self.road_B_Npms = road_B_Npms
+        self.road_C_Npms2 = road_C_Npms2
+        #: A real dyno's rollers are heavy and this term is not small.
+        self.roller_inertia_kgm2 = roller_inertia_kgm2
+        self.hub_inertia_kgm2 = hub_inertia_kgm2
+        self.grade_rad = grade_rad
+
+    def resistance(self, speed):
+        """Road resistance, signed so it always opposes motion."""
+        sign = 1.0 if speed >= 0.0 else -1.0
+        return sign * (self.road_A_N + self.road_B_Npms * abs(speed)
+                       + self.road_C_Npms2 * speed * speed)
+
 
 #: One tick of output. ``axle_torque`` is the MEASURED one -- torque on the wheel
 #: axis, which is what the powertrain produced less what went into spinning the

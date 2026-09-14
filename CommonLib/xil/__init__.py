@@ -4,19 +4,15 @@ A stand-in for the hardware, so a coupling can be built and argued about before
 the bench exists. Standard library only: it loads and unit-tests on a machine
 with neither CARLA nor CarMaker.
 
-Four modules are parts of the setup, one is the simulation that couples them:
-
     vehicle.py   Vehicle, Powertrain, Driveline    the car under test
-    dyno.py      Dyno                              the dynamometer
     driver.py    RobotDriver                       who works the pedal
     link.py      LocalLink, UdpLink                the wire out to CARLA
-    sim.py       DynoSim, State                    those three, running
+    dynosim.py   Dyno, DynoSim, State              the dyno, and a car on it
 
 DynoSim owns the equations of motion, because the acceleration of a car on a
 dyno belongs to neither the car nor the dyno alone. It holds the parts by name.
 
-    from CommonLib.xil.dyno import Dyno
-    from CommonLib.xil.sim import DynoSim
+    from CommonLib.xil.dynosim import Dyno, DynoSim
     from CommonLib.xil.vehicle import Vehicle
 
     sim = DynoSim(Vehicle(mass_kg=2100), Dyno(mode='axle'))
