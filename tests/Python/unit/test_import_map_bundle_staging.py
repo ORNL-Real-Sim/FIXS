@@ -120,3 +120,23 @@ def test_a_flat_package_is_unchanged(tmp_path):
         z.writestr(f"{MAP}/{MAP}.fbx", "flat-fbx")
         z.writestr(f"{MAP}/{MAP}.xodr", "flat-xodr")
     assert import_map._carla_half(str(flat), MAP) == str(flat)
+
+def test_a_restage_clears_a_leftover_nested_duplicate(tmp_path):
+    """Recovery, not prevention.
+
+    The fixed code never creates Import/carla/<name>.json -- but every machine
+    that ran the broken version already has one, and CARLA cooks every
+    descriptor it finds, so the FIRST fixed import would still crash.
+    """
+    carlaRoot = _carlaRoot(tmp_path)
+    importDir = os.path.join(carlaRoot, 'Import')
+    _stagedAlready(importDir)
+    leftover = os.path.join(importDir, 'carla')
+    os.makedirs(os.path.join(leftover, MAP))
+    with open(os.path.join(leftover, MAP + '.json'), 'w') as fh:
+        fh.write(_descriptorText())
+
+    import_map.clear_staging(carlaRoot, MAP)
+
+    assert _descriptorsUnder(importDir) == [], (
+        'a restage must clear every copy, not just the canonical one')

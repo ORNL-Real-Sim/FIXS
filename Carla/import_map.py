@@ -765,12 +765,42 @@ def _carla_half(src, name):
     return src
 
 
+def nested_duplicate_roots(import_dir, name):
+    """Directories under `import_dir` holding a SECOND `<name>.json`, below the top.
+
+    The canonical staging is Import/<name>.json beside Import/<name>/. A copy at
+    any greater depth is a duplicate CARLA would cook a second time. Returns the
+    directory that holds each one - the package root to move or delete - deepest
+    first, and never `import_dir` itself.
+    """
+    roots = []
+    want = (name + ".json").lower()
+    for base, _dirs, files in os.walk(import_dir):
+        if os.path.abspath(base) == os.path.abspath(import_dir):
+            continue
+        if any(f.lower() == want for f in files):
+            roots.append(base)
+    # Deepest first, so removing a parent cannot invalidate a child's path.
+    roots.sort(key=lambda p: p.count(os.sep), reverse=True)
+    # Drop any root nested inside another one already listed.
+    kept = []
+    for r in roots:
+        if not any(r != k and r.startswith(k + os.sep) for k in roots):
+            kept.append(r)
+    return kept
+
+
 def clear_staging(carla_root, name):
     """Delete what a past import staged in Import/ for `name`.
 
     Only for a caller that has decided to restage; see resolve_existing_staging.
+    Duplicates below the top level go too: they are what made CARLA cook the map
+    twice, and a restage supersedes every copy, not just the canonical one.
     """
-    for p in staged_import_paths(carla_root, name):
+    import_dir = os.path.join(carla_root, "Import")
+    targets = list(staged_import_paths(carla_root, name))
+    targets += nested_duplicate_roots(import_dir, name)
+    for p in targets:
         print(f"[import] clearing the previous staging: {p}")
         if os.path.isdir(p):
             shutil.rmtree(p, ignore_errors=True)
