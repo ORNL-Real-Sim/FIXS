@@ -1,20 +1,8 @@
 """The ego's reported pose never steps backward.
 
-A physics ego coming off a standstill moves backward by a millimetre or two --
-measured on the MLK corridor at two separate lights, 1-3 mm over three or four
-consecutive ticks, on a flat road as well as a 3.8% climb. That is normal for a
-rigid body leaving rest and is not a defect.
-
-It becomes one at the seam. The wire carries a SPEED, not a velocity, so the
-sign is lost here and nothing downstream can recover it; and SUMO, handed a
-position it cannot reach travelling forward, walks the entire route looking for
-it. On a looping route that yields thousands of metres, which SUMO clamps to
-twice the vehicle's top speed for one step -- 11 m with the default 200 km/h
-type -- and applies. The ego leaves its 20.9 m lane for the rest of the step,
-so a neighbour checking that lane finds the gap empty and changes into it.
-
-Measured on the co-simulation: 15 of those excursions per run, and one of them
-put a background vehicle on top of the ego. With the guard, zero.
+A physics ego leaving rest moves backward a millimetre or two. The wire
+carries a speed, so the sign is lost, and SUMO answers a backward target by
+throwing the ego off its lane. Mechanism and measurements: FIXS#358.
 
     python -m pytest tests/Python/unit/test_ego_backstep_guard.py
 """

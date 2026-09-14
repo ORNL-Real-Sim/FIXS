@@ -109,9 +109,7 @@ class CarlaBackend(IVirEnvBackend):
         #: its transform reads the ORIGIN until a tick delivers a snapshot --
         #: so readEgoState would report a pose that is not the ego's.
         self._egoAwaitingSnapshot = False
-        # Backstep guard (#24): the last pose REPORTED to FIXS, how often it
-        # held, and how far the real ego may get behind it before we stop
-        # pretending (genuine reversing, as opposed to physics noise).
+        # Backstep guard state; see readEgoState. FIXS#358.
         self._lastEgoPose = None
         self._egoBackstepHolds = 0
         self._egoBackstepGuard = os.environ.get('FIXS_EGO_BACKSTEP_GUARD', '1') != '0'
@@ -283,16 +281,9 @@ class CarlaBackend(IVirEnvBackend):
         ext = self._egoActor.bounding_box.extent
         vel = self._egoActor.get_velocity()
         sTf = BridgeHelper.map_transfrom_Carla_to_Sumo(cTf, ext)
-        # --- the backstep guard (FIXS_Applications#24) ------------------------
-        # The SIGN of the ego's motion exists only here: the line below reduces
-        # the velocity to a magnitude, and nothing downstream -- not the wire,
-        # not TrafficHelper -- can recover it.  A traffic simulator asked to
-        # place a vehicle BEHIND where it already has it cannot express that as
-        # forward travel, and SUMO answers by walking the whole route and then
-        # clamping the result, which throws the ego metres up the road for the
-        # rest of the step.  So a pose that is not ahead is not reported: the
-        # previous one is repeated, which costs nothing while the ego is
-        # stationary and is where all of this happens.
+        # Backstep guard: never report a pose behind the last one reported --
+        # the sign is lost on the `out.speed` line below, and SUMO answers a
+        # backward target by throwing the ego off its lane. FIXS#358.
         fwd = cTf.get_forward_vector()
         vLong = vel.x * fwd.x + vel.y * fwd.y
         held = False
@@ -303,10 +294,7 @@ class CarlaBackend(IVirEnvBackend):
                      + (sTf.location.y - ly) * math.cos(hRad))
             behind = math.sqrt((sTf.location.x - lx) ** 2
                                + (sTf.location.y - ly) ** 2)
-            # Two signals, because they fail differently. vLong is a state and
-            # catches the FIRST backward tick; the projection compares against
-            # the pose actually reported and so cannot drift.  Either one
-            # saying 'not forward' is enough to hold.
+            # vLong catches the first backward tick; the projection cannot drift.
             held = (vLong < 0.0 or ahead <= 0.0) and behind < self._egoBackstepRelease
         if held:
             out.x, out.y, out.z = lx, ly, lz
@@ -604,10 +592,7 @@ class CarlaBackend(IVirEnvBackend):
         return self._egoActor
 
     def destroyEgo(self):
-        # Say how often the pose gate held. Zero is the expected reading on a
-        # scenario where the ego never stops; a large count on a run with no
-        # standstill means the physics is moving backward somewhere it should
-        # not be, which is worth seeing rather than silently absorbing.
+        # A count with no standstill in the run means backward physics. FIXS#358.
         if self._egoBackstepHolds:
             print('[carla] backstep guard held the ego pose on %d readbacks '
                   '(backward or non-advancing motion, not reported to FIXS)'

@@ -88,8 +88,7 @@ class TrafficLight:
         self.carlaTrafficLightActorPtr = None
 
 
-#: Default seed for the blueprint draw. Any fixed value does; what matters is
-#: that it IS fixed -- see BridgeHelper._blueprintRng.
+#: Default for CarlaSetup.BlueprintSeed. Any fixed value does; it must be fixed.
 _kBlueprintSeed = 20260913
 
 
@@ -224,30 +223,14 @@ class BridgeHelper:
     #: on every spawn, which on a corridor with one unmapped class buries the log.
     _warnedVClasses = set()
 
-    #: The blueprint draw's OWN generator, seeded, not the module RNG.
-    #:
-    #: This is not cosmetic. A blueprint decides the actor's bounding box, and
-    #: extent.x is the POSE ANCHOR: the traffic simulator reports a vehicle at
-    #: its front bumper and CarlaBackend._extentXOf steps back by that
-    #: half-length to the centre CARLA wants. So an unseeded draw puts the SAME
-    #: traffic in DIFFERENT places run to run, moves every rear bumper with it,
-    #: and changes both what an agent's obstacle sweep intersects and what the
-    #: physics ego can hit. Two builds then cannot be compared on anything as
-    #: rare as a contact.
-    #:
-    #: Its own Random instance rather than random.seed(): seeding the module RNG
-    #: would reach into every other user of it in the process, which is a side
-    #: effect this has no business having.
+    #: The blueprint draw's own generator, not the module RNG. A blueprint sets
+    #: the bounding box, and extent.x is the pose anchor, so an unseeded draw
+    #: moves every vehicle run to run. Seed from CarlaSetup.BlueprintSeed. FIXS#355.
     _blueprintRng = random.Random(_kBlueprintSeed)
 
     @staticmethod
     def setBlueprintSeed(seed):
-        """Re-seed the blueprint draw.
-
-        For a caller that deliberately wants a different traffic mix. The
-        default is fixed, so a run is reproducible unless someone asks for it
-        not to be.
-        """
+        """Re-seed the blueprint draw (CarlaSetup.BlueprintSeed)."""
         BridgeHelper._blueprintRng = random.Random(seed)
 
     @staticmethod
