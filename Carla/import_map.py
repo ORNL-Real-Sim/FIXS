@@ -1173,9 +1173,19 @@ def _restore_stash(import_dir, stash, names=None):
     for n in (names if names is not None else sorted(os.listdir(stash))):
         src, dst = os.path.join(stash, n), os.path.join(import_dir, n)
         if os.path.exists(src) and not os.path.exists(dst):
+            # `n` may be a relative path: a duplicate set aside from BELOW the
+            # top level comes back to exactly where it was. FIXS#358.
+            parent = os.path.dirname(dst)
+            if parent and not os.path.isdir(parent):
+                os.makedirs(parent, exist_ok=True)
             shutil.move(src, dst)
             back.append(n)
-    if not os.listdir(stash):
+    # Nested entries leave their parent directories behind; drop the empty ones
+    # so the stash still disappears when everything has gone home.
+    for base, dirs, files in os.walk(stash, topdown=False):
+        if not dirs and not files and os.path.abspath(base) != os.path.abspath(stash):
+            os.rmdir(base)
+    if os.path.isdir(stash) and not os.listdir(stash):
         os.rmdir(stash)
     return back
 
@@ -1213,9 +1223,30 @@ def _isolate_import(import_dir, keep):
         if os.path.isdir(folder):
             shutil.move(folder, os.path.join(stash, base))
             moved.append(base)
+    # CARLA cooks EVERY descriptor under Import/, so a second `<keep>.json` at any
+    # depth cooks the map twice and the repeat crashes Unreal. Set those aside as
+    # well, by relative path so restore() puts them back exactly. Guarded on the
+    # canonical one existing, so this can never hide the only copy. FIXS#358.
+    if os.path.isfile(os.path.join(import_dir, keep + ".json")):
+        for nested in nested_duplicate_roots(import_dir, keep):
+            rel = os.path.relpath(nested, import_dir)
+            dst = os.path.join(stash, rel)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.move(nested, dst)
+            moved.append(rel)
+            print(f"[import] set aside a duplicate package for '{keep}': {rel}")
     if moved:
         print(f"[import] isolating '{keep}' for the cook (set aside {len(moved)} "
               f"other Import/ item(s), restored after)")
+    # What CARLA will actually see. Said out loud rather than assumed: a second
+    # descriptor here is a double cook, and the crash it causes is 20 minutes
+    # into Unreal with a traceback that names none of this.
+    left = nested_duplicate_roots(import_dir, keep)
+    if left:
+        print(f"[import] WARNING: {len(left)} further copy(ies) of '{keep}' remain "
+              f"under Import/ and could not be set aside:")
+        for p in left:
+            print(f"[import]   {os.path.relpath(p, import_dir)}")
 
     def restore():
         _restore_stash(import_dir, stash, moved)

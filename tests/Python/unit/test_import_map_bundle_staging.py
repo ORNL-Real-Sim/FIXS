@@ -140,3 +140,55 @@ def test_a_restage_clears_a_leftover_nested_duplicate(tmp_path):
 
     assert _descriptorsUnder(importDir) == [], (
         'a restage must clear every copy, not just the canonical one')
+
+
+def _nested(importDir, rel):
+    """Plant a duplicate descriptor at `rel` under Import/, as a broken run left."""
+    d = os.path.join(importDir, rel)
+    os.makedirs(os.path.join(d, MAP), exist_ok=True)
+    with open(os.path.join(d, MAP + ".json"), "w") as fh:
+        fh.write(_descriptorText())
+    return d
+
+
+def test_isolation_hides_a_nested_duplicate_and_puts_it_back(tmp_path):
+    """The cook must see exactly one descriptor, whatever Import/ holds.
+
+    Non-destructive: the duplicate is only set aside, and restore() returns it
+    to the exact path it came from -- including its sub-directory.
+    """
+    carlaRoot = _carlaRoot(tmp_path)
+    importDir = os.path.join(carlaRoot, "Import")
+    _stagedAlready(importDir)
+    _nested(importDir, "carla")
+
+    assert len(_descriptorsUnder(importDir)) == 2
+    restore = import_map._isolate_import(importDir, MAP)
+    assert _descriptorsUnder(importDir) == [MAP + ".json"], "the cook still sees two"
+    restore()
+    assert sorted(_descriptorsUnder(importDir)) == sorted(
+        [MAP + ".json", os.path.join("carla", MAP + ".json")]), \
+        "the duplicate was not put back where it came from"
+
+
+def test_isolation_keeps_a_duplicate_buried_in_the_asset_folder_out_of_the_cook(tmp_path):
+    carlaRoot = _carlaRoot(tmp_path)
+    importDir = os.path.join(carlaRoot, "Import")
+    _stagedAlready(importDir)
+    _nested(importDir, os.path.join(MAP, MAP, "carla"))
+
+    restore = import_map._isolate_import(importDir, MAP)
+    assert _descriptorsUnder(importDir) == [MAP + ".json"]
+    assert os.path.isdir(os.path.join(importDir, MAP)), \
+        "the map's own asset folder must survive"
+    restore()
+
+
+def test_isolation_never_hides_the_only_copy(tmp_path):
+    """No canonical descriptor: the nested one is all there is, so it stays."""
+    carlaRoot = _carlaRoot(tmp_path)
+    importDir = os.path.join(carlaRoot, "Import")
+    _nested(importDir, "carla")
+
+    import_map._isolate_import(importDir, MAP)
+    assert _descriptorsUnder(importDir) == [os.path.join("carla", MAP + ".json")]
