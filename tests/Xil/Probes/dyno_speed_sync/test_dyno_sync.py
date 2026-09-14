@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import dyno_sync_sim as sim  # noqa: E402
 
-from CommonLib.xil import DynoSimulator  # noqa: E402
+from CommonLib.xil import DynoSim  # noqa: E402
 
 
 def _cycle(secs=60.0):
@@ -32,8 +32,8 @@ def _cycle(secs=60.0):
 def test_the_study_drives_the_shipped_bench_not_a_copy():
     """If this ever stops being the CommonLib simulator, the study is measuring
     something the rest of FIXS does not use."""
-    assert isinstance(sim.build_dyno(), DynoSimulator)
-    assert sim.build_dyno().cfg.mode == 'chassis'
+    assert isinstance(sim.build_dyno(), DynoSim)
+    assert sim.build_dyno().dyno.mode == 'chassis'
 
 
 def test_the_bench_is_driven_by_the_shipped_robot_driver():
@@ -51,10 +51,10 @@ def test_the_bench_is_driven_by_the_shipped_robot_driver():
 def test_the_reference_crosses_the_link():
     """Routed through the wire even in-process, so swapping to UDP is a
     transport change and not a code change."""
-    from CommonLib.xil import InProcessPair
-    pair = InProcessPair()
-    pair.simulator.send_reference(12.0)
-    assert pair.dyno.latest_reference()[0] == pytest.approx(12.0)
+    from CommonLib.xil import LocalLink
+    link = LocalLink()
+    link.send_reference(12.0)
+    assert link.recv_reference()[0] == pytest.approx(12.0)
 
 
 # ---------------------------------------------------------- the disagreement
@@ -80,20 +80,15 @@ def _matched():
     bench's C to that and zeroing A, B and CARLA's rolling makes them identical.
     """
     c = sim.CarlaParams(roll_coeff=0.0)
-
-    def over(cfg):
-        cfg.road_resistance.A_N = 0.0
-        cfg.road_resistance.B_Npms = 0.0
-        cfg.road_resistance.C_Npms2 = 0.5 * c.air_density * c.aero_CdA_m2
-        cfg.chassis.vehicle_mass_kg = c.mass_kg
-        cfg.chassis.roller_inertia_kgm2 = 0.0
-    return over, c
+    return dict(road_A_N=0.0, road_B_Npms=0.0,
+                road_C_Npms2=0.5 * c.air_density * c.aero_CdA_m2,
+                mass_kg=c.mass_kg, roller_inertia_kgm2=0.0), c
 
 
 def test_matching_the_resistance_models_cuts_the_sync_force():
     over, c = _matched()
     run = sim.RunParams()
-    matched = sim.simulate(_cycle(40), sim.build_dyno(over), c, run,
+    matched = sim.simulate(_cycle(40), sim.build_dyno(**over), c, run,
                            'forced_driven')['_summary']['F_sync_rms_N']
     stock = sim.simulate(_cycle(40), sim.build_dyno(), sim.CarlaParams(), run,
                          'forced_driven')['_summary']['F_sync_rms_N']
@@ -111,18 +106,12 @@ def test_torque_delivery_lag_is_a_second_independent_source():
     """
     over, c = _matched()
     run = sim.RunParams()
+    slow_cfg = dict(over, torque_bandwidth_Hz=2.0)
+    fast_cfg = dict(over, torque_bandwidth_Hz=50.0)
 
-    def slow_cfg(cfg):
-        over(cfg)
-        cfg.driveline.torque_bandwidth_Hz = 2.0
-
-    def fast_cfg(cfg):
-        over(cfg)
-        cfg.driveline.torque_bandwidth_Hz = 50.0
-
-    slow = sim.simulate(_cycle(40), sim.build_dyno(slow_cfg), c, run,
+    slow = sim.simulate(_cycle(40), sim.build_dyno(**slow_cfg), c, run,
                         'forced_driven')['_summary']['F_sync_rms_N']
-    fast = sim.simulate(_cycle(40), sim.build_dyno(fast_cfg), c, run,
+    fast = sim.simulate(_cycle(40), sim.build_dyno(**fast_cfg), c, run,
                         'forced_driven')['_summary']['F_sync_rms_N']
     assert slow > 1.0, 'matched resistance should still leave a lag residual'
     assert fast < slow / 2.0, 'a faster torque loop should shrink it'

@@ -58,17 +58,15 @@ import json
 import math
 import os
 import sys
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 
 _REPO = os.path.abspath(os.path.join(os.path.dirname(__file__),
                                      '..', '..', '..', '..'))
 if _REPO not in sys.path:
     sys.path.insert(0, _REPO)
 
-from CommonLib.xil import (ChassisDynoParams, DrivelineParams,  # noqa: E402
-                           DynoConfig, DynoSimulator, DynoVehicle, InProcessPair,
-                           PowertrainParams, RoadResistanceParams, RobotDriver,
-                           RobotDriverParams, envelope_powertrain)
+from CommonLib.xil import (Bench, Dyno, DynoSim, LocalLink,  # noqa: E402
+                           RobotDriver, Vehicle)
 
 G = 9.80665
 
@@ -114,14 +112,15 @@ def carla_resistance_N(p: CarlaParams, v: float) -> float:
     return s * (aero + roll)
 
 
-def steady_state_gap_N(dyno: DynoSimulator, carla: CarlaParams, speeds):
+def steady_state_gap_N(sim, carla, speeds):
     """The part of F_sync that is pure model disagreement, not dynamics.
 
     At constant speed the bench holds against its road load while CARLA holds
     against its own aero plus rolling. Whatever the two differ by has to come out
     of the sync, for as long as the vehicle sits at that speed.
     """
-    return [(v, dyno.road_resistance_N(v) - carla_resistance_N(carla, v)) for v in speeds]
+    return [(v, sim.dyno.resistance(v) - carla_resistance_N(carla, v))
+            for v in speeds]
 
 
 # ---------------------------------------------------------------- components
@@ -189,16 +188,16 @@ TRACE_COLS = ('t', 'v_ref', 'v_dyno', 'v_carla', 'v_carla_presync',
 COUPLINGS = ('free', 'track', 'forced_coast', 'forced_driven')
 
 
-def build_dyno(cfg_over=None) -> DynoSimulator:
-    """The bench under study: chassis mode, the shipped simulator."""
-    cfg = DynoConfig(mode='chassis',
-                     powertrain=PowertrainParams(),
-                     driveline=DrivelineParams(),
-                     road_resistance=RoadResistanceParams(),
-                     chassis=ChassisDynoParams())
-    if cfg_over:
-        cfg_over(cfg)
-    return DynoSimulator(cfg)
+def build_dyno(**kw):
+    """The bench under study: chassis mode, the shipped simulator.
+
+    Keywords are split between the two config objects by name, so a caller says
+    ``build_dyno(mass_kg=1800, road_A_N=90)`` without knowing which is which.
+    """
+    vehicle_keys = set(Vehicle().__dict__)
+    v = dict((k, kw[k]) for k in kw if k in vehicle_keys)
+    d = dict((k, kw[k]) for k in kw if k not in vehicle_keys)
+    return DynoSim(Vehicle(**v), Dyno(mode='chassis', **d))
 
 
 def simulate(cycle, dyno: DynoSimulator, carla: CarlaParams, run: RunParams,
@@ -211,17 +210,15 @@ def simulate(cycle, dyno: DynoSimulator, carla: CarlaParams, run: RunParams,
     sync_every = max(1, int(round(run.sync_dt_s / dt)))
     dyno.reset()
 
-    dp = RobotDriverParams(kp=run.driver_kp, ki=run.driver_ki)
-    car = DynoVehicle(dyno=dyno, driver=RobotDriver(dp))
-    drv_c = RobotDriver(dp)
-    link = InProcessPair() if run.use_link else None
+    bench = Bench(sim=dyno, driver=RobotDriver(run.driver_kp, run.driver_ki))
+    drv_c = RobotDriver(run.driver_kp, run.driver_ki)
+    link = LocalLink() if run.use_link else None
 
     # The surrogate shares the bench's powertrain envelope so that the two plants
     # differ only in resistance, mass and the bench's delivery lag.
-    carla_powertrain = envelope_powertrain(dyno.cfg.powertrain,
-                                           dyno.cfg.driveline.wheel_radius_m)
-    r = dyno.cfg.driveline.wheel_radius_m
-    max_brake = dyno.cfg.driveline.max_brake_torque_Nm
+    carla_powertrain = dyno.vehicle.axle_torque
+    r = dyno.vehicle.wheel_radius_m
+    max_brake = dyno.vehicle.max_brake_torque_Nm
 
     v_c = x_d = x_c = 0.0
     rec = {k: [] for k in TRACE_COLS}
@@ -232,16 +229,16 @@ def simulate(cycle, dyno: DynoSimulator, carla: CarlaParams, run: RunParams,
 
         # ---- the bench, across the wire --------------------------------
         if link is not None:
-            link.simulator.send_reference(v_ref)
-            ref = link.dyno.latest_reference()
-            st = car.step(ref[0] if ref else 0.0, dt)
-            link.dyno.send_measurement(st.speed_mps)
-            meas = link.simulator.latest_measurement()
+            link.send_reference(v_ref)
+            ref = link.recv_reference()
+            st = bench.step(ref[0] if ref else 0.0, dt)
+            link.send_measurement(st.speed)
+            meas = link.recv_measurement()
             v_d = meas[0] if meas else 0.0
         else:
-            st = car.step(v_ref, dt)
-            v_d = st.speed_mps
-        thr, brk = car.last_throttle, car.last_brake
+            st = bench.step(v_ref, dt)
+            v_d = st.speed
+        thr, brk = bench.throttle, bench.brake
 
         # ---- the CARLA surrogate ---------------------------------------
         if coupling in ('free', 'forced_driven'):
@@ -251,7 +248,7 @@ def simulate(cycle, dyno: DynoSimulator, carla: CarlaParams, run: RunParams,
         else:                                      # forced_coast
             ct, cb = 0.0, 0.0                      # speed imposed, nothing driving
         w = v_c / r
-        Tf, Tr = carla_powertrain(ct, cb, w, w)    # no delivery lag: apply_control
+        Tf, Tr = carla_powertrain(ct, w, w)        # no delivery lag: apply_control
         F_c = (Tf + Tr) / r - cb * 4.0 * max_brake / r
         F_res_c = carla_resistance_N(carla, v_c)
         v_c = max(0.0, v_c + (F_c - F_res_c) / carla.mass_kg * dt)
@@ -270,7 +267,7 @@ def simulate(cycle, dyno: DynoSimulator, carla: CarlaParams, run: RunParams,
 
         for key, val in zip(TRACE_COLS,
                             (t, v_ref, v_d, v_c, v_pre, thr, brk,
-                             st.tractive_force_N, st.road_resistance_N, F_res_c,
+                             st.force, st.resistance, F_res_c,
                              F_c, F_sync, x_d, x_c)):
             rec[key].append(val)
 
@@ -422,7 +419,7 @@ def print_report(summaries, gap, outdir, png):
 
 def build_argparser():
     c, r = CarlaParams(), RunParams()
-    dl, rl, ch = DrivelineParams(), RoadResistanceParams(), ChassisDynoParams()
+    veh, dyn = Vehicle(), Dyno()
     p = argparse.ArgumentParser(
         description='Dyno / CARLA forced-speed-match study',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -434,13 +431,13 @@ def build_argparser():
     p.add_argument('--sync-dt', type=float, default=r.sync_dt_s)
     p.add_argument('--sync-sweep', default='',
                    help='comma-separated sync intervals [s], e.g. 0.005,0.01,0.05')
-    p.add_argument('--dyno-mass', type=float, default=ch.vehicle_mass_kg)
-    p.add_argument('--roller-inertia', type=float, default=ch.roller_inertia_kgm2)
+    p.add_argument('--dyno-mass', type=float, default=veh.mass_kg)
+    p.add_argument('--roller-inertia', type=float, default=dyn.roller_inertia_kgm2)
     p.add_argument('--grade-deg', type=float, default=0.0)
-    p.add_argument('--road-a', type=float, default=rl.A_N)
-    p.add_argument('--road-b', type=float, default=rl.B_Npms)
-    p.add_argument('--road-c', type=float, default=rl.C_Npms2)
-    p.add_argument('--torque-bw', type=float, default=dl.torque_bandwidth_Hz,
+    p.add_argument('--road-a', type=float, default=dyn.road_A_N)
+    p.add_argument('--road-b', type=float, default=dyn.road_B_Npms)
+    p.add_argument('--road-c', type=float, default=dyn.road_C_Npms2)
+    p.add_argument('--torque-bw', type=float, default=veh.torque_bandwidth_Hz,
                    help='bench torque delivery bandwidth [Hz]')
     p.add_argument('--carla-mass', type=float, default=c.mass_kg)
     p.add_argument('--carla-cda', type=float, default=c.aero_CdA_m2)
@@ -453,16 +450,12 @@ def build_argparser():
 def main(argv=None):
     args = build_argparser().parse_args(argv)
 
-    def over(cfg):
-        cfg.chassis.vehicle_mass_kg = args.dyno_mass
-        cfg.chassis.roller_inertia_kgm2 = args.roller_inertia
-        cfg.chassis.grade_rad = math.radians(args.grade_deg)
-        cfg.road_resistance.A_N = args.road_a
-        cfg.road_resistance.B_Npms = args.road_b
-        cfg.road_resistance.C_Npms2 = args.road_c
-        cfg.driveline.torque_bandwidth_Hz = args.torque_bw
-
-    dyno = build_dyno(over)
+    dyno = build_dyno(mass_kg=args.dyno_mass,
+                      torque_bandwidth_Hz=args.torque_bw,
+                      roller_inertia_kgm2=args.roller_inertia,
+                      grade_rad=math.radians(args.grade_deg),
+                      road_A_N=args.road_a, road_B_Npms=args.road_b,
+                      road_C_Npms2=args.road_c)
     carla = CarlaParams(mass_kg=args.carla_mass, aero_CdA_m2=args.carla_cda,
                         roll_coeff=args.carla_roll)
     run = RunParams(dt_s=args.dt, sync_dt_s=args.sync_dt)
@@ -491,12 +484,9 @@ def main(argv=None):
     png = None if args.no_plot else try_plot(runs, gap, outdir)
 
     with open(os.path.join(outdir, 'summary.json'), 'w') as fh:
-        json.dump({'dyno': {'mode': dyno.cfg.mode,
-                            'powertrain': asdict(dyno.cfg.powertrain),
-                            'driveline': asdict(dyno.cfg.driveline),
-                            'road_resistance': asdict(dyno.cfg.road_resistance),
-                            'chassis': asdict(dyno.cfg.chassis)},
-                   'carla': asdict(carla), 'run': asdict(run),
+        json.dump({'vehicle': dict(dyno.vehicle.__dict__),
+                   'dyno': dict(dyno.dyno.__dict__),
+                   'carla': dict(carla.__dict__), 'run': dict(run.__dict__),
                    'results': summaries}, fh, indent=2)
 
     print_report(summaries, gap, outdir, png)

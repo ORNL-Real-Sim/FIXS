@@ -64,7 +64,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import dyno_sync_sim as study  # noqa: E402
 
-from CommonLib.xil import DynoVehicle, InProcessPair  # noqa: E402
+from CommonLib.xil import Bench, LocalLink  # noqa: E402
 
 
 # ------------------------------------------------------------------- leader
@@ -148,13 +148,12 @@ def run(command: str, scenario: str, duration_s=90.0, dt=0.005,
     if scenario not in ('free', 'leader'):
         raise ValueError("scenario must be 'free' or 'leader'")
 
-    dyno = study.build_dyno()
-    car = DynoVehicle(dyno=dyno)
-    link = InProcessPair()
-    powertrain = study.envelope_powertrain(dyno.cfg.powertrain,
-                                           dyno.cfg.driveline.wheel_radius_m)
-    r = dyno.cfg.driveline.wheel_radius_m
-    max_brake = dyno.cfg.driveline.max_brake_torque_Nm
+    sim = study.build_dyno()
+    bench = Bench(sim=sim)
+    link = LocalLink()
+    powertrain = sim.vehicle.axle_torque
+    r = sim.vehicle.wheel_radius_m
+    max_brake = sim.vehicle.max_brake_torque_Nm
 
     cycle = study.synthetic_cycle(duration_s, dt) if scenario == 'free' else None
 
@@ -176,21 +175,21 @@ def run(command: str, scenario: str, duration_s=90.0, dt=0.005,
             x_l += v_l * dt
             # The IDM plans against the BENCH's state, because the bench is the
             # vehicle: it is what the reference is for.
-            v_ref = max(0.0, v_ref + idm_accel(car.speed_mps, x_l - x_d,
-                                               car.speed_mps - v_l, idm) * dt)
+            v_ref = max(0.0, v_ref + idm_accel(bench.speed, x_l - x_d,
+                                               bench.speed - v_l, idm) * dt)
 
-        link.simulator.send_reference(v_ref)
-        ref = link.dyno.latest_reference()
-        st = car.step(ref[0] if ref else 0.0, dt)
-        link.dyno.send_measurement(st.speed_mps)
-        meas = link.simulator.latest_measurement()
+        link.send_reference(v_ref)
+        ref = link.recv_reference()
+        st = bench.step(ref[0] if ref else 0.0, dt)
+        link.send_measurement(st.speed)
+        meas = link.recv_measurement()
         v_d = meas[0] if meas else 0.0
         x_d += v_d * dt
 
         # ---- the CARLA side follows the bench --------------------------
         e = v_d - v_c
         w = v_c / r
-        cap_f, cap_r = powertrain(1.0, 0.0, w, w)
+        cap_f, cap_r = powertrain(1.0, w, w)
         a_max = (cap_f + cap_r) / r / carla.mass_kg
         a_min = -4.0 * max_brake / r / carla.mass_kg
         if command == 'speed':
@@ -205,7 +204,7 @@ def run(command: str, scenario: str, duration_s=90.0, dt=0.005,
             if -PEDAL_MAX_ACCEL < a_raw < PEDAL_MAX_ACCEL:
                 integ += e * dt
             thr, brk = accel_to_pedal(PEDAL_KP * e + PEDAL_KI * integ)
-            Tf, Tr = powertrain(thr, brk, w, w)
+            Tf, Tr = powertrain(thr, w, w)
             F = (Tf + Tr) / r - brk * 4.0 * max_brake / r
         v_c = max(0.0, v_c + (F - study.carla_resistance_N(carla, v_c))
                   / carla.mass_kg * dt)
@@ -224,7 +223,7 @@ def run(command: str, scenario: str, duration_s=90.0, dt=0.005,
         # The CARLA surrogate is a point mass with no wheel, so its propulsive
         # force at the road times the radius is the same quantity: contact
         # torque, with no inertia term to subtract because there is no wheel.
-        T_bench = sum(st.axle_torque_Nm)
+        T_bench = sum(st.axle_torque)
         T_carla = F * r
         x_c += v_c * dt
 
