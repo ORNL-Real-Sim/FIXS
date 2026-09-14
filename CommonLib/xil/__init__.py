@@ -10,24 +10,21 @@ Four modules are parts of the setup, one is the simulation that couples them:
     dyno.py      Dyno                              the dynamometer
     driver.py    RobotDriver                       who works the pedal
     link.py      LocalLink, UdpLink                the wire out to CARLA
-    dynosim.py   DynoSim, State                    those three, running
+    sim.py       DynoSim, State                    those three, running
 
-DynoSim holds the parts and owns the equations of motion, because the
-acceleration of a car on a dyno belongs to neither the car nor the dyno alone.
+DynoSim owns the equations of motion, because the acceleration of a car on a
+dyno belongs to neither the car nor the dyno alone. It holds the parts by name.
+
+    from CommonLib.xil.dyno import Dyno
+    from CommonLib.xil.sim import DynoSim
+    from CommonLib.xil.vehicle import Vehicle
 
     sim = DynoSim(Vehicle(mass_kg=2100), Dyno(mode='axle'))
     state = sim.step(v_ref, dt)               # the driver chases a reference
     state = sim.step_pedals(thr, brk, dt)     # or work the pedal yourself
     sim.vehicle.powertrain.front_share
     sim.dyno.resistance(v)
+
+Nothing is re-exported here on purpose. Import from the module that defines the
+thing, so the import line says where it lives.
 """
-
-from .driver import RobotDriver
-from .dyno import Dyno
-from .dynosim import NWHEEL, DynoSim, State
-from .link import LocalLink, UdpLink
-from .vehicle import Driveline, Powertrain, Vehicle
-
-__all__ = ['DynoSim', 'State', 'NWHEEL',
-           'Vehicle', 'Powertrain', 'Driveline', 'Dyno',
-           'RobotDriver', 'LocalLink', 'UdpLink']

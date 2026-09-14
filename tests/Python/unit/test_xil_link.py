@@ -16,8 +16,8 @@ import pytest
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__),
                                                 '..', '..', '..')))
 
-from CommonLib.xil import LocalLink, UdpLink  # noqa: E402
-from CommonLib.xil.link import (MEASUREMENT_PORT, PACKET_SIZE,  # noqa: E402
+from CommonLib.xil.link import (LocalLink, UdpLink,  # noqa: E402
+                                MEASUREMENT_PORT, PACKET_SIZE,
                                 REFERENCE_PORT, pack, unpack)
 
 

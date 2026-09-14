@@ -64,7 +64,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import dyno_sync_sim as study  # noqa: E402
 
-from CommonLib.xil import LocalLink  # noqa: E402
+from CommonLib.xil.link import LocalLink  # noqa: E402
 
 
 # ------------------------------------------------------------------- leader

@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import dyno_sync_sim as sim  # noqa: E402
 
-from CommonLib.xil import DynoSim  # noqa: E402
+from CommonLib.xil.sim import DynoSim  # noqa: E402
 
 
 def _cycle(secs=60.0):
@@ -39,7 +39,7 @@ def test_the_study_drives_the_shipped_bench_not_a_copy():
 def test_the_bench_is_driven_by_the_shipped_robot_driver():
     """The study must not carry its own driver: the thing under study is the
     bench as it ships, driver included."""
-    from CommonLib.xil import RobotDriver
+    from CommonLib.xil.driver import RobotDriver
     assert not hasattr(sim, 'PedalDriver')
     d = RobotDriver()
     thr, brk = d.step(10.0, 0.0, 0.001)
@@ -51,7 +51,7 @@ def test_the_bench_is_driven_by_the_shipped_robot_driver():
 def test_the_reference_crosses_the_link():
     """Routed through the wire even in-process, so swapping to UDP is a
     transport change and not a code change."""
-    from CommonLib.xil import LocalLink
+    from CommonLib.xil.link import LocalLink
     link = LocalLink()
     link.send_reference(12.0)
     assert link.recv_reference()[0] == pytest.approx(12.0)

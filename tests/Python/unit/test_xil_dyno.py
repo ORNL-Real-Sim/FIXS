@@ -16,7 +16,10 @@ import pytest
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__),
                                                 '..', '..', '..')))
 
-from CommonLib.xil import DynoSim, Dyno, RobotDriver, Vehicle  # noqa: E402
+from CommonLib.xil.driver import RobotDriver  # noqa: E402
+from CommonLib.xil.dyno import Dyno  # noqa: E402
+from CommonLib.xil.sim import DynoSim  # noqa: E402
+from CommonLib.xil.vehicle import Vehicle  # noqa: E402
 
 DT = 0.001
 RL = 2

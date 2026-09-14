@@ -65,8 +65,11 @@ _REPO = os.path.abspath(os.path.join(os.path.dirname(__file__),
 if _REPO not in sys.path:
     sys.path.insert(0, _REPO)
 
-from CommonLib.xil import (DynoSim, Dyno, LocalLink,  # noqa: E402
-                           RobotDriver, Vehicle)
+from CommonLib.xil.driver import RobotDriver  # noqa: E402
+from CommonLib.xil.dyno import Dyno  # noqa: E402
+from CommonLib.xil.link import LocalLink  # noqa: E402
+from CommonLib.xil.sim import DynoSim  # noqa: E402
+from CommonLib.xil.vehicle import Vehicle  # noqa: E402
 
 G = 9.80665
 
