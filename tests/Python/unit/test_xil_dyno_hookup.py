@@ -162,3 +162,28 @@ def test_transport_defaults_to_inprocess(tmp_path):
     cfg = ConfigHelper()
     cfg.getConfig(write(tmp_path, {"EnableXil": True}))
     assert cfg.Xil_setup['Transport'] == 'inprocess'
+
+
+def test_an_unreadable_scenario_is_not_read_as_no_bench(tmp_path, monkeypatch):
+    """The dangerous direction. Whether a bench is declared is a fact about the
+    scenario; a scenario that cannot be read does not answer it, and guessing
+    'no' would quietly run the plant the yaml did not ask for."""
+    monkeypatch.delenv('FIXS_CONFIG_YAML', raising=False)
+    with pytest.raises(fixs.FixsError) as e:
+        fixs.dyno()
+    assert 'FIXS_CONFIG_YAML' in str(e.value)
+
+    monkeypatch.setenv('FIXS_CONFIG_YAML', str(tmp_path / 'nope.yaml'))
+    with pytest.raises(fixs.FixsError):
+        fixs.dyno()
+
+
+def test_the_bridge_says_which_yaml_it_is_running(tmp_path):
+    """mainVirCarla exports its -f so a controller loaded in-process cannot read
+    a DIFFERENT scenario than the bridge hosting it. Without this the fallback
+    above fires mid-run: measured, the bridge died on its first controlled tick
+    with FileNotFoundError: 'config.yaml'."""
+    src = os.path.join(_ROOT, 'Carla', 'VirEnv', 'mainVirCarla.py')
+    with open(src, encoding='utf-8') as fh:
+        text = fh.read()
+    assert "os.environ['FIXS_CONFIG_YAML'] = os.path.abspath(args.configPath)" in text
