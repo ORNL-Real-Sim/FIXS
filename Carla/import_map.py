@@ -680,6 +680,10 @@ def stage_package(carla_root, name, package_url=None, package_dir=None, package_
             print(f"[import] using the staged package: {descriptor}")
             return import_dir
         print(f"[import] no descriptor beside the staged folder; staging afresh.")
+    else:
+        # Restaging: the old copy is superseded, and leaving it is not inert.
+        # CARLA cooks every descriptor in Import/. FIXS#358.
+        clear_staging(carla_root, name)
 
     os.makedirs(import_dir, exist_ok=True)
     tmpdir = None
@@ -692,6 +696,9 @@ def stage_package(carla_root, name, package_url=None, package_dir=None, package_
             src, tmpdir = _try_gh_download(package_url)
             if src is None:
                 src = _select_package(name, package_url)
+        # Only the CARLA half of a Digital-Twin-Library bundle belongs in Import/;
+        # the sumo half lands in the map cache. FIXS#358.
+        src = _carla_half(src, name)
         if _has_descriptor(src):
             # Hand-authored package: <name>.json + its <name>/ asset folder land
             # directly under Import/.
@@ -735,6 +742,43 @@ def stage_package(carla_root, name, package_url=None, package_dir=None, package_
                  f"         (a packaged map must contain {name}.json; a raw export "
                  f"must be named after the map so one can be generated)")
     return import_dir
+
+
+def _carla_half(src, name):
+    """The CARLA package inside `src`, splitting a bundle if that is what it is.
+
+    A Digital-Twin-Library map ships as `carla/` + `sumo/`. Handed whole to
+    Import/, it stages a SECOND descriptor at Import/carla/<name>.json beside the
+    one already there -- and CARLA's Import.py cooks every descriptor it finds,
+    so the map is cooked twice and the second pass crashes Unreal. Splitting also
+    puts the sumo half where the co-sim reads it. FIXS#358.
+    """
+    try:
+        carla_src, _sumo = open_bundle(src, cache_name=name)
+    except Exception as exc:                                    # noqa: BLE001
+        print(f"[import] could not split '{src}' as a bundle ({exc}); "
+              f"staging it as-is.")
+        return src
+    if carla_src and os.path.exists(carla_src) and carla_src != src:
+        print(f"[import] bundle: staging its CARLA half ({carla_src})")
+        return carla_src
+    return src
+
+
+def clear_staging(carla_root, name):
+    """Delete what a past import staged in Import/ for `name`.
+
+    Only for a caller that has decided to restage; see resolve_existing_staging.
+    """
+    for p in staged_import_paths(carla_root, name):
+        print(f"[import] clearing the previous staging: {p}")
+        if os.path.isdir(p):
+            shutil.rmtree(p, ignore_errors=True)
+        else:
+            try:
+                os.remove(p)
+            except OSError as exc:                              # noqa: PERF203
+                print(f"[import]   could not remove it ({exc}); leaving it.")
 
 
 def _looks_like_bundle(names):
