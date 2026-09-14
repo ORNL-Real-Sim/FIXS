@@ -207,3 +207,95 @@ def test_a_returned_command_is_ignored(tmp_path):
     kind, _, backend, _ = drive(str(p), plantSpeed=6.0, advisory=8.0)
     assert kind is None
     assert backend.applied == []
+
+
+# ---------------------------------------------------------------------------
+# the advisory is an INPUT, and the controller's command must not eat it
+# ---------------------------------------------------------------------------
+#
+# speedDesired is the only field that travels both ways: the traffic simulator
+# writes the eco advisory into it at the feed, and a speed-commanding controller
+# writes its command into the same slot every sub-step. Read back on the next
+# sub-step, that command looks exactly like a fresh advisory -- and a controller
+# whose target comes from it is then closing a loop on itself, on every second
+# step, with nothing in any log to say so. Measured on a 300 s co-simulation
+# before this was fixed: 1299 of 2554 controller steps read a speedDesired equal
+# to the previous step's own command to within 1e-3, which is every sub-step.
+
+COMMANDS_A_SPEED = """
+class Controller:
+    def __init__(self, config, egoId):
+        self.seen = []
+
+    def control(self, ego, dt):
+        self.seen.append(ego.speedDesired)
+        # Deliberately NOT the advisory, so a readback is unmistakable.
+        ego.set(speedDesired=99.0, steerAngleDesired=0.0)
+"""
+
+
+def speedController(tmp_path):
+    p = tmp_path / "speed_controller.py"
+    p.write_text(COMMANDS_A_SPEED, encoding="utf-8")
+    ctl = loadController(str(p))
+    ctl.setup({}, "ego")
+    return ctl
+
+
+def test_the_advisory_survives_the_substeps_of_a_feed(tmp_path):
+    """One feed, two CARLA steps. Both steps must read the feed's advisory."""
+    backend, ctl = StubBackend(5.0), speedController(tmp_path)
+    ego = makeEgo(speedDesired=8.0)
+
+    runController(backend, ctl, ego, 0.05, True, maxSteerRad=0.7)    # the feed
+    runController(backend, ctl, ego, 0.05, False, maxSteerRad=0.7)   # the sub-step
+
+    assert ctl._instance.seen == [pytest.approx(8.0), pytest.approx(8.0)]
+
+
+def test_the_command_still_reaches_the_plant_on_every_substep(tmp_path):
+    """Restoring the input must not cost the output: the value applied is the
+    controller's command, on the sub-step as much as on the feed."""
+    backend, ctl = StubBackend(5.0), speedController(tmp_path)
+    ego = makeEgo(speedDesired=8.0)
+
+    runController(backend, ctl, ego, 0.05, True, maxSteerRad=0.7)
+    runController(backend, ctl, ego, 0.05, False, maxSteerRad=0.7)
+
+    assert [a[0] for a in backend.applied] == ["speedsteer", "speedsteer"]
+    assert [a[1] for a in backend.applied] == [pytest.approx(99.0),
+                                               pytest.approx(99.0)]
+
+
+def test_a_new_feed_replaces_the_held_advisory(tmp_path):
+    """Held, not frozen. The next feed's value is what the sub-steps after it
+    see -- otherwise this would trade a readback for a stale target."""
+    backend, ctl = StubBackend(5.0), speedController(tmp_path)
+    ego = makeEgo(speedDesired=8.0)
+
+    runController(backend, ctl, ego, 0.05, True, maxSteerRad=0.7)
+    runController(backend, ctl, ego, 0.05, False, maxSteerRad=0.7)
+    # the next feed lands, carrying a different advisory
+    object.__setattr__(ego, "speedDesired", 4.0)
+    runController(backend, ctl, ego, 0.05, True, maxSteerRad=0.7)
+    runController(backend, ctl, ego, 0.05, False, maxSteerRad=0.7)
+
+    assert ctl._instance.seen == [pytest.approx(8.0), pytest.approx(8.0),
+                                  pytest.approx(4.0), pytest.approx(4.0)]
+
+
+def test_a_pedal_controller_is_untouched(tmp_path):
+    """Only speedDesired is dual-use. A pedal command is an output the traffic
+    simulator never fills in, so nothing about it is restored."""
+    backend, ctl = StubBackend(5.0), None
+    p = tmp_path / "pedal_controller.py"
+    p.write_text(CLASS_FORM, encoding="utf-8")
+    ctl = loadController(str(p))
+    ctl.setup({}, "ego")
+    ego = makeEgo(speedDesired=8.0)
+
+    runController(backend, ctl, ego, 0.05, True, maxSteerRad=0.7)
+    runController(backend, ctl, ego, 0.05, False, maxSteerRad=0.7)
+
+    assert [a[0] for a in backend.applied] == ["actuation", "actuation"]
+    assert ego.acceleratorPedalDesired == pytest.approx(0.4)
