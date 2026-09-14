@@ -159,7 +159,8 @@ def run(command: str, scenario: str, duration_s=90.0, dt=0.005,
     cycle = study.synthetic_cycle(duration_s, dt) if scenario == 'free' else None
 
     x_l = leader.start_gap_m
-    x_d = x_c = v_c = v_ref = ack_i = 0.0
+    x_d = x_c = v_c = v_ref = 0.0
+    integ = 0.0          # the tracking law's integral, whichever law is running
     rec = {k: [] for k in ('t', 'v_lead', 'v_ref', 'v_dyno', 'v_carla',
                            'gap_dyno', 'gap_carla', 'x_divergence',
                            'T_bench', 'T_carla', 'T_carla_capacity')}
@@ -195,15 +196,15 @@ def run(command: str, scenario: str, duration_s=90.0, dt=0.005,
         if command == 'speed':
             # The controller asks for an acceleration; the vehicle delivers what
             # it can. That clip is what stops this being an assignment.
-            if a_min < SPEED_KP * e + SPEED_KI * ack_i < a_max:
-                ack_i += e * dt
-            a_cmd = max(a_min, min(a_max, SPEED_KP * e + SPEED_KI * ack_i))
+            if a_min < SPEED_KP * e + SPEED_KI * integ < a_max:
+                integ += e * dt
+            a_cmd = max(a_min, min(a_max, SPEED_KP * e + SPEED_KI * integ))
             F = carla.mass_kg * a_cmd
         else:
-            a_raw = PEDAL_KP * e + PEDAL_KI * ack_i
+            a_raw = PEDAL_KP * e + PEDAL_KI * integ
             if -PEDAL_MAX_ACCEL < a_raw < PEDAL_MAX_ACCEL:
-                ack_i += e * dt
-            thr, brk = accel_to_pedal(PEDAL_KP * e + PEDAL_KI * ack_i)
+                integ += e * dt
+            thr, brk = accel_to_pedal(PEDAL_KP * e + PEDAL_KI * integ)
             Tf, Tr = powertrain(thr, brk, w, w)
             F = (Tf + Tr) / r - brk * 4.0 * max_brake / r
         v_c = max(0.0, v_c + (F - study.carla_resistance_N(carla, v_c))
