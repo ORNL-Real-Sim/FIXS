@@ -37,7 +37,7 @@ from pathlib import Path
 from . import ego
 
 __all__ = ["build_ego_scenario", "has_ego", "vtypes_file", "net_file",
-           "route_files"]
+           "route_files", "set_run_settings"]
 
 
 def _flags_by_dest():
@@ -168,3 +168,44 @@ def vtypes_file(sumocfg, ids):
     raise SystemExit(
         f"{Path(sumocfg).resolve()} names no route file defining "
         f"{', '.join(sorted(ids))}.")
+
+
+def set_run_settings(sumocfg, out_path=None, *, end=None, step_length=None,
+                     time_to_teleport=None, seed=None):
+    """Write a run's own SUMO settings into a .sumocfg. Returns where it wrote.
+
+    The same four build_ego_scenario applies, for a scenario that did not come
+    through it -- one prepared by hand, say. `out_path` defaults to writing back
+    to `sumocfg`; pass it to write a copy instead.
+
+    These belong in the config rather than on the runner's command line. A value
+    declared per-app there overrides whatever the scenario says, silently, so the
+    two drift and the flag wins (FIXS_Applications#45: a restated
+    --time-to-teleport 30 overrode a generated config's 150 and walked an app
+    12.75 m/s off its reference results).
+
+    Nor is the seed optional for anyone comparing runs. SUMO's default is 23423,
+    and a different random stream draws different per-vehicle speedFactors --
+    which is the free-flow speed a controller plans against.
+
+    Creates each element if the config does not have it. The obvious loop,
+
+        for node in root.iter("end"):
+            node.set("value", ...)
+
+    silently does nothing when the element is absent, which is the shape this
+    replaces: it worked only because the scenarios in hand happened to carry one.
+    """
+    tree = ET.parse(Path(sumocfg))
+    root = tree.getroot()
+    if end is not None:
+        ego._set_value(root, "time", "end", end)
+    if step_length is not None:
+        ego._set_value(root, "time", "step-length", step_length)
+    if time_to_teleport is not None:
+        ego._set_value(root, "processing", "time-to-teleport", time_to_teleport)
+    if seed is not None:
+        ego._set_value(root, "random_number", "seed", seed)
+    target = Path(out_path) if out_path is not None else Path(sumocfg)
+    tree.write(target, encoding="UTF-8", xml_declaration=True)
+    return target

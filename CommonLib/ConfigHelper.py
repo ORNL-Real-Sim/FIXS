@@ -33,10 +33,19 @@ class ConfigHelper:
         self.Sumo_setup = defaultdict(lambda: None)
         self.Carla_setup = defaultdict(lambda: None)
         self.DataLog_setup = defaultdict(lambda: None)
+        # The document as written, before defaults were applied. Every section
+        # above is a defaultdict filled in with fallbacks, so it cannot answer
+        # "did the author actually say this?" -- and for some keys that is the
+        # only question worth asking. CarlaClientPort defaults to 430, which is
+        # also a perfectly normal application port, so a caller deciding
+        # something from its VALUE cannot tell a declared 430 from a defaulted
+        # one. Read from here when presence is what matters.
+        self.raw = {}
     def getConfig(self, configName):
         path = os.path.normpath(configName)
         with open(path, 'r') as file:
             config = yaml.safe_load(file)
+        self.raw = config or {}
 
         # Simulation Setup
         simulation_node = config.get("SimulationSetup", {})

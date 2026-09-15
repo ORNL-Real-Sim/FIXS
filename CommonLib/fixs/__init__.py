@@ -466,7 +466,7 @@ def _requireConnection():
 # Connecting
 # ---------------------------------------------------------------------------
 
-def connect(configPath=None, *, port=None, host=None, ego=None,
+def connect(configPath=None, *, port=None, host=None, ego=None, requires=(),
             connectTimeout=None, recvTimeout=None, role='controller'):
     """(string, ...) -> (string, integer) -- connect and return the endpoint.
 
@@ -482,6 +482,15 @@ def connect(configPath=None, *, port=None, host=None, ego=None,
     :param ego: id, or list of ids, this client controls, reported by
         :func:`getEgoIDList`. Defaults to the ``attribute.id`` list of the
         selected subscription, so the yaml is not restated in code.
+    :param requires: field names this client READS off the feed, checked
+        against ``SimulationSetup.VehicleMessageField`` before the socket opens.
+        ``set()`` already refuses to COMMAND a field the config does not
+        declare; this is the other direction, and it has to be asked for because
+        only the client knows what it reads. Worth asking: a field that is not
+        declared is not sent, so its VehData attribute keeps the dataclass
+        default -- ``signalLightId`` is a char[50], defaulting to fifty spaces --
+        and the run dies on a blank several hundred simulated seconds in, at the
+        first vehicle that has one. Declared here it costs a line at startup.
     :param connectTimeout: seconds to keep retrying the connect; ``None``
         retries forever, which is right under a supervisor (run_cosim) that
         stops the stack itself when something upstream dies.
@@ -510,6 +519,21 @@ def connect(configPath=None, *, port=None, host=None, ego=None,
     config.getConfig(configPath)
 
     declared = config.simulation_setup.get('VehicleMessageField') or ['id', 'speed']
+
+    if isinstance(requires, str):
+        raise TypeError(
+            f'requires takes a list of field names, not a single string. '
+            f'Use requires=[{requires!r}].')
+    absent = [f for f in requires if f not in declared]
+    if absent:
+        raise FixsError(
+            f'{configPath}\n'
+            f'      SimulationSetup.VehicleMessageField does not declare '
+            f'{", ".join(absent)}, which this client reads.\n'
+            f'      Undeclared fields are not put on the wire, so they arrive '
+            f'as their defaults and the run fails later, on a blank, at the '
+            f'first vehicle that has one.\n'
+            f'      On the wire: {", ".join(declared)}')
 
     subscription = _selectSubscription(config, configPath, port)
     if host is None:
@@ -554,10 +578,31 @@ def _selectSubscription(config, configPath, port):
             f'It declares: {declaredPorts}.'
         )
     if len(subscriptions) > 1:
+        # One of them is usually not an application at all: a CARLA scenario
+        # subscribes the BRIDGE on ApplicationSetup too, and says so elsewhere in
+        # the same file as CarlaSetup.CarlaClientPort -- which is exactly what
+        # run_cosim reads to decide where to start it. So the config already
+        # distinguishes them, and a controller should not have to answer a
+        # question its own scenario yaml answers.
+        #
+        # Presence, not value: CarlaClientPort DEFAULTS to 430, which is also a
+        # perfectly ordinary application port, so a defaulted 430 would exclude
+        # the caller's own subscription. config.raw is the document as written.
+        carlaSection = (config.raw.get('CarlaSetup') or {})
+        if 'CarlaClientPort' in carlaSection:
+            bridgePort = carlaSection['CarlaClientPort']
+            mine = [e for e in subscriptions
+                    if bridgePort not in (e.get('port') or [])]
+            if len(mine) == 1:
+                return mine[0]
         declaredPorts = [p for e in subscriptions for p in e.get('port', [])]
         raise FixsError(
             f'{configPath} declares {len(subscriptions)} vehicle subscriptions '
-            f'(ports {declaredPorts}); pass port= to say which is this client.'
+            f'(ports {declaredPorts}); pass port= to say which is this client. '
+            f'A CARLA scenario normally needs no port here: '
+            f'CarlaSetup.CarlaClientPort names the subscription belonging to '
+            f'the bridge, and the one left over is the application. More than '
+            f'one was left over.'
         )
     return subscriptions[0]
 
