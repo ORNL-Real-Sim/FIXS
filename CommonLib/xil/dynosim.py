@@ -41,8 +41,9 @@ class Dyno(object):
     fights a driver tracking the same speed, and the pedal then parks on
     whatever the driver's integrator happened to hold rather than on what the
     physics require. Measured, reaching 15 m/s three different ways parked the
-    throttle at 0.040, 0.206 and 0.696; under road resistance it is 0.0283 every
-    time.
+    throttle at 0.040, 0.206 and 0.696; under road resistance it is 0.0149 every
+    time, and that number is checkable rather than remembered -- it is the
+    throttle whose torque balances the load, 227.1 N at 0.36 m, or 81.8 Nm.
     """
 
     def __init__(self, mode='chassis', road_A_N=111.0, road_B_Npms=0.99,
