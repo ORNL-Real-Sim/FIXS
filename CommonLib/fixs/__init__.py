@@ -84,7 +84,7 @@ from CommonLib.SocketHelper import SocketHelper
 from CommonLib.VehDataMsgDefs import VehData
 
 __all__ = [
-    'connect', 'recv', 'send', 'close',
+    'connect', 'recv', 'send', 'close', 'checkFields',
     'sim', 'vehicle', 'trafficlight',
     'emit', 'transport', 'commandKind',
     'Vehicle', 'MAX_STEER_RAD',
@@ -466,6 +466,46 @@ def _requireConnection():
 # Connecting
 # ---------------------------------------------------------------------------
 
+def checkFields(configPath=None, requires=(), *, _declared=None):
+    """(string, list) -> None -- fail now if the config cannot feed this client.
+
+    connect() calls this for its ``requires``; call it directly to fail BEFORE
+    the run exists. Under run_cosim an application builds its scenario and
+    reports it before it connects, so a check that waits for connect() has
+    already cost a run directory and a SUMO launch. This costs a line.
+
+    An undeclared field is never put on the wire, so it arrives as its VehData
+    default -- signalLightId is a char[50], fifty spaces -- and the failure
+    surfaces hundreds of simulated seconds later, on a blank, at the first
+    vehicle that has one.
+    """
+    if isinstance(requires, str):
+        raise TypeError(
+            f'requires takes a list of field names, not a single string. '
+            f'Use requires=[{requires!r}].')
+    if not requires:
+        return
+    declared = _declared
+    if declared is None:
+        configPath = configPath or os.environ.get('FIXS_CONFIG_YAML') or 'config.yaml'
+        if not os.path.isfile(configPath):
+            raise FixsError(f'config not found: {configPath}')
+        config = ConfigHelper()
+        config.getConfig(configPath)
+        declared = config.simulation_setup.get('VehicleMessageField') or ['id', 'speed']
+    absent = [f for f in requires if f not in declared]
+    if absent:
+        raise FixsError(
+            f'{configPath}\n'
+            f'      SimulationSetup.VehicleMessageField does not declare '
+            f'{", ".join(absent)}, which this client reads.\n'
+            f'      Undeclared fields are not put on the wire, so they arrive '
+            f'as their defaults and the run fails later, on a blank, at the '
+            f'first vehicle that has one.\n'
+            f'      On the wire: {", ".join(declared)}')
+
+
+
 def connect(configPath=None, *, port=None, host=None, ego=None, requires=(),
             connectTimeout=None, recvTimeout=None, role='controller'):
     """(string, ...) -> (string, integer) -- connect and return the endpoint.
@@ -520,20 +560,7 @@ def connect(configPath=None, *, port=None, host=None, ego=None, requires=(),
 
     declared = config.simulation_setup.get('VehicleMessageField') or ['id', 'speed']
 
-    if isinstance(requires, str):
-        raise TypeError(
-            f'requires takes a list of field names, not a single string. '
-            f'Use requires=[{requires!r}].')
-    absent = [f for f in requires if f not in declared]
-    if absent:
-        raise FixsError(
-            f'{configPath}\n'
-            f'      SimulationSetup.VehicleMessageField does not declare '
-            f'{", ".join(absent)}, which this client reads.\n'
-            f'      Undeclared fields are not put on the wire, so they arrive '
-            f'as their defaults and the run fails later, on a blank, at the '
-            f'first vehicle that has one.\n'
-            f'      On the wire: {", ".join(declared)}')
+    checkFields(configPath, requires, _declared=declared)
 
     subscription = _selectSubscription(config, configPath, port)
     if host is None:
