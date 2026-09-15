@@ -31,6 +31,8 @@ application that shells out should keep using.
 """
 from __future__ import annotations
 
+import json
+import os
 import shutil
 import typing
 import xml.etree.ElementTree as ET
@@ -231,11 +233,9 @@ def set_run_settings(sumocfg, out_path=None, *, end=_UNSET, step_length=None,
 
 class Scenario(typing.NamedTuple):
     """What a run needs to know about the scenario it is about to run."""
-    path: str          # what to start SUMO on, and what to report to FIXS_HANDOFF
+    path: str          # what SUMO is started on; reported to FIXS_HANDOFF already
     built: bool        # True if the ego was inserted; False if it was already there
     types_file: object # the route file this run's vType attributes were written into
-    ego_depart: object # the ego's depart time, read back from what was built
-    begin: object      # SUMO's begin time, for a controller that idles until entry
 
 
 def _apply_vtypes(sumocfg, out_dir, vtypes):
@@ -375,6 +375,34 @@ def ego_from_file(path):
     return options
 
 
+def _report(path):
+    """Tell run_cosim what to start SUMO on, if it is waiting to be told.
+
+    run_cosim launches an application BEFORE the stack exists, and blocks polling
+    for this file, because only the application knows what its scenario turned
+    out to be: a run directory, its own demand, an ego that did not exist until
+    now. FIXS_HANDOFF is where it looks.
+
+    Done here rather than by every app. The variable, the json key and the atomic
+    write are FIXS's own handshake, and an application hand-rolling it is the
+    same mistake as an application hand-rolling the socket framing. tmp +
+    os.replace because run_cosim polls, and a plain write is eventually read
+    half-finished.
+
+    Silent when FIXS_HANDOFF is unset: a scenario built outside a co-simulation
+    has nobody to report to.
+    """
+    handoff = os.environ.get("FIXS_HANDOFF")
+    if not handoff:
+        return
+    resolved = str(Path(path).resolve())
+    tmp = Path(handoff + ".tmp")
+    tmp.parent.mkdir(parents=True, exist_ok=True)
+    tmp.write_text(json.dumps({"sumocfg": resolved}), encoding="utf-8")
+    os.replace(tmp, handoff)
+    print("[fixs.sumo] reported scenario -> " + resolved)
+
+
 #: Conventional file name per output element, so `outputs` can be given as names
 #: alone. A name the source config already carries keeps ITS file name; these are
 #: only for an output this run is adding.
@@ -500,6 +528,9 @@ def scenario(sumocfg, out_dir, *, ego=None, vtypes=None, outputs=None,
 
     `run_settings` are end / step_length / time_to_teleport / seed. `end`
     defaults to SimulationSetup.SimulationEndTime, so a run's clock has one owner.
+
+    The scenario is REPORTED to FIXS_HANDOFF before returning, when run_cosim set
+    it, so an application does not repeat that handshake.
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -539,27 +570,5 @@ def scenario(sumocfg, out_dir, *, ego=None, vtypes=None, outputs=None,
         _redirect_outputs(path, out_dir, outputs)
         built = False
 
-    return Scenario(path=str(path), built=built, types_file=types_copy,
-                    ego_depart=_ego_depart(path, ego_id), begin=_begin(path))
-
-
-def _ego_depart(sumocfg, ego_id):
-    """The ego's depart time out of the scenario, or None."""
-    for path in route_files(sumocfg):
-        if not path.is_file():
-            continue
-        for _event, el in ET.iterparse(path, events=("end",)):
-            if el.tag == "vehicle" and el.get("id") == ego_id:
-                depart = el.get("depart")
-                return None if depart is None else float(depart)
-            if el.tag in ("vehicle", "flow", "route"):
-                el.clear()
-    return None
-
-
-def _begin(sumocfg):
-    """SUMO's configured begin time, or None."""
-    node = ET.parse(Path(sumocfg)).getroot().find("./time/begin")
-    if node is None or node.get("value") is None:
-        return None
-    return float(node.get("value"))
+    _report(path)
+    return Scenario(path=str(path), built=built, types_file=types_copy)
