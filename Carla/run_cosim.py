@@ -24,6 +24,8 @@ Examples:
   python run_cosim.py --peer 192.168.140.56      # on the traffic machine
 """
 import argparse
+import csv
+import io
 import json
 import re
 import os
@@ -1536,6 +1538,112 @@ def _process_name(pid):
 def _is_carla_process(name):
     n = (name or "").lower()
     return "ue4editor" in n or "carlaue4" in n
+
+
+# ---------------------------------------------------------------------------
+# leftovers from an earlier run
+# ---------------------------------------------------------------------------
+#
+# The port sweep further down catches SUMO and TrafficLayer, which hold ports
+# this launcher knows. Nothing catches the APPLICATION: it listens on nothing,
+# so a run closed by its window X leaves it alive and the next run sits at
+# "0 exchanges" while TrafficLayer answers the ghost.
+#
+# Matched by command line rather than by name, and the pattern comes from the
+# catalog: an app's process is an interpreter whose command line names a file
+# under apps/<id>/. True for every app, hardcodes none.
+
+_INTERPRETERS = ("python", "pythonw", "python3", "py")
+_STACK_NAMES = ("trafficlayer", "vircarlaenv", "sumo", "sumo-gui")
+_STACK_CMDS = ("virenv/mainvircarla.py", "virenv\mainvircarla.py",
+               "run_synchronization.py")
+
+
+def _running_processes():
+    """[(pid, name, cmdline)]. Command lines need CIM on Windows, ps on POSIX;
+    tasklist and `ps -o comm` cannot give them."""
+    out = []
+    try:
+        if platform.system() == "Windows":
+            raw = subprocess.check_output(
+                ["powershell", "-NoProfile", "-Command",
+                 "Get-CimInstance Win32_Process | Select-Object ProcessId,Name,"
+                 "CommandLine | ConvertTo-Csv -NoTypeInformation"],
+                text=True, stderr=subprocess.DEVNULL)
+            for row in csv.DictReader(io.StringIO(raw)):
+                try:
+                    out.append((int(row["ProcessId"]), row.get("Name") or "",
+                                row.get("CommandLine") or ""))
+                except (TypeError, ValueError):
+                    continue
+        else:
+            raw = subprocess.check_output(["ps", "-eo", "pid=,comm=,args="],
+                                          text=True, stderr=subprocess.DEVNULL)
+            for line in raw.splitlines():
+                f = line.strip().split(None, 2)
+                if len(f) >= 2:
+                    out.append((int(f[0]), f[1], f[2] if len(f) > 2 else ""))
+    except Exception:                                        # noqa: BLE001
+        pass
+    return out
+
+
+def _cosim_leftovers(app_id=None, include_carla=False):
+    """[(pid, name, cmdline)] from an earlier co-sim. Never us or our parent."""
+    if app_id:
+        marks = (f"apps/{app_id}/", f"apps\{app_id}\\")
+    else:
+        try:
+            root = os.path.join(app_catalog.app_root(), "apps").lower()
+            marks = (root.replace("\\", "/") + "/", root.replace("/", "\\") + "\\")
+        except Exception:                                    # noqa: BLE001
+            marks = ()
+    mine = {os.getpid()}
+    try:
+        mine.add(os.getppid())
+    except Exception:                                        # noqa: BLE001
+        pass
+    out = []
+    for pid, name, cmd in _running_processes():
+        if pid in mine:
+            continue
+        n, c = name.lower(), cmd.lower()
+        stem = n[:-4] if n.endswith(".exe") else n
+        # A COMMAND-LINE match counts only on an interpreter. Otherwise any
+        # process that merely mentions the path -- the shell you launched from,
+        # a grep, an editor -- looks like the application. An earlier cut of
+        # this, without the guard, killed its own caller's shell.
+        by_cmd = stem in _INTERPRETERS and (
+            any(s in c for s in _STACK_CMDS) or any(m in c for m in marks))
+        if stem in _STACK_NAMES or by_cmd or (include_carla and _is_carla_process(n)):
+            out.append((pid, name, cmd))
+    return out
+
+
+def run_cleanup(app_id=None):
+    """--cleanup: stop what a co-sim leaves behind, then exit.
+
+    CARLA is included, unlike the pre-launch sweep that leaves it alone: someone
+    asking for a cleanup wants the machine back.
+    """
+    victims = _cosim_leftovers(app_id, include_carla=True)
+    if not victims:
+        print("[cosim] nothing left running.")
+        return 0
+    for pid, name, cmd in victims:
+        detail = (cmd or name).strip()
+        print(f"[cosim] stopping {name} (pid {pid}): "
+              f"{detail if len(detail) <= 96 else detail[:93] + '...'}")
+        _kill_pid_tree(pid)
+    time.sleep(2.0)
+    still = _cosim_leftovers(app_id, include_carla=True)
+    if still:
+        print(f"[cosim] {len(still)} did not stop: "
+              + ", ".join(f"{n} ({p})" for p, n, _ in still))
+        return 1
+    print(f"[cosim] stopped {len(victims)}; the machine is clear.")
+    return 0
+
 
 
 def _carla_pid_on(port):
@@ -3389,6 +3497,14 @@ def main():
                     help="check this machine can run a co-sim (python deps, SUMO, "
                          "FIXS binaries, CARLA, peer, maps, gh auth) and exit; "
                          "non-zero exit if anything is broken")
+    ap.add_argument("--cleanup", action="store_true",
+                    help="stop everything a co-sim leaves behind -- SUMO, "
+                         "TrafficLayer, the bridge, CARLA and the application -- "
+                         "then exit. A run closed by its window X or killed "
+                         "mid-tick leaves the APPLICATION alive with nothing to "
+                         "notice it, and the next run then sits at 0 exchanges. "
+                         "With --app, that app's own process is included; without "
+                         "it, every app's is")
     ap.add_argument("--role", choices=["traffic", "render"], default=None,
                     help="which half of a distributed co-sim this machine is; "
                          "--doctor infers it from what is installed here, and this "
@@ -3517,6 +3633,12 @@ def main():
     # front door. Handled before everything else for the same reason.
     if args.update_python:
         return env.update_python()
+
+    # --cleanup stops things rather than starting them, so it runs before any
+    # setup, map or CARLA work - the point is to be usable when the machine is in
+    # a state that would make those fail.
+    if args.cleanup:
+        return run_cleanup(getattr(args, "app", None))
 
     # --doctor and --version answer a question and stop. Neither touches a map, a
     # setup or a server, so they are safe to run at any time - including while a
@@ -3911,6 +4033,19 @@ def main():
     # minutes, so its wait for the bridge has to be patient - run_cosim stops it if
     # anything below fails.
     if app and app.get("launch"):
+        # A leftover app from an earlier run holds no port, so the port sweep
+        # cannot see it, and it waits forever (the eco app runs --fixsTimeout 0).
+        # It then answers TrafficLayer instead of the one started here and the
+        # bridge reports "0 exchanges" with nothing naming the cause. Swept HERE,
+        # before this run's app exists, so there is nothing of ours to confuse it
+        # with. CARLA is skipped: the preflight owns it.
+        for pid, pname, _ in _cosim_leftovers(app.get("id")):
+            if _is_carla_process(pname):
+                continue
+            print(f"[cosim] {pname} (pid {pid}) is left over from an earlier run; "
+                  f"stopping it so this one is not answered by a ghost.")
+            _kill_pid_tree(pid)
+
         # The yaml this run will hand TrafficLayer. Known already for a config that
         # was chosen (--config, or the one the profile remembers); a first run that
         # GENERATES a per-map config has none yet, and the app falls back to its own.

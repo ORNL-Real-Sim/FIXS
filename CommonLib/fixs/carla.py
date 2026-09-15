@@ -38,10 +38,23 @@ WHAT IS REFUSED, and why it is refused rather than quietly allowed:
                               and the bridge is it. Return from control(ego, dt)
                               instead -- that IS the tick.
 
-Actuation is the third thing FIXS keeps, and it is not refused here because it
-never reaches here: the bridge applies the FIXS record to the physics ego, so a
-controller commands with ``ego.set(acceleratorPedalDesired=...)`` rather than
-``actor.apply_control()``. Two writers would fight over the actuator.
+ACTUATION is the third thing FIXS keeps, and it is relayed here like the rest::
+
+    -vehicle.apply_control(control)
+    +carla.apply_control(control)
+
+The command is written onto the ego record the bridge is already holding for this
+step, and the bridge applies it through its own backend verb after control()
+returns. That is not indirection for its own sake: it is what keeps ONE writer on
+the actuator, keeps the command visible to DataLogSetup and to every other
+subscriber on the wire, and keeps the same controller file running against a
+CarMaker or XIL plant, and against MockVirEnvBackend with no simulator at all.
+
+``ego.set(acceleratorPedalDesired=...)`` still works and says the same thing in
+FIXS's own vocabulary. The relayed form exists because a user bringing a CARLA
+script should not have to learn a second one -- and because the record's
+``steerAngleDesired`` is an ANGLE in radians while ``control.steer`` is
+normalised [-1, 1], a conversion every controller was otherwise doing by hand.
 
 See ORNL-Real-Sim/FIXS#305.
 """
@@ -50,7 +63,8 @@ from __future__ import annotations
 import importlib
 import math
 
-__all__ = ['client', 'world', 'map', 'ego', 'available', 'bind', 'refresh']
+__all__ = ['client', 'world', 'map', 'ego', 'available', 'bind', 'refresh',
+           'apply_control', 'apply_ackermann_control']
 
 _carla = None
 _mapCache = None
@@ -272,6 +286,56 @@ def bind(agent, egoId='', route=True):
     if _routeOwned:
         _layRoute(agent, first=True)
     return agent
+
+
+def apply_control(control):                                     # noqa: N802
+    """``vehicle.apply_control(control)``, relayed onto the FIXS record.
+
+    Takes a ``carla.VehicleControl``: throttle, brake and a NORMALISED steer.
+    The steer is converted to the record's radian convention here, which is the
+    one place that conversion belongs.
+
+    ``hand_brake``, ``reverse`` and ``manual_gear_shift`` are NOT carried -- the
+    record has no field for them, and silently dropping a hand brake a caller
+    meant would be worse than saying so. Reach for ``carla.ego`` directly if you
+    need them, and then do not also call this.
+    """
+    _writeCommand(acceleratorPedalDesired=float(control.throttle),
+                  brakePedalDesired=float(control.brake),
+                  steerAngleDesired=float(control.steer) * _maxSteerRad())
+
+
+def apply_ackermann_control(control):                           # noqa: N802
+    """``vehicle.apply_ackermann_control(control)``, relayed onto the record.
+
+    Takes a ``carla.VehicleAckermannControl``: a speed in m/s and a normalised
+    steer. Writing a speed is what selects the plant's own speed loop, exactly as
+    it does in CARLA -- the bridge infers the interface from the field, so this
+    and :func:`apply_control` are the two shapes and not two styles.
+
+    ``acceleration`` and ``jerk`` are not carried; the record has no field for
+    them.
+    """
+    _writeCommand(speedDesired=float(control.speed),
+                  steerAngleDesired=float(control.steer) * _maxSteerRad())
+
+
+def _maxSteerRad():
+    from CommonLib import fixs
+    return fixs.MAX_STEER_RAD
+
+
+def _writeCommand(**fields):
+    """Put a command on the record the bridge is holding for this step."""
+    from CommonLib.VirEnv.EgoControllerHost import currentEgoRecord
+    record = currentEgoRecord()
+    if record is None:
+        raise _Refused(
+            "carla.apply_control(...) needs the ego record for the step in "
+            "progress, and there is none. It is only live inside a controller's "
+            "control(ego, dt) call -- from anywhere else, write the record you "
+            "were handed: ego.set(...).")
+    record.set(**fields)
 
 
 def refresh(record):

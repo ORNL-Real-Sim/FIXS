@@ -51,6 +51,12 @@ def _backendWithSpawnedEgo():
     b = CarlaBackend.__new__(CarlaBackend)
     b._egoActor = _Actor()
     b._egoAwaitingSnapshot = True            # what spawnEgo leaves behind
+    # readEgoState also consults the backstep guard, and __new__ skips __init__,
+    # so give it the start __init__ would. See test_ego_backstep_guard.py.
+    b._lastEgoPose = None
+    b._egoBackstepHolds = 0
+    b._egoBackstepGuard = True
+    b._egoBackstepRelease = 0.5
     return b
 
 

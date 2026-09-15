@@ -680,6 +680,10 @@ def stage_package(carla_root, name, package_url=None, package_dir=None, package_
             print(f"[import] using the staged package: {descriptor}")
             return import_dir
         print(f"[import] no descriptor beside the staged folder; staging afresh.")
+    else:
+        # Restaging: the old copy is superseded, and leaving it is not inert.
+        # CARLA cooks every descriptor in Import/. FIXS#358.
+        clear_staging(carla_root, name)
 
     os.makedirs(import_dir, exist_ok=True)
     tmpdir = None
@@ -692,6 +696,9 @@ def stage_package(carla_root, name, package_url=None, package_dir=None, package_
             src, tmpdir = _try_gh_download(package_url)
             if src is None:
                 src = _select_package(name, package_url)
+        # Only the CARLA half of a Digital-Twin-Library bundle belongs in Import/;
+        # the sumo half lands in the map cache. FIXS#358.
+        src = _carla_half(src, name)
         if _has_descriptor(src):
             # Hand-authored package: <name>.json + its <name>/ asset folder land
             # directly under Import/.
@@ -735,6 +742,73 @@ def stage_package(carla_root, name, package_url=None, package_dir=None, package_
                  f"         (a packaged map must contain {name}.json; a raw export "
                  f"must be named after the map so one can be generated)")
     return import_dir
+
+
+def _carla_half(src, name):
+    """The CARLA package inside `src`, splitting a bundle if that is what it is.
+
+    A Digital-Twin-Library map ships as `carla/` + `sumo/`. Handed whole to
+    Import/, it stages a SECOND descriptor at Import/carla/<name>.json beside the
+    one already there -- and CARLA's Import.py cooks every descriptor it finds,
+    so the map is cooked twice and the second pass crashes Unreal. Splitting also
+    puts the sumo half where the co-sim reads it. FIXS#358.
+    """
+    try:
+        carla_src, _sumo = open_bundle(src, cache_name=name)
+    except Exception as exc:                                    # noqa: BLE001
+        print(f"[import] could not split '{src}' as a bundle ({exc}); "
+              f"staging it as-is.")
+        return src
+    if carla_src and os.path.exists(carla_src) and carla_src != src:
+        print(f"[import] bundle: staging its CARLA half ({carla_src})")
+        return carla_src
+    return src
+
+
+def nested_duplicate_roots(import_dir, name):
+    """Directories under `import_dir` holding a SECOND `<name>.json`, below the top.
+
+    The canonical staging is Import/<name>.json beside Import/<name>/. A copy at
+    any greater depth is a duplicate CARLA would cook a second time. Returns the
+    directory that holds each one - the package root to move or delete - deepest
+    first, and never `import_dir` itself.
+    """
+    roots = []
+    want = (name + ".json").lower()
+    for base, _dirs, files in os.walk(import_dir):
+        if os.path.abspath(base) == os.path.abspath(import_dir):
+            continue
+        if any(f.lower() == want for f in files):
+            roots.append(base)
+    # Deepest first, so removing a parent cannot invalidate a child's path.
+    roots.sort(key=lambda p: p.count(os.sep), reverse=True)
+    # Drop any root nested inside another one already listed.
+    kept = []
+    for r in roots:
+        if not any(r != k and r.startswith(k + os.sep) for k in roots):
+            kept.append(r)
+    return kept
+
+
+def clear_staging(carla_root, name):
+    """Delete what a past import staged in Import/ for `name`.
+
+    Only for a caller that has decided to restage; see resolve_existing_staging.
+    Duplicates below the top level go too: they are what made CARLA cook the map
+    twice, and a restage supersedes every copy, not just the canonical one.
+    """
+    import_dir = os.path.join(carla_root, "Import")
+    targets = list(staged_import_paths(carla_root, name))
+    targets += nested_duplicate_roots(import_dir, name)
+    for p in targets:
+        print(f"[import] clearing the previous staging: {p}")
+        if os.path.isdir(p):
+            shutil.rmtree(p, ignore_errors=True)
+        else:
+            try:
+                os.remove(p)
+            except OSError as exc:                              # noqa: PERF203
+                print(f"[import]   could not remove it ({exc}); leaving it.")
 
 
 def _looks_like_bundle(names):
@@ -1099,9 +1173,19 @@ def _restore_stash(import_dir, stash, names=None):
     for n in (names if names is not None else sorted(os.listdir(stash))):
         src, dst = os.path.join(stash, n), os.path.join(import_dir, n)
         if os.path.exists(src) and not os.path.exists(dst):
+            # `n` may be a relative path: a duplicate set aside from BELOW the
+            # top level comes back to exactly where it was. FIXS#358.
+            parent = os.path.dirname(dst)
+            if parent and not os.path.isdir(parent):
+                os.makedirs(parent, exist_ok=True)
             shutil.move(src, dst)
             back.append(n)
-    if not os.listdir(stash):
+    # Nested entries leave their parent directories behind; drop the empty ones
+    # so the stash still disappears when everything has gone home.
+    for base, dirs, files in os.walk(stash, topdown=False):
+        if not dirs and not files and os.path.abspath(base) != os.path.abspath(stash):
+            os.rmdir(base)
+    if os.path.isdir(stash) and not os.listdir(stash):
         os.rmdir(stash)
     return back
 
@@ -1139,9 +1223,30 @@ def _isolate_import(import_dir, keep):
         if os.path.isdir(folder):
             shutil.move(folder, os.path.join(stash, base))
             moved.append(base)
+    # CARLA cooks EVERY descriptor under Import/, so a second `<keep>.json` at any
+    # depth cooks the map twice and the repeat crashes Unreal. Set those aside as
+    # well, by relative path so restore() puts them back exactly. Guarded on the
+    # canonical one existing, so this can never hide the only copy. FIXS#358.
+    if os.path.isfile(os.path.join(import_dir, keep + ".json")):
+        for nested in nested_duplicate_roots(import_dir, keep):
+            rel = os.path.relpath(nested, import_dir)
+            dst = os.path.join(stash, rel)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.move(nested, dst)
+            moved.append(rel)
+            print(f"[import] set aside a duplicate package for '{keep}': {rel}")
     if moved:
         print(f"[import] isolating '{keep}' for the cook (set aside {len(moved)} "
               f"other Import/ item(s), restored after)")
+    # What CARLA will actually see. Said out loud rather than assumed: a second
+    # descriptor here is a double cook, and the crash it causes is 20 minutes
+    # into Unreal with a traceback that names none of this.
+    left = nested_duplicate_roots(import_dir, keep)
+    if left:
+        print(f"[import] WARNING: {len(left)} further copy(ies) of '{keep}' remain "
+              f"under Import/ and could not be set aside:")
+        for p in left:
+            print(f"[import]   {os.path.relpath(p, import_dir)}")
 
     def restore():
         _restore_stash(import_dir, stash, moved)

@@ -329,10 +329,39 @@ def loadController(spec, appRoot=None):
 #: to any one controller.
 _feedAge = [0.0]
 
+#: What the feed brought in each DUAL-USE field, kept across the sub-steps that
+#: follow it. Beside _feedAge for the same reason, and cleared with it.
+_heldInputs = {}
+
+#: Fields the traffic simulator OWNS and a controller also WRITES.
+#:
+#: The record is one object used in both directions, so a controller's command
+#: lands in the same slot the feed's value arrived in. With CarlaTimeStep 0.05
+#: against a 0.1 s feed that value is read back half a step later as though it
+#: were still input -- which contradicts what this module's own docstring
+#: promises about speedDesired, and closes a speed controller's loop onto
+#: itself on every second step.
+#:
+#: speedDesired is the only one: acceleratorPedalDesired, brakePedalDesired and
+#: steerAngleDesired are commands the traffic simulator never fills in.
+_DUAL_USE = ('speedDesired',)
+
+
+#: The ego record this step's controller call is holding. Published so
+#: ``fixs.carla.apply_control`` can write a CARLA-shaped command onto the same
+#: record ``ego.set`` writes to, without the controller having to pass it.
+_egoRecord = [None]
+
+
+def currentEgoRecord():
+    """The ego's fixs.Vehicle for the call in progress, or None outside one."""
+    return _egoRecord[0]
+
 
 def resetFeedAge():
     """Call when a new feed arrives, before the sub-steps that follow it."""
     _feedAge[0] = 0.0
+    _heldInputs.clear()
 
 
 def runController(backend, controller, ego, dt, onFeed, maxSteerRad):
@@ -351,6 +380,8 @@ def runController(backend, controller, ego, dt, onFeed, maxSteerRad):
     :param ego: the ego's fixs.Vehicle for this feed. Its pose fields are
         refreshed here every step; the fields the traffic simulator owns last
         changed at the feed, and ``ego.feedAge`` says how long ago that was.
+        Those fields are RESTORED before each call, because the record is also
+        where the controller writes -- see _DUAL_USE.
     :returns: the command shape applied -- 'actuation', 'speedsteer', or None.
     """
     from CommonLib import fixs
@@ -364,8 +395,19 @@ def runController(backend, controller, ego, dt, onFeed, maxSteerRad):
 
     if onFeed:
         resetFeedAge()
+        for name in _DUAL_USE:
+            _heldInputs[name] = getattr(ego, name, None)
     else:
         _feedAge[0] += dt
+        # Put the feed's value back before asking the controller for a new
+        # command. Without this the controller reads its own last command out of
+        # a field the docstring above promises holds the traffic simulator's --
+        # and a controller that closes a speed loop on it is closing it on
+        # itself. Restored BEFORE control(), so the command it writes is still
+        # the one applied below.
+        for name, held in _heldInputs.items():
+            if held is not None:
+                object.__setattr__(ego, name, held)
 
     # EgoState is flat and already in the canonical FIXS wire frame -- the
     # backend removed its own anchor before returning, so nothing is converted
@@ -384,7 +426,11 @@ def runController(backend, controller, ego, dt, onFeed, maxSteerRad):
     # real and useful answer -- could never be observed again.
     object.__setattr__(ego, '_written', frozenset())
 
-    controller.control(ego, dt)
+    _egoRecord[0] = ego
+    try:
+        controller.control(ego, dt)
+    finally:
+        _egoRecord[0] = None
 
     kind = fixs.commandKind(ego)
     if kind == 'actuation':

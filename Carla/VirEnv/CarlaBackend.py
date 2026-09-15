@@ -109,6 +109,12 @@ class CarlaBackend(IVirEnvBackend):
         #: its transform reads the ORIGIN until a tick delivers a snapshot --
         #: so readEgoState would report a pose that is not the ego's.
         self._egoAwaitingSnapshot = False
+        # Backstep guard state; see readEgoState. FIXS#358.
+        self._lastEgoPose = None
+        self._egoBackstepHolds = 0
+        self._egoBackstepGuard = os.environ.get('FIXS_EGO_BACKSTEP_GUARD', '1') != '0'
+        self._egoBackstepRelease = float(
+            os.environ.get('FIXS_EGO_BACKSTEP_RELEASE', '0.5'))
         self._tmPort = 0
         self._egoUsesTM = False
         self._egoDesiredOverride = -1.0  # L2 advisory target (m/s); < 0 = none
@@ -275,10 +281,31 @@ class CarlaBackend(IVirEnvBackend):
         ext = self._egoActor.bounding_box.extent
         vel = self._egoActor.get_velocity()
         sTf = BridgeHelper.map_transfrom_Carla_to_Sumo(cTf, ext)
-        out.x = sTf.location.x
-        out.y = sTf.location.y
-        out.z = sTf.location.z
-        out.heading = sTf.rotation.yaw
+        # Backstep guard: never report a pose behind the last one reported --
+        # the sign is lost on the `out.speed` line below, and SUMO answers a
+        # backward target by throwing the ego off its lane. FIXS#358.
+        fwd = cTf.get_forward_vector()
+        vLong = vel.x * fwd.x + vel.y * fwd.y
+        held = False
+        if self._egoBackstepGuard and self._lastEgoPose is not None:
+            lx, ly, lz, lh = self._lastEgoPose
+            hRad = lh * math.pi / 180.0
+            ahead = ((sTf.location.x - lx) * math.sin(hRad)
+                     + (sTf.location.y - ly) * math.cos(hRad))
+            behind = math.sqrt((sTf.location.x - lx) ** 2
+                               + (sTf.location.y - ly) ** 2)
+            # vLong catches the first backward tick; the projection cannot drift.
+            held = (vLong < 0.0 or ahead <= 0.0) and behind < self._egoBackstepRelease
+        if held:
+            out.x, out.y, out.z = lx, ly, lz
+            out.heading = lh
+            self._egoBackstepHolds += 1
+        else:
+            out.x = sTf.location.x
+            out.y = sTf.location.y
+            out.z = sTf.location.z
+            out.heading = sTf.rotation.yaw
+            self._lastEgoPose = (out.x, out.y, out.z, out.heading)
         out.grade = sTf.rotation.pitch * math.pi / 180.0
         out.speed = math.sqrt(vel.x * vel.x + vel.y * vel.y)
         return True
@@ -565,6 +592,11 @@ class CarlaBackend(IVirEnvBackend):
         return self._egoActor
 
     def destroyEgo(self):
+        # A count with no standstill in the run means backward physics. FIXS#358.
+        if self._egoBackstepHolds:
+            print('[carla] backstep guard held the ego pose on %d readbacks '
+                  '(backward or non-advancing motion, not reported to FIXS)'
+                  % self._egoBackstepHolds, flush=True)
         if self._egoActor is not None:
             self._egoActor.destroy()
             self._egoActor = None
