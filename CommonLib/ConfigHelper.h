@@ -288,7 +288,7 @@ struct VissimSetup_t {
 	bool EnableDriverModelRelay;
 };
 
-typedef struct SubscriptionVehicleList_t {
+struct SubscriptionVehicleList_t {
 	std::unordered_set <std::string> edgeSubscribeId_v;
 
 	// vehicle id -> radius
@@ -304,7 +304,7 @@ typedef struct SubscriptionVehicleList_t {
 	std::unordered_map <std::string, double> vehicleTypeSubscribedId_v;
 };
 
-typedef struct SubscriptionSignalList_t {
+struct SubscriptionSignalList_t {
 	std::unordered_set <std::string> signalId_v;
 
 	// Default-initialised: this was previously an indeterminate value until the
@@ -313,11 +313,11 @@ typedef struct SubscriptionSignalList_t {
 	bool subAllSignalFlag = false;
 };
 
-typedef struct SubscriptionDetectorList_t {
+struct SubscriptionDetectorList_t {
 	std::unordered_set <std::string> pattern_v;;
 };
 
-typedef struct SubscriptionAllList_t {
+struct SubscriptionAllList_t {
 	SubscriptionVehicleList_t VehicleList;
 	SubscriptionSignalList_t SignalList = { {}, false };
 	SubscriptionDetectorList_t DetectorList;
