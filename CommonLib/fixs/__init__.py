@@ -438,50 +438,6 @@ sim: _Sim = _Sim(unavailable=_NOT_CONNECTED)
 vehicle: _VehicleView = _VehicleView(unavailable=_NOT_CONNECTED)
 trafficlight: _TrafficLightView = _TrafficLightView(unavailable=_NOT_CONNECTED)
 
-#: Every field name the wire format has, from the record definition itself so a
-#: field added to VehDataMsgDefs.py needs no change here.
-_WIRE_FIELDS = frozenset(f.name for f in dataclasses.fields(VehData))
-
-#: The wire fields this config does NOT declare. Real configs leave 16-23 of the
-#: 37 out, so this is never empty in practice.
-_undeclaredFields = frozenset()
-
-#: Vehicle, with the undeclared fields shadowed. Records are adopted into this
-#: at recv(), so a DECLARED field is still a plain attribute read and costs
-#: nothing; only the ones that were never sent go through a descriptor, and that
-#: descriptor raises. Rebuilt per connect() because the wire format is per config.
-_recordClass = Vehicle
-
-
-def _recordClassFor(undeclared, declared):
-    """Vehicle subclass whose undeclared fields refuse to be read.
-
-    A field left out of SimulationSetup.VehicleMessageField is never decoded, so
-    the attribute keeps its dataclass default and reading it hands back something
-    that is not data -- signalLightId is a char[50], which arrives as fifty
-    spaces. That default travels: it reads as a value, gets compared and indexed,
-    and fails hundreds of simulated seconds later somewhere unrelated.
-
-    A property is a data descriptor, so it wins over the instance attribute the
-    decoder never wrote -- and only for these names. Nothing is checked on the
-    fields that were sent.
-    """
-    onTheWire = ', '.join(sorted(declared))
-
-    def refuse(field):
-        def read(self):
-            raise ProtocolError(
-                f"{field} was not sent: it is not in this config's "
-                f"SimulationSetup.VehicleMessageField, so it was never decoded "
-                f"and this attribute would be a dataclass default, not data. "
-                f"On the wire: {onTheWire}."
-            )
-        return property(read)
-
-    if not undeclared:
-        return Vehicle
-    return type('Vehicle', (Vehicle,), {name: refuse(name) for name in undeclared})
-
 #: False once TrafficLayer has ended the run, so a controller writes
 #: `while fixs.running:` instead of `while True` with an exception for control
 #: flow. Read off the wire, never computed: it is the same state=0 that raises
@@ -585,7 +541,7 @@ def connect(configPath=None, *, port=None, host=None, ego=None,
         controller must not have.
     """
     global _helper, _sock, _egoIds, _declaredFields, _role
-    global _running, _connectedConfigPath, _undeclaredFields, _recordClass
+    global _running, _connectedConfigPath
     global sim, vehicle, trafficlight, _noTick
 
     if role not in _ROLES:
@@ -619,8 +575,6 @@ def connect(configPath=None, *, port=None, host=None, ego=None,
     msgHelper.set_vehicle_message_field(declared)
 
     _declaredFields = frozenset(declared)
-    _undeclaredFields = _WIRE_FIELDS - _declaredFields
-    _recordClass = _recordClassFor(_undeclaredFields, _declaredFields)
     _role = role
     _helper = SocketHelper(config_helper=config, msg_helper=msgHelper)
     _sock = _openSocket(host, int(port), connectTimeout, recvTimeout)
@@ -810,7 +764,7 @@ def recv():
 
     _received = _helper.vehicle_data_receive_list
     for record in _received:
-        record.__class__ = _recordClass  # adopt in place: no copy, no re-decode
+        record.__class__ = Vehicle      # adopt in place: no copy, no re-decode
         object.__setattr__(record, '_written', frozenset())
     vehicle = _VehicleView(_received, fields=_declaredFields, egoIDs=_egoIds)
     trafficlight = _TrafficLightView(
