@@ -375,35 +375,81 @@ def ego_from_file(path):
     return options
 
 
-def _redirect_outputs(sumocfg, out_dir):
-    """Point every output a config asks for at this run's directory.
+#: Conventional file name per output element, so `outputs` can be given as names
+#: alone. A name the source config already carries keeps ITS file name; these are
+#: only for an output this run is adding.
+_OUTPUT_DEFAULTS = {
+    "summary-output": "simulation_summary.xml",
+    "tripinfo-output": "tripinfo.xml",
+    "fcd-output": "fcd.xml",
+    "netstate-dump": "netstate.xml",
+    "emission-output": "emissions.xml",
+    "full-output": "full.xml",
+    "queue-output": "queue.xml",
+    "statistic-output": "statistics.xml",
+    "log": "simulation.log",
+}
 
-    SUMO writes these relative to the process working directory otherwise, so two
-    runs of the same scenario land on top of each other. sumo_ego already does
-    this for a scenario it builds; this is the same for one taken as it is, so a
-    run is self-contained either way.
+#: Which section of a .sumocfg each one belongs in.
+_OUTPUT_SECTION = {"log": "report"}
 
-    ego.OUTPUT_ELEMENTS is the list, and it is the library's rather than an
-    application's: nine elements plus the SaveTLSSwitchStates timedEvent, which
-    hides in <report> instead of <output>. Idempotent -- re-joining an already
-    redirected basename to the same directory changes nothing.
+def _redirect_outputs(sumocfg, out_dir, wanted=None):
+    """Which outputs this run writes, and where they land.
+
+    SUMO writes these relative to the process working directory, so two runs of
+    one scenario land on top of each other. sumo_ego already does this for a
+    scenario it builds; this is the same for one taken as it is.
+
+    `wanted` is the run's own answer to WHICH files, and the caller's to give: a
+    map bundle's .sumocfg is a shared artifact whose author chose outputs for
+    their own reasons, and one of them can be expensive -- fcd-output is 298 MB
+    for an 800 s MLK run. Named here, an application gets what it asked for and
+    nothing else; anything the source asked for that is not in the list is
+    dropped.
+
+    Give it as names, taking each file's own name from the source or a
+    conventional one, or as {element: file name} to be explicit. Omit it and the
+    source's outputs are kept as they are and merely redirected.
     """
     tree = ET.parse(Path(sumocfg))
     root = tree.getroot()
     out_dir = Path(out_dir)
+    if wanted is not None and not isinstance(wanted, dict):
+        wanted = {name: None for name in wanted}
+
+    existing = {}
     for section in ("output", "report"):
         node = root.find(section)
         if node is None:
             continue
-        for child in node:
-            if child.tag in ego_module.OUTPUT_ELEMENTS and child.get("value"):
-                child.set("value", str(out_dir / Path(child.get("value")).name))
-            for event in child.iter("timedEvent"):
-                if event.get("dest"):
-                    event.set("dest", str(out_dir / Path(event.get("dest")).name))
+        for child in list(node):
+            if child.tag in ego_module.OUTPUT_ELEMENTS:
+                existing[child.tag] = child
+                if wanted is not None and child.tag not in wanted:
+                    node.remove(child)      # this run does not want it
+                elif child.get("value"):
+                    child.set("value", str(out_dir / Path(child.get("value")).name))
         for event in node.iter("timedEvent"):
             if event.get("dest"):
                 event.set("dest", str(out_dir / Path(event.get("dest")).name))
+
+    for tag, name in (wanted or {}).items():
+        if name is None and tag in existing:
+            continue                        # kept and redirected above
+        if name is None:
+            name = _OUTPUT_DEFAULTS.get(tag)
+            if name is None:
+                raise SystemExit(
+                    "no conventional file name for " + tag + "; give it as "
+                    "{" + repr(tag) + ": 'a file name'}")
+        element = existing.get(tag)
+        if element is None:
+            section = root.find(_OUTPUT_SECTION.get(tag, "output"))
+            if section is None:
+                section = ET.SubElement(root, _OUTPUT_SECTION.get(tag, "output"))
+            element = ET.SubElement(section, tag)
+        element.set("value", str(out_dir / Path(name).name))
+
     tree.write(Path(sumocfg), encoding="UTF-8", xml_declaration=True)
 
 
@@ -424,7 +470,8 @@ def _redirect_outputs(sumocfg, out_dir):
 _RUN_SETTINGS = ('end',)
 
 
-def scenario(sumocfg, out_dir, *, ego=None, vtypes=None, **options):
+def scenario(sumocfg, out_dir, *, ego=None, vtypes=None, outputs=None,
+             **options):
     """(path, path) -> Scenario -- this run's SUMO inputs, ready to start.
 
     The one call an application needs here. It is handed the scenario run_cosim
@@ -476,6 +523,7 @@ def scenario(sumocfg, out_dir, *, ego=None, vtypes=None, **options):
             ego.setdefault("replace", []).append(
                 types_src.name + "=" + str(types_copy))
         path = build_ego_scenario(sumocfg, out_dir, **ego, **run_settings)
+        _redirect_outputs(path, out_dir, outputs)
         built = True
         if not has_ego(path, ego_id):
             raise SystemExit(
@@ -488,7 +536,7 @@ def scenario(sumocfg, out_dir, *, ego=None, vtypes=None, **options):
         path = out_dir / Path(sumocfg).name
         _copy_inputs(sumocfg, out_dir, skip={types_src.name} if types_src else set())
         set_run_settings(sumocfg, out_path=path, **run_settings)
-        _redirect_outputs(path, out_dir)
+        _redirect_outputs(path, out_dir, outputs)
         built = False
 
     return Scenario(path=str(path), built=built, types_file=types_copy,
