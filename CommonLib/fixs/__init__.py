@@ -84,7 +84,7 @@ from CommonLib.SocketHelper import SocketHelper
 from CommonLib.VehDataMsgDefs import VehData
 
 __all__ = [
-    'connect', 'recv', 'send', 'close', 'checkFields', 'running',
+    'connect', 'recv', 'send', 'close', 'running',
     'simulationEndTime',
     'sim', 'vehicle', 'trafficlight',
     'emit', 'transport', 'commandKind',
@@ -231,6 +231,32 @@ class Vehicle(VehData):
     COMMAND_FIELDS = LONGITUDINAL_FIELDS | ACTUATION_FIELDS
 
     _written = frozenset()
+
+    def __getattribute__(self, name):
+        """Refuse a field this config does not put on the wire.
+
+        SimulationSetup.VehicleMessageField decides what is sent. A field left
+        out of it is never decoded, so the attribute keeps its dataclass default
+        -- signalLightId is a char[50], which arrives as fifty spaces -- and the
+        controller reads a blank that looks like data. The failure then surfaces
+        hundreds of simulated seconds later, somewhere else, as a KeyError on an
+        empty string.
+
+        So it raises here, at the read, naming the field and the config. No
+        application has to declare what it reads, and none can be quietly handed
+        a value that was never sent.
+
+        One frozenset test per attribute access, against a set that is empty for
+        a config declaring everything this client touches.
+        """
+        if name in _undeclaredFields:
+            raise ProtocolError(
+                f"{name} was not sent: it is not in this config's "
+                f"SimulationSetup.VehicleMessageField, so it was never decoded "
+                f"and this attribute is a dataclass default, not data. "
+                f"On the wire: {', '.join(sorted(_declaredFields or ()))}."
+            )
+        return object.__getattribute__(self, name)
 
     def set(self, **fields):
         """(**fields) -> None -- command this vehicle.
@@ -438,6 +464,15 @@ sim: _Sim = _Sim(unavailable=_NOT_CONNECTED)
 vehicle: _VehicleView = _VehicleView(unavailable=_NOT_CONNECTED)
 trafficlight: _TrafficLightView = _TrafficLightView(unavailable=_NOT_CONNECTED)
 
+#: Every field name the wire format has, from the record definition itself so a
+#: field added to VehDataMsgDefs.py needs no change here.
+_WIRE_FIELDS = frozenset(f.name for f in dataclasses.fields(VehData))
+
+#: The wire fields this config does NOT declare, so reading one can say so
+#: instead of handing back a dataclass default. Empty until connect(), and
+#: usually empty after it.
+_undeclaredFields = frozenset()
+
 #: False once TrafficLayer has ended the run, so a controller writes
 #: `while fixs.running:` instead of `while True` with an exception for control
 #: flow. Read off the wire, never computed: it is the same state=0 that raises
@@ -514,47 +549,7 @@ def simulationEndTime(configPath=None):
     return value
 
 
-def checkFields(configPath=None, requires=(), *, _declared=None):
-    """(string, list) -> None -- fail now if the config cannot feed this client.
-
-    connect() calls this for its ``requires``; call it directly to fail BEFORE
-    the run exists. Under run_cosim an application builds its scenario and
-    reports it before it connects, so a check that waits for connect() has
-    already cost a run directory and a SUMO launch. This costs a line.
-
-    An undeclared field is never put on the wire, so it arrives as its VehData
-    default -- signalLightId is a char[50], fifty spaces -- and the failure
-    surfaces hundreds of simulated seconds later, on a blank, at the first
-    vehicle that has one.
-    """
-    if isinstance(requires, str):
-        raise TypeError(
-            f'requires takes a list of field names, not a single string. '
-            f'Use requires=[{requires!r}].')
-    if not requires:
-        return
-    declared = _declared
-    if declared is None:
-        configPath = configPath or os.environ.get('FIXS_CONFIG_YAML') or 'config.yaml'
-        if not os.path.isfile(configPath):
-            raise FixsError(f'config not found: {configPath}')
-        config = ConfigHelper()
-        config.getConfig(configPath)
-        declared = config.simulation_setup.get('VehicleMessageField') or ['id', 'speed']
-    absent = [f for f in requires if f not in declared]
-    if absent:
-        raise FixsError(
-            f'{configPath}\n'
-            f'      SimulationSetup.VehicleMessageField does not declare '
-            f'{", ".join(absent)}, which this client reads.\n'
-            f'      Undeclared fields are not put on the wire, so they arrive '
-            f'as their defaults and the run fails later, on a blank, at the '
-            f'first vehicle that has one.\n'
-            f'      On the wire: {", ".join(declared)}')
-
-
-
-def connect(configPath=None, *, port=None, host=None, ego=None, requires=(),
+def connect(configPath=None, *, port=None, host=None, ego=None,
             connectTimeout=None, recvTimeout=None, role='controller'):
     """(string, ...) -> (string, integer) -- connect and return the endpoint.
 
@@ -570,15 +565,6 @@ def connect(configPath=None, *, port=None, host=None, ego=None, requires=(),
     :param ego: id, or list of ids, this client controls, reported by
         :func:`getEgoIDList`. Defaults to the ``attribute.id`` list of the
         selected subscription, so the yaml is not restated in code.
-    :param requires: field names this client READS off the feed, checked
-        against ``SimulationSetup.VehicleMessageField`` before the socket opens.
-        ``set()`` already refuses to COMMAND a field the config does not
-        declare; this is the other direction, and it has to be asked for because
-        only the client knows what it reads. Worth asking: a field that is not
-        declared is not sent, so its VehData attribute keeps the dataclass
-        default -- ``signalLightId`` is a char[50], defaulting to fifty spaces --
-        and the run dies on a blank several hundred simulated seconds in, at the
-        first vehicle that has one. Declared here it costs a line at startup.
     :param connectTimeout: seconds to keep retrying the connect; ``None``
         retries forever, which is right under a supervisor (run_cosim) that
         stops the stack itself when something upstream dies.
@@ -590,7 +576,7 @@ def connect(configPath=None, *, port=None, host=None, ego=None, requires=(),
         controller must not have.
     """
     global _helper, _sock, _egoIds, _declaredFields, _role
-    global _running, _connectedConfigPath
+    global _running, _connectedConfigPath, _undeclaredFields
     global sim, vehicle, trafficlight, _noTick
 
     if role not in _ROLES:
@@ -609,7 +595,6 @@ def connect(configPath=None, *, port=None, host=None, ego=None, requires=(),
 
     declared = config.simulation_setup.get('VehicleMessageField') or ['id', 'speed']
 
-    checkFields(configPath, requires, _declared=declared)
 
     subscription = _selectSubscription(config, configPath, port)
     if host is None:
@@ -625,6 +610,7 @@ def connect(configPath=None, *, port=None, host=None, ego=None, requires=(),
     msgHelper.set_vehicle_message_field(declared)
 
     _declaredFields = frozenset(declared)
+    _undeclaredFields = _WIRE_FIELDS - _declaredFields
     _role = role
     _helper = SocketHelper(config_helper=config, msg_helper=msgHelper)
     _sock = _openSocket(host, int(port), connectTimeout, recvTimeout)
