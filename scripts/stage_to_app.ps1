@@ -57,6 +57,15 @@ if (-not (Test-Path $Dst)) {
     throw "No FIXS bundle at $Dst. Fetch one first (run_cosim --update-fixs)."
 }
 
+# A Python package is a directory with an __init__.py. Used for both staging and
+# restoring, so the two can never disagree about what was put there.
+function Get-PythonPackages {
+    param([string]$Root)
+    if (-not (Test-Path $Root)) { return @() }
+    Get-ChildItem $Root -Directory -ErrorAction SilentlyContinue |
+        Where-Object { Test-Path (Join-Path $_.FullName '__init__.py') }
+}
+
 # ---- restore -------------------------------------------------------------
 if ($Restore) {
     if (-not (Test-Path $Bak)) { Write-Host "Nothing staged (no $Bak)."; exit 0 }
@@ -66,7 +75,9 @@ if ($Restore) {
         $b = Join-Path $Bak $exe
         if (Test-Path $b) { Copy-Item $b $Dst -Force }
     }
-    Remove-Item (Join-Path $Dst 'CommonLib\VirEnv') -Recurse -Force -ErrorAction SilentlyContinue
+    foreach ($pkg in Get-PythonPackages (Join-Path $Dst 'CommonLib')) {
+        Remove-Item $pkg.FullName -Recurse -Force -ErrorAction SilentlyContinue
+    }
     Remove-Item $Bak -Recurse -Force
     Write-Host "Restored the fetched bundle at $Dst."
     exit 0
@@ -85,8 +96,18 @@ if (-not (Test-Path $Bak)) {
 }
 
 # ---- the Python engine ---------------------------------------------------
+# Top-level modules, then every PACKAGE under CommonLib. VirEnv used to be named
+# here one directory at a time, which is why `fixs` and `xil` were never staged:
+# a hand-kept list is only updated by whoever remembers. A directory with an
+# __init__.py is a package; YAMLMatlab and yaml-cpp are not, and their own .py
+# files have no business in a bundle.
 Copy-Item (Join-Path $Src 'CommonLib\*.py') (Join-Path $Dst 'CommonLib') -Force
-Copy-Item (Join-Path $Src 'CommonLib\VirEnv') (Join-Path $Dst 'CommonLib') -Recurse -Force
+foreach ($pkg in Get-PythonPackages (Join-Path $Src 'CommonLib')) {
+    Remove-Item (Join-Path $Dst "CommonLib\$($pkg.Name)") -Recurse -Force -ErrorAction SilentlyContinue
+    Copy-Item $pkg.FullName (Join-Path $Dst 'CommonLib') -Recurse -Force
+}
+Get-ChildItem (Join-Path $Dst 'CommonLib') -Recurse -Directory -Filter '__pycache__' -ErrorAction SilentlyContinue |
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 
 # ---- Carla/: run_cosim, the bridges, the map tooling ---------------------
 # Removed first rather than merged: a file deleted in this checkout has to
