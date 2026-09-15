@@ -84,7 +84,8 @@ from CommonLib.SocketHelper import SocketHelper
 from CommonLib.VehDataMsgDefs import VehData
 
 __all__ = [
-    'connect', 'recv', 'send', 'close', 'checkFields',
+    'connect', 'recv', 'send', 'close', 'checkFields', 'running',
+    'simulationEndTime',
     'sim', 'vehicle', 'trafficlight',
     'emit', 'transport', 'commandKind',
     'Vehicle', 'MAX_STEER_RAD',
@@ -437,6 +438,21 @@ sim: _Sim = _Sim(unavailable=_NOT_CONNECTED)
 vehicle: _VehicleView = _VehicleView(unavailable=_NOT_CONNECTED)
 trafficlight: _TrafficLightView = _TrafficLightView(unavailable=_NOT_CONNECTED)
 
+#: False once TrafficLayer has ended the run, so a controller writes
+#: `while fixs.running:` instead of `while True` with an exception for control
+#: flow. Read off the wire, never computed: it is the same state=0 that raises
+#: Shutdown, so a client cannot end its loop on a different answer than the one
+#: TrafficLayer gave -- which is how a client stops replying while the tick is
+#: still waiting for it.
+_running = False
+
+#: The config connect() resolved, so the run's own facts can be answered later
+#: without the caller repeating the path. None until connect().
+_connectedConfigPath = None
+
+#: SimulationEndTime by config path. Read once: it cannot change under a run.
+_endTimeCache = {}
+
 #: VehicleMessageField for this connection; None until connect().
 _declaredFields: typing.Optional[frozenset] = None
 #: Why tick data is unavailable, or None while a tick is held.
@@ -465,6 +481,38 @@ def _requireConnection():
 # ---------------------------------------------------------------------------
 # Connecting
 # ---------------------------------------------------------------------------
+
+_END_TIME_UNSET = object()
+
+
+def simulationEndTime(configPath=None):
+    """(string) -> double or None -- when this run ends, from the scenario yaml.
+
+    Not something an application should have to ask for: fixs.running ends its
+    loop, and fixs.sumo defaults a generated scenario to this. It is public
+    because the value has exactly one owner -- SimulationSetup.SimulationEndTime,
+    which TrafficLayer reads -- and anything that needs it should read it from
+    there rather than keep a second copy.
+
+    None when the config does not declare one. ConfigHelper applies a 90000
+    default to that key, so the parsed value cannot say "the author was silent";
+    config.raw can, and the difference matters to a caller deciding whether to
+    write an end time into a SUMO config at all.
+    """
+    configPath = (configPath or _connectedConfigPath
+                  or os.environ.get('FIXS_CONFIG_YAML') or 'config.yaml')
+    if not os.path.isfile(configPath):
+        raise FixsError(f'config not found: {configPath}')
+    cached = _endTimeCache.get(configPath, _END_TIME_UNSET)
+    if cached is not _END_TIME_UNSET:
+        return cached
+    config = ConfigHelper()
+    config.getConfig(configPath)
+    declared = (config.raw.get('SimulationSetup') or {}).get('SimulationEndTime')
+    value = None if declared is None else float(declared)
+    _endTimeCache[configPath] = value
+    return value
+
 
 def checkFields(configPath=None, requires=(), *, _declared=None):
     """(string, list) -> None -- fail now if the config cannot feed this client.
@@ -542,6 +590,7 @@ def connect(configPath=None, *, port=None, host=None, ego=None, requires=(),
         controller must not have.
     """
     global _helper, _sock, _egoIds, _declaredFields, _role
+    global _running, _connectedConfigPath
     global sim, vehicle, trafficlight, _noTick
 
     if role not in _ROLES:
@@ -584,6 +633,8 @@ def connect(configPath=None, *, port=None, host=None, ego=None, requires=(),
     vehicle = _VehicleView(unavailable=_NO_TICK_YET,
                            fields=_declaredFields, egoIDs=_egoIds)
     trafficlight = _TrafficLightView(unavailable=_NO_TICK_YET)
+    _connectedConfigPath = configPath
+    _running = True
     atexit.register(close)          # an unanswered tick must still go out
     return host, int(port)
 
@@ -722,13 +773,15 @@ def recv():
     the views, so nothing is encoded in a return value that would have to change
     shape as more status is exposed::
 
-        try:
-            while True:
-                fixs.recv()
-                ...
-                fixs.send()
-        except fixs.Shutdown:
-            pass
+        while fixs.running:
+            fixs.recv()
+            ...
+            fixs.send()
+
+    ``fixs.running`` goes False when TrafficLayer ends the run, so a controller
+    needs no end time of its own. Shutdown is still raised, because the run can
+    end in the middle of a tick this loop has already entered; catch it only if
+    there is something to do on the way out.
 
     :raises Shutdown: TrafficLayer has ended the run.
     :raises ProtocolError: the previous tick was never answered. TrafficLayer
@@ -736,7 +789,7 @@ def recv():
         would otherwise surface as an unexplained hang here.
     """
     _requireConnection()
-    global sim, vehicle, trafficlight, _armed, _received, _simState, _simTime
+    global sim, vehicle, trafficlight, _armed, _received, _simState, _simTime, _running
     global _noTick
 
     if _armed:
@@ -753,6 +806,7 @@ def recv():
         # reached is a fact, and reporting it is the natural thing to do in the
         # `except fixs.Shutdown:` block.
         _noTick = _SHUTDOWN
+        _running = False
         vehicle = _VehicleView(unavailable=_SHUTDOWN,
                                fields=_declaredFields, egoIDs=_egoIds)
         trafficlight = _TrafficLightView(unavailable=_SHUTDOWN)
@@ -954,6 +1008,13 @@ def __getattr__(name):
     # Detector records are received but not decoded -- SocketHelper.recv_data
     # drops them. Say so rather than handing back an empty view, which would
     # read as "no detectors this tick".
+    if name == 'running':
+        # The loop condition, owned by FIXS so an application does not compute
+        # one of its own. Refuses before connect() rather than answering False:
+        # a loop that never runs is indistinguishable from a finished one.
+        if _sock is None:
+            raise NotConnected('call fixs.connect(...) first')
+        return _running
     if name == 'detector':
         raise NotImplementedError(
             'detector data is not decoded yet -- SocketHelper.recv_data drops '

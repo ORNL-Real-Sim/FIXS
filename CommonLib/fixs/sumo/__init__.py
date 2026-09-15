@@ -34,6 +34,7 @@ from __future__ import annotations
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+from .. import simulationEndTime
 from . import ego
 
 __all__ = ["build_ego_scenario", "has_ego", "vtypes_file", "net_file",
@@ -62,6 +63,12 @@ def build_ego_scenario(sumocfg, out_dir, **options):
     The map bundle is read and never written; everything generated lands under
     `out_dir`.
     """
+    # The RUN's end time, defaulted rather than asked for. It has one owner --
+    # SimulationSetup.SimulationEndTime, which TrafficLayer reads -- and an
+    # application passing it here would be copying a value out of a file it
+    # should not have to open. Pass end= explicitly only to override it.
+    options.setdefault("end", simulationEndTime())
+
     flags = _flags_by_dest()
     argv = ["--sumocfg", str(sumocfg), "--out-dir", str(out_dir)]
     for dest, value in options.items():
@@ -170,7 +177,10 @@ def vtypes_file(sumocfg, ids):
         f"{', '.join(sorted(ids))}.")
 
 
-def set_run_settings(sumocfg, out_path=None, *, end=None, step_length=None,
+_UNSET = object()
+
+
+def set_run_settings(sumocfg, out_path=None, *, end=_UNSET, step_length=None,
                      time_to_teleport=None, seed=None):
     """Write a run's own SUMO settings into a .sumocfg. Returns where it wrote.
 
@@ -196,6 +206,11 @@ def set_run_settings(sumocfg, out_path=None, *, end=None, step_length=None,
     silently does nothing when the element is absent, which is the shape this
     replaces: it worked only because the scenarios in hand happened to carry one.
     """
+    # Same as build_ego_scenario: the run's end time is the scenario yaml's, and
+    # a caller should not have to fetch it. end=None still means "leave it alone".
+    if end is _UNSET:
+        end = simulationEndTime()
+
     tree = ET.parse(Path(sumocfg))
     root = tree.getroot()
     if end is not None:
