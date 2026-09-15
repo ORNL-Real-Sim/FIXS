@@ -39,7 +39,8 @@ from pathlib import Path
 from .. import simulationEndTime
 from . import ego as ego_module
 
-__all__ = ["scenario", "Scenario", "build_ego_scenario", "has_ego",
+__all__ = ["scenario", "Scenario", "ego_from_file", "build_ego_scenario",
+           "has_ego",
            "vtypes_file", "net_file", "route_files", "set_run_settings"]
 
 
@@ -296,6 +297,67 @@ def _copy_inputs(sumocfg, out_dir, skip):
                 shutil.copy(src, Path(out_dir) / src.name)
 
 
+#: vType attributes an ego file may set, and the build option each becomes.
+_EGO_VTYPE_OPTIONS = {"accel": "accel", "decel": "decel",
+                      "speedFactor": "speed_factor", "speedDev": "speed_dev"}
+
+#: <vehicle> attributes, likewise.
+_EGO_VEHICLE_OPTIONS = {"id": "ego_id", "type": "type_id", "depart": "depart",
+                        "departLane": "depart_lane", "departPos": "depart_pos",
+                        "departSpeed": "depart_speed"}
+
+
+def ego_from_file(path):
+    """Read an ego .rou.xml into build_ego_scenario options.
+
+    The ego is SUMO data, so it is easier to keep as SUMO:
+
+        <routes>
+            <vType id="EGO_TYPE_EXTERNAL" accel="2.0" decel="2.0"
+                   speedFactor="1.1273"/>
+            <vehicle id="ego" type="EGO_TYPE_EXTERNAL" depart="29100"
+                     departLane="1" departPos="free" departSpeed="0.1"/>
+        </routes>
+
+    rather than as a dozen keyword arguments marshalled into command-line flags
+    and written back out as this same XML. Editing the ego becomes editing a
+    scenario file in the vocabulary it is finally expressed in.
+
+    WHICH ROUTE is not in here, and neither is what the vType derives from.
+    Both are questions asked of the MAP -- "route1", "EGO_TYPE" -- and a SUMO
+    file is self-contained by design, with no spelling for a reference out of
+    it. Inventing one would put a FIXS-only attribute inside a file that claims
+    to be SUMO's, so route_from/route_edges, repeat and type_from stay arguments
+    to scenario(), where they are honestly FIXS's own.
+
+    A vehicle with no `route` is deliberate: this file is a template for an ego
+    to be injected, not a scenario to be run.
+    """
+    root = ET.parse(Path(path)).getroot()
+    options = {}
+
+    vtype = root.find("vType")
+    if vtype is not None:
+        if vtype.get("id"):
+            options["type_id"] = vtype.get("id")
+        for attribute, option in _EGO_VTYPE_OPTIONS.items():
+            if vtype.get(attribute) is not None:
+                options[option] = vtype.get(attribute)
+
+    vehicle = root.find("vehicle")
+    if vehicle is None:
+        raise SystemExit(
+            str(Path(path)) + " defines no <vehicle>, so there is no ego in it.")
+    for attribute, option in _EGO_VEHICLE_OPTIONS.items():
+        if vehicle.get(attribute) is not None:
+            options[option] = vehicle.get(attribute)
+
+    route = root.find("route")
+    if route is not None and route.get("repeat") is not None:
+        options["repeat"] = route.get("repeat")
+    return options
+
+
 def scenario(sumocfg, out_dir, *, ego=None, vtypes=None, **run_settings):
     """(path, path) -> Scenario -- this run's SUMO inputs, ready to start.
 
@@ -324,6 +386,10 @@ def scenario(sumocfg, out_dir, *, ego=None, vtypes=None, **run_settings):
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    # A path, or the options themselves. The file carries what SUMO can express
+    # about an ego; anything it names of the MAP stays an argument beside it.
+    if ego and not isinstance(ego, dict):
+        ego = ego_from_file(ego)
     ego = dict(ego or {})
     ego_id = ego.get("ego_id", ego_module.DEFAULT_EGO_ID)
 
