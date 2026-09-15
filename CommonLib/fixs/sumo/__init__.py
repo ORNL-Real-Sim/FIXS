@@ -375,9 +375,21 @@ def ego_from_file(path):
     return options
 
 
-#: Settings about the RUN rather than about the ego. Everything else passed
-#: to scenario() describes the ego and goes to the builder.
-_RUN_SETTINGS = ('end', 'step_length', 'time_to_teleport', 'seed')
+#: The only setting about the RUN rather than about the ego. Everything else
+#: passed to scenario() describes the ego and goes to the builder.
+#:
+#: Deliberately just one. SUMO has hundreds of options and naming them here as
+#: Python keywords would re-declare that surface one app's need at a time --
+#: which is what apps.json `sumo_args` is already for: a deviation declared
+#: beside the application, passed by run_cosim on the command line, and printed
+#: with its origin on every run. The command line also WINS over a generated
+#: config, so an option written into the scenario by an app is the weaker of two
+#: places for it (FIXS_Applications#45).
+#:
+#: `end` is not a deviation. It is how long the run is, TrafficLayer already owns
+#: the number as SimulationSetup.SimulationEndTime, and it is defaulted from
+#: there so no application states it at all.
+_RUN_SETTINGS = ('end',)
 
 
 def scenario(sumocfg, out_dir, *, ego=None, vtypes=None, **options):
