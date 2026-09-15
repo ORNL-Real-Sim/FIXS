@@ -375,6 +375,38 @@ def ego_from_file(path):
     return options
 
 
+def _redirect_outputs(sumocfg, out_dir):
+    """Point every output a config asks for at this run's directory.
+
+    SUMO writes these relative to the process working directory otherwise, so two
+    runs of the same scenario land on top of each other. sumo_ego already does
+    this for a scenario it builds; this is the same for one taken as it is, so a
+    run is self-contained either way.
+
+    ego.OUTPUT_ELEMENTS is the list, and it is the library's rather than an
+    application's: nine elements plus the SaveTLSSwitchStates timedEvent, which
+    hides in <report> instead of <output>. Idempotent -- re-joining an already
+    redirected basename to the same directory changes nothing.
+    """
+    tree = ET.parse(Path(sumocfg))
+    root = tree.getroot()
+    out_dir = Path(out_dir)
+    for section in ("output", "report"):
+        node = root.find(section)
+        if node is None:
+            continue
+        for child in node:
+            if child.tag in ego_module.OUTPUT_ELEMENTS and child.get("value"):
+                child.set("value", str(out_dir / Path(child.get("value")).name))
+            for event in child.iter("timedEvent"):
+                if event.get("dest"):
+                    event.set("dest", str(out_dir / Path(event.get("dest")).name))
+        for event in node.iter("timedEvent"):
+            if event.get("dest"):
+                event.set("dest", str(out_dir / Path(event.get("dest")).name))
+    tree.write(Path(sumocfg), encoding="UTF-8", xml_declaration=True)
+
+
 #: The only setting about the RUN rather than about the ego. Everything else
 #: passed to scenario() describes the ego and goes to the builder.
 #:
@@ -456,6 +488,7 @@ def scenario(sumocfg, out_dir, *, ego=None, vtypes=None, **options):
         path = out_dir / Path(sumocfg).name
         _copy_inputs(sumocfg, out_dir, skip={types_src.name} if types_src else set())
         set_run_settings(sumocfg, out_path=path, **run_settings)
+        _redirect_outputs(path, out_dir)
         built = False
 
     return Scenario(path=str(path), built=built, types_file=types_copy,
