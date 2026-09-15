@@ -246,6 +246,33 @@ for %%f in ("%SOURCE_PATH%\CommonLib\*.py") do (
     copy /Y "%%f" "%RELEASE_PATH%\CommonLib\" >nul 2>&1
 )
 
+REM ...and the Python PACKAGES under CommonLib. The loop above matches FILES in
+REM one directory, so every subpackage was silently dropped from the release the
+REM moment it appeared: CommonLib\VirEnv with #335, CommonLib\fixs with #355,
+REM CommonLib\xil with the dyno work. Such a bundle extracts cleanly and reports a
+REM healthy build, then mainVirCarla dies on
+REM   ModuleNotFoundError: No module named 'CommonLib.VirEnv'
+REM the first time anyone runs the Python bridge from a release.
+REM
+REM A directory with an __init__.py is a Python package and ships; anything else
+REM under CommonLib is vendored C++/MATLAB (yaml-cpp, YAMLMatlab) whose own .py
+REM files must NOT ship - yaml-cpp\test alone carries ~50 googletest scripts.
+REM Structural rather than a hand-kept list, because a list is what failed here:
+REM it is only ever updated by whoever remembers, and twice nobody did.
+echo Copying Python CommonLib packages...
+for /d %%d in ("%SOURCE_PATH%\CommonLib\*") do (
+    if exist "%%d\__init__.py" (
+        echo   - CommonLib\%%~nxd
+        xcopy /Y /E /I "%%d" "%RELEASE_PATH%\CommonLib\%%~nxd" >nul
+    )
+)
+REM Drop the compiled caches /E picked up. Swept once over CommonLib rather than
+REM inside the loop above: a `for /d /r` nested in a `for /d` does not fire, and
+REM it silently shipped the .pyc files when it was written that way.
+for /d /r "%RELEASE_PATH%\CommonLib" %%c in (__pycache__) do (
+    if exist "%%c" rd /s /q "%%c"
+)
+
 REM Release CarMaker files
 echo Copying CarMaker files...
 if defined CARMAKER_VERSIONS (
