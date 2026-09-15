@@ -243,6 +243,50 @@ def inject_ego(opt, demand, out_path, vtype, edges):
     return str(out_path)
 
 
+def _redirect_timed_events(files, out_dir):
+    """Keep a run's SaveTLSSwitchStates output inside the run directory.
+
+    An additional file can carry `<timedEvent type="SaveTLSSwitchStates"
+    dest="signal_result.xml"/>`, and SUMO resolves that relative dest NEXT TO THE
+    ADDITIONAL FILE -- not next to the .sumocfg, and not in the working
+    directory. We reference the bundle's additional files in place, on purpose,
+    so the consequence was that every run wrote its signal record into the shared
+    map cache under ~/.fixs/maps/<map>/sumo/ and the run directory got none. The
+    next run of any application on that map overwrote it.
+
+    So: a file with such a dest is copied into out_dir with the dest made
+    absolute, and the generated config points at the copy. A file without one is
+    still referenced in place, which is the common case and copies nothing.
+
+    Only timedEvent dest is redirected. Other relative paths inside an additional
+    file are left alone; the copy sits in out_dir, so any that exist would now
+    resolve there. No shipped additional file has one, and widening this without
+    a case to look at would be guessing.
+    """
+    out = []
+    for f in files:
+        path = Path(f)
+        if not path.is_file():
+            out.append(f)
+            continue
+        try:
+            tree = ET.parse(path)
+        except ET.ParseError:
+            out.append(f)          # not ours to interpret; leave it as it was
+            continue
+        loose = [e for e in tree.getroot().iter("timedEvent")
+                 if e.get("dest") and not Path(e.get("dest")).is_absolute()]
+        if not loose:
+            out.append(f)
+            continue
+        for event in loose:
+            event.set("dest", str(out_dir / Path(event.get("dest")).name))
+        copy = out_dir / path.name
+        tree.write(copy, encoding="UTF-8", xml_declaration=True)
+        out.append(str(copy))
+    return out
+
+
 def build_sumocfg(opt, base_cfg, ego_rou, replace_demand=None):
     """The bundle's config, with the ego file appended and outputs redirected.
 
@@ -271,7 +315,10 @@ def build_sumocfg(opt, base_cfg, ego_rou, replace_demand=None):
         node = inp.find(tag)
         if node is not None and node.get("value"):
             files = [_abs_from(base_dir, f) for f in _split_list(node.get("value"))]
-            node.set("value", ",".join(_apply_replacements(files, repl, used)))
+            files = _apply_replacements(files, repl, used)
+            if tag == "additional-files":
+                files = _redirect_timed_events(files, opt.out_dir)
+            node.set("value", ",".join(files))
 
     routes = inp.find("route-files")
     if routes is None or not routes.get("value"):
