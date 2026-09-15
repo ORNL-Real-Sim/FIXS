@@ -999,8 +999,20 @@ def _validateCommand(record):
 
 
 def __getattr__(name):
-    # Imported on demand: it pulls in the CARLA-side impersonation, which a
-    # client that is not driving an ego has no reason to load.
+    # `import fixs` is the whole of the integration, so the submodules answer to
+    # it. Python does not bind a subpackage on a parent import, which meant an
+    # application had to write `import fixs.sumo` as well and know that fixs is
+    # laid out in parts -- the opposite of the point.
+    #
+    # On demand rather than at the top of this file: carla pulls in the CARLA
+    # side, which a client that is not driving an ego has no reason to load, and
+    # sumo reads scenario files a controller may never touch. Bound into the
+    # module afterwards, so the cost is once and later lookups are ordinary.
+    if name in ('sumo', 'carla'):
+        import importlib
+        module = importlib.import_module(f'{__name__}.{name}')
+        globals()[name] = module
+        return module
     # Detector records are received but not decoded -- SocketHelper.recv_data
     # drops them. Say so rather than handing back an empty view, which would
     # read as "no detectors this tick".
