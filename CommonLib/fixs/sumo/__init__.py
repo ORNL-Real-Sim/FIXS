@@ -35,16 +35,11 @@ passes on the command line and prints with its origin -- and the command line
 beats a generated config, so an option written into the scenario by an app is
 the weaker of the two places for it.
 
-The other names here answer questions about a .sumocfg. Nothing in tree calls
-them now that scenario() exists; they are public because an application driving
-the pieces itself should not have to re-derive them:
-
-    has_ego(cfg)        does this scenario already define that vehicle
-    net_file(cfg)       which network it opens
-    route_files(cfg)    which route files it names, resolved
-    ego_from_file(path) an ego .rou.xml as build options
-    build_ego_scenario  insert an ego; what scenario() calls for a bundle
-    set_run_settings    write end / step-length / seed / teleport into a config
+`build.py` holds the pieces `scenario()` is made of -- `has_ego`, `net_file`,
+`route_files`, `ego_from_file`, `build_ego_scenario`, `set_run_settings`. They
+are importable (`from fixs.sumo.build import has_ego`) and not exported, because
+nothing calls them yet. Exporting is a promise to keep a signature stable, and
+one worth making when a second caller turns up rather than in anticipation of it.
 
 The command line is still there too. Carla/utils/sumo_ego.py drives ego.py
 exactly as before, prints what it always printed, and is what a shell script
@@ -55,16 +50,6 @@ should keep using.
 """
 from __future__ import annotations
 
-from .build import (
-    Scenario,
-    build_ego_scenario,
-    ego_from_file,
-    has_ego,
-    net_file,
-    route_files,
-    scenario,
-    set_run_settings,
-)
+from .build import Scenario, scenario
 
-__all__ = ["scenario", "Scenario", "ego_from_file", "build_ego_scenario",
-           "has_ego", "net_file", "route_files", "set_run_settings"]
+__all__ = ["scenario", "Scenario"]

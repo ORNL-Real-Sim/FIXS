@@ -4,8 +4,7 @@ The implementation moved to CommonLib/fixs/sumo/ego.py so applications can call
 it directly:
 
     import fixs
-    cfg = fixs.sumo.build_ego_scenario(bundle_cfg, run_dir, route_from="route1",
-                                       depart=29100)
+    cfg = fixs.sumo.scenario(bundle_cfg, run_dir, ego=APP_DIR / "ego.rou.xml")
 
 rather than locate this file, shell out to it, and read the generated config off
 the last line of its stdout - which is what every caller was doing.
