@@ -88,6 +88,10 @@ class TrafficLight:
         self.carlaTrafficLightActorPtr = None
 
 
+#: Default for CarlaSetup.BlueprintSeed. Any fixed value does; it must be fixed.
+_kBlueprintSeed = 20260913
+
+
 class BridgeHelper:
     """Static frame / blueprint / signal mappings, mirroring the C++ class."""
 
@@ -219,6 +223,16 @@ class BridgeHelper:
     #: on every spawn, which on a corridor with one unmapped class buries the log.
     _warnedVClasses = set()
 
+    #: The blueprint draw's own generator, not the module RNG. A blueprint sets
+    #: the bounding box, and extent.x is the pose anchor, so an unseeded draw
+    #: moves every vehicle run to run. Seed from CarlaSetup.BlueprintSeed. FIXS#355.
+    _blueprintRng = random.Random(_kBlueprintSeed)
+
+    @staticmethod
+    def setBlueprintSeed(seed):
+        """Re-seed the blueprint draw (CarlaSetup.BlueprintSeed)."""
+        BridgeHelper._blueprintRng = random.Random(seed)
+
     @staticmethod
     def map_Sumo_vClass_to_Carla_blueprintId(vClass):
         """(string) -> string -- a blueprint id for one SUMO vehicle class."""
@@ -232,7 +246,7 @@ class BridgeHelper:
                       'Defaulting to vehicle.tesla.model3.'
                       % (vClass, ', '.join(sorted(BridgeHelper._BY_VCLASS))))
             return 'vehicle.tesla.model3'          # default to a passenger car
-        return random.choice(pool)
+        return BridgeHelper._blueprintRng.choice(pool)
 
     # --------------------------------------------------------- signal states
     @staticmethod

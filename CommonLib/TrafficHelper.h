@@ -50,6 +50,13 @@ public:
 
 	int addEgoVehicle(double simTime);
 	int addEgoVehicleFromXY(double simTime, std::string vehicleId, std::string vehicleType, double positionX, double positionY);
+
+	// Which layer owns this vehicle's motion, if the traffic simulator does not?
+	// CarMaker/XIL and the virtual environment are the same case, so one test
+	// answers it and one body in sendToSUMO mirrors either answer. VirEnv is
+	// checked first because it is the more specific claim (FIXS#305).
+	enum class ExternalEgoOwner { None, VehSimulator, VirEnv };
+	ExternalEgoOwner externalEgoOwnerOf(const std::string& vehId) const;
 	bool isWarmUpEgoInNetwork(double* simTime);
 
 	int getSimulationTime(double* simTime);
@@ -144,12 +151,13 @@ public:
 
 	bool ENABLE_CARLA = false;
 	bool ENABLE_CARLA_EXTERNAL_CONTROL = false;
-	// Carla external-control ids already added to the traffic simulator (add ONCE,
-	// then wait for insertion; see the Carla inject branch in sendToSUMO).
-	std::set<std::string> carlaInjectedIds_;
-	// #174: last (x,y) fed to moveToXY per Carla-owned id -- lets the off-map guard
-	// compare SUMO's placement (getPosition, n-1) to what we asked for last tick.
-	std::unordered_map<std::string, std::pair<double, double>> carlaLastFed_;
+	// Externally-driven ego ids already added to the traffic simulator (add ONCE,
+	// then wait for insertion; see the mirror block in sendToSUMO).
+	std::set<std::string> externalEgoInjected_;
+	// #174: last (x,y) fed to moveToXY per externally-driven ego -- lets the
+	// off-map guard compare SUMO's placement (getPosition, n-1) to what we asked
+	// for last tick.
+	std::unordered_map<std::string, std::pair<double, double>> externalEgoLastFedXY_;
 
 	// #177: skip per-vehicle TraCI getters whose output is never sent. Derived
 	// once from VehicleMessageField_set in connectionSetup -- getNextTLS is only
@@ -211,6 +219,13 @@ public:
 
 	// vehicle id->edge list
 	std::unordered_map<std::string, std::vector<std::string>> VehicleId2EdgeList_um;
+
+	// Last speed limit / free-flow speed SUMO actually reported for a vehicle.
+	// The subscription does not always carry VAR_ALLOWED_SPEED -- and reading it
+	// through map::operator[] when it is absent inserts a NULL pointer and
+	// dereferences it, which published -815417536 on the wire. A limit does not
+	// vanish between two ticks of the same road, so the last real one stands.
+	std::unordered_map<std::string, std::pair<double, double>> VehicleId2LastSpeedLimit_um;
 
 	// #177 Phase 2: cache the upcoming-TLS list so getNextTLS (O(remaining route
 	// length)) runs ONCE PER VEHICLE instead of every step. A vehicle's getNextTLS
