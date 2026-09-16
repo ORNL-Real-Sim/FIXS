@@ -3476,12 +3476,20 @@ def main():
     # render yet - a network edited on the SUMO side, or a controller change worth
     # checking before a map is cooked for it.
     #
-    # SUPPRESSed rather than documented: this is a development escape hatch, and
-    # run_cosim's whole promise is that what you pick is a co-simulation. Offering
-    # "...but without the simulator half" in --help invites picking it to make a
-    # CARLA problem go away, which is how you end up with results nobody can place.
-    # Un-suppress it when it is something users are meant to reach for.
-    ap.add_argument("--sumo-only", action="store_true", help=argparse.SUPPRESS)
+    # Documented rather than SUPPRESSed. It was hidden while it was a development
+    # escape hatch, on the reasoning that offering "...but without the simulator
+    # half" invites picking it to make a CARLA problem go away, and results from a
+    # run nobody can place. That worry belongs in the help text, not in hiding the
+    # flag: an application whose scenario CARLA cannot render yet has no other way
+    # to run, and a hidden flag is found by reading the source, which is worse.
+    ap.add_argument("--sumo-only", action="store_true",
+                    help="run the traffic half only: SUMO, TrafficLayer and the "
+                         "app's controller, same scenario and same ports, with no "
+                         "CARLA started, connected to or rendered into. For "
+                         "iterating on a controller without waiting for a map to "
+                         "load, and for a network CARLA has no cooked map for. "
+                         "Nothing is rendered, so say so when reporting a result "
+                         "from it -- it is not a co-simulation result.")
     ap.add_argument("--connect-timeout", type=float, default=15.0,
                     help="seconds to wait for the CARLA RPC handshake (default 15). "
                          "Separate from --load-timeout: reaching a server is fast or "

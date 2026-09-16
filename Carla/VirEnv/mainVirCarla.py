@@ -249,7 +249,13 @@ def main(argv=None):
 
     egoDriver = EgoDriver()
     embedded = None
-    if useEmbedded:
+    # virEnvOwnsEgo as well as useEmbedded, so this gate matches the one that
+    # CALLS the controller below. Without it a scenario that names a Controller
+    # but leaves the ego to the traffic simulator still imported the module, ran
+    # its setup() and announced "called every CARLA step" -- while the call site
+    # skipped it every tick, because ego physics are gated on Dynamics. The log
+    # said an app's control law was driving when nothing ever read it.
+    if virEnvOwnsEgo and useEmbedded:
         spec = egoCfg['Controller']
         if not spec:
             raise SystemExit("EgoSetup.ActuationSource: user needs a Controller: "
@@ -258,6 +264,12 @@ def main(argv=None):
         embedded.setup(cs, egoId, backend, core)
         print("Ego controller: %s (called every CARLA step, not every feed)"
               % embedded.spec)
+    elif useEmbedded:
+        # Say so rather than going quiet. The scenario names a controller, and a
+        # reader who sees nothing cannot tell whether it was found or ignored.
+        print("Ego controller: %s NOT loaded -- EgoSetup.Dynamics is '%s', so the "
+              "traffic simulator moves the ego and no control law is called."
+              % (egoCfg['Controller'], egoCfg['Dynamics'] or 'traffic'))
     lastAdvisory = cs['EgoTargetSpeed']
 
     try:
