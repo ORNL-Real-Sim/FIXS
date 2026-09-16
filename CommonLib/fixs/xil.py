@@ -21,7 +21,35 @@ from CommonLib.ConfigHelper import ConfigHelper
 
 from . import FixsError
 
-__all__ = ['dyno']
+__all__ = ['enabled', 'dyno']
+
+
+def _scenario(configPath):
+    """The scenario this run is using, read the same way fixs.connect() reads it."""
+    configPath = configPath or os.environ.get('FIXS_CONFIG_YAML')
+    if not configPath or not os.path.exists(configPath):
+        raise FixsError(
+            'cannot tell whether this scenario declares a dynamometer: '
+            + ('$FIXS_CONFIG_YAML is not set' if not configPath
+               else '%s does not exist' % configPath)
+            + '. Pass the scenario yaml, or set $FIXS_CONFIG_YAML to the one '
+              'this run is using.')
+    config = ConfigHelper()
+    config.getConfig(configPath)
+    return config.Xil_setup
+
+
+def enabled(configPath=None):
+    """Is a dynamometer in this run's loop? -> bool
+
+    Ask this rather than testing whether :func:`dyno` returned something. The
+    two are different questions: this one is about the SCENARIO, and it stays
+    true for a controller that brings its own cell client instead of the one
+    below. A rig with its own dyno software still answers the same flag, so the
+    control flow that depends on a bench being present does not have to care
+    who talks to it.
+    """
+    return bool(_scenario(configPath)['EnableXil'])
 
 
 def dyno(configPath=None):
@@ -57,20 +85,7 @@ def dyno(configPath=None):
     a list -- and an unknown one fails the run rather than leaving a bench
     silently on its defaults.
     """
-    configPath = configPath or os.environ.get('FIXS_CONFIG_YAML')
-    if not configPath or not os.path.exists(configPath):
-        # NOT 'assume no bench'. Whether one is declared is a fact about the
-        # scenario, and a scenario that cannot be read does not answer it --
-        # guessing 'no' would quietly run the plant the yaml did not ask for.
-        raise FixsError(
-            'cannot tell whether this scenario declares a dynamometer: '
-            + ('$FIXS_CONFIG_YAML is not set' if not configPath
-               else f'{configPath} does not exist')
-            + '. Pass the scenario yaml to fixs.dyno(path), or set '
-              '$FIXS_CONFIG_YAML to the one this run is using.')
-    config = ConfigHelper()
-    config.getConfig(configPath)
-    xil = config.Xil_setup
+    xil = _scenario(configPath)
     if not xil['EnableXil']:
         return None
 

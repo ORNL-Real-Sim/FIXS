@@ -239,3 +239,19 @@ def test_a_light_bench_reaches_its_reference_far_sooner(tmp_path):
     finally:
         heavy.close()
         light.close()
+
+
+def test_enabled_answers_the_scenario_not_the_client(tmp_path):
+    """The flag is about the SCENARIO. A rig that brings its own cell client
+    still gets a true answer, so control flow that depends on a bench being in
+    the loop does not have to test whether OUR client was built."""
+    assert fixsxil.enabled(write(tmp_path, xilOn())) is True
+    assert fixsxil.enabled(write(tmp_path, dict(xilOn(), EnableXil=False),
+                                 name='off.yaml')) is False
+    assert fixsxil.enabled(write(tmp_path, name='none.yaml')) is False
+
+
+def test_enabled_refuses_to_guess_like_dyno_does(tmp_path, monkeypatch):
+    monkeypatch.delenv('FIXS_CONFIG_YAML', raising=False)
+    with pytest.raises(fixs.FixsError):
+        fixsxil.enabled()
