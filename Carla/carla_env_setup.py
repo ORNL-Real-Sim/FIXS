@@ -276,6 +276,34 @@ def _python_tag(py_exe):
         return None
 
 
+def _carla_wheel_hint(py_exe):
+    """Why a carla install usually fails: the interpreter is out of range.
+
+    The client is published as a wheel for CPython 3.7-3.10 only, with no source
+    distribution, so on 3.11+ pip has nothing to install and reports that it found
+    no matching distribution - which reads as a network or index problem rather
+    than as a python that cannot be used at all. Name the version when that is the
+    reason, and say nothing when it is not, so this never talks over a real
+    failure."""
+    tag = _python_tag(py_exe) or ""
+    if not tag.startswith("cp3"):
+        return ""
+    try:
+        minor = int(tag[3:])
+    except ValueError:
+        return ""
+    if 7 <= minor <= 10:
+        return ""
+    return (
+        "\n[setup] that interpreter is python 3.%d. The CARLA client is published"
+        "\n        only for CPython 3.7-3.10 and has no source distribution, so"
+        "\n        there is no wheel for it to install - this is not a network"
+        "\n        problem. Bind a 3.10 env instead:"
+        "\n            conda env create -n %s -f environment.yml"
+        "\n            python carla_env_setup.py --update-python"
+        % (minor, _canonical_env_name()))
+
+
 def _conda_roots():
     """Conda/mamba install roots discovered from env vars + the usual locations."""
     roots = []
@@ -862,7 +890,8 @@ def ensure_carla(py_exe, mode, carla_root=None):
             sys.exit("[setup] carla not installed; re-run and bind a dedicated env "
                      "(--update-python).")
         if not _pip_install(py_exe, ["carla==0.9.15"]):
-            sys.exit("[setup] pip install carla==0.9.15 failed.")
+            sys.exit("[setup] pip install carla==0.9.15 failed."
+                     + _carla_wheel_hint(py_exe))
         return None
 
     # source: client should match the custom server -> install the build's wheel

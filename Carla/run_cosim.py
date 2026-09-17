@@ -127,10 +127,11 @@ def _fixs_tag_repo():
     try:
         # utf-8-SIG: this file is written by scripts/update_fixs.ps1, and under
         # PowerShell 5.1 `Out-File -Encoding UTF8` means UTF-8 *with* a BOM. Read as
-        # plain utf-8 the BOM survives as ﻿ on line 1 - and str.strip() does not
-        # remove it, because it is not whitespace - so the tag came out as
-        # '﻿v0.9.0-alpha', the releases API call built from it failed, and the
-        # freshness check below disabled itself silently on every Windows install.
+        # plain utf-8 the BOM survives on line 1 as U+FEFF (bytes EF BB BF) - and
+        # str.strip() does not remove it, because it is not whitespace - so the tag
+        # came out as '<U+FEFF>v0.9.0-alpha', the releases API call built from it
+        # failed, and the freshness check below disabled itself silently on every
+        # Windows install.
         with open(os.path.join(FIXS_ROOT, "FIXS_VERSION.txt"), encoding="utf-8-sig") as f:
             lines = [ln.strip() for ln in f if ln.strip()]
         if lines:
