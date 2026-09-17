@@ -77,6 +77,32 @@ SLOTS = [
 SLOT_KEYS = [k for k, _ in SLOTS]
 
 
+def _carla_row_hidden(carla_cfg, derived):
+    """True when there is no CARLA for the row to describe.
+
+    'client' mode means no CARLA on this machine. With the endpoint also pointing
+    here, the row read "client (none on this machine)  ->  127.0.0.1:2000  [this
+    machine]" - which contradicts itself and offers nothing to open. A REMOTE
+    endpoint is worth a row, so --peer / --carla-host bring it straight back; that
+    is also how you set one, which is why losing the row costs nothing."""
+    if (carla_cfg or {}).get("mode") != "client":
+        return False
+    # None (endpoint not resolved yet) counts as "not remote": on a machine with
+    # no CARLA, an unresolved endpoint is no more informative than a local one.
+    return (derived or {}).get("carla_local") is not False
+
+
+def visible_slots(carla_cfg=None, derived=None):
+    """SLOTS minus rows with nothing to say for this machine.
+
+    The printed numbers ARE the edit keys, so show() and the reader below must
+    build from this one list - numbering a hidden row out of existence in one and
+    not the other is how "5" opens SUMO while the screen says CARLA."""
+    if _carla_row_hidden(carla_cfg, derived):
+        return [(k, l) for k, l in SLOTS if k != "carla"]
+    return list(SLOTS)
+
+
 def profiles_path():
     """~/.fixs/run_profiles.json - beside carla.json, outside any repo."""
     return os.path.join(os.path.dirname(env.CONFIG_PATH), "run_profiles.json")
@@ -334,7 +360,7 @@ def show(name, rec, carla_cfg=None, derived=None):
     when = (rec.get("updated") or "").replace("T", " ")
     stamp = f"  (last run {when})" if when else "  (new)"
     print(f"\n[cosim] Run setup '{name}'{stamp}:")
-    for i, (slot, label) in enumerate(SLOTS, 1):
+    for i, (slot, label) in enumerate(visible_slots(carla_cfg, derived), 1):
         print(f"   {i}) {label:<10}{_fmt(slot, rec, carla_cfg, derived)}")
 
 
@@ -488,7 +514,9 @@ def ask(name, rec, carla_cfg=None, interactive=True, can_switch=True, derived=No
     while True:
         show(name, rec, carla_cfg, derived)
         extra = " | S = switch setup | N = new" if can_switch else ""
-        ans = _input(f"[cosim] Enter = run it | 1-{len(SLOTS)} = change "
+        slots = visible_slots(carla_cfg, derived)
+        keys = [k for k, _ in slots]
+        ans = _input(f"[cosim] Enter = run it | 1-{len(slots)} = change "
                      f"(e.g. \"2 4\"){extra} | Q = quit: ").lower()
         if ans == "":
             return RUN
@@ -499,12 +527,12 @@ def ask(name, rec, carla_cfg=None, interactive=True, can_switch=True, derived=No
         if can_switch and ans == "n":
             return NEW
         if ans in ("a", "all"):
-            return set(SLOT_KEYS)
+            return set(keys)
         picks = [t for t in ans.replace(",", " ").split() if t]
-        if picks and all(t.isdigit() and 1 <= int(t) <= len(SLOTS) for t in picks):
+        if picks and all(t.isdigit() and 1 <= int(t) <= len(slots) for t in picks):
             # Exactly what was selected. cascade() is applied by the caller, which
             # needs to tell a row the user opened from one that only fell over with
             # it - the first asks, the second settles itself where it can.
-            return {SLOT_KEYS[int(t) - 1] for t in picks}
+            return {keys[int(t) - 1] for t in picks}
         print("[cosim] enter numbers to change, Enter to run"
               + (", S / N to switch" if can_switch else "") + ", or Q.")
