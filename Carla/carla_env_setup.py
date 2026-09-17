@@ -8,10 +8,13 @@ no config exists, run_cosim.py invokes this on the first run.
 Three flavours:
   packaged  a released build (CarlaUE4.exe / .sh) - stock maps
   source    an Unreal source build - the only one that can cook a custom map
-  client    no CARLA on this machine at all; it runs on another host and is
-            reached over the network. The traffic stack (SUMO, TrafficLayer,
-            VirCarlaEnv) still runs here, so this machine needs the carla PYTHON
-            client but no install, no Unreal, and no GPU.
+  client    no CARLA on this machine at all. It says nothing about where CARLA
+            is: there may be one on another host, reached over the network, or
+            none anywhere. Traffic-only runs (run_cosim --sumo-only) need only
+            SUMO and TrafficLayer, both of which run here; driving a remote CARLA
+            additionally needs the carla PYTHON client, which is why that is
+            offered rather than required. Either way: no install, no Unreal and
+            no GPU on this machine.
 
 Run this any time to switch CARLA (packaged <-> source build, or a different
 install/version):
@@ -491,7 +494,7 @@ def ensure_runtime(cfg, force=False):
         print("[setup] saved config has no usable python env (carla not importable); "
               "resolving it now (CARLA paths kept) ...")
     cfg["python"] = resolve_python()
-    # .get: 'client' mode has no carla_root by design (CARLA is on another host).
+    # .get: 'client' mode has no carla_root by design (no CARLA on this machine).
     wheel = ensure_carla(cfg["python"], cfg["mode"], cfg.get("carla_root"))
     if wheel:
         cfg["carla_wheel"] = wheel
@@ -1088,8 +1091,14 @@ def run_setup(allow_packaged_windows=False):
         cfg["carla_wheel"] = wheel
 
     save_config(cfg)
-    where = cfg.get("carla_root") or "on another host (see CarlaSetup.CarlaServerIP)"
-    print(f"\n[setup] done: {cfg['mode']} CARLA @ {where}")
+    # Not "on another host": a remote CARLA is one of the things this answer
+    # allows, not something it states. A traffic-only machine has no host to name.
+    root = cfg.get("carla_root")
+    if root:
+        print(f"\n[setup] done: {cfg['mode']} CARLA @ {root}")
+    else:
+        print("\n[setup] done: no CARLA on this machine. --sumo-only runs as it "
+              "stands; --peer HOST drives one elsewhere.")
     print(f"[setup] python: {cfg['python']}")
     return cfg
 
