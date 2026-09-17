@@ -874,14 +874,37 @@ def ensure_carla(py_exe, mode, carla_root=None):
     for source.
 
     'client' takes the PyPI wheel because there is no local build to take one
-    from. run_cosim still needs `import carla` on this machine - it is what
-    drives load_world, the readiness check and the spectator against the remote
-    server - so the wheel is required even though nothing here ever launches
-    CARLA. If that remote server is a source build with a patched PythonAPI,
-    the version handshake is what catches the mismatch, not this."""
+    from, and it is OFFERED rather than required. That mode means only "no CARLA
+    on this machine"; it does not say a CARLA exists elsewhere. Driving a remote
+    one needs `import carla` here - it is what runs load_world, the readiness
+    check and the spectator against that server - but a traffic-only run
+    (run_cosim --sumo-only) never imports it, so refusing to finish setup without
+    it would block the one thing the mode is certainly for. If that remote server
+    is a source build with a patched PythonAPI, the version handshake is what
+    catches the mismatch, not this."""
     has_carla = _python_can_import(py_exe, ("carla",))
 
-    if mode in ("packaged", "client"):
+    if mode == "client":
+        if has_carla:
+            print(f"[setup] carla {_carla_version(py_exe)} already importable.")
+            return
+        # Declining is not fatal here, unlike 'packaged'. See the docstring: this
+        # mode means no CARLA on this machine, and the commonest thing to do from
+        # it - a traffic-only run - never imports the client.
+        print("[setup] the CARLA python client is not installed in this env.")
+        print("        It is needed only to drive a CARLA on ANOTHER host from here")
+        print("        (run_cosim --peer HOST). Traffic-only runs (--sumo-only) do not")
+        print("        use it.")
+        if not _confirm_install(py_exe, "carla==0.9.15 (PyPI wheel, with its deps)"):
+            print("[setup] skipped - traffic-only runs work without it. Re-run setup "
+                  "to add it when you need a remote CARLA.")
+            return None
+        if not _pip_install(py_exe, ["carla==0.9.15"]):
+            sys.exit("[setup] pip install carla==0.9.15 failed."
+                     + _carla_wheel_hint(py_exe))
+        return None
+
+    if mode == "packaged":
         if has_carla:
             print(f"[setup] carla {_carla_version(py_exe)} already importable.")
             return
@@ -989,9 +1012,10 @@ def run_setup(allow_packaged_windows=False):
     if offer_packaged:
         print("  [1] Packaged CARLA  (a released build with CarlaUE4.exe / CarlaUE4.sh)")
     print("  [2] Source build    (run through the Unreal editor: UE4Editor -game)")
-    print("  [3] None on this machine - CARLA runs on another host")
-    print("      (SUMO + TrafficLayer + VirCarlaEnv run here; CARLA is reached over")
-    print("       the network at CarlaSetup.CarlaServerIP)")
+    print("  [3] No CARLA on this machine")
+    print("      (SUMO and TrafficLayer run here, which is all a traffic-only run")
+    print("       needs: run_cosim --sumo-only. To drive a CARLA on ANOTHER host")
+    print("       from here instead, name it at run time: run_cosim --peer HOST.)")
     if not offer_packaged:
         print("  (packaged is not offered on Windows: custom-map import is Linux+Docker")
         print("   only in CARLA. Only need stock maps? re-run with --allow-packaged-windows)")
