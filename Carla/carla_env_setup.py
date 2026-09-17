@@ -1071,10 +1071,11 @@ def run_setup(allow_packaged_windows=False):
         # something to half-succeed against. The server address is NOT stored
         # here either - it lives in the scenario yaml (CarlaSetup.CarlaServerIP),
         # which is already the one place every component reads it from.
-        print("[setup] client mode: no CARLA on this machine. run_cosim will not")
-        print("        launch or cook anything here; point CarlaSetup.CarlaServerIP")
-        print("        at the host running CARLA, which must already have the map")
-        print("        cooked with traffic lights and signs placed.")
+        print("[setup] no CARLA on this machine. Nothing is launched or cooked here.")
+        print("        Traffic-only runs need nothing further:  run_cosim --sumo-only")
+        print("        To drive a CARLA on ANOTHER host from here, name it at run time")
+        print("        - run_cosim --peer HOST - and that host must already have the")
+        print("        map cooked, with traffic lights and signs placed.")
         cfg = {"mode": "client"}
 
     # Resolve the interpreter (carla + SUMO) and match the carla client to the
