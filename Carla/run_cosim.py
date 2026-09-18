@@ -2109,6 +2109,10 @@ def derived_from_yaml(config_yaml, staged, args=None):
                 # "this machine", and saying so would be a third wrong answer.
                 "carla_local": (_is_local_host(getattr(args, "carla_host", None))
                                 if getattr(args, "carla_host", None) else None),
+                # Not a yaml setting: what THIS run will do with what the yaml
+                # says. --sumo-only starts no bridge and no CARLA, so the rows
+                # describing them have nothing to describe.
+                "sumo_only": bool(getattr(args, "sumo_only", False)),
                 "carla_tick": getattr(args, "carla_tick", None),
                 "realtime": None}
     host, port = read_carla_endpoint(config_yaml)
@@ -2123,6 +2127,7 @@ def derived_from_yaml(config_yaml, staged, args=None):
                        or read_backend(config_yaml)),
             "carla_host": host, "carla_port": port,
             "carla_local": _is_local_host(host) if host else None,
+            "sumo_only": bool(getattr(args, "sumo_only", False)),
             # The cadence and the pacing live here too, so the summary shows what
             # will actually run instead of a number the setup remembered.
             "carla_tick": _yaml_float(config_yaml, "CarlaSetup", "CarlaTimeStep", 0.0)

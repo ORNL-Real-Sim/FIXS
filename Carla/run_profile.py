@@ -85,6 +85,13 @@ def _carla_row_hidden(carla_cfg, derived):
     machine]" - which contradicts itself and offers nothing to open. A REMOTE
     endpoint is worth a row, so --peer / --carla-host bring it straight back; that
     is also how you set one, which is why losing the row costs nothing."""
+    # This RUN uses no CARLA. --sumo-only launches none, loads no world and dials
+    # nothing, whatever this machine happens to have installed - so the row
+    # describes something that will not happen, and opens onto a setting that
+    # changes nothing. Checked before the mode, because it holds on a full source
+    # build just as much as on a machine with no CARLA at all.
+    if (derived or {}).get("sumo_only"):
+        return True
     if (carla_cfg or {}).get("mode") != "client":
         return False
     # None (endpoint not resolved yet) counts as "not remote": on a machine with
