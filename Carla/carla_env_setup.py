@@ -8,10 +8,13 @@ no config exists, run_cosim.py invokes this on the first run.
 Three flavours:
   packaged  a released build (CarlaUE4.exe / .sh) - stock maps
   source    an Unreal source build - the only one that can cook a custom map
-  client    no CARLA on this machine at all; it runs on another host and is
-            reached over the network. The traffic stack (SUMO, TrafficLayer,
-            VirCarlaEnv) still runs here, so this machine needs the carla PYTHON
-            client but no install, no Unreal, and no GPU.
+  client    no CARLA on this machine at all. It says nothing about where CARLA
+            is: there may be one on another host, reached over the network, or
+            none anywhere. Traffic-only runs (run_cosim --sumo-only) need only
+            SUMO and TrafficLayer, both of which run here; driving a remote CARLA
+            additionally needs the carla PYTHON client, which is why that is
+            offered rather than required. Either way: no install, no Unreal and
+            no GPU on this machine.
 
 Run this any time to switch CARLA (packaged <-> source build, or a different
 install/version):
@@ -276,6 +279,34 @@ def _python_tag(py_exe):
         return None
 
 
+def _carla_wheel_hint(py_exe):
+    """Why a carla install usually fails: the interpreter is out of range.
+
+    The client is published as a wheel for CPython 3.7-3.10 only, with no source
+    distribution, so on 3.11+ pip has nothing to install and reports that it found
+    no matching distribution - which reads as a network or index problem rather
+    than as a python that cannot be used at all. Name the version when that is the
+    reason, and say nothing when it is not, so this never talks over a real
+    failure."""
+    tag = _python_tag(py_exe) or ""
+    if not tag.startswith("cp3"):
+        return ""
+    try:
+        minor = int(tag[3:])
+    except ValueError:
+        return ""
+    if 7 <= minor <= 10:
+        return ""
+    return (
+        "\n[setup] that interpreter is python 3.%d. The CARLA client is published"
+        "\n        only for CPython 3.7-3.10 and has no source distribution, so"
+        "\n        there is no wheel for it to install - this is not a network"
+        "\n        problem. Bind a 3.10 env instead:"
+        "\n            conda env create -n %s -f environment.yml"
+        "\n            python carla_env_setup.py --update-python"
+        % (minor, _canonical_env_name()))
+
+
 def _conda_roots():
     """Conda/mamba install roots discovered from env vars + the usual locations."""
     roots = []
@@ -463,7 +494,7 @@ def ensure_runtime(cfg, force=False):
         print("[setup] saved config has no usable python env (carla not importable); "
               "resolving it now (CARLA paths kept) ...")
     cfg["python"] = resolve_python()
-    # .get: 'client' mode has no carla_root by design (CARLA is on another host).
+    # .get: 'client' mode has no carla_root by design (no CARLA on this machine).
     wheel = ensure_carla(cfg["python"], cfg["mode"], cfg.get("carla_root"))
     if wheel:
         cfg["carla_wheel"] = wheel
@@ -846,14 +877,37 @@ def ensure_carla(py_exe, mode, carla_root=None):
     for source.
 
     'client' takes the PyPI wheel because there is no local build to take one
-    from. run_cosim still needs `import carla` on this machine - it is what
-    drives load_world, the readiness check and the spectator against the remote
-    server - so the wheel is required even though nothing here ever launches
-    CARLA. If that remote server is a source build with a patched PythonAPI,
-    the version handshake is what catches the mismatch, not this."""
+    from, and it is OFFERED rather than required. That mode means only "no CARLA
+    on this machine"; it does not say a CARLA exists elsewhere. Driving a remote
+    one needs `import carla` here - it is what runs load_world, the readiness
+    check and the spectator against that server - but a traffic-only run
+    (run_cosim --sumo-only) never imports it, so refusing to finish setup without
+    it would block the one thing the mode is certainly for. If that remote server
+    is a source build with a patched PythonAPI, the version handshake is what
+    catches the mismatch, not this."""
     has_carla = _python_can_import(py_exe, ("carla",))
 
-    if mode in ("packaged", "client"):
+    if mode == "client":
+        if has_carla:
+            print(f"[setup] carla {_carla_version(py_exe)} already importable.")
+            return
+        # Declining is not fatal here, unlike 'packaged'. See the docstring: this
+        # mode means no CARLA on this machine, and the commonest thing to do from
+        # it - a traffic-only run - never imports the client.
+        print("[setup] the CARLA python client is not installed in this env.")
+        print("        It is needed only to drive a CARLA on ANOTHER host from here")
+        print("        (run_cosim --peer HOST). Traffic-only runs (--sumo-only) do not")
+        print("        use it.")
+        if not _confirm_install(py_exe, "carla==0.9.15 (PyPI wheel, with its deps)"):
+            print("[setup] skipped - traffic-only runs work without it. Re-run setup "
+                  "to add it when you need a remote CARLA.")
+            return None
+        if not _pip_install(py_exe, ["carla==0.9.15"]):
+            sys.exit("[setup] pip install carla==0.9.15 failed."
+                     + _carla_wheel_hint(py_exe))
+        return None
+
+    if mode == "packaged":
         if has_carla:
             print(f"[setup] carla {_carla_version(py_exe)} already importable.")
             return
@@ -862,7 +916,8 @@ def ensure_carla(py_exe, mode, carla_root=None):
             sys.exit("[setup] carla not installed; re-run and bind a dedicated env "
                      "(--update-python).")
         if not _pip_install(py_exe, ["carla==0.9.15"]):
-            sys.exit("[setup] pip install carla==0.9.15 failed.")
+            sys.exit("[setup] pip install carla==0.9.15 failed."
+                     + _carla_wheel_hint(py_exe))
         return None
 
     # source: client should match the custom server -> install the build's wheel
@@ -960,9 +1015,10 @@ def run_setup(allow_packaged_windows=False):
     if offer_packaged:
         print("  [1] Packaged CARLA  (a released build with CarlaUE4.exe / CarlaUE4.sh)")
     print("  [2] Source build    (run through the Unreal editor: UE4Editor -game)")
-    print("  [3] None on this machine - CARLA runs on another host")
-    print("      (SUMO + TrafficLayer + VirCarlaEnv run here; CARLA is reached over")
-    print("       the network at CarlaSetup.CarlaServerIP)")
+    print("  [3] No CARLA on this machine")
+    print("      (SUMO and TrafficLayer run here, which is all a traffic-only run")
+    print("       needs: run_cosim --sumo-only. To drive a CARLA on ANOTHER host")
+    print("       from here instead, name it at run time: run_cosim --peer HOST.)")
     if not offer_packaged:
         print("  (packaged is not offered on Windows: custom-map import is Linux+Docker")
         print("   only in CARLA. Only need stock maps? re-run with --allow-packaged-windows)")
@@ -1018,10 +1074,11 @@ def run_setup(allow_packaged_windows=False):
         # something to half-succeed against. The server address is NOT stored
         # here either - it lives in the scenario yaml (CarlaSetup.CarlaServerIP),
         # which is already the one place every component reads it from.
-        print("[setup] client mode: no CARLA on this machine. run_cosim will not")
-        print("        launch or cook anything here; point CarlaSetup.CarlaServerIP")
-        print("        at the host running CARLA, which must already have the map")
-        print("        cooked with traffic lights and signs placed.")
+        print("[setup] no CARLA on this machine. Nothing is launched or cooked here.")
+        print("        Traffic-only runs need nothing further:  run_cosim --sumo-only")
+        print("        To drive a CARLA on ANOTHER host from here, name it at run time")
+        print("        - run_cosim --peer HOST - and that host must already have the")
+        print("        map cooked, with traffic lights and signs placed.")
         cfg = {"mode": "client"}
 
     # Resolve the interpreter (carla + SUMO) and match the carla client to the
@@ -1034,8 +1091,14 @@ def run_setup(allow_packaged_windows=False):
         cfg["carla_wheel"] = wheel
 
     save_config(cfg)
-    where = cfg.get("carla_root") or "on another host (see CarlaSetup.CarlaServerIP)"
-    print(f"\n[setup] done: {cfg['mode']} CARLA @ {where}")
+    # Not "on another host": a remote CARLA is one of the things this answer
+    # allows, not something it states. A traffic-only machine has no host to name.
+    root = cfg.get("carla_root")
+    if root:
+        print(f"\n[setup] done: {cfg['mode']} CARLA @ {root}")
+    else:
+        print("\n[setup] done: no CARLA on this machine. --sumo-only runs as it "
+              "stands; --peer HOST drives one elsewhere.")
     print(f"[setup] python: {cfg['python']}")
     return cfg
 
