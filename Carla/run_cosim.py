@@ -127,10 +127,11 @@ def _fixs_tag_repo():
     try:
         # utf-8-SIG: this file is written by scripts/update_fixs.ps1, and under
         # PowerShell 5.1 `Out-File -Encoding UTF8` means UTF-8 *with* a BOM. Read as
-        # plain utf-8 the BOM survives as ﻿ on line 1 - and str.strip() does not
-        # remove it, because it is not whitespace - so the tag came out as
-        # '﻿v0.9.0-alpha', the releases API call built from it failed, and the
-        # freshness check below disabled itself silently on every Windows install.
+        # plain utf-8 the BOM survives on line 1 as U+FEFF (bytes EF BB BF) - and
+        # str.strip() does not remove it, because it is not whitespace - so the tag
+        # came out as '<U+FEFF>v0.9.0-alpha', the releases API call built from it
+        # failed, and the freshness check below disabled itself silently on every
+        # Windows install.
         with open(os.path.join(FIXS_ROOT, "FIXS_VERSION.txt"), encoding="utf-8-sig") as f:
             lines = [ln.strip() for ln in f if ln.strip()]
         if lines:
@@ -2108,6 +2109,10 @@ def derived_from_yaml(config_yaml, staged, args=None):
                 # "this machine", and saying so would be a third wrong answer.
                 "carla_local": (_is_local_host(getattr(args, "carla_host", None))
                                 if getattr(args, "carla_host", None) else None),
+                # Not a yaml setting: what THIS run will do with what the yaml
+                # says. --sumo-only starts no bridge and no CARLA, so the rows
+                # describing them have nothing to describe.
+                "sumo_only": bool(getattr(args, "sumo_only", False)),
                 "carla_tick": getattr(args, "carla_tick", None),
                 "realtime": None}
     host, port = read_carla_endpoint(config_yaml)
@@ -2122,6 +2127,7 @@ def derived_from_yaml(config_yaml, staged, args=None):
                        or read_backend(config_yaml)),
             "carla_host": host, "carla_port": port,
             "carla_local": _is_local_host(host) if host else None,
+            "sumo_only": bool(getattr(args, "sumo_only", False)),
             # The cadence and the pacing live here too, so the summary shows what
             # will actually run instead of a number the setup remembered.
             "carla_tick": _yaml_float(config_yaml, "CarlaSetup", "CarlaTimeStep", 0.0)
@@ -3751,6 +3757,19 @@ def main():
         print("[cosim] no CARLA env configured; running under the current python. "
               "If 'import carla' fails, run setup_carla first.")
 
+    # --sumo-only launches no CARLA, loads no world and connects no client, so
+    # every CARLA-local preflight below - the source-build cook, the carla half of
+    # a map bundle, TL and sign placement - has nothing to do for it. All of those
+    # are already gated on --no-launch, so saying it once here is what turns them
+    # off; threading a second flag through each would be the same decision written
+    # four more times. Deliberately AFTER the config gate above: this must not stop
+    # a fresh machine from settling WHICH PYTHON to use, which a traffic-only run
+    # needs exactly as much as a CARLA one does.
+    if args.sumo_only and not args.no_launch:
+        print("[cosim] --sumo-only: no CARLA is launched, loaded or dialled; "
+              "implying --no-launch.")
+        args.no_launch = True
+
     import import_map
     repo, tag_prefix = import_map.resolve_map_source(args.repo, args.tag_prefix)
     catalog = import_map.fetch_catalog(repo)
@@ -4398,7 +4417,13 @@ def main():
     # at this machine cannot be satisfied by anything. Caught here rather than at
     # connect time because the failure would otherwise surface as a bare RPC
     # timeout, which reads as "CARLA is down" instead of "nothing was ever there".
-    if cfg is not None and cfg.get("mode") == "client" and _is_local_host(args.carla_host):
+    # Not for --sumo-only: that run dials no CARLA at all, so CarlaServerIP is
+    # simply unread, not contradictory. Without this exemption a machine that
+    # answered "no CARLA here" could not run traffic-only at all - the stock
+    # scenario yamls point CarlaServerIP at 127.0.0.1, so the check fired on every
+    # single-machine run and exited 1 before reaching the --sumo-only path below.
+    if (cfg is not None and cfg.get("mode") == "client"
+            and _is_local_host(args.carla_host) and not args.sumo_only):
         sys.exit(
             f"[cosim] carla.json is 'client' mode (no CARLA on this machine), but "
             f"{os.path.basename(config_yaml)} points CarlaSetup.CarlaServerIP at "
@@ -4503,7 +4528,11 @@ def main():
                 place_signs.place_signs(target_map, carla_root=cfg["carla_root"],
                                         ue4_root=cfg.get("ue4_root"), force=args.reimport)
 
-    elif cfg is not None and cfg.get("mode") == "client":
+    # Not for --sumo-only, for the same reason as the CarlaServerIP check above:
+    # this says who must cook the map, and a traffic-only run needs no cooked map
+    # anywhere. Printed unconditionally it also asserts a CARLA machine exists,
+    # which "no CARLA on this machine" does not claim.
+    elif cfg is not None and cfg.get("mode") == "client" and not args.sumo_only:
         # Cooking a map and placing actors both write into a CARLA content tree and
         # save a .umap, so they can only happen where CARLA lives. In client mode
         # that is another machine, and this is the only place that says so - the
