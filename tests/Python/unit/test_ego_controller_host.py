@@ -373,3 +373,58 @@ def test_the_relayed_call_is_refused_outside_a_controller_step():
     import fixs.carla as fixscarla
     with pytest.raises(Exception):
         fixscarla.apply_control(fixscarla.VehicleControl(throttle=0.1))
+
+
+# -- the scenario's own options for its controller (#24) --------------------
+
+_CTRL = '''
+class Controller:
+    def __init__(self, config, egoId):
+        self.argv = config.get('EgoControllerArgs')
+    def control(self, ego, dt):
+        return None
+'''
+
+
+def _writeCtrl(tmp_path, name='ctrl.py'):
+    p = tmp_path / name
+    p.write_text(_CTRL)
+    return p
+
+
+def test_a_bare_path_is_unchanged_and_gets_no_arguments(tmp_path):
+    """The regression that would hurt: every scenario today names a bare path."""
+    p = _writeCtrl(tmp_path)
+    lc = loadController(str(p))
+    cfg = {}
+    lc.setup(cfg, 'ego')
+    assert lc.argv == []
+    assert cfg['EgoControllerArgs'] == []
+
+
+def test_options_after_the_path_reach_the_controller(tmp_path):
+    p = _writeCtrl(tmp_path)
+    lc = loadController(str(p) + ' --command-shape pedals')
+    cfg = {}
+    lc.setup(cfg, 'ego')
+    assert lc.argv == ['--command-shape', 'pedals']
+    assert lc._instance.argv == ['--command-shape', 'pedals']
+
+
+def test_a_path_with_a_space_still_resolves(tmp_path):
+    """Split on ' --', never on whitespace -- 'C:/My Apps/ctrl.py' is a path."""
+    d = tmp_path / 'My Apps'
+    d.mkdir()
+    p = _writeCtrl(d)
+    lc = loadController(str(p))
+    assert lc.argv == []
+    lc2 = loadController(str(p) + ' --command-shape speed')
+    assert lc2.argv == ['--command-shape', 'speed']
+
+
+def test_an_attribute_still_works_alongside_options(tmp_path):
+    p = _writeCtrl(tmp_path)
+    lc = loadController(str(p) + ':Controller --command-shape pedals')
+    cfg = {}
+    lc.setup(cfg, 'ego')
+    assert lc.argv == ['--command-shape', 'pedals']

@@ -141,8 +141,11 @@ class LoadedController:
     does not branch on how the user chose to write it.
     """
 
-    def __init__(self, spec, obj, setupFn=None, shutdownFn=None, isClass=False):
+    def __init__(self, spec, obj, setupFn=None, shutdownFn=None, isClass=False,
+                 argv=()):
         self.spec = spec
+        #: What the scenario wrote after the path. FIXS does not read it.
+        self.argv = list(argv)
         self._obj = obj
         self._setup = setupFn
         self._shutdown = shutdownFn
@@ -156,6 +159,10 @@ class LoadedController:
         # controller's own signature is unchanged: it does not take a backend,
         # it asks FIXS -- see currentBackend.
         global _backend, _core, _config
+        # The scenario's own words for its controller, verbatim. FIXS resolves
+        # the path and carries the rest; what the options MEAN is the
+        # controller's business, so no option of its ever reaches this schema.
+        config['EgoControllerArgs'] = self.argv
         _backend, _core, _config = backend, core, config
         if self._isClass:
             self._instance = self._obj(config, egoId)
@@ -254,14 +261,27 @@ def loadController(spec, appRoot=None):
     """(string) -> LoadedController -- resolve what the scenario named.
 
     ``spec`` is ``path/to/file.py``, ``path/to/file.py:attribute``, or
-    ``package.module:attribute``. The path form takes no sys.path arrangement,
-    which is the point: applications are not installed packages.
+    ``package.module:attribute``, each optionally followed by the controller's
+    own options::
+
+        apps/mlk_eco_driving/ego_agent_controller.py --command-shape pedals
+
+    Split on the first ``' --'``, never on whitespace: a path may contain
+    spaces, and one that did used to resolve. The tail arrives as
+    ``config['EgoControllerArgs']`` and is not interpreted here -- a controller
+    option must never need a key in this schema.
+
+    The path form takes no sys.path arrangement, which is the point:
+    applications are not installed packages.
 
     Nothing is discovered. The scenario names the controller the way it names
     the map, and if the name is wrong you find out here rather than 400 ticks in.
     """
     if not spec or not spec.strip():
         raise ControllerError('EgoController is empty')
+    spec = spec.strip()
+    spec, sep, rest = spec.partition(' --')
+    argv = ('--' + rest).split() if sep else []
     spec = spec.strip()
     _letControllerImportFixs()
 
@@ -307,7 +327,7 @@ def loadController(spec, appRoot=None):
         if not callable(getattr(obj, 'control', None)):
             raise ControllerError(
                 f'EgoController: {where}:{found} is a class with no control(ego, dt).')
-        return LoadedController(spec, obj, isClass=True)
+        return LoadedController(spec, obj, isClass=True, argv=argv)
 
     if not callable(obj):
         raise ControllerError(
@@ -317,7 +337,7 @@ def loadController(spec, appRoot=None):
     shutdownFn = getattr(module, 'shutdown', None)
     if setupFn is not None and not callable(setupFn):
         raise ControllerError(f'EgoController: {where}:setup is not callable')
-    return LoadedController(spec, obj, setupFn, shutdownFn)
+    return LoadedController(spec, obj, setupFn, shutdownFn, argv=argv)
 
 
 # ---------------------------------------------------------------------------
