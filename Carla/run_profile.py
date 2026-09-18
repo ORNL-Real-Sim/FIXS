@@ -324,6 +324,12 @@ def _fmt(slot, rec, carla_cfg, derived=None):
         return f"{os.path.basename(path):<26} ({where})"
     if slot == "engine":
         eng = derived.get("engine") or "py"
+        # --sumo-only starts no bridge at all, so naming the one the yaml declares
+        # would promise a process that never appears. The row stays rather than
+        # being hidden like the CARLA one, because TrafficLayer genuinely does run
+        # and the value is still what the next CARLA run will use.
+        if derived.get("sumo_only"):
+            return f"{eng:<26} (TrafficLayer only - --sumo-only starts no bridge)"
         how = ("TrafficLayer + mainVirCarla.py" if eng == "py"
                else "TrafficLayer + VirCarlaEnv")
         return f"{eng:<26} ({how}, from the yaml)"
@@ -354,7 +360,9 @@ def _fmt(slot, rec, carla_cfg, derived=None):
         tick = derived.get("carla_tick")
         pace = derived.get("realtime")
         bits = [gui]
-        if tick:
+        # The tick is the rate CARLA is stepped at. With --sumo-only there is no
+        # CARLA to step, so printing it describes something that will not happen.
+        if tick and not derived.get("sumo_only"):
             bits.append(f"CARLA tick {tick:g} s")
         if pace is not None:
             bits.append("realtime" if pace else "as fast as possible")
