@@ -159,6 +159,12 @@ def main(argv=None):
 
     config = ConfigHelper()
     config.getConfig(args.configPath)
+    # An in-process controller reads the scenario through fixs, which finds it
+    # by $FIXS_CONFIG_YAML -- run_cosim sets that for the app it launches, but
+    # this bridge is launched separately and inherits nothing. Say which yaml
+    # this process is running, so a controller loaded here cannot read a
+    # DIFFERENT one than the bridge hosting it.
+    os.environ['FIXS_CONFIG_YAML'] = os.path.abspath(args.configPath)
     cs = config.Carla_setup
     egoCfg = config.Ego_setup          # the ego, once (FIXS#305)
     verbose = cs['EnableVerboseLog']

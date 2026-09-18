@@ -14,7 +14,12 @@ often it is called. See CommonLib/VirEnv/IEgoController.py for the full contract
 def setup(config, egoId):
     """Optional. Called once, before the run. Whatever you return comes back as
     the third argument to control()."""
-    return {"route": config.get("EgoRoutePoints", [])}
+    import fixs.xil
+    return {"route": config.get("EgoRoutePoints", []),
+            # None unless the SCENARIO says a bench is in the loop. The
+            # simulated cell is real working code, not a stub -- a run with it
+            # is a run with a vehicle that has mass and a torque delay.
+            "dyno": fixs.xil.dyno() if fixs.xil.enabled() else None}
 
 
 def control(ego, dt, state=None):
@@ -29,6 +34,28 @@ def control(ego, dt, state=None):
                       speedDesired, signalLightColor
     """
     target = ego.speedDesired if ego.speedDesired > 0.01 else 8.33
+
+    # --- a dynamometer, when the scenario says so --------------------------
+    # AFTER every decision you make, BEFORE you command anything: you decide a
+    # speed, the cell says what a real vehicle reached, and THAT is what you
+    # then drive to. Next step you read ego.speed back, so the cell is in the
+    # loop rather than beside it.
+    dyno = (state or {}).get("dyno")
+    if dyno is not None:
+        target = dyno.exchange(target, dt)
+
+    # FOR A REAL CELL, replace the object -- nothing else changes:
+    #
+    #     state["dyno"] = MyCell("192.168.1.50")    # instead of fixs.xil.dyno()
+    #
+    # It needs one method, exchange(speed, dt) -> speed. No subclass, no
+    # registration, no key in the FIXS schema: how your cell is spoken to is
+    # yours, and FIXS's simulated one carries no more authority than it.
+    # Three things bite. It is called every step (20 Hz at CarlaTimeStep 0.05),
+    # so it MUST NOT BLOCK -- send, then take the newest answer that already
+    # arrived. When none has, return the reference you were given: it is the
+    # only answer that cannot invent motion. And count that, because a run
+    # ending with a large miss count did not test what it claims to have.
 
     # --- shape 1: pedals + steer. You close the loop. -----------------------
     error = target - ego.speed
@@ -45,3 +72,7 @@ def control(ego, dt, state=None):
 
 def shutdown(state=None):
     """Optional. Called once, after the run."""
+    dyno = (state or {}).get("dyno")
+    if dyno is not None:
+        print("dyno: %d exchanges went unanswered" % dyno.misses)
+        dyno.close()
