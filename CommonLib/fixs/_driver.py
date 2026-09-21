@@ -20,8 +20,8 @@ Your rig keeps its own API, its own protocol and its own rate; ``exchange``
 is the glue, and it is the whole of what this module asks for.
 
 Pass nothing and nothing is in the loop. This module never goes looking for a
-cell -- deciding one is there belongs to the caller, so passing a function IS
-the declaration. For the simulated cell, pass the one FIXS already has::
+dyno -- deciding one is there belongs to the caller, so passing a function IS
+the declaration. For the simulated dyno, pass the one FIXS already has::
 
     Controller = fixs.driver(fixs.xil.exchange)
 
@@ -33,7 +33,7 @@ WHERE IT GOES IN THE LOOP -- after every decision, before any command::
     want = exchange(want)     what a real vehicle did with that
     drive(want)               pedals, or a speed for the plant to close on
 
-Next step the driver reads ``ego.speed`` back, so the cell is in the loop and
+Next step the driver reads ``ego.speed`` back, so the dyno is in the loop and
 not beside it. ``target`` and ``drive`` are public for anyone who wants that
 ordering in their own hands.
 
@@ -223,24 +223,43 @@ USE_ADVISORY = True
 #:            9.8-11.0 m on this corridor.
 SIGNAL_SOURCE = 'fixs'
 
+class Limits(object):
+    """How close the driver lets the ego come to a bar or a leader.
+
+    Policy, not tuning -- so it is set in code where a diff shows it, never on
+    a yaml line where a change nobody reviews can move how hard the ego brakes.
+
+        fixs.driver(limits=Limits(comfortDecel=1.5))
+    """
+
+    __slots__ = ('comfortDecel', 'stopMargin', 'commitDecel', 'leaderMargin')
+
+    def __init__(self, comfortDecel=2.0, stopMargin=2.0,
+                 commitDecel=4.0, leaderMargin=2.0):
+        self.comfortDecel, self.stopMargin = comfortDecel, stopMargin
+        self.commitDecel, self.leaderMargin = commitDecel, leaderMargin
+
+    def __str__(self):
+        return ','.join('%s=%g' % (n, getattr(self, n)) for n in self.__slots__)
+
+    def __repr__(self):
+        return 'Limits(%s)' % self
+
+
 #: Deceleration used to turn a distance-to-stop into a speed ceiling, m/s^2.
 #: Not a braking authority: the point of an envelope is that it is met early and
 #: gently, so the emergency stop is never the thing that has to work.
-COMFORT_DECEL = 2.0
 
 #: Stop this far short of the stop bar, m.
-STOP_MARGIN = 2.0
 
 #: Deceleration assumed when deciding whether a YELLOW can still be stopped for,
 #: m/s^2. Firmer than COMFORT_DECEL on purpose: the question here is not "is this
 #: pleasant" but "is stopping still possible", and answering it with the comfort
 #: figure commits the ego to crossing from twice as far out as it needs to.
-COMMIT_DECEL = 4.0
 
 #: Kept behind the leader on TOP of the traffic simulator's own minGap: the
 #: wire's precedingVehicleDistance is measured from the ego's front bumper plus
 #: minGap to the leader's rear bumper, so 0.0 here would already leave minGap.
-LEADER_MARGIN = 2.0
 
 #: signalLightColor on the wire (CommonLib/TrafficHelper.cpp tlsStateToColor).
 _RED, _YELLOW, _RED_YELLOW = 1, 2, 4
@@ -261,10 +280,11 @@ def _options(config, overrides=None):
     wrote after the controller's path overrides both -- because the scenario
     is the thing an operator edits without touching code."""
     over = dict(overrides or {})
-    unknown = set(over) - {'shape', 'loop', 'tuning'}
+    known = {'shape', 'loop', 'tuning', 'limits', 'idealSpeedTracking'}
+    unknown = set(over) - known
     if unknown:
-        raise TypeError('fixs.driver(): unknown option(s) %s -- known: '
-                        'shape, loop, tuning' % ', '.join(sorted(unknown)))
+        raise TypeError('fixs.driver(): unknown option(s) %s -- known: %s'
+                        % (', '.join(sorted(unknown)), ', '.join(sorted(known))))
 
     p = argparse.ArgumentParser(prog='fixs.driver', add_help=False)
     p.add_argument('--command-shape', choices=('speed', 'pedals'),
@@ -281,6 +301,15 @@ def _options(config, overrides=None):
         raise TypeError('fixs.driver(tuning=): expected a Tuning, got %s'
                         % type(base).__name__)
     opt.tuning = Tuning.parse(opt.tune, base) if opt.tune else base
+
+    #: Policy, and the stiffened Ackermann gains: code, not the command line.
+    #: A margin changed from a yaml line is a change nobody reviews.
+    opt.limits = over.get('limits') or Limits()
+    if not isinstance(opt.limits, Limits):
+        raise TypeError('fixs.driver(limits=): expected a Limits, got %s'
+                        % type(opt.limits).__name__)
+    opt.idealSpeedTracking = bool(
+        over.get('idealSpeedTracking', IDEAL_SPEED_TRACKING))
     return opt
 
 
@@ -298,14 +327,17 @@ class Controller:
         #: Every gain in force, as one value -- and written into the log, so a
         #: run can say what it was without anyone regressing it out of the data.
         self.tuning = opt.tuning
+        #: How close it comes to a bar or a leader. Policy, not tuning.
+        self.limits = opt.limits
+        self.idealSpeedTracking = opt.idealSpeedTracking
         self.dt = float(config.get('CarlaTimeStep') or 0.1)
         self.fallbackSpeed = float(config.get('EgoTargetSpeed') or 8.33)
         self.useAdvisory = USE_ADVISORY
         self.agent = None
         self.log = _openLog(
             config.get('EgoControllerLog', '_datalog/agent_embedded.csv'),
-            'fixs.driver shape=%s loop=%s %s cell=%s'
-            % (self.shape, self.loop, self.tuning,
+            'fixs.driver shape=%s loop=%s %s %s exchange=%s'
+            % (self.shape, self.loop, self.tuning, self.limits,
                getattr(self._EXCHANGE, '__name__', 'none')))
         self.steps, self.elapsed = 0, 0.0
         #: Held between feeds -- see _advisoryOf.
@@ -335,15 +367,15 @@ class Controller:
         self._vPrev = 0.0
         self._aMeas = 0.0
         if self.benchInLoop:
-            print('[driver] cell in the loop (%s)'
+            print('[driver] exchange in the loop (%s)'
                   % getattr(self._EXCHANGE, '__name__', 'exchange'), flush=True)
 
-    def throughCell(self, vRef):
-        """(mps) -> mps -- what the cell did with the speed we asked for.
+    def exchange(self, vRef):
+        """(mps) -> mps -- what the dyno did with the speed we asked for.
 
-        A cell that cannot answer this tick returns None, and the REFERENCE
-        goes through untouched: it is the only value that cannot invent
-        motion, and the run then behaves as though no cell were attached.
+        An exchange that cannot answer this tick returns None, and the
+        REFERENCE goes through untouched: it is the only value that cannot
+        invent motion, so the run behaves as though nothing were attached.
         Those ticks are counted, because a run that ends with many of them did
         not test what it claims to have tested.
         """
@@ -379,7 +411,7 @@ class Controller:
             import random
             self.agent.set_destination(
                 random.choice(carla.map.get_spawn_points()).location)
-        if IDEAL_SPEED_TRACKING:
+        if self.idealSpeedTracking:
             st = carla.ego.get_ackermann_controller_settings()
             st.speed_kp, st.speed_ki, st.speed_kd = 50.0, 5.0, 0.0
             carla.ego.apply_ackermann_controller_settings(st)
@@ -429,7 +461,8 @@ class Controller:
         # the envelopes use, so the agent's own following model is engaged while
         # there is still room for it to act. It still decides.
         self.agent._behavior.min_proximity_threshold = max(
-            10.0, ego.speed * ego.speed / (2.0 * COMFORT_DECEL) + LEADER_MARGIN)
+            10.0, ego.speed * ego.speed / (2.0 * self.limits.comfortDecel)
+            + self.limits.leaderMargin)
 
         # NOT a ceiling from the bench. Capping the agent's target with the
         # bench's MEASURED speed latches: the bench starts at zero, so the
@@ -472,7 +505,7 @@ class Controller:
         # THAT is what CARLA is told to hold. Next tick the agent reads back
         # ego.speed, so the bench is in the loop rather than beside it.
         if self.benchInLoop:
-            vRef = self.vRef = self.throughCell(vRef)
+            vRef = self.vRef = self.exchange(vRef)
 
         # THE COMMAND, in CARLA's own two shapes. fixs.carla relays them onto
         # the ego record and converts the normalised steer to the wire's radians
@@ -529,9 +562,10 @@ class Controller:
         if dist < 0.0 or colour not in (_RED, _YELLOW, _RED_YELLOW):
             return _NO_LIMIT
         v = float(getattr(ego, 'speed', 0.0) or 0.0)
-        if colour == _YELLOW and dist < v * v / (2.0 * COMMIT_DECEL):
+        lim = self.limits
+        if colour == _YELLOW and dist < v * v / (2.0 * lim.commitDecel):
             return _NO_LIMIT
-        return _stopBy(dist - STOP_MARGIN)
+        return _stopBy(dist - lim.stopMargin, lim.comfortDecel)
 
     def _leaderCeiling(self, ego):
         """The speed the vehicle ahead allows.
@@ -558,7 +592,8 @@ class Controller:
             return 0.0
         lead = max(0.0, float(getattr(ego, 'precedingVehicleSpeed', 0.0) or 0.0))
         return math.sqrt(lead * lead
-                         + 2.0 * COMFORT_DECEL * max(0.0, gap - LEADER_MARGIN))
+                         + 2.0 * self.limits.comfortDecel
+                         * max(0.0, gap - self.limits.leaderMargin))
 
     def _speedToPedal(self, vTarget, vEgo):
         """(float, float) -> (throttle, brake) that puts CARLA on vTarget.
@@ -626,9 +661,9 @@ class Controller:
             # A miss is a tick the cell did not answer, and the reference went
             # through untouched. Say how many, because a run with many of them
             # did not test what it claims to have tested.
-            print('[driver] cell: %d of %d steps unanswered'
+            print('[driver] exchange: %d of %d steps unanswered'
                   % (self.misses, self.steps), flush=True)
-        print('[agent] %d control steps' % self.steps, flush=True)
+        print('[driver] %d control steps' % self.steps, flush=True)
 
     def _logStep(self, ego, cmd, target, advisory):
         """This application's instrumentation. It records what FIXS supplied
@@ -662,7 +697,7 @@ def driver(exchange=None, **options):
     """(callable) -> class -- the controller the scenario should name.
 
     ``exchange(vref, dt) -> mps`` is yours: a speed goes in, the speed your
-    cell reached comes back. Return None on a tick it could not answer and the
+    dyno reached comes back. Return None on a tick it could not answer and the
     reference passes through untouched; those are counted and reported.
 
     Omit it and nothing is in the loop. For the simulated cell, pass
@@ -692,9 +727,9 @@ def _isEmergencyStop(control, maxBrake):
     return control.throttle <= 1e-6 and control.brake >= maxBrake - 1e-6
 
 
-def _stopBy(metres):
-    """The fastest we may go and still stop in `metres` at COMFORT_DECEL."""
-    return math.sqrt(2.0 * COMFORT_DECEL * max(0.0, metres))
+def _stopBy(metres, decel):
+    """The fastest we may go and still stop in `metres` at `decel`."""
+    return math.sqrt(2.0 * decel * max(0.0, metres))
 
 
 def _col(v):

@@ -16,8 +16,8 @@ sys.path.insert(0, os.path.abspath(
     os.path.join(os.path.dirname(__file__), '..', '..', '..')))
 
 import CommonLib.fixs as fixs                                    # noqa: E402
-from CommonLib.fixs._driver import (Controller, Tuning, driver,  # noqa: E402
-                                    _options)  # noqa: E402
+from CommonLib.fixs._driver import (Controller, Limits, Tuning,  # noqa: E402
+                                    driver, _options)  # noqa: E402
 
 
 _SCENARIO = """
@@ -30,7 +30,7 @@ CarlaSetup: {EnableCosimulation: true, EnablePythonBackend: true}
 
 @pytest.fixture
 def scenario(request):
-    """A yaml on disk, with or without the simulated cell declared."""
+    """A yaml on disk, with or without the simulated dyno declared."""
     with tempfile.NamedTemporaryFile('w', suffix='.yaml', delete=False) as f:
         f.write(_SCENARIO % ('true' if request.param else 'false'))
         path = f.name
@@ -67,7 +67,7 @@ def test_a_non_callable_exchange_is_refused_at_the_call_not_at_the_tick():
 # -- the three cases the seam has to answer ---------------------------------
 
 @pytest.mark.parametrize('scenario', [False], indirect=True)
-def test_no_exchange_means_no_cell(scenario):
+def test_no_exchange_means_nothing_in_the_loop(scenario):
     d = _build(driver())
     assert d.benchInLoop is False
 
@@ -88,11 +88,11 @@ def test_your_function_needs_no_scenario_flag(scenario):
 
 
 @pytest.mark.parametrize('scenario', [True], indirect=True)
-def test_the_simulated_cell_is_passed_in_like_any_other(scenario):
+def test_the_simulated_dyno_is_passed_in_like_any_other(scenario):
     from CommonLib.fixs import xil
     d = _build(driver(xil.exchange))
     assert d.benchInLoop is True
-    assert d.throughCell(10.0) > 0.0        # it answered
+    assert d.exchange(10.0) > 0.0        # it answered
 
 
 def test_the_driver_does_not_import_xil():
@@ -109,14 +109,14 @@ def test_the_driver_does_not_import_xil():
 # -- the rule that matters when hardware misbehaves -------------------------
 
 @pytest.mark.parametrize('scenario', [False], indirect=True)
-def test_a_tick_the_cell_cannot_answer_passes_the_reference_through(scenario):
+def test_a_tick_the_dyno_cannot_answer_passes_the_reference_through(scenario):
     """None back must not become 0 m/s: that would invent a stop."""
     answers = [7.5, None, 7.6]
     d = _build(driver(lambda v, dt: answers.pop(0)))
-    assert d.throughCell(9.0) == 7.5           # the cell answered
-    assert d.throughCell(9.0) == 9.0           # it did not -- the reference stands
+    assert d.exchange(9.0) == 7.5           # the cell answered
+    assert d.exchange(9.0) == 9.0           # it did not -- the reference stands
     assert d.misses == 1
-    assert d.throughCell(9.0) == 7.6
+    assert d.exchange(9.0) == 7.6
     assert d.misses == 1
 
 
@@ -174,7 +174,8 @@ def test_the_run_records_what_drove_it(scenario, tmp_path):
     assert first.startswith('#')
     assert 'shape=pedals' in first
     assert 'kv=0.33' in first
-    assert 'cell=<lambda>' in first
+    assert 'exchange=<lambda>' in first
+    assert 'comfortDecel=2' in first   # the limits are recorded too
 
 
 # -- the law itself, which is pure arithmetic and needs no simulator ---------
@@ -207,3 +208,34 @@ def test_the_gains_reach_the_law():
     """A tuning that cannot move the pedal is a tuning nobody is applying."""
     slow, fast = _pedalLaw(kv=0.01), _pedalLaw(kv=0.9)
     assert fast._speedToPedal(9.0, 4.0)[0] > slow._speedToPedal(9.0, 4.0)[0]
+
+
+# -- the limits, and that they reach the ceilings ---------------------------
+
+def test_limits_reach_the_stopping_ceiling():
+    """A limit that cannot change how early the ego slows is a limit nobody is
+    applying -- the same failure the gains had, caught the same way."""
+    from CommonLib.fixs._driver import Limits, _stopBy
+    gentle, firm = Limits(comfortDecel=1.0), Limits(comfortDecel=4.0)
+    assert _stopBy(50.0, firm.comfortDecel) > _stopBy(50.0, gentle.comfortDecel)
+
+
+def test_limits_are_carried_and_recorded():
+    cls = driver(limits=Limits(comfortDecel=1.5, stopMargin=3.0))
+    obj = cls.__new__(cls)
+    Controller.__init__(obj, {'EgoControllerLog': ''}, 'ego')
+    assert obj.limits.comfortDecel == 1.5
+    assert obj.limits.stopMargin == 3.0
+    assert 'comfortDecel=1.5' in str(obj.limits)
+
+
+def test_a_wrong_type_for_limits_is_refused():
+    with pytest.raises(TypeError):
+        _options({}, {'limits': {'comfortDecel': 1.5}})
+
+
+def test_ideal_speed_tracking_is_settable_like_the_shape_it_pairs_with():
+    """It only bites under shape='speed'; leaving it a bare global while the
+    shape was settable was the inconsistency."""
+    assert _options({}).idealSpeedTracking is True
+    assert _options({}, {'idealSpeedTracking': False}).idealSpeedTracking is False
