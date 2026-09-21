@@ -2,12 +2,15 @@
 
 Copy this next to your application, edit control(), and point the scenario at it:
 
-    EgoActuationSource: embedded
-    EgoController:      apps/<your_app>/my_controller.py
+    EgoSetup:
+      ActuationSource: user
+      Controller:      apps/<your_app>/my_controller.py
 
-Run it as an ordinary FIXS client instead, with no code change, by setting
-EgoActuationSource: external -- the difference is only where it runs, and so how
-often it is called. See CommonLib/VirEnv/IEgoController.py for the full contract.
+Naming Controller is what runs this file IN-PROCESS, once per CarlaTimeStep.
+Leave it unset and ActuationSource: user takes the pedals off the FIXS record at
+the 0.1 s feed instead -- the same file, called less often, which is not
+equivalent and is refused outright on the Python backend. See
+CommonLib/VirEnv/EgoControllerHost.py for the full contract.
 """
 
 

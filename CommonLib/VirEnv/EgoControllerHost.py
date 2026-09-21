@@ -11,8 +11,9 @@ it. There is no base class to inherit, no registry, and no socket::
                 steerAngleDesired=0.10)
 
     # scenario yaml
-    EgoActuationSource: embedded
-    EgoController:      apps/<app>/my_controller.py
+    EgoSetup:
+      ActuationSource: user
+      Controller:      apps/<app>/my_controller.py
 
 
 WHY THIS IS A HOOK AND NOT A CLIENT
@@ -32,8 +33,8 @@ function call.
 The rate is therefore not configurable and never has been: it is a consequence
 of where the controller lives.
 
-    EgoActuationSource: external   own process, over FIXS   -> feed rate
-    EgoActuationSource: embedded   in the bridge            -> CarlaTimeStep
+    ActuationSource: user, no Controller   own process, over FIXS -> feed rate
+    ActuationSource: user +  Controller    in the bridge          -> CarlaTimeStep
 
 Because both deployments write through ``ego.set``, the same file runs either
 way -- which makes "does the fast loop actually change the result?" a one-
