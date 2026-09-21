@@ -24,6 +24,12 @@
     <ClCompile Include="..\..\CommonLib\SocketHelper.cpp" />
     <ClCompile Include="..\..\CommonLib\TrafficHelper.cpp" />
     <ClCompile Include="..\..\CommonLib\XilGuard.cpp" />
+    <!-- #356: the relayed-TraCI executor, and SUMO's byte buffer. storage.cpp is
+         COMPILED IN rather than linked: libtracicpp.dll exports exactly one
+         tcpip::Storage member (size()), so the type cannot cross the DLL boundary
+         by declaration alone. Staged into CommonLib/libsumo by the native-deps zip. -->
+    <ClCompile Include="..\..\CommonLib\TraciRelay.cpp" />
+    <ClCompile Include="..\..\CommonLib\libsumo\foreign\tcpip\storage.cpp" />
     <ClCompile Include="..\..\CommonLib\VissimDSProxyHelper.cpp" />
     <ClCompile Include="DSProxyMode.cpp" />
     <ClCompile Include="mainTrafficLayer.cpp" />
@@ -34,6 +40,8 @@
     <ClInclude Include="..\..\CommonLib\SocketHelper.h" />
     <ClInclude Include="..\..\CommonLib\TrafficHelper.h" />
     <ClInclude Include="..\..\CommonLib\VehDataMsgDefs.h" />
+    <ClInclude Include="..\..\CommonLib\MsgTypes.h" />
+    <ClInclude Include="..\..\CommonLib\TraciRelay.h" />
     <ClInclude Include="..\..\CommonLib\RealSimVersion.h" />
     <ClInclude Include="..\..\CommonLib\VissimDSProxyHelper.h" />
     <ClInclude Include="DSProxyMode.h" />

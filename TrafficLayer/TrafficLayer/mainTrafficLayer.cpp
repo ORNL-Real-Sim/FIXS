@@ -8,6 +8,7 @@
 
 #include "TrafficHelper.h"
 #include "DSProxyMode.h"
+#include "TraciRelay.h"
 
 #include "RealSimVersion.h"
 
@@ -588,6 +589,31 @@ int main(int argc, char* argv[]) {
 		printf("Traffic Simulator: SUMO\n");
 		// Configure SUMO library path for runtime DLL loading
 		ConfigureSumoLibraryPath(Config_c);
+	}
+
+	// #356: relayed TraCI. Installing the handler is the whole wiring -- SocketHelper
+	// answers a FIXS_MSG_TRACI_REQUEST record inside its blocking wait for a client's
+	// tick answer, and with no handler installed it refuses every request. So the
+	// checks below are made once, here, instead of per request.
+	if (Config_c.SumoSetup.EnableTraciRelay) {
+		if (ENABLE_VISSIM) {
+			printf("ERROR: SumoSetup.EnableTraciRelay is true, but the selected traffic\n");
+			printf("       simulator is VISSIM. The relay executes TraCI commands on the\n");
+			printf("       libtraci connection TrafficLayer owns, and there is no such\n");
+			printf("       connection under VISSIM.\n");
+			exit(-1);
+		}
+		if (!fixs::traciRelayAvailable()) {
+			printf("ERROR: SumoSetup.EnableTraciRelay is true, but this TrafficLayer was\n");
+			printf("       built with ENABLE_LIBSUMO. libsumo runs SUMO in-process: there\n");
+			printf("       is no TraCI connection and no generic executor to relay onto.\n");
+			printf("       Rebuild with libtraci, or set EnableTraciRelay: false.\n");
+			exit(-1);
+		}
+		Sock_c.TraciRelayHandler = [](const TraciRequest_t& req) {
+			return fixs::executeTraci(req.cmdID, req.varID, req.objID, req.payload);
+		};
+		printf("TraCI relay: enabled (clients may use 'import fixs.traci as traci')\n");
 	}
 	if (Config_c.SimulationSetup.EnableVerboseLog) {
 		ENABLE_VERBOSE = true;

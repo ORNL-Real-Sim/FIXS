@@ -7,9 +7,17 @@ import struct
 
 
 class MessageType:
+    """Record types on the FIXS wire; the C++ side of this table is MsgTypes.h.
+
+    1-63 are DATA (pushed one way, an unknown one may be skipped); 128+ are RPC
+    (the sender blocks for an answer, so an unknown one must be answered, not
+    dropped). See #356.
+    """
     vehicle_data = 1
     traffic_light_data = 2
     detector_data = 3
+    traci_request = 128     # client -> TrafficLayer, relayed TraCI command
+    traci_response = 129    # TrafficLayer -> client, its reply
 
 #   VehicleMessageField: [id, type, vehicleClass, speed, acceleration, positionX, positionY, positionZ, heading,
 #     color, linkId, laneId, distanceTravel, speedDesired, grade, length, width, height]

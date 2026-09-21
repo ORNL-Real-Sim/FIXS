@@ -753,3 +753,184 @@ void MsgHelper::depackDetectorData(char* buffer, int msgSize, TlsDetector_t* Det
 
 	*DetectorData = make_tuple(signalId, signalName, DetAll_v);
 }
+
+
+// ===========================================================================
+// #356: relayed TraCI RPC records
+// ===========================================================================
+// Same conventions as every record above: little-endian, contiguous, no padding,
+// record size written last into the two bytes reserved first, and a NULL buffer
+// means "measure, don't write" so the size pass and the pack pass share one
+// traversal.
+
+void MsgHelper::packTraciRequest(const TraciRequest_t& req, const unsigned char* chunk,
+                                 int chunkLen, bool more, char* buffer, int* iByte) {
+	/*
+	MESSAGE STRUCTURE:
+
+	2 bytes, uint16_t, record length
+	1 byte,  uint8_t,  data identifier (FIXS_MSG_TRACI_REQUEST)
+	1 byte,  uint8_t,  TraCI command id
+	2 bytes, int16_t,  TraCI variable id (-1: none, and no object id on the wire)
+	1 byte,  uint8_t,  length of the object id string
+	X bytes, string,   object id (max 255 bytes -- TraCI ids are short)
+	1 byte,  uint8_t,  more (1: another chunk of this command follows in this message)
+	4 bytes, uint32_t, length of this payload chunk
+	X bytes, bytes,    payload chunk (opaque)
+	*/
+
+	uint8_t tempUint8;
+	uint16_t tempUint16;
+	int16_t tempInt16;
+	uint32_t tempUint32;
+
+	int initByte = *iByte;
+
+	// SKIP RECORD LENGTH UNTIL THE REST OF THE RECORD IS FILLED
+	*iByte = *iByte + sizeof(uint16_t);
+
+	tempUint8 = FIXS_MSG_TRACI_REQUEST;
+	if (buffer) memcpy(buffer + *iByte, (char*)&tempUint8, sizeof(uint8_t));
+	*iByte = *iByte + sizeof(uint8_t);
+
+	tempUint8 = req.cmdID;
+	if (buffer) memcpy(buffer + *iByte, (char*)&tempUint8, sizeof(uint8_t));
+	*iByte = *iByte + sizeof(uint8_t);
+
+	tempInt16 = req.varID;
+	if (buffer) memcpy(buffer + *iByte, (char*)&tempInt16, sizeof(int16_t));
+	*iByte = *iByte + sizeof(int16_t);
+
+	tempUint8 = (uint8_t)req.objID.size();
+	if (buffer) memcpy(buffer + *iByte, (char*)&tempUint8, sizeof(uint8_t));
+	*iByte = *iByte + sizeof(uint8_t);
+	if (buffer) memcpy(buffer + *iByte, (char*)req.objID.c_str(), tempUint8);
+	*iByte = *iByte + tempUint8;
+
+	tempUint8 = more ? 1 : 0;
+	if (buffer) memcpy(buffer + *iByte, (char*)&tempUint8, sizeof(uint8_t));
+	*iByte = *iByte + sizeof(uint8_t);
+
+	tempUint32 = (uint32_t)chunkLen;
+	if (buffer) memcpy(buffer + *iByte, (char*)&tempUint32, sizeof(uint32_t));
+	*iByte = *iByte + sizeof(uint32_t);
+	if (buffer && chunkLen > 0) memcpy(buffer + *iByte, (char*)chunk, chunkLen);
+	*iByte = *iByte + chunkLen;
+
+	tempUint16 = (uint16_t)(*iByte - initByte);
+	if (buffer) memcpy(buffer + initByte, (char*)&tempUint16, sizeof(tempUint16));
+}
+
+int MsgHelper::traciRequestRecordSize(const TraciRequest_t& req, int chunkLen) {
+	int iByte = 0;
+	packTraciRequest(req, nullptr, chunkLen, false, nullptr, &iByte);
+	return iByte;
+}
+
+// A truncated or oversized field means
+// the stream is desynced; the caller (recvData) has already bounded bodySize against
+// MAX_RECORD_SIZE, so a short chunk is simply not appended.
+void MsgHelper::depackTraciRequest(char* buffer, int bodySize, TraciRequest_t* req, bool* more) {
+	// bodySize excludes the record header (size + type), exactly as the other
+	// depack*() functions receive it.
+	int iByte = 0;
+	uint8_t tempUint8;
+	int16_t tempInt16;
+	uint32_t tempUint32;
+
+	memcpy(&tempUint8, buffer + iByte, sizeof(uint8_t));
+	iByte += sizeof(uint8_t);
+	req->cmdID = tempUint8;
+
+	memcpy(&tempInt16, buffer + iByte, sizeof(int16_t));
+	iByte += sizeof(int16_t);
+	req->varID = tempInt16;
+
+	memcpy(&tempUint8, buffer + iByte, sizeof(uint8_t));
+	iByte += sizeof(uint8_t);
+	req->objID.assign(buffer + iByte, tempUint8);
+	iByte += tempUint8;
+
+	memcpy(&tempUint8, buffer + iByte, sizeof(uint8_t));
+	iByte += sizeof(uint8_t);
+	*more = (tempUint8 != 0);
+
+	memcpy(&tempUint32, buffer + iByte, sizeof(uint32_t));
+	iByte += sizeof(uint32_t);
+	const int chunkLen = (int)tempUint32;
+	if (chunkLen > 0 && iByte + chunkLen <= bodySize) {
+		const unsigned char* c = (const unsigned char*)(buffer + iByte);
+		req->payload.insert(req->payload.end(), c, c + chunkLen);
+	}
+}
+
+void MsgHelper::packTraciResponse(uint8_t status, const unsigned char* chunk, int chunkLen,
+                                  bool more, char* buffer, int* iByte) {
+	/*
+	MESSAGE STRUCTURE:
+
+	2 bytes, uint16_t, record length
+	1 byte,  uint8_t,  data identifier (FIXS_MSG_TRACI_RESPONSE)
+	1 byte,  uint8_t,  status (FixsTraciStatus)
+	1 byte,  uint8_t,  more (1: another chunk of this reply follows in this message)
+	4 bytes, uint32_t, length of this chunk
+	X bytes, bytes,    chunk -- the reply when status is OK, the message text otherwise
+	*/
+
+	uint8_t tempUint8;
+	uint16_t tempUint16;
+	uint32_t tempUint32;
+
+	int initByte = *iByte;
+	*iByte = *iByte + sizeof(uint16_t);
+
+	tempUint8 = FIXS_MSG_TRACI_RESPONSE;
+	if (buffer) memcpy(buffer + *iByte, (char*)&tempUint8, sizeof(uint8_t));
+	*iByte = *iByte + sizeof(uint8_t);
+
+	tempUint8 = status;
+	if (buffer) memcpy(buffer + *iByte, (char*)&tempUint8, sizeof(uint8_t));
+	*iByte = *iByte + sizeof(uint8_t);
+
+	tempUint8 = more ? 1 : 0;
+	if (buffer) memcpy(buffer + *iByte, (char*)&tempUint8, sizeof(uint8_t));
+	*iByte = *iByte + sizeof(uint8_t);
+
+	tempUint32 = (uint32_t)chunkLen;
+	if (buffer) memcpy(buffer + *iByte, (char*)&tempUint32, sizeof(uint32_t));
+	*iByte = *iByte + sizeof(uint32_t);
+	if (buffer && chunkLen > 0) memcpy(buffer + *iByte, (char*)chunk, chunkLen);
+	*iByte = *iByte + chunkLen;
+
+	tempUint16 = (uint16_t)(*iByte - initByte);
+	if (buffer) memcpy(buffer + initByte, (char*)&tempUint16, sizeof(tempUint16));
+}
+
+int MsgHelper::traciResponseRecordSize(int chunkLen) {
+	int iByte = 0;
+	packTraciResponse(0, nullptr, chunkLen, false, nullptr, &iByte);
+	return iByte;
+}
+
+void MsgHelper::depackTraciResponse(char* buffer, int bodySize, uint8_t* status,
+                                    std::vector<unsigned char>* chunk, bool* more) {
+	int iByte = 0;
+	uint8_t tempUint8;
+	uint32_t tempUint32;
+
+	memcpy(&tempUint8, buffer + iByte, sizeof(uint8_t));
+	iByte += sizeof(uint8_t);
+	*status = tempUint8;
+
+	memcpy(&tempUint8, buffer + iByte, sizeof(uint8_t));
+	iByte += sizeof(uint8_t);
+	*more = (tempUint8 != 0);
+
+	memcpy(&tempUint32, buffer + iByte, sizeof(uint32_t));
+	iByte += sizeof(uint32_t);
+	const int chunkLen = (int)tempUint32;
+	if (chunkLen > 0 && iByte + chunkLen <= bodySize) {
+		const unsigned char* c = (const unsigned char*)(buffer + iByte);
+		chunk->insert(chunk->end(), c, c + chunkLen);
+	}
+}

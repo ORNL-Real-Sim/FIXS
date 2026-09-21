@@ -61,6 +61,14 @@ class ConfigHelper:
         # it to SUMO as --num-clients; without it parsed here the key was read back
         # as None on the python side, so the yaml value silently stayed 1.
         self.Sumo_setup["NumClients"] = self.parserInteger(sumo_node, "NumClients", 1)
+        # #356: what fixs.traci checks an adopter's traci.start(['sumo', '-c', ...])
+        # against. Relative paths resolve against the config's own directory, as
+        # ConfigHelper.cpp does, so the two ends compare the same thing.
+        sumo_cfg = sumo_node.get("SumoConfigFile", "")
+        if sumo_cfg and not os.path.isabs(sumo_cfg):
+            sumo_cfg = os.path.join(os.path.dirname(os.path.abspath(configName)), sumo_cfg)
+        self.Sumo_setup["SumoConfigFile"] = sumo_cfg
+        self.Sumo_setup["EnableTraciRelay"] = self.parserFlag(sumo_node, "EnableTraciRelay", False)
         # Application Setup
         app_node = config.get("ApplicationSetup", {})
         self.application_setup["EnableApplicationLayer"] = self.parserFlag(app_node, "EnableApplicationLayer", False)

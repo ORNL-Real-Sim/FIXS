@@ -922,6 +922,17 @@ int SocketHelper::recvData(int sock, int* simState, float* simTime, MsgHelper& M
 
 	int recvSize;
 
+	// #356: normally this reads ONE message and returns. A peer may also send relayed
+	// TraCI requests while it holds the tick -- each is its own message, and each must
+	// be answered here, because the peer is blocked on the reply and cannot send its
+	// tick answer until it has one. So: read a message; if it was a relay request,
+	// answer it and read the next; return only on an ordinary data message.
+	//
+	// That window is exactly TrafficLayer's blocking wait for a client's tick answer,
+	// which is also the window in which that client's controller runs. No second
+	// socket, no thread, and the lockstep contract is unchanged.
+	for (;;) {
+
 	if ((recvSize = recvExact(sock, recvBuffer, Msg_c.msgHeaderSize)) == SOCKET_ERROR) {
 #ifdef WIN32
 		if (WSAGetLastError() == WSAEINTR) {
@@ -951,6 +962,13 @@ int SocketHelper::recvData(int sock, int* simState, float* simTime, MsgHelper& M
 	}
 
 	uint32_t msgProcessed = Msg_c.msgHeaderSize;
+#ifndef RS_DSPACE
+	// #356: relay requests found in THIS message. A command may be chunked across
+	// several records (FIXS_TRACI_REQ_CHUNK); `more` flags that another follows, and
+	// the reassembled command is appended here once the last one arrives.
+	std::vector<TraciRequest_t> relayRequests;
+	TraciRequest_t relayPending;
+#endif
 	uint8_t simStateRecv;
 	uint32_t totalMsgSizeRecv;
 	float simTimeRecv;
@@ -1037,13 +1055,125 @@ int SocketHelper::recvData(int sock, int* simState, float* simTime, MsgHelper& M
 			Msg_c.depackDetectorData(recvEachDataBuf, recvSize, &iDetData);
 			Msg_c.DetDataRecv_um[get<1>(iDetData)] = iDetData;
 			break;
+#ifndef RS_DSPACE
+		case FIXS_MSG_TRACI_REQUEST: {
+			bool more = false;
+			Msg_c.depackTraciRequest(recvEachDataBuf, bodySize, &relayPending, &more);
+			if (!more) {
+				relayRequests.push_back(relayPending);
+				relayPending = TraciRequest_t();
+			}
+			break;
+		}
+#endif
+		default:
+			// Framing survives an unknown record -- msgProcessed advances by the
+			// record's own size -- so a DATA record from a newer peer is simply
+			// skipped. An RPC record must NOT be: the peer is blocked on a reply it
+			// will never get, and the co-simulation would hang with no explanation.
+			// Answer 'unsupported' instead. (#356)
+			if (iMsgTypeRecv >= FIXS_MSG_RPC_FIRST) {
+#ifndef RS_DSPACE
+				fixs::TraciResult unsupported;
+				unsupported.status = FIXS_TRACI_REFUSED;
+				const std::string why =
+					"this TrafficLayer does not support RPC record type " +
+					std::to_string((int)iMsgTypeRecv) + ". Check that both ends are "
+					"the same FIXS version.";
+				unsupported.body.assign(why.begin(), why.end());
+				sendTraciResponse(sock, simStateRecv, simTimeRecv, unsupported, Msg_c);
+#endif
+			}
+			else if (!warnedUnknownRecord) {
+				warnedUnknownRecord = true;
+				printf("FIXS #356: ignoring unknown data record type %d (a newer peer?)\n",
+				       (int)iMsgTypeRecv);
+			}
+			break;
 		}
 
 		msgProcessed += iMsgSizeRecv;
 	}
 
+#ifndef RS_DSPACE
+	// #356: this message was relayed TraCI, not the tick answer. Execute, reply on
+	// this same socket, and go back for the next message. A request that arrives with
+	// no handler installed -- a VISSIM run, EnableTraciRelay off, or a peer that
+	// should not have asked -- is refused with a message rather than ignored.
+	if (!relayRequests.empty()) {
+		for (size_t iR = 0; iR < relayRequests.size(); iR++) {
+			fixs::TraciResult result;
+			if (TraciRelayHandler) {
+				result = TraciRelayHandler(relayRequests[iR]);
+			}
+			else {
+				const std::string why =
+					"this TrafficLayer is not relaying TraCI. The relay is SUMO-only "
+					"and off by default: set SumoSetup.EnableTraciRelay: true in "
+					"config.yaml.";
+				result.status = FIXS_TRACI_REFUSED;
+				result.body.assign(why.begin(), why.end());
+			}
+			if (sendTraciResponse(sock, simStateRecv, simTimeRecv, result, Msg_c) < 0) {
+				return -1;
+			}
+		}
+		continue;
+	}
+#endif
+
+	return 0;
+
+	}  // for (;;) -- #356: only a non-relay message leaves this loop
+}
+
+#ifndef RS_DSPACE
+// #356: one reply message -- the 9-byte header, then as many FIXS_MSG_TRACI_RESPONSE
+// records as the body needs. The body is chunked because MAX_RECORD_SIZE (8192) is a
+// wire contract shared with dSPACE and cannot be raised for this: lane.getIDList() on
+// a real network is larger than that. The chunks travel in ONE message and the client
+// concatenates them in wire order, so no sequence number is needed.
+//
+// simState / simTime echo the request's own header. The client ignores them, but
+// echoing beats inventing: simState 0 means shutdown to a FIXS client.
+int SocketHelper::sendTraciResponse(int sock, uint8_t simStateSend, float simTimeSend,
+                                    const fixs::TraciResult& result, MsgHelper& Msg_c) {
+	const int bodySize = (int)result.body.size();
+	const int nRecords = bodySize <= FIXS_TRACI_RSP_CHUNK
+	                     ? 1 : (bodySize + FIXS_TRACI_RSP_CHUNK - 1) / FIXS_TRACI_RSP_CHUNK;
+
+	uint32_t totalMsgSize = (uint32_t)Msg_c.msgHeaderSize;
+	for (int iC = 0; iC < nRecords; iC++) {
+		const int chunkLen = (iC == nRecords - 1) ? bodySize - iC * FIXS_TRACI_RSP_CHUNK
+		                                          : FIXS_TRACI_RSP_CHUNK;
+		totalMsgSize += (uint32_t)Msg_c.traciResponseRecordSize(chunkLen);
+	}
+
+	int txLen = 0;
+	Msg_c.packHeader(simStateSend, simTimeSend, totalMsgSize, txBuf, &txLen);
+
+	for (int iC = 0; iC < nRecords; iC++) {
+		const int offset = iC * FIXS_TRACI_RSP_CHUNK;
+		const int chunkLen = (iC == nRecords - 1) ? bodySize - offset : FIXS_TRACI_RSP_CHUNK;
+		if (txLen + Msg_c.traciResponseRecordSize(chunkLen) > TX_CHUNK_SIZE) {
+			if (sendExact(sock, txBuf, txLen) < 0) {
+				fprintf(stderr, "FIXS #356: send() failed mid TraCI response\n");
+				return -1;
+			}
+			txLen = 0;
+		}
+		Msg_c.packTraciResponse(result.status,
+		                        bodySize > 0 ? result.body.data() + offset : nullptr,
+		                        chunkLen, iC != nRecords - 1, txBuf, &txLen);
+	}
+
+	if (txLen > 0 && sendExact(sock, txBuf, txLen) < 0) {
+		fprintf(stderr, "FIXS #356: send() failed on TraCI response\n");
+		return -1;
+	}
 	return 0;
 }
+#endif
 
 
 

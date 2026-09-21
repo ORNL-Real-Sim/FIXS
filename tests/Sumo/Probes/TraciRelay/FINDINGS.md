@@ -1,5 +1,13 @@
 # #356 probe: relaying TraCI over TrafficLayer's existing connection
 
+> **This probe has been acted on.** The relay it measured is implemented in the same
+> PR: `CommonLib/TraciRelay.cpp` (the executor), `CommonLib/fixs/traci.py` (the shim),
+> and record types 128/129 in `CommonLib/MsgTypes.h`. Tests:
+> `tests/Python/unit/test_traci_relay.py` (no simulator) and `tests/Python/TraciRelay/`
+> (live co-simulation). This probe is kept because it is the evidence, and because the
+> next person to touch this should be able to re-run it rather than re-derive it —
+> where a number is quoted in the implementation's comments, it was measured here.
+
 **Verdict: the mechanism works.** Every open question in #356 that could be settled
 without building FIXS transport has been settled by running code, not reading it.
 A request produced by SUMO's own Python `traci` at `Connection._sendCmd` was executed

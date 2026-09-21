@@ -393,7 +393,7 @@ try {
         Write-Host "  - $dllCount runtime DLLs ($("{0:N2}" -f $totalDllSize) MB total)" -ForegroundColor Gray
     }
 
-    Write-Host "  - 24 header files from libsumo API" -ForegroundColor Gray
+    Write-Host "  - 24 header files from libsumo API, plus foreign/tcpip/storage.{h,cpp} and a config.h shim (#356)" -ForegroundColor Gray
 
     Write-Host "`nDestination:" -ForegroundColor Yellow
     $destDir = Join-Path $PSScriptRoot "..\CommonLib\libsumo"
@@ -528,6 +528,46 @@ try {
         "TraCIConstants.h",
         "TraCIDefs.h"
     )
+
+    # #356: the TraCI relay calls libtraci's generic executor,
+    #   Connection::doCommand(int, int, const string&, tcpip::Storage*, int)
+    # whose payload and reply are tcpip::Storage. Of libtracicpp.dll's exports exactly
+    # ONE is a Storage member (size()), so the type cannot be used across the DLL
+    # boundary by declaration alone -- storage.cpp is COMPILED INTO TrafficLayer. These
+    # live under src/foreign/, not src/libsumo/, and the foreign/tcpip/ subpath must be
+    # preserved because the already-shipped StorageHelper.h and Subscription.h include
+    # it as <foreign/tcpip/storage.h>.
+    $foreignFiles = @("storage.h", "storage.cpp")
+    $foreignSrc   = Join-Path $sumoDir "srcoreign	cpip"
+    $foreignDest  = Join-Path $destDir "foreign	cpip"
+    New-Item -ItemType Directory -Force -Path $foreignDest | Out-Null
+    foreach ($file in $foreignFiles) {
+        $sourceFile = Join-Path $foreignSrc $file
+        Write-Host "  Copying foreign/tcpip/$file..." -NoNewline
+        if (Test-Path $sourceFile) {
+            Copy-Item -Path $sourceFile -Destination (Join-Path $foreignDest $file) -Force
+            Write-Host " OK" -ForegroundColor Green
+            $successCount++
+        } else {
+            Write-Host " NOT FOUND" -ForegroundColor Red
+            Write-Host "    Expected at: $sourceFile" -ForegroundColor Yellow
+            $failCount++
+        }
+    }
+
+    # Those two include <config.h>, which is generated into SUMO's own build tree and
+    # is not part of any release. None of the macros it defines are read by that
+    # translation unit, so an empty file is the whole requirement. Checked before
+    # adding it: nothing else on TrafficLayer's include path includes <config.h>, so
+    # this cannot shadow another library's.
+    $configShim = Join-Path $destDir "config.h"
+    Write-Host "  Writing config.h shim..." -NoNewline
+    Set-Content -Path $configShim -Encoding ascii -Value @(
+        "/* FIXS (#356): SUMO headers include <config.h> from its build tree. The relay needs",
+        "   foreign/tcpip/storage.{h,cpp}, which include it; none of the macros it would define",
+        "   are used by that translation unit, so an empty file is the whole requirement.",
+        "   Staged by scripts/build_libsumo.ps1 and shipped in the native-deps zip. */")
+    Write-Host " OK" -ForegroundColor Green
 
     foreach ($file in $headerFiles) {
         $sourceFile = Join-Path $sumoSrcLibsumoDir $file
