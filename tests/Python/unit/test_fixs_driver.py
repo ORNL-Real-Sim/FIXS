@@ -294,3 +294,36 @@ def test_two_drivers_in_one_file_is_refused(tmp_path):
     with pytest.raises(ControllerError) as e:
         loadController(p)
     assert 'twice' in str(e.value) or '2 times' in str(e.value)
+
+
+# -- the shipped templates ---------------------------------------------------
+
+def _template(name):
+    return os.path.join(os.path.dirname(__file__), '..', '..', '..',
+                        'Carla', 'VirEnv', 'templates', name)
+
+
+@pytest.mark.parametrize('scenario', [True], indirect=True)
+def test_the_driver_template_loads(scenario):
+    """Shipped example code that is never run is how the last one rotted: it
+    pointed at a file that does not exist and used pre-EgoSetup yaml keys."""
+    from CommonLib.VirEnv.EgoControllerHost import loadController
+    lc = loadController(_template('driver_template.py'))
+    assert callable(getattr(lc._obj, 'control', None))
+    assert lc._obj._EXCHANGE.__name__ == 'exchange'
+
+
+def test_the_controller_template_loads():
+    from CommonLib.VirEnv.EgoControllerHost import loadController
+    lc = loadController(_template('controller_template.py'))
+    assert callable(lc._obj)
+
+
+def test_the_templates_name_keys_that_exist():
+    """EgoActuationSource / EgoController were the old spelling, and
+    IEgoController.py does not exist."""
+    for name in ('controller_template.py', 'driver_template.py'):
+        src = io.open(_template(name), encoding='utf-8').read()
+        assert 'EgoActuationSource' not in src, name
+        assert 'IEgoController' not in src, name
+        assert 'EgoSetup' in src, name

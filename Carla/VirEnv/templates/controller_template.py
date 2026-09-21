@@ -1,25 +1,30 @@
-"""A FIXS ego controller, in the smallest form that works.
+"""Write your own ego controller. The smallest form that works.
 
-Copy this next to your application, edit control(), and point the scenario at it:
+Copy this next to your application and point the scenario at it::
 
-    EgoActuationSource: embedded
-    EgoController:      apps/<your_app>/my_controller.py
+    EgoSetup:
+      Dynamics: virenv            # the virtual environment moves the ego
+      ActuationSource: user       # a controller produces the pedals and steer
+      Controller: apps/<your_app>/my_controller.py
 
-Run it as an ordinary FIXS client instead, with no code change, by setting
-EgoActuationSource: external -- the difference is only where it runs, and so how
-often it is called. See CommonLib/VirEnv/IEgoController.py for the full contract.
+FIXS imports that file, looks for a module-level ``Controller`` (or a
+``control`` function), builds it once with ``(config, egoId)``, and calls
+``control(ego, dt)`` every step. Those two signatures are the whole contract.
+The scenario can name the attribute instead -- ``my_controller.py:Whatever`` --
+and then the name here does not matter either.
+
+DO YOU NEED TO WRITE ONE? FIXS ships a working driver: the eco advisory, the
+signal and leader ceilings, a speed-to-pedal law and both command shapes,
+with one function for your dynamometer. See ``driver_template.py``. Write your
+own when you want control logic FIXS does not have -- not to get an ego
+moving.
 """
 
 
 def setup(config, egoId):
     """Optional. Called once, before the run. Whatever you return comes back as
     the third argument to control()."""
-    import fixs.xil
-    return {"route": config.get("EgoRoutePoints", []),
-            # None unless the SCENARIO says a bench is in the loop. The
-            # simulated cell is real working code, not a stub -- a run with it
-            # is a run with a vehicle that has mass and a torque delay.
-            "dyno": fixs.xil.dyno() if fixs.xil.enabled() else None}
+    return {"route": config.get("EgoRoutePoints", [])}
 
 
 def control(ego, dt, state=None):
@@ -35,36 +40,7 @@ def control(ego, dt, state=None):
     """
     target = ego.speedDesired if ego.speedDesired > 0.01 else 8.33
 
-    # --- a dynamometer, when the scenario says so --------------------------
-    # AFTER every decision you make, BEFORE you command anything: you decide a
-    # speed, the cell says what a real vehicle reached, and THAT is what you
-    # then drive to. Next step you read ego.speed back, so the cell is in the
-    # loop rather than beside it.
-    dyno = (state or {}).get("dyno")
-    if dyno is not None:
-        target = dyno.exchange(target, dt)
-
-    # FOR A REAL CELL: call it. Right here, in place of the two lines above.
-    #
-    #     reached = my_cell.send_and_read(target)   # your code, your shape
-    #     target = reached
-    #
-    # There is no interface to implement and nothing to register. This is your
-    # controller; FIXS calls control() and reads what you write onto `ego`.
-    # `exchange` above is simply the method the SIMULATED cell happens to have
-    # -- match it only if you want to swap the two without touching this line.
-    #
-    # What FIXS knows about cells is the placement above, not how to reach one:
-    # your cell answers AFTER you decide and BEFORE you command, and the loop
-    # closes next step when you read ego.speed back.
-    #
-    # Three things bite, whatever you write. It runs every step (20 Hz at
-    # CarlaTimeStep 0.05), so it MUST NOT BLOCK -- send, then take the newest
-    # answer that already arrived. When none has, use the reference you already
-    # had: it is the only value that cannot invent motion. And count that,
-    # because a run ending with many of them did not test what it claims to.
-
-    # --- shape 1: pedals + steer. You close the loop. -----------------------
+    # --- shape 1: pedals + steer. You close the speed loop. -----------------
     error = target - ego.speed
     ego.set(acceleratorPedalDesired=max(0.0, min(0.75, 0.25 * error + 0.15)),
             brakePedalDesired=max(0.0, min(0.30, -0.30 * error)),
@@ -76,10 +52,11 @@ def control(ego, dt, state=None):
     #
     # ego.set(speedDesired=target, steerAngleDesired=0.0)
 
+    # A DYNAMOMETER, if you have one, goes between the two: decide a speed,
+    # ask the cell what a real vehicle reached, drive to THAT. How you reach it
+    # is yours -- FIXS has no interface for it. driver_template.py shows the
+    # placement and the three things that bite.
+
 
 def shutdown(state=None):
     """Optional. Called once, after the run."""
-    dyno = (state or {}).get("dyno")
-    if dyno is not None:
-        print("dyno: %d exchanges went unanswered" % dyno.misses)
-        dyno.close()
