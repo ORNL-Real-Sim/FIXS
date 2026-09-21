@@ -188,6 +188,33 @@ class LoadedController:
         return f'<LoadedController {self.spec}>'
 
 
+def _driverMark():
+    """Where fixs.driver()'s registry stands, or None if there is no driver.
+
+    Swallows everything: a FIXS build without the driver, or one whose import
+    failed for its own reasons, must still load a hand-written controller.
+    """
+    try:
+        from CommonLib.fixs import _driver
+        return _driver.mark()
+    except Exception:
+        return None
+
+
+def _driverBuilt(mark, where):
+    """What fixs.driver() built while `where` was importing."""
+    if mark is None:
+        return None
+    from CommonLib.fixs import _driver
+    made = _driver.builtSince(mark)
+    if len(made) > 1:
+        raise ControllerError(
+            f'EgoController: {where} calls fixs.driver() {len(made)} times. '
+            f'FIXS drives the ego with one thing -- name the one you mean '
+            f'(EgoController: {where}:TheOneIMeant).')
+    return made[0] if made else None
+
+
 def _importFromPath(path):
     name = os.path.splitext(os.path.basename(path))[0]
     spec = importlib.util.spec_from_file_location(name, path)
@@ -284,6 +311,7 @@ def loadController(spec, appRoot=None):
     argv = ('--' + rest).split() if sep else []
     spec = spec.strip()
     _letControllerImportFixs()
+    driverMark = _driverMark()      # before the module runs
 
     modPart, sep, attr = spec.rpartition(':')
     # A Windows drive letter is not a separator: 'C:/x/y.py' has no attribute.
@@ -314,13 +342,19 @@ def loadController(spec, appRoot=None):
             raise ControllerError(f'EgoController: {where} has no {attr!r}')
         found = attr
     else:
-        found = next((n for n in ENTRY_POINTS if hasattr(module, n)), None)
+        # A driver built by fixs.driver() says so itself, so the name the
+        # user gave it -- or did not give it -- is theirs. Asked before the
+        # name scan, which stays for controllers written from scratch.
+        obj = _driverBuilt(driverMark, where)
+        found = ('fixs.driver()' if obj is not None else
+                 next((n for n in ENTRY_POINTS if hasattr(module, n)), None))
+        if found is not None and obj is None:
+            obj = getattr(module, found)
         if found is None:
             raise ControllerError(
                 f'EgoController: {where} defines none of {", ".join(ENTRY_POINTS)}.\n'
                 f'  Define control(ego, dt), or a class Controller with '
                 f'__init__(config, egoId) and control(ego, dt).')
-        obj = getattr(module, found)
 
     isClass = isinstance(obj, type)
     if isClass:

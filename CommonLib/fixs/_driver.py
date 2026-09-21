@@ -64,6 +64,7 @@ from __future__ import annotations
 import argparse
 import math
 
+from . import FixsError                 # noqa: E402
 from . import carla as carla            # noqa: E402
 # CARLA's vendored agents: importing the package puts them on sys.path.
 from agents.navigation.behavior_agent import BehaviorAgent   # noqa: E402
@@ -705,17 +706,44 @@ def driver(exchange=None, **options):
 
         Controller = fixs.driver(exchange)
 
-    Returns a CLASS because that is what FIXS's loader expects to find: it
-    constructs it with (config, egoId) and calls control(ego, dt) every step.
+    Returns a CLASS, and ALSO records it here, so the name you give it is
+    yours::
+
+        Driver = fixs.driver(exchange)      # any name
+        fixs.driver(exchange)               # or none at all
+
+    The loader asks :func:`built` before it scans the module for a name. The
+    scenario still says which FILE -- FIXS has nothing to import otherwise --
+    but nothing inside it has to be spelled a particular way.
+
     ``options`` override the module defaults, and the scenario's own
     ``--command-shape`` still wins over both, being nearer the run.
     """
     if exchange is not None and not callable(exchange):
         raise TypeError('fixs.driver(exchange): %r is not callable'
                         % (exchange,))
-    return type('Controller', (Controller,),
-                dict(_EXCHANGE=staticmethod(exchange) if exchange else None,
-                     _OPTIONS=dict(options)))
+    cls = type('Controller', (Controller,),
+               dict(_EXCHANGE=staticmethod(exchange) if exchange else None,
+                    _OPTIONS=dict(options)))
+    _BUILT.append(cls)
+    return cls
+
+
+#: Every class :func:`driver` has built. The loader clears this before it
+#: imports a controller file and reads it after, so "how many" is asked of one
+#: FILE rather than of the process -- a test, or a second controller, may build
+#: as many as it likes.
+_BUILT = []
+
+
+def builtSince(mark):
+    """The drivers built since `mark`, which is what :func:`mark` returned."""
+    return _BUILT[mark:]
+
+
+def mark():
+    """Where the list stands now. Take one before importing a controller."""
+    return len(_BUILT)
 
 
 def _isEmergencyStop(control, maxBrake):

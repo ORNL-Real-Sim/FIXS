@@ -89,10 +89,18 @@ def test_your_function_needs_no_scenario_flag(scenario):
 
 @pytest.mark.parametrize('scenario', [True], indirect=True)
 def test_the_simulated_dyno_is_passed_in_like_any_other(scenario):
+    """The bench is built with its parameters, and the exchange is a function
+    the caller writes -- the same two lines a rig owner replaces."""
     from CommonLib.fixs import xil
-    d = _build(driver(xil.exchange))
+    bench = xil.dyno(vehicle={'mass_kg': 900.0})
+
+    def exchange(vref, dt):
+        return bench.exchange(vref, dt)
+
+    d = _build(driver(exchange))
     assert d.benchInLoop is True
     assert d.exchange(10.0) > 0.0        # it answered
+    assert bench.sim.vehicle.mass_kg == 900.0   # stated in code, not the yaml
 
 
 def test_the_driver_does_not_import_xil():
@@ -239,3 +247,50 @@ def test_ideal_speed_tracking_is_settable_like_the_shape_it_pairs_with():
     shape was settable was the inconsistency."""
     assert _options({}).idealSpeedTracking is True
     assert _options({}, {'idealSpeedTracking': False}).idealSpeedTracking is False
+
+
+# -- the name is the user's ------------------------------------------------
+
+_ANY_NAME = '''
+import sys
+sys.path.insert(0, %r)
+import CommonLib.fixs as fixs
+%s
+'''
+
+
+def _controllerFile(tmp_path, body, name='c.py'):
+    root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+    p = tmp_path / name
+    p.write_text(_ANY_NAME % (root, body))
+    return str(p)
+
+
+def test_the_name_you_give_the_driver_is_yours(tmp_path):
+    """No `Controller =` anywhere: fixs.driver() says what it built."""
+    from CommonLib.VirEnv.EgoControllerHost import loadController
+    for body in ('Driver = fixs.driver()',       # any name
+                 'fixs.driver()',                # or none
+                 'WhateverIWant = fixs.driver()'):
+        lc = loadController(_controllerFile(tmp_path, body, 'c%d.py' % hash(body)))
+        assert callable(getattr(lc._obj, 'control', None))
+
+
+def test_a_hand_written_controller_still_works_by_name(tmp_path):
+    """The name scan stays, for anyone not using fixs.driver()."""
+    from CommonLib.VirEnv.EgoControllerHost import loadController
+    p = _controllerFile(tmp_path, '''
+class Controller:
+    def __init__(self, config, egoId): pass
+    def control(self, ego, dt): pass
+''', 'hand.py')
+    assert loadController(p)._obj.__name__ == 'Controller'
+
+
+def test_two_drivers_in_one_file_is_refused(tmp_path):
+    """Last-wins would run one of two, chosen by statement order."""
+    from CommonLib.VirEnv.EgoControllerHost import loadController, ControllerError
+    p = _controllerFile(tmp_path, 'A = fixs.driver()\nB = fixs.driver()', 'two.py')
+    with pytest.raises(ControllerError) as e:
+        loadController(p)
+    assert 'twice' in str(e.value) or '2 times' in str(e.value)

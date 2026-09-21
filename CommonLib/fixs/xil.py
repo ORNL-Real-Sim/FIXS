@@ -21,35 +21,7 @@ from CommonLib.ConfigHelper import ConfigHelper
 
 from . import FixsError
 
-__all__ = ['enabled', 'dyno', 'exchange']
-
-
-_BENCH = [None]
-
-
-def exchange(vref, dt):
-    """(mps, s) -> mps -- the simulated cell, as a plain function.
-
-    Pass it where a driver wants an exchange::
-
-        Controller = fixs.driver(fixs.xil.exchange)
-
-    and a rig owner passes their own instead. Neither is privileged: this one
-    is a function like any other, so nothing has to go looking for a bench or
-    branch on whether one is configured.
-
-    The cell is opened on the first call, not at import: the scenario is not
-    readable until the bridge has exported it.
-    """
-    if _BENCH[0] is None:
-        bench = dyno()
-        if bench is None:
-            raise FixsError(
-                'fixs.xil.exchange: this scenario declares no bench '
-                '(XilSetup.EnableXil is false), so there is nothing to ask. '
-                'Pass your own exchange, or pass none at all.')
-        _BENCH[0] = bench
-    return _BENCH[0].exchange(vref, dt)
+__all__ = ['enabled', 'dyno']
 
 
 def _scenario(configPath):
@@ -80,7 +52,7 @@ def enabled(configPath=None):
     return bool(_scenario(configPath)['EnableXil'])
 
 
-def dyno(configPath=None):
+def dyno(configPath=None, vehicle=None, dyno=None):
     """The dynamometer this scenario declares, or None when it declares none.
 
     A bench is not a plant that owns the ego. The virtual environment still
@@ -120,8 +92,12 @@ def dyno(configPath=None):
     subs = xil['VehicleSubscription'] or []
     host = (subs[0].get('ip') or ['127.0.0.1'])[0] if subs else '127.0.0.1'
     port = (subs[0].get('port') or [None])[0] if subs else None
+    # Stated in code wins over the yaml: a caller who writes the mass down
+    # is saying what is on the bench, and should not have to edit a scenario
+    # as well to be believed.
     return _Dyno(xil['Transport'], host, port,
-                 vehicle=xil['Vehicle'], dyno=xil['Dyno'])
+                 vehicle=dict(xil['Vehicle'], **(vehicle or {})),
+                 dyno=dict(xil['Dyno'], **(dyno or {})))
 
 
 class _Dyno:
