@@ -52,7 +52,7 @@ def enabled(configPath=None):
     return bool(_scenario(configPath)['EnableXil'])
 
 
-def dyno(configPath=None):
+def dyno(configPath=None, vehicle=None, dyno=None):
     """The dynamometer this scenario declares, or None when it declares none.
 
     A bench is not a plant that owns the ego. The virtual environment still
@@ -92,8 +92,12 @@ def dyno(configPath=None):
     subs = xil['VehicleSubscription'] or []
     host = (subs[0].get('ip') or ['127.0.0.1'])[0] if subs else '127.0.0.1'
     port = (subs[0].get('port') or [None])[0] if subs else None
+    # Stated in code wins over the yaml: a caller who writes the mass down
+    # is saying what is on the bench, and should not have to edit a scenario
+    # as well to be believed.
     return _Dyno(xil['Transport'], host, port,
-                 vehicle=xil['Vehicle'], dyno=xil['Dyno'])
+                 vehicle=dict(xil['Vehicle'], **(vehicle or {})),
+                 dyno=dict(xil['Dyno'], **(dyno or {})))
 
 
 class _Dyno:
