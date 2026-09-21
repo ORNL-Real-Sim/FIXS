@@ -397,6 +397,9 @@ _egoIds: typing.List[str] = []
 # The tick currently held awaiting its answer.
 _armed: bool = False
 _received: typing.List[Vehicle] = []
+# #356: the scenario TrafficLayer is running, so fixs.traci can tell an adopter that
+# their traci.start(...) names a different one rather than letting the two drift.
+_sumoConfigFile: typing.Optional[str] = None
 _simState: int = 0
 _simTime: float = 0.0
 
@@ -433,7 +436,7 @@ def connect(configPath=None, *, port=None, host=None, ego=None,
         indefinitely. TrafficLayer advances only once EVERY subscriber has
         answered, so a deadline here fires when some OTHER client stalls.
     """
-    global _helper, _sock, _egoIds, _declaredFields
+    global _helper, _sock, _egoIds, _declaredFields, _sumoConfigFile
     global sim, vehicle, trafficlight, _noTick
 
     if _sock is not None:
@@ -462,6 +465,7 @@ def connect(configPath=None, *, port=None, host=None, ego=None,
     msgHelper.set_vehicle_message_field(declared)
 
     _declaredFields = frozenset(declared)
+    _sumoConfigFile = config.Sumo_setup.get('SumoConfigFile') or None
     _helper = SocketHelper(config_helper=config, msg_helper=msgHelper)
     _sock = _openSocket(host, int(port), connectTimeout, recvTimeout)
     _noTick = _NO_TICK_YET

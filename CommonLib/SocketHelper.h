@@ -8,6 +8,10 @@
 //#include <event2/event.h>
 
 #include "MsgHelper.h"
+#ifndef RS_DSPACE
+#include <functional>
+#include "TraciRelay.h"   // #356: the result type the relay handler returns
+#endif
 
 #ifndef WIN32
 	#include <sys/types.h>
@@ -181,6 +185,20 @@ public:
 
 	void socketShutdown();
 
+#ifndef RS_DSPACE
+	// #356: relayed-TraCI RPC. recvData answers a FIXS_MSG_TRACI_REQUEST record on the
+	// spot -- the client is blocked waiting -- and only returns once it has read the
+	// peer's ordinary tick message.
+	//
+	// A std::function installed by the owner, rather than a direct call into
+	// TraciRelay: SocketHelper frames bytes and must stay ignorant of libtraci (it is
+	// also built for clients and, under RS_DSPACE, for a real-time target that has no
+	// SUMO at all). TrafficLayer installs it; everyone else leaves it empty and every
+	// request is answered with a refusal, which is the correct answer for a VISSIM
+	// run, a relay-disabled config, or a peer that should not have asked.
+	std::function<fixs::TraciResult(const TraciRequest_t&)> TraciRelayHandler;
+#endif
+
 	// recv data 
 	int recvData(int sock, int* simState, float* simTime, MsgHelper& Msg_c);
 		
@@ -189,6 +207,14 @@ public:
 
 
 	void printSocketErrorMessage(int errorCode);
+
+#ifndef RS_DSPACE
+	// #356: one response message (header + as many FIXS_MSG_TRACI_RESPONSE records as
+	// the body needs). Public only because recvData's caller may want to answer a
+	// request it handled itself.
+	int sendTraciResponse(int sock, uint8_t simStateSend, float simTimeSend,
+	                      const fixs::TraciResult& result, MsgHelper& Msg_c);
+#endif
 
 // below should be converted to private in the future
 //private:
@@ -204,6 +230,11 @@ public:
 	//
 	// Never holds a whole message -- only one chunk at a time.
 	char txBuf[TX_CHUNK_SIZE];
+
+	// #356: an unknown DATA record is skipped silently by design (framing survives, a
+	// newer peer just sent a field this build does not know). Say so once, so it is
+	// diagnosable, without a line per record per tick.
+	bool warnedUnknownRecord = false;
 
 	int NSERVER = 0;
 	int NCLIENT = 0;

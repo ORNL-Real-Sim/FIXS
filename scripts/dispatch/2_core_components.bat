@@ -85,6 +85,15 @@ if /I "%RUN_MODE%"=="standalone" (
     >>"%LOG_SUMMARY%" echo ----------------------
 )
 
+REM #356: the TraCI relay binds to three exported libtraci symbols through a local
+REM declaration. Check them here so a SUMO bump that drops one fails with an
+REM explanation instead of an unresolved external halfway through the link.
+powershell -ExecutionPolicy Bypass -NoProfile -File "%DISPATCH_DIR%check_libtraci_symbols.ps1"
+if errorlevel 1 (
+    call :TrackFailure "libtraci symbol check (#356)"
+    set "BUILD_RESULT=1"
+)
+
 REM Build TrafficLayer
 for %%C in (%STANDALONE_CONFIGS%) do (
     call :BuildSolution "TrafficLayer (%%C)" ".\TrafficLayer\TrafficLayer.sln" "/p:Configuration=%%C"

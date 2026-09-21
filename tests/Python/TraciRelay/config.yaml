@@ -1,0 +1,47 @@
+# NOTE: YAML files do not allow tabs. use 2 or 4 spaces for indentation
+#
+# #356 -- relayed TraCI over the connection TrafficLayer already owns.
+#
+# The client (relay_client.py) reads its tick from the FIXS feed as usual AND calls
+# traci.* through `import fixs.traci as traci`. Both answers come from the same SUMO
+# over the same one connection; the test asserts they agree.
+#
+# Deterministic on purpose: the net is the probe's (sigma 0, no speed deviation), so
+# a cross-check between the feed and a relayed getter is exact rather than close.
+
+SimulationSetup:
+    EnableFIXS: true
+    EnableVerboseLog: false
+    SelectedTrafficSimulator: 'SUMO'
+
+    TrafficSimulatorIP: "127.0.0.1"
+    TrafficSimulatorPort: 1337
+
+    VehicleMessageField: [id, type, speed, speedDesired, positionX, positionY, laneId, linkId]
+
+SumoSetup:
+    # The runner starts SUMO headless itself, so TrafficLayer attaches to it rather
+    # than launching sumo-gui.
+    EnableAutoLaunch: false
+
+    # Checked by fixs.traci against an adopter's traci.start([...]) command line: a
+    # script that names a different .sumocfg is told so, instead of quietly reasoning
+    # about a network the co-simulation is not running.
+    SumoConfigFile: "../../Sumo/Probes/TraciRelay/net/probe.sumocfg"
+
+    # #356. Off by default everywhere else: the relay lets a connected client do
+    # anything TraCI can do to the live run, and the client ports listen on every
+    # interface, so enabling it is a yes a run states rather than inherits.
+    EnableTraciRelay: true
+
+ApplicationSetup:
+    EnableApplicationLayer: true
+    VehicleSubscription:
+    -   type: ego
+        attribute: {id: ['ego'], radius: [0]}
+        ip: ['127.0.0.1']
+        port: [2444]
+
+XilSetup:
+    EnableXil: false
+    VehicleSubscription:

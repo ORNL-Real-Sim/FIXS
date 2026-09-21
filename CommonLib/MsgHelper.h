@@ -10,6 +10,7 @@ This MsgHelper Class is dedicated to handling the messages.
 #include <unordered_map>
 #include <unordered_set>
 #include "VehDataMsgDefs.h"
+#include "MsgTypes.h"
 
 #ifndef RS_DSPACE
 #include "ConfigHelper.h"
@@ -39,6 +40,18 @@ public:
 	void packDetectorData(const TlsDetector_t& DetectorData, char* buffer, int* iByte);
 	void depackDetectorData(char* buffer, int msgSize, TlsDetector_t* DetectorData);
 
+	// #356: the relayed-TraCI RPC pair. One command may span several records of the
+	// same message (see FIXS_TRACI_*_CHUNK); `more` says another follows. The payload
+	// is opaque here and everywhere else in FIXS -- it was serialized by the client's
+	// own traci and is handed to SUMO unread.
+	void packTraciRequest(const TraciRequest_t& req, const unsigned char* chunk,
+	                      int chunkLen, bool more, char* buffer, int* iByte);
+	void depackTraciRequest(char* buffer, int bodySize, TraciRequest_t* req, bool* more);
+	void packTraciResponse(uint8_t status, const unsigned char* chunk, int chunkLen,
+	                       bool more, char* buffer, int* iByte);
+	void depackTraciResponse(char* buffer, int bodySize, uint8_t* status,
+	                         std::vector<unsigned char>* chunk, bool* more);
+
 	// #87: record sizes for the send-side size pass, so total_msg_size can be written
 	// into the 9-byte header BEFORE the body is streamed out in chunks. Each runs the
 	// matching pack*() with a NULL buffer (measure, don't write) -- one traversal serves
@@ -46,6 +59,8 @@ public:
 	int vehRecordSize(const VehFullData_t& VehFullData);
 	int tlsRecordSize(const TrafficLightData_t& TrafficLightData);
 	int detRecordSize(const TlsDetector_t& DetectorData);
+	int traciRequestRecordSize(const TraciRequest_t& req, int chunkLen);
+	int traciResponseRecordSize(int chunkLen);
 
 	void clearRecvStorage();
 	void clearSendStorage();

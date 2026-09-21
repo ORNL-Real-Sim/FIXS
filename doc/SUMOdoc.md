@@ -11,6 +11,7 @@ realsimxil@gmail.com
     * [Preceding Vehicle](#preceding-vehicle)
     * [Multiple Clients](#multiple-clients)
 * [SumoSetup in config.yaml](#sumosetup-in-configyaml)
+* [Relayed TraCI: import fixs.traci as traci (#356)](#relayed-traci-import-fixstraci-as-traci-356)
 * [Performance & TraCI transport (libtraci vs libsumo)](#performance--traci-transport-libtraci-vs-libsumo)
 
 ## Simulation Setups
@@ -168,6 +169,97 @@ SumoSetup:
     SpeedMode: 32
 ```
 The SpeedMode is an integer defines behavior of SetSpeed command of SUMO TraCI API. More parameters can be included in SumoSetup for future releases.
+
+## Relayed TraCI: `import fixs.traci as traci` (#356)
+
+A script that already drives SUMO through TraCI can keep its `traci.*` calls while
+running as a FIXS client. Change one import:
+
+```diff
+-import traci
++import fixs.traci as traci
+```
+
+```python
+import fixs
+import fixs.traci as traci
+
+fixs.connect('config.yaml')
+while True:
+    fixs.recv()                                   # the tick, as usual
+    links = traci.lane.getLinks('e0_1')           # relayed to FIXS's own connection
+    if congested(links):
+        traci.vehicle.changeLane('ego', 1, 3.0)
+    fixs.send()
+```
+
+Turn it on with `SumoSetup.EnableTraciRelay: true`. It is off by default, and the
+default is deliberate: without the relay a connected client can write back the fields
+of the vehicles it subscribed to, and with it that client can do anything TraCI can do
+to the live run. TrafficLayer's client ports listen on every interface, and FIXS runs
+apps from a catalog, so "on" is a yes the run should state rather than inherit. A
+client that calls into `fixs.traci` against a TrafficLayer that has not enabled it gets
+a message saying exactly which key to add.
+
+**This is not a second TraCI client.** The alternative -- opening your own
+`traci.init()` alongside FIXS -- makes you a client under SUMO's multi-client
+protocol (see *Multiple Clients* above): `--num-clients 2`, a mandatory `setOrder`,
+and a simulation that does not advance until every client has stepped. Get the
+stepping contract wrong and it deadlocks. The relay has none of that, because there
+is still exactly one connection: yours goes to TrafficLayer, which executes the
+command on the libtraci connection it already holds.
+
+### What it does not relay
+
+| Call | Why, and what to use |
+| --- | --- |
+| `traci.simulationStep()` | TrafficLayer owns the clock. `fixs.recv()` / `fixs.send()` advance the co-simulation. |
+| `traci.close()` | TrafficLayer owns the session. `fixs.close()`. |
+| `traci.load()` | Would reload the network under a running co-simulation. |
+| `traci.setOrder()` | Meaningless: FIXS is the only TraCI client. |
+| `*.subscribe()` / `subscribeContext()` | **The FIXS feed *is* the subscription.** The vehicles and fields your config named arrive on every `recv()`; read them with `fixs.vehicle.get(id)` / `getAll()`, which cost nothing per call because the data is already in the process. |
+
+`traci.start()` and `traci.init()` are neither relayed nor refused: they *verify*. A
+script that opens with `traci.start(['sumo', '-c', 'mynet.sumocfg'])` keeps that line,
+and FIXS checks the `.sumocfg` against `SumoSetup.SumoConfigFile`. If they disagree
+you are told immediately, instead of discovering fifty ticks later that your script
+and the co-simulation are reasoning about different networks.
+
+### Rules
+
+- **Call only between `recv()` and `send()`** -- the window in which your controller
+  runs. TrafficLayer serves relayed commands from inside its wait for your tick
+  answer; outside that window nothing is listening, so the call raises rather than
+  hanging.
+- **Every call is a round trip.** A relayed getter costs what a TraCI getter has
+  always cost (~30 us of SUMO round trip, measured, plus the FIXS hop) and it is paid
+  inside the lockstep. Twenty getters across two hundred vehicles every tick will
+  slow the co-simulation down; the feed is there precisely so that per-tick state
+  does not have to be asked for.
+- **`import fixs.traci` rebinds the real `traci` module's domains**, since there is
+  only one `traci.vehicle` in a process. A third-party library that does its own
+  `import traci` is relayed too. Usually what you want; occasionally a surprise.
+- **libtraci builds only.** Under `ENABLE_LIBSUMO` SUMO runs in-process and there is
+  no TraCI connection to relay onto; TrafficLayer says so at startup rather than
+  failing later.
+
+### How it works
+
+Every one of traci's ~800 domain functions funnels through
+`Connection._sendCmd(cmdID, varID, objID, format, *values)`, with the arguments
+already serialized by traci's own `_pack`. `fixs.traci` replaces that one method:
+the four values go to TrafficLayer as an RPC record on the FIXS socket
+(`MSG_TRACI_REQUEST`, type 128 -- see `CommonLib/MsgTypes.h`), TrafficLayer executes
+them with libtraci's generic executor `Connection::doCommand`, and the reply comes
+back as bytes that traci's own parsers read unmodified. **Neither side enumerates the
+TraCI API, and the payload is opaque end to end** -- TrafficLayer never learns what
+`0x13` means.
+
+Evidence that this is exact rather than approximate, including the byte-for-byte
+comparison against a real TraCI connection and the cost measurements:
+`tests/Sumo/Probes/TraciRelay/FINDINGS.md`. Tests:
+`tests/Python/unit/test_traci_relay.py` (no simulator) and
+`tests/Python/TraciRelay/run_relay_test.ps1` (live co-simulation).
 
 ## Performance & TraCI transport (libtraci vs libsumo)
 
