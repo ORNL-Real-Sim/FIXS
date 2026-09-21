@@ -5,6 +5,7 @@ hold it to the three cases the driver has to answer -- your function, the
 simulated cell, or nobody -- and to the rule that a tick the cell could not
 answer passes the reference through untouched rather than inventing motion.
 """
+import io
 import os
 import sys
 import tempfile
@@ -15,7 +16,8 @@ sys.path.insert(0, os.path.abspath(
     os.path.join(os.path.dirname(__file__), '..', '..', '..')))
 
 import CommonLib.fixs as fixs                                    # noqa: E402
-from CommonLib.fixs._driver import Controller, driver, _options  # noqa: E402
+from CommonLib.fixs._driver import (Controller, Tuning, driver,  # noqa: E402
+                                    _options)  # noqa: E402
 
 
 _SCENARIO = """
@@ -65,31 +67,43 @@ def test_a_non_callable_exchange_is_refused_at_the_call_not_at_the_tick():
 # -- the three cases the seam has to answer ---------------------------------
 
 @pytest.mark.parametrize('scenario', [False], indirect=True)
-def test_no_cell_declared_and_none_given_leaves_the_loop_open(scenario):
+def test_no_exchange_means_no_cell(scenario):
     d = _build(driver())
     assert d.benchInLoop is False
 
 
 @pytest.mark.parametrize('scenario', [True], indirect=True)
-def test_the_scenario_alone_brings_the_simulated_cell(scenario):
+def test_the_scenario_alone_brings_nothing(scenario):
+    """EnableXil declares the SIMULATED cell exists; it does not put one in
+    this driver's loop. Only passing a function does that."""
     d = _build(driver())
-    assert d.benchInLoop is True
-    assert d._bench is not None
+    assert d.benchInLoop is False
 
 
 @pytest.mark.parametrize('scenario', [False], indirect=True)
 def test_your_function_needs_no_scenario_flag(scenario):
-    """Passing one IS the declaration -- EnableXil is about the simulated cell."""
+    """Passing one IS the declaration."""
     d = _build(driver(lambda v, dt: v))
     assert d.benchInLoop is True
-    assert d._bench is None
 
 
 @pytest.mark.parametrize('scenario', [True], indirect=True)
-def test_your_function_wins_over_the_simulated_cell(scenario):
-    d = _build(driver(lambda v, dt: 1.0))
-    assert d._bench is None
-    assert d._exchange(9.0, 0.05) == 1.0
+def test_the_simulated_cell_is_passed_in_like_any_other(scenario):
+    from CommonLib.fixs import xil
+    d = _build(driver(xil.exchange))
+    assert d.benchInLoop is True
+    assert d.throughCell(10.0) > 0.0        # it answered
+
+
+def test_the_driver_does_not_import_xil():
+    """The coupling this PR removes: a driver that reaches for a bench is
+    deciding something that belongs to whoever built it."""
+    src = io.open(os.path.join(os.path.dirname(__file__), '..', '..', '..',
+                               'CommonLib', 'fixs', '_driver.py'),
+                  encoding='utf-8').read()
+    code = [ln for ln in src.splitlines()
+            if ln.startswith(('import ', 'from ')) and 'xil' in ln]
+    assert code == [], code
 
 
 # -- the rule that matters when hardware misbehaves -------------------------
@@ -118,3 +132,46 @@ def test_the_scenario_beats_the_factory_beats_the_default():
 def test_an_unknown_option_fails_at_construction():
     with pytest.raises(TypeError):
         _options({}, {'nonsense': 1})
+
+
+# -- the gains, as one value ------------------------------------------------
+
+def test_a_gain_ladder_is_one_token_per_rung():
+    assert str(Tuning()) == 'kv=0.25,ki=0.5,kp=5,k=0.01,maxAccel=1.5,fullStop=0.1'
+    assert Tuning.parse('kv=0.3,ki=0.6').kv == 0.3
+    assert Tuning.parse('kv=0.3,ki=0.6').ki == 0.6
+    assert Tuning.parse('kv=0.3').ki == 0.5          # the rest stand
+
+
+def test_a_typo_in_a_gain_name_is_refused_not_ignored():
+    """The failure that matters: a run that silently used the defaults while
+    its command line claimed otherwise."""
+    with pytest.raises(TypeError):
+        Tuning().replace(nope=1)
+    with pytest.raises(TypeError):
+        Tuning.parse('nope=1')
+    with pytest.raises(ValueError):
+        Tuning.parse('kv')
+    with pytest.raises(ValueError):
+        Tuning.parse('kv=fast')
+
+
+def test_the_scenario_beats_the_factory_for_gains_too():
+    assert _options({}, {'tuning': Tuning(kv=0.9)}).tuning.kv == 0.9
+    assert _options({'EgoControllerArgs': ['--tune', 'kv=0.1']},
+                    {'tuning': Tuning(kv=0.9)}).tuning.kv == 0.1
+
+
+@pytest.mark.parametrize('scenario', [False], indirect=True)
+def test_the_run_records_what_drove_it(scenario, tmp_path):
+    """A batch once reported gains it had not used. The log says."""
+    path = tmp_path / 'agent.csv'
+    cls = driver(lambda v, dt: v, shape='pedals', tuning=Tuning(kv=0.33))
+    obj = cls.__new__(cls)
+    Controller.__init__(obj, {'EgoControllerLog': str(path)}, 'ego')
+    obj.shutdown()
+    first = path.read_text().splitlines()[0]
+    assert first.startswith('#')
+    assert 'shape=pedals' in first
+    assert 'kv=0.33' in first
+    assert 'cell=<lambda>' in first

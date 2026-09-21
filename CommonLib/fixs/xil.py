@@ -21,7 +21,35 @@ from CommonLib.ConfigHelper import ConfigHelper
 
 from . import FixsError
 
-__all__ = ['enabled', 'dyno']
+__all__ = ['enabled', 'dyno', 'exchange']
+
+
+_BENCH = [None]
+
+
+def exchange(vref, dt):
+    """(mps, s) -> mps -- the simulated cell, as a plain function.
+
+    Pass it where a driver wants an exchange::
+
+        Controller = fixs.driver(fixs.xil.exchange)
+
+    and a rig owner passes their own instead. Neither is privileged: this one
+    is a function like any other, so nothing has to go looking for a bench or
+    branch on whether one is configured.
+
+    The cell is opened on the first call, not at import: the scenario is not
+    readable until the bridge has exported it.
+    """
+    if _BENCH[0] is None:
+        bench = dyno()
+        if bench is None:
+            raise FixsError(
+                'fixs.xil.exchange: this scenario declares no bench '
+                '(XilSetup.EnableXil is false), so there is nothing to ask. '
+                'Pass your own exchange, or pass none at all.')
+        _BENCH[0] = bench
+    return _BENCH[0].exchange(vref, dt)
 
 
 def _scenario(configPath):

@@ -16,10 +16,16 @@ WITH A DYNAMOMETER, you write the one function FIXS cannot::
 
     Controller = fixs.driver(exchange)
 
-Your rig keeps its own API, its own protocol and its own rate; ``exchange`` is
-the glue, and it is the whole of what this module asks for. Pass nothing and
-the simulated cell answers when ``XilSetup.EnableXil`` says one is in the loop,
-and nothing answers when it does not.
+Your rig keeps its own API, its own protocol and its own rate; ``exchange``
+is the glue, and it is the whole of what this module asks for.
+
+Pass nothing and nothing is in the loop. This module never goes looking for a
+cell -- deciding one is there belongs to the caller, so passing a function IS
+the declaration. For the simulated cell, pass the one FIXS already has::
+
+    Controller = fixs.driver(fixs.xil.exchange)
+
+which is a function like any other and holds no privilege over yours.
 
 WHERE IT GOES IN THE LOOP -- after every decision, before any command::
 
@@ -58,7 +64,6 @@ from __future__ import annotations
 import argparse
 import math
 
-from . import xil                       # noqa: E402  (sibling, not the app's)
 from . import carla as carla            # noqa: E402
 # CARLA's vendored agents: importing the package puts them on sys.path.
 from agents.navigation.behavior_agent import BehaviorAgent   # noqa: E402
@@ -103,6 +108,72 @@ IDEAL_SPEED_TRACKING = True
 #:            it -- measured, amplitude moves with the gains, period does not.
 #:            Fix the lag (lead term) before selecting this.
 PEDAL_LOOP = 'speed'
+
+
+class Tuning(object):
+    """The driver's gains, as ONE value.
+
+    Six loose constants made a gain ladder six edits to the source, and a
+    teardown line in a scratch script once left one of them changed: a whole
+    batch of runs then reported gains it had not used. One value is one thing
+    to pass, one thing to override, and one thing to write into the log --
+    which is what makes a run able to say what it was.
+
+        Tuning.parse('kv=0.3,ki=0.6')        # --tune, and the ladder
+        tuning.replace(kv=0.3)               # in code
+        str(tuning)                          # -> the log header, verbatim
+    """
+
+    __slots__ = ('kv', 'ki', 'kp', 'k', 'maxAccel', 'fullStop')
+
+    #: What each is for, and where it came from. See the PR for the runs.
+    _DOC = {
+        'kv': 'speed loop, proportional [pedal per m/s]',
+        'ki': 'speed loop, integral -- this is the road-load trim',
+        'kp': "accel loop's outer gain [m/s2 per m/s], PEDAL_LOOP='accel' only",
+        'k': "accel loop's inner gain, set by the 0.65 s dead time, not by plant gain",
+        'maxAccel': 'ceiling on the acceleration the outer stage may ask [m/s2]',
+        'fullStop': 'below this speed, with a target this low, hold the brake [m/s]',
+    }
+
+    def __init__(self, kv=0.25, ki=0.5, kp=5.0, k=0.01,
+                 maxAccel=1.5, fullStop=0.1):
+        self.kv, self.ki, self.kp, self.k = kv, ki, kp, k
+        self.maxAccel, self.fullStop = maxAccel, fullStop
+
+    def replace(self, **kw):
+        """A copy with some gains changed. Unknown names are refused, not
+        ignored: a typo that sets nothing is a run that silently used the
+        defaults."""
+        bad = set(kw) - set(self.__slots__)
+        if bad:
+            raise TypeError('unknown gain(s) %s -- known: %s'
+                            % (', '.join(sorted(bad)), ', '.join(self.__slots__)))
+        return Tuning(**dict({n: getattr(self, n) for n in self.__slots__}, **kw))
+
+    @classmethod
+    def parse(cls, text, base=None):
+        """'kv=0.3,ki=0.6' -> Tuning, on top of base (or the defaults)."""
+        out = {}
+        for part in (text or '').split(','):
+            part = part.strip()
+            if not part:
+                continue
+            name, sep, value = part.partition('=')
+            if not sep:
+                raise ValueError('--tune %r: expected name=value' % part)
+            try:
+                out[name.strip()] = float(value)
+            except ValueError:
+                raise ValueError('--tune %s: %r is not a number'
+                                 % (name.strip(), value.strip()))
+        return (base or cls()).replace(**out)
+
+    def __str__(self):
+        return ','.join('%s=%g' % (n, getattr(self, n)) for n in self.__slots__)
+
+    def __repr__(self):
+        return 'Tuning(%s)' % self
 
 #: 'speed' law.
 PEDAL_KV, PEDAL_KI = 0.25, 0.5
@@ -189,14 +260,27 @@ def _options(config, overrides=None):
     defaults, fixs.driver(**options) overrides them, and what the SCENARIO
     wrote after the controller's path overrides both -- because the scenario
     is the thing an operator edits without touching code."""
+    over = dict(overrides or {})
+    unknown = set(over) - {'shape', 'loop', 'tuning'}
+    if unknown:
+        raise TypeError('fixs.driver(): unknown option(s) %s -- known: '
+                        'shape, loop, tuning' % ', '.join(sorted(unknown)))
+
     p = argparse.ArgumentParser(prog='fixs.driver', add_help=False)
     p.add_argument('--command-shape', choices=('speed', 'pedals'),
-                   default=(overrides or {}).get('shape', COMMAND_SHAPE))
+                   default=over.get('shape', COMMAND_SHAPE))
+    p.add_argument('--pedal-loop', choices=('speed', 'accel'),
+                   default=over.get('loop', PEDAL_LOOP))
+    #: One option, not six: a gain ladder is then one token per rung, and the
+    #: whole tuning state is one string that lands in the log verbatim.
+    p.add_argument('--tune', default=None, metavar='kv=0.3,ki=0.6')
     opt = p.parse_args(config.get('EgoControllerArgs') or [])
-    unknown = set(overrides or {}) - {'shape'}
-    if unknown:
-        raise TypeError('fixs.driver(): unknown option(s) %s'
-                        % ', '.join(sorted(unknown)))
+
+    base = over.get('tuning') or Tuning()
+    if not isinstance(base, Tuning):
+        raise TypeError('fixs.driver(tuning=): expected a Tuning, got %s'
+                        % type(base).__name__)
+    opt.tuning = Tuning.parse(opt.tune, base) if opt.tune else base
     return opt
 
 
@@ -210,24 +294,30 @@ class Controller:
     def __init__(self, config, egoId):
         opt = _options(config, getattr(self, '_OPTIONS', None))
         self.shape = opt.command_shape
+        self.loop = opt.pedal_loop
+        #: Every gain in force, as one value -- and written into the log, so a
+        #: run can say what it was without anyone regressing it out of the data.
+        self.tuning = opt.tuning
         self.dt = float(config.get('CarlaTimeStep') or 0.1)
         self.fallbackSpeed = float(config.get('EgoTargetSpeed') or 8.33)
         self.useAdvisory = USE_ADVISORY
         self.agent = None
-        self.log = _openLog(config.get('EgoControllerLog',
-                                       '_datalog/agent_embedded.csv'))
+        self.log = _openLog(
+            config.get('EgoControllerLog', '_datalog/agent_embedded.csv'),
+            'fixs.driver shape=%s loop=%s %s cell=%s'
+            % (self.shape, self.loop, self.tuning,
+               getattr(self._EXCHANGE, '__name__', 'none')))
         self.steps, self.elapsed = 0, 0.0
         #: Held between feeds -- see _advisoryOf.
         self.advisory = None
         self.vSignal = self.vLeader = _NO_LIMIT
         #: Who answers "you asked for this speed -- what did you reach?".
-        #: Three cases, in order: the function handed to fixs.driver(), the
-        #: simulated cell when the scenario declares one, or nobody.
+        #: Whatever was handed to fixs.driver(), and nothing else: this module
+        #: never goes looking for a cell. Deciding one is in the loop is the
+        #: caller's, so passing a function IS the declaration and there is no
+        #: flag here to disagree with it. fixs.xil.exchange is one such
+        #: function, for the simulated cell; a rig's own is another.
         self._exchange = self._EXCHANGE
-        self._bench = None
-        if self._exchange is None and xil.enabled():
-            self._bench = xil.dyno()
-            self._exchange = lambda v, dt: self._bench.exchange(v, dt)
         self.benchInLoop = self._exchange is not None
         #: Ticks the cell did not answer usefully. Counted here, not asked of
         #: the cell: a plain function cannot be expected to carry state FIXS
@@ -246,9 +336,7 @@ class Controller:
         self._aMeas = 0.0
         if self.benchInLoop:
             print('[driver] cell in the loop (%s)'
-                  % ('simulated: ' + self._bench.transport if self._bench
-                     else getattr(self._EXCHANGE, '__name__', 'user')),
-                  flush=True)
+                  % getattr(self._EXCHANGE, '__name__', 'exchange'), flush=True)
 
     def throughCell(self, vRef):
         """(mps) -> mps -- what the cell did with the speed we asked for.
@@ -490,28 +578,29 @@ class Controller:
         # FULL STOP, and no state carried out of it -- a loop left running at
         # a red light acquires a demand the stopped car cannot answer. CARLA
         # bypasses its own loops on the same condition (RunControlFullStop).
-        if abs(vTarget) < FULL_STOP_MPS and abs(vEgo) < FULL_STOP_MPS:
+        if abs(vTarget) < g.fullStop and abs(vEgo) < g.fullStop:
             self.speedInteg = 0.0
             self.pedal = -1.0
             self._dbg = (0.0, 0.0, self._aMeas, self.pedal)
             return (0.0, 1.0)
 
         error = vTarget - vEgo
-        if PEDAL_LOOP == 'speed':
+        g = self.tuning
+        if self.loop == 'speed':
             # The integral is the trim, in pedal units. Held off when it would
             # push further into a stop it is already against -- an integral
             # that cannot shed what it collects is what seized the old law.
             saturated = not -1.0 < self.pedal < 1.0
             if not (saturated and error * self.pedal > 0):
-                self.speedInteg += PEDAL_KI * error * self.dt
+                self.speedInteg += g.ki * error * self.dt
             self.speedInteg = max(-1.0, min(1.0, self.speedInteg))
             demand = float('nan')
-            self.pedal = max(-1.0, min(1.0, PEDAL_KV * error + self.speedInteg))
+            self.pedal = max(-1.0, min(1.0, g.kv * error + self.speedInteg))
         else:
-            demand = SPEED_KP * error
-            demand = max(-PEDAL_MAX_ACCEL, min(PEDAL_MAX_ACCEL, demand))
+            demand = g.kp * error
+            demand = max(-g.maxAccel, min(g.maxAccel, demand))
             self.pedal = max(-1.0, min(1.0, self.pedal
-                                       + PEDAL_K * (demand - self._aMeas)))
+                                       + g.k * (demand - self._aMeas)))
         # The loop's own signals, for the log. Without them a pedal run can
         # only be diagnosed by inference from speed.
         self._dbg = (error, demand, self._aMeas, self.pedal)
@@ -539,8 +628,6 @@ class Controller:
             # did not test what it claims to have tested.
             print('[driver] cell: %d of %d steps unanswered'
                   % (self.misses, self.steps), flush=True)
-            if self._bench is not None:
-                self._bench.close()
         print('[agent] %d control steps' % self.steps, flush=True)
 
     def _logStep(self, ego, cmd, target, advisory):
@@ -578,9 +665,8 @@ def driver(exchange=None, **options):
     cell reached comes back. Return None on a tick it could not answer and the
     reference passes through untouched; those are counted and reported.
 
-    Omit it and the simulated cell answers when ``XilSetup.EnableXil`` declares
-    one, and nothing answers when it does not -- so the same file runs with
-    your hardware, with the simulated cell, or with neither::
+    Omit it and nothing is in the loop. For the simulated cell, pass
+    ``fixs.xil.exchange``; for yours, pass yours::
 
         Controller = fixs.driver(exchange)
 
@@ -616,12 +702,20 @@ def _col(v):
     return '' if v >= _NO_LIMIT else '%.3f' % v
 
 
-def _openLog(path):
+def _openLog(path, provenance=''):
+    """Open the per-step csv, with a comment line saying what drove the run.
+
+    The header is not decoration. A batch of 800 s runs once reported gains it
+    had not used, and recovering the truth meant regressing them back out of
+    pidDemand/pidError. A run has to be able to say what it was.
+    """
     if not path:
         return None
     import os
     os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
     f = open(path, 'w', encoding='utf-8', buffering=1)
+    if provenance:
+        f.write('# %s' % provenance + chr(10))
     f.write('t,feedAge,x,y,speed,advisory,target,throttle,brake,steer,'
             'wpLeft,leaderGap,signalColor,signalDist,nSeen,'
             'wireLimit,agentTarget,vSignal,vLeader,vDyno,vRef,'
