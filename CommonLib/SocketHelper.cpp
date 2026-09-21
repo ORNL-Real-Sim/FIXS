@@ -493,7 +493,19 @@ int SocketHelper::initConnection(std::string errorLogName) {
 				closesocket(selfServerSock[iS]);
 				WSACleanup();
 #else
-				fprintf(stderr, "%s: %s\n", "bind() failed", FIXS::Platform::socketErrorText(FIXS::Platform::socketErrorCode()).c_str());
+				// Name the PORT, and on POSIX explain EACCES: ports below 1024
+				// need root (net.ipv4.ip_unprivileged_port_start), which Windows
+				// does not enforce -- so a config that works there fails here,
+				// and "bind() failed: Permission denied" alone does not say why.
+				fprintf(stderr, "%s %d: %s\n", "bind() failed on port",
+				        selfServerPort[iS],
+				        FIXS::Platform::socketErrorText(FIXS::Platform::socketErrorCode()).c_str());
+				if (FIXS::Platform::socketErrorCode() == EACCES && selfServerPort[iS] < 1024) {
+					fprintf(stderr, "       port %d is privileged on this OS; ports below 1024 need root.\n"
+					                "       Use a port >= 1024 in the config (both the subscription port and\n"
+					                "       CarlaSetup.CarlaClientPort, which are the two ends of one socket).\n",
+					        selfServerPort[iS]);
+				}
 				if (!errorLogName.empty()) {
 					fstream f(errorLogName, std::fstream::in | std::fstream::out | std::fstream::app);
 					f << "bind() failed! error: " << FIXS::Platform::socketErrorText(FIXS::Platform::socketErrorCode()) << endl;

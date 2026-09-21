@@ -907,7 +907,14 @@ int main(int argc, char* argv[]) {
 			Sock_c.DeferAcceptClients = Config_c.SimulationSetup.WarmUpUntilEgoEntry ||
 				Config_c.SimulationSetup.WarmUpTime > 0;
 
-			if (Sock_c.initConnection(TrafficLayerErrorFile) > 0) {
+			// `< 0`, not `> 0`. initConnection returns -1 for every failure and 0
+			// for success, so the old test could never fire: a failed socket
+			// setup fell through as though it had worked, and TrafficLayer went
+			// on to send on descriptors it never got -- "send() failed: Socket
+			// operation on non-socket", then a GRACEFUL shutdown and exit 0. A
+			// supervisor cannot tell that from a clean run. The VISSIM branch
+			// above has always tested `< 0`; this one did not.
+			if (Sock_c.initConnection(TrafficLayerErrorFile) < 0) {
 				printf("Connect to SUMO failed! Make sure start Traffic Simulator first and start one instance of VISSIM/SUMO \n");
 				exit(-1);
 			}
