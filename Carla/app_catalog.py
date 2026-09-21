@@ -31,10 +31,11 @@ Schema (schema: 1)
                                         #   the chosen map's, so run_cosim must open
                                         #   the bundle before starting it. Default
                                         #   false - see below.
-      "launch": "run_my_app",           # optional: a command run alongside the stack
+      "launch": "my_controller.py",     # optional: a command run alongside the stack
                                         #   (the app's controller / XIL host), which
-                                        #   may also report the scenario to run. See
-                                        #   below - run_cosim does not read its args.
+                                        #   may also report the scenario to run. A .py
+                                        #   runs under this interpreter - no wrapper.
+                                        #   See below - run_cosim does not read its args.
       "defaults": {                     # optional per-app run defaults (CLI wins)
         "engine": "py"|"cpp", "sumo_gui": true
       },                                # no timestep: the scenario yaml owns the
@@ -63,6 +64,12 @@ elsewhere, the convention run_cosim / import_map / place_tls already use) and pa
 every argument after the first token through UNTOUCHED. It never adds, removes or reads
 one, so what a controller needs to be told is the app's business and adding an app
 costs no engine change.
+
+Name the controller's `.py` and it is run under this interpreter, which is what most
+applications want: the wrapper scripts this used to require were one file repeated per
+app - resolve a directory, call python on the .py beside it, propagate the exit code -
+carrying no decision of the app's own. Keep a .bat/.sh where there IS one to carry:
+arguments computed at launch time, an environment to set, a non-python controller.
 
 It is started FIRST, before SUMO, and it may report the scenario to run. run_cosim
 gives it a path in FIXS_HANDOFF and waits for a json object to appear there:
@@ -188,7 +195,21 @@ def launch_command(app, root=None):
     extension when it has none - `run_mlk_eco_driving` -> run_mlk_eco_driving.bat on
     Windows, .sh elsewhere - which is the convention run_cosim / import_map /
     place_tls already ship both halves of. Everything after the first token is passed
-    through verbatim and never interpreted: the app owns its own arguments."""
+    through verbatim and never interpreted: the app owns its own arguments.
+
+    A `.py` is named DIRECTLY and run under this interpreter, so a controller needs
+    no wrapper script. Every wrapper an application had to carry for this was the
+    same file - resolve a directory, call python on the .py beside it, propagate the
+    exit code - and it was mandatory rather than chosen: CreateProcess does not
+    consult PATHEXT, so Popen(['my_controller.py']) fails on Windows with WinError
+    193, and `launch: "python my_controller.py"` resolves the FIRST token, looking
+    for a `python.bat` in the app folder that is not there. The interpreter used is
+    sys.executable - the one run_cosim re-exec'd into and applied the app's
+    requirements.txt to, and the same one it passes as FIXS_PYTHON, so a wrapper
+    that went looking for its own could find an env that never received them.
+
+    Nothing else changes: the environment (FIXS_HANDOFF included) is passed by the
+    caller to whatever the child turns out to be, and it was never on this argv."""
     if not app or not app.get("launch"):
         return None, None
     import shlex
@@ -204,6 +225,8 @@ def launch_command(app, root=None):
         _warn(f"app '{app['id']}': launch command '{app['launch']}' not found "
               f"at {path}; nothing will be started for it.")
         return None, None
+    if os.path.splitext(path)[1].lower() == ".py":
+        return [sys.executable, path] + parts[1:], here
     return [path] + parts[1:], here
 
 

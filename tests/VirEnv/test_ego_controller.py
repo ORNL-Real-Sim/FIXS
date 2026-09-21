@@ -1,7 +1,7 @@
 """The controller hook (#325): loading, both command shapes, and the guards.
 
-Runs with no CARLA, no TrafficLayer and no SUMO -- the point of keeping
-IEgoController SDK-free is that this is possible at all.
+Runs with no CARLA, no TrafficLayer and no SUMO -- the point of keeping the
+controller contract SDK-free is that this is possible at all.
 
     python -m pytest tests/VirEnv/test_ego_controller.py
 """
