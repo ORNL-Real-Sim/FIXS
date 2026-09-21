@@ -193,7 +193,13 @@ while True:
     fixs.send()
 ```
 
-No switch to turn on: the relay is available whenever TrafficLayer is driving SUMO through libtraci. Under VISSIM, or in a libsumo build, there is no connection to relay onto and a call says so.
+Turn it on with `SumoSetup.EnableTraciRelay: true`. It is off by default, and the
+default is deliberate: without the relay a connected client can write back the fields
+of the vehicles it subscribed to, and with it that client can do anything TraCI can do
+to the live run. TrafficLayer's client ports listen on every interface, and FIXS runs
+apps from a catalog, so "on" is a yes the run should state rather than inherit. A
+client that calls into `fixs.traci` against a TrafficLayer that has not enabled it gets
+a message saying exactly which key to add.
 
 **This is not a second TraCI client.** The alternative -- opening your own
 `traci.init()` alongside FIXS -- makes you a client under SUMO's multi-client

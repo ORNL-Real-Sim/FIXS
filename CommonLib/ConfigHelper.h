@@ -267,6 +267,25 @@ struct SumoSetup_t {
 	// 1000 preserves the previously hard-coded behaviour.
 	double PrecedingVehicleLookahead;
 
+	// #356: let a FIXS client relay raw TraCI commands through the connection
+	// TrafficLayer already owns (`import fixs.traci as traci`).
+	//
+	// Off by default, and the default is the point. Without the relay a connected
+	// peer can write back the ~30 VehDataMsgDefs fields of the vehicles it
+	// subscribed to; with it, that peer can do anything TraCI can do to the live
+	// run -- remove vehicles, rewrite signal programs, load a state file. Two
+	// things about FIXS make that worth an explicit yes rather than a default:
+	// the client ports bind INADDR_ANY (SocketHelper.cpp), so this is not a
+	// localhost-only story, and apps arrive from a catalog, so the person running
+	// a config is often not the person who wrote the import.
+	//
+	// It is not a security boundary -- nothing stops a peer that should not have
+	// asked, which is why TraciRelay.cpp refuses on its own terms too. It is the
+	// run's record of what it permitted.
+	//
+	// SUMO-only: a VISSIM config that sets it is rejected at startup.
+	bool EnableTraciRelay;
+
 	// Auto-launch SUMO configuration
 	bool EnableAutoLaunch;
 	std::string SumoConfigFile;

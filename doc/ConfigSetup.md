@@ -69,6 +69,7 @@ silently ignored.
 | SumoConfigFile | string | `""` | Path to `.sumocfg` used when auto-launching. Relative paths resolved against config file directory. |
 | NumClients | int | 1 | Number of SUMO clients negotiated during auto-launch. |
 | RuntimeLibraryPath | string | `""` | Optional override for the SUMO runtime directory (DLL/.so path). |
+| EnableTraciRelay | bool | false | #356. When true, a FIXS client may run TraCI commands through the connection TrafficLayer already owns (`import fixs.traci as traci`). SUMO-only; rejected at startup under VISSIM or an `ENABLE_LIBSUMO` build. Off by default because it widens a connected peer from "writes back the fields it subscribed to" to "can do anything TraCI can do to the live run", and the client ports bind all interfaces. |
 
 When `RuntimeLibraryPath` is omitted the executable searches for the libsumo runtime in the following order:
 

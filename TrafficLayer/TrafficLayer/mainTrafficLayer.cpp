@@ -594,18 +594,28 @@ int main(int argc, char* argv[]) {
 	// #356: relayed TraCI. Installing the handler is the whole wiring -- SocketHelper
 	// answers a FIXS_MSG_TRACI_REQUEST record from inside its blocking wait for a
 	// client's tick answer, and with no handler installed it refuses every request.
-	//
-	// There is deliberately no config key for this. A relay request only exists
-	// because someone wrote `import fixs.traci as traci` in their own client, and a
-	// flag set by the same person it would protect against is not a control. What
-	// does decide it is structural, and checked here once rather than per request:
-	// VISSIM has no libtraci connection to relay onto, and a libsumo build has no
-	// generic executor at all.
-	if (!ENABLE_VISSIM && fixs::traciRelayAvailable()) {
+	// So all three conditions are decided once, here, instead of per request: the
+	// config said yes, there is a libtraci connection to relay onto, and this build
+	// has the generic executor at all.
+	if (Config_c.SumoSetup.EnableTraciRelay) {
+		if (ENABLE_VISSIM) {
+			printf("ERROR: SumoSetup.EnableTraciRelay is true, but the selected traffic\n");
+			printf("       simulator is VISSIM. The relay executes TraCI commands on the\n");
+			printf("       libtraci connection TrafficLayer owns, and there is no such\n");
+			printf("       connection under VISSIM.\n");
+			exit(-1);
+		}
+		if (!fixs::traciRelayAvailable()) {
+			printf("ERROR: SumoSetup.EnableTraciRelay is true, but this TrafficLayer was\n");
+			printf("       built with ENABLE_LIBSUMO. libsumo runs SUMO in-process: there\n");
+			printf("       is no TraCI connection and no generic executor to relay onto.\n");
+			printf("       Rebuild with libtraci, or set EnableTraciRelay: false.\n");
+			exit(-1);
+		}
 		Sock_c.TraciRelayHandler = [](const TraciRequest_t& req) {
 			return fixs::executeTraci(req.cmdID, req.varID, req.objID, req.payload);
 		};
-		printf("TraCI relay: available (clients may use 'import fixs.traci as traci')\n");
+		printf("TraCI relay: enabled (clients may use 'import fixs.traci as traci')\n");
 	}
 
 	if (Config_c.SimulationSetup.EnableVerboseLog) {

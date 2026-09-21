@@ -590,6 +590,12 @@ int ConfigHelper::getConfig(string configName) {
 	else {
 		SumoSetup.EnableAutoLaunch = false;
 	}
+	if (node["EnableTraciRelay"]) {
+		SumoSetup.EnableTraciRelay = parserFlag(node, "EnableTraciRelay");
+	}
+	else {
+		SumoSetup.EnableTraciRelay = false;
+	}
 	if (node["SumoConfigFile"]) {
 		SumoSetup.SumoConfigFile = parserString(node, "SumoConfigFile");
 

@@ -1098,8 +1098,8 @@ int SocketHelper::recvData(int sock, int* simState, float* simTime, MsgHelper& M
 #ifndef RS_DSPACE
 	// #356: this message was relayed TraCI, not the tick answer. Execute, reply on
 	// this same socket, and go back for the next message. A request that arrives with
-	// no handler installed is refused with a message rather than ignored: the peer is
-	// blocked on an answer, so silence would hang the co-simulation.
+	// no handler installed -- a VISSIM run, EnableTraciRelay off, or a peer that
+	// should not have asked -- is refused with a message rather than ignored.
 	if (!relayRequests.empty()) {
 		for (size_t iR = 0; iR < relayRequests.size(); iR++) {
 			fixs::TraciResult result;
@@ -1108,10 +1108,12 @@ int SocketHelper::recvData(int sock, int* simState, float* simTime, MsgHelper& M
 			}
 			else {
 				const std::string why =
-					"this TrafficLayer cannot relay TraCI. The relay executes commands "
-					"on the libtraci connection TrafficLayer owns, and this run has no "
-					"such connection -- it is driving VISSIM, or was built with "
-					"ENABLE_LIBSUMO (SUMO in-process, no TraCI server).";
+					"this TrafficLayer is not relaying TraCI. If it is driving SUMO "
+					"through libtraci, add 'EnableTraciRelay: true' under SumoSetup in "
+					"config.yaml -- it is off by default because the relay lets a "
+					"connected client do anything TraCI can do to the live run. Under "
+					"VISSIM, or in an ENABLE_LIBSUMO build, there is no connection to "
+					"relay onto and the key will not help.";
 				result.status = FIXS_TRACI_REFUSED;
 				result.body.assign(why.begin(), why.end());
 			}
