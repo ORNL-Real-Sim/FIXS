@@ -570,6 +570,7 @@ class Controller:
         # Measured acceleration, lightly filtered. It is differenced speed, so
         # unfiltered it is mostly quantisation noise; CARLA filters the same
         # signal at 4/5, which costs it 0.2 s of phase. 0.1 s here.
+        g = self.tuning
         a = (vEgo - self._vPrev) / self.dt if self.dt > 0 else 0.0
         self._vPrev = vEgo
         alpha = self.dt / (0.1 + self.dt)
@@ -585,7 +586,6 @@ class Controller:
             return (0.0, 1.0)
 
         error = vTarget - vEgo
-        g = self.tuning
         if self.loop == 'speed':
             # The integral is the trim, in pedal units. Held off when it would
             # push further into a stop it is already against -- an integral

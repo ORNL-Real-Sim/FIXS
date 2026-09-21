@@ -175,3 +175,35 @@ def test_the_run_records_what_drove_it(scenario, tmp_path):
     assert 'shape=pedals' in first
     assert 'kv=0.33' in first
     assert 'cell=<lambda>' in first
+
+
+# -- the law itself, which is pure arithmetic and needs no simulator ---------
+
+def _pedalLaw(**tune):
+    cls = driver(shape='pedals', tuning=Tuning(**tune))
+    obj = cls.__new__(cls)
+    Controller.__init__(obj, {'EgoControllerLog': '', 'CarlaTimeStep': 0.05}, 'ego')
+    return obj
+
+
+def test_a_stopped_car_asked_for_nothing_holds_the_brake():
+    """The full-stop rule -- and the line that broke rung 4 in review, because
+    it reads a gain before the law had bound it."""
+    d = _pedalLaw()
+    assert d._speedToPedal(0.0, 0.0) == (0.0, 1.0)
+
+
+def test_zero_speed_error_still_holds_a_pedal():
+    """The whole reason the integral exists: road load has to be paid."""
+    d = _pedalLaw()
+    for _ in range(40):
+        thr, brk = d._speedToPedal(8.0, 8.0 - 0.2)     # a standing shortfall
+    assert thr > 0.0
+    thr, brk = d._speedToPedal(8.0, 8.0)               # error now zero
+    assert thr > 0.0, 'the pedal collapsed when the error did'
+
+
+def test_the_gains_reach_the_law():
+    """A tuning that cannot move the pedal is a tuning nobody is applying."""
+    slow, fast = _pedalLaw(kv=0.01), _pedalLaw(kv=0.9)
+    assert fast._speedToPedal(9.0, 4.0)[0] > slow._speedToPedal(9.0, 4.0)[0]
