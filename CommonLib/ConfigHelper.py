@@ -68,7 +68,6 @@ class ConfigHelper:
         if sumo_cfg and not os.path.isabs(sumo_cfg):
             sumo_cfg = os.path.join(os.path.dirname(os.path.abspath(configName)), sumo_cfg)
         self.Sumo_setup["SumoConfigFile"] = sumo_cfg
-        self.Sumo_setup["EnableTraciRelay"] = self.parserFlag(sumo_node, "EnableTraciRelay", False)
         # Application Setup
         app_node = config.get("ApplicationSetup", {})
         self.application_setup["EnableApplicationLayer"] = self.parserFlag(app_node, "EnableApplicationLayer", False)

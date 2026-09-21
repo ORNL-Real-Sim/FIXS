@@ -29,10 +29,6 @@ SumoSetup:
     # about a network the co-simulation is not running.
     SumoConfigFile: "../../Sumo/Probes/TraciRelay/net/probe.sumocfg"
 
-    # #356. Off by default everywhere else: it hands a client the whole TraCI API,
-    # setters included, against the live run.
-    EnableTraciRelay: true
-
 ApplicationSetup:
     EnableApplicationLayer: true
     VehicleSubscription:

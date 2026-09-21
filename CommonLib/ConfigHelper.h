@@ -267,12 +267,6 @@ struct SumoSetup_t {
 	// 1000 preserves the previously hard-coded behaviour.
 	double PrecedingVehicleLookahead;
 
-	// #356: let a FIXS client relay raw TraCI commands through the connection
-	// TrafficLayer already owns (`import fixs.traci as traci`). Off by default: it
-	// hands a client the whole TraCI API, including setters, against the live run.
-	// SUMO-only -- a VISSIM config that sets it is rejected at startup.
-	bool EnableTraciRelay;
-
 	// Auto-launch SUMO configuration
 	bool EnableAutoLaunch;
 	std::string SumoConfigFile;
