@@ -44,18 +44,25 @@ def control(ego, dt, state=None):
     if dyno is not None:
         target = dyno.exchange(target, dt)
 
-    # FOR A REAL CELL, replace the object -- nothing else changes:
+    # FOR A REAL CELL: call it. Right here, in place of the two lines above.
     #
-    #     state["dyno"] = MyCell("192.168.1.50")    # instead of fixs.xil.dyno()
+    #     reached = my_cell.send_and_read(target)   # your code, your shape
+    #     target = reached
     #
-    # It needs one method, exchange(speed, dt) -> speed. No subclass, no
-    # registration, no key in the FIXS schema: how your cell is spoken to is
-    # yours, and FIXS's simulated one carries no more authority than it.
-    # Three things bite. It is called every step (20 Hz at CarlaTimeStep 0.05),
-    # so it MUST NOT BLOCK -- send, then take the newest answer that already
-    # arrived. When none has, return the reference you were given: it is the
-    # only answer that cannot invent motion. And count that, because a run
-    # ending with a large miss count did not test what it claims to have.
+    # There is no interface to implement and nothing to register. This is your
+    # controller; FIXS calls control() and reads what you write onto `ego`.
+    # `exchange` above is simply the method the SIMULATED cell happens to have
+    # -- match it only if you want to swap the two without touching this line.
+    #
+    # What FIXS knows about cells is the placement above, not how to reach one:
+    # your cell answers AFTER you decide and BEFORE you command, and the loop
+    # closes next step when you read ego.speed back.
+    #
+    # Three things bite, whatever you write. It runs every step (20 Hz at
+    # CarlaTimeStep 0.05), so it MUST NOT BLOCK -- send, then take the newest
+    # answer that already arrived. When none has, use the reference you already
+    # had: it is the only value that cannot invent motion. And count that,
+    # because a run ending with many of them did not test what it claims to.
 
     # --- shape 1: pedals + steer. You close the loop. -----------------------
     error = target - ego.speed

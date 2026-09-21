@@ -90,7 +90,21 @@ __all__ = [
     'emit', 'transport', 'commandKind',
     'Vehicle', 'MAX_STEER_RAD',
     'Shutdown', 'FixsError', 'NotConnected', 'ProtocolError',
+    'driver',
 ]
+
+
+def driver(exchange=None, **options):
+    """A ready-made controller for the ego -- see :mod:`CommonLib.fixs._driver`.
+
+        Controller = fixs.driver()              # no cell
+        Controller = fixs.driver(exchange)      # yours: (vref, dt) -> mps
+
+    Imported lazily: the driver pulls in fixs.carla and CARLA's agents, which
+    a SUMO-only or CarMaker run has no reason to load.
+    """
+    from CommonLib.fixs._driver import driver as _driver
+    return _driver(exchange, **options)
 
 
 #: Full-lock front road-wheel angle [rad]. `steerAngleDesired` is an ANGLE on
