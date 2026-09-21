@@ -296,34 +296,74 @@ def test_two_drivers_in_one_file_is_refused(tmp_path):
     assert 'twice' in str(e.value) or '2 times' in str(e.value)
 
 
-# -- the shipped templates ---------------------------------------------------
+# -- the shipped template ---------------------------------------------------
 
-def _template(name):
+def _template():
     return os.path.join(os.path.dirname(__file__), '..', '..', '..',
-                        'Carla', 'VirEnv', 'templates', name)
+                        'Carla', 'VirEnv', 'templates', 'driver_template.py')
 
 
-@pytest.mark.parametrize('scenario', [True], indirect=True)
-def test_the_driver_template_loads(scenario):
-    """Shipped example code that is never run is how the last one rotted: it
-    pointed at a file that does not exist and used pre-EgoSetup yaml keys."""
+def test_the_template_names_keys_and_files_that_exist():
+    """Shipped example code that is never checked is how the last one rotted:
+    it used the pre-EgoSetup yaml keys, pointed at a file that does not exist,
+    and read a config key that reads back empty."""
+    src = io.open(_template(), encoding='utf-8').read()
+    for wrong in ('EgoActuationSource', 'EgoController:', 'IEgoController',
+                  'EgoRoutePoints'):
+        assert wrong not in src, wrong
+    assert 'EgoSetup' in src
+
+
+def test_the_template_offers_the_three_forms():
+    src = io.open(_template(), encoding='utf-8').read()
+    for form in ('fixs.driver()', 'fixs.driver(exchange)',
+                 'fixs.driver(usercontrol=my_control)'):
+        assert form in src, form
+
+
+# -- your own driving, through the same factory ------------------------------
+
+class _FakeEgo:
+    speed = 4.0
+    speedDesired = 0.0
+    feedAge = 0.0
+
+    def set(self, **kw):
+        self.cmd = kw
+
+
+@pytest.mark.parametrize('scenario', [False], indirect=True)
+def test_usercontrol_replaces_the_driving_entirely(scenario):
+    """Your logic, called with the same (ego, dt), writing the same way --
+    and none of the driver's own runs."""
+    seen = []
+
+    def mine(ego, dt):
+        seen.append(dt)
+        ego.set(speedDesired=9.0)
+
+    d = _build(driver(usercontrol=mine))
+    ego = _FakeEgo()
+    d.control(ego, 0.05)
+    assert seen == [0.05]
+    assert ego.cmd == {'speedDesired': 9.0}
+    assert d.agent is None, 'the CARLA agent was built for logic that is not ours'
+
+
+@pytest.mark.parametrize('scenario', [False], indirect=True)
+def test_usercontrol_needs_no_name_and_no_method(scenario):
+    """The point of it: you write a function, not a class with control()."""
     from CommonLib.VirEnv.EgoControllerHost import loadController
-    lc = loadController(_template('driver_template.py'))
-    assert callable(getattr(lc._obj, 'control', None))
-    assert lc._obj._EXCHANGE.__name__ == 'exchange'
+    cls = driver(usercontrol=lambda ego, dt: None)
+    assert callable(getattr(cls, 'control', None))
 
 
-def test_the_controller_template_loads():
-    from CommonLib.VirEnv.EgoControllerHost import loadController
-    lc = loadController(_template('controller_template.py'))
-    assert callable(lc._obj)
+def test_usercontrol_and_exchange_together_is_refused():
+    """Your control decides when to ask a cell; ours would never call it."""
+    with pytest.raises(TypeError):
+        driver(exchange=lambda v, dt: v, usercontrol=lambda ego, dt: None)
 
 
-def test_the_templates_name_keys_that_exist():
-    """EgoActuationSource / EgoController were the old spelling, and
-    IEgoController.py does not exist."""
-    for name in ('controller_template.py', 'driver_template.py'):
-        src = io.open(_template(name), encoding='utf-8').read()
-        assert 'EgoActuationSource' not in src, name
-        assert 'IEgoController' not in src, name
-        assert 'EgoSetup' in src, name
+def test_a_non_callable_usercontrol_is_refused_at_the_call():
+    with pytest.raises(TypeError):
+        driver(usercontrol=42)

@@ -1,86 +1,86 @@
-"""Use the driver FIXS ships, and put your dynamometer in its loop.
-
-Copy this next to your application and point the scenario at it::
+"""Drive the FIXS ego. Copy this next to your application.
 
     EgoSetup:
-      Dynamics: virenv
-      ActuationSource: user
-      Controller: apps/<your_app>/my_controller.py --command-shape pedals
+      Dynamics: virenv            # the virtual environment moves the ego
+      ActuationSource: user       # a controller produces the pedals and steer
+      Controller: apps/<your_app>/my_driver.py --command-shape pedals
 
-``fixs.driver()`` gives you the eco advisory read off the wire, the signal and
-leader ceilings, a speed-to-pedal law and both command shapes. You supply one
-thing FIXS cannot: how to reach your cell.
+EMBEDDED ONLY. FIXS imports that file once and calls it every CARLA step. A
+control law served at the 0.1 s feed instead would read the advisory back as
+its own measured speed, so FIXS refuses that combination -- if you want a
+client on the feed, that is a different shape entirely; see the application
+repo's apps/_template.
 
-To write the control logic yourself instead, see ``controller_template.py``.
+Three ways to use this, in the order you should reach for them.
+
+
+1. THE DRIVER AS IT IS
+----------------------
+::
+
+    import fixs
+    Driver = fixs.driver()
+
+You get the eco advisory read off the wire, the signal and leader ceilings, a
+speed-to-pedal law and both command shapes. Nothing else to write.
+
+
+2. WITH YOUR DYNAMOMETER
+------------------------
+::
+
+    import fixs
+    import fixs.xil
+
+    dyno = fixs.xil.dyno(vehicle={'mass_kg': 2100.0})   # or your own rig
+
+    def exchange(vref, dt):
+        return dyno.exchange(vref, dt)     # a speed in, the speed reached out
+
+    Driver = fixs.driver(exchange)
+
+The driver calls it after every decision and before it commands anything, so
+the cell is in the loop rather than beside it. For REAL hardware, replace that
+body -- the packet, the port and the rate are yours, and FIXS has no interface
+for them. Three things bite: never block (send, then take an answer that has
+already arrived); when none has, return `vref`, the only value that cannot
+invent motion; and count those, because nothing else will.
+
+
+3. YOUR OWN DRIVING
+-------------------
+::
+
+    import fixs
+
+    def my_control(ego, dt):
+        ...
+        ego.set(speedDesired=target, steerAngleDesired=0.0)
+
+    Driver = fixs.driver(usercontrol=my_control)
+
+Nothing of the driver's runs -- no ceilings, no pedal law, no agent. FIXS
+still builds the class and calls it every step, so you never write __init__ or
+a method named control, and the name `Driver` is yours to pick: fixs.driver()
+tells FIXS what it built.
+
+Ask your own cell inside that function, wherever you want it.
+
+
+WHAT `ego` GIVES YOU, AND THE TWO THINGS THAT CATCH PEOPLE
+----------------------------------------------------------
+LIVE every call : positionX, positionY, heading, speed, acceleration
+HELD since the last feed, `ego.feedAge` seconds ago:
+                  speedDesired, signalLightColor, precedingVehicleDistance
+
+`speedDesired` IS DUAL-USE. The traffic simulator's advisory arrives in it on
+the feed, and your command goes out through it every step. The bridge restores
+the feed's value before each call for exactly that reason -- but read it only
+when `ego.feedAge` is 0, or on the ticks between feeds you are reading back
+your own last command. Measured on a 300 s run before that was understood:
+1299 of 2554 ticks matched the previous tick's own target to within 1e-3.
+
+`steerAngleDesired` IS AN ANGLE, in radians. A CARLA agent's `control.steer`
+is normalised [-1, 1]; multiply by fixs.MAX_STEER_RAD, or command through
+`fixs.carla.apply_control`, which converts in the one place that belongs.
 """
-import fixs
-import fixs.xil
-
-#: THE BENCH, stated here rather than left to the yaml, so this file says what
-#: is on it. Omit an argument and XilSetup.Vehicle / XilSetup.Dyno supplies it.
-#: This one is simulated -- real physics, not a stub: mass, torque bandwidth
-#: and road load, so it answers 0.12 m/s to a first request of 10.
-dyno = fixs.xil.dyno(vehicle={'mass_kg': 2100.0},
-                     dyno={'road_A_N': 111.0, 'roller_inertia_kgm2': 40.0})
-
-#: TRUE when the cell is real hardware rather than the simulation above. The
-#: two exchanges below are the only difference.
-USE_RIG = False
-
-
-if USE_RIG:
-    import socket
-    import struct
-
-    RIG_ADDR = ('192.168.1.50', 5555)
-
-    _sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    _sock.setblocking(False)
-    _sock.bind(('', 5556))
-
-    def exchange(vref, dt):
-        """Ask the rig for a speed; answer with what it reached.
-
-        This is the whole of what the driver needs, and none of it is FIXS's
-        business -- the packet, the port and the rate are yours. Three things
-        bite, whatever you write here:
-
-        NEVER BLOCK. Send, then take an answer that has ALREADY arrived. A
-        blocking read turns a co-simulation into one paced by your network.
-
-        NO ANSWER THIS TICK -> return vref. It is the only value that cannot
-        invent motion; the run then behaves as though no cell were attached.
-
-        COUNT those, because nothing else will, and a run that ends with many
-        of them did not test what it claims to have tested.
-        """
-        _sock.sendto(struct.pack('<2f', vref, 0.0), RIG_ADDR)
-        newest = None
-        while True:                   # drain; the newest answer is the true one
-            try:
-                data, _ = _sock.recvfrom(64)
-            except BlockingIOError:
-                break
-            newest = data
-        if newest is None:
-            exchange.misses += 1
-            return vref
-        return struct.unpack('<2f', newest)[0]
-
-    exchange.misses = 0
-
-else:
-
-    def exchange(vref, dt):
-        """Ask the simulated bench for a speed; answer with what it reached."""
-        return dyno.exchange(vref, dt)
-
-
-#: WHERE IT SITS IN THE LOOP: after every decision the driver makes, before it
-#: commands anything. Next step the driver reads ego.speed back, so the cell is
-#: in the loop rather than beside it.
-#:
-#: fixs.driver() tells FIXS what it built, so this name is yours to pick. The
-#: scenario names the FILE; the loader takes the driver from here and calls its
-#: control(ego, dt) every step.
-Driver = fixs.driver(exchange)
