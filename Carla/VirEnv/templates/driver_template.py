@@ -8,9 +8,9 @@
 As written you get the driver FIXS ships: the eco advisory read off the wire,
 the signal and leader ceilings, a speed-to-pedal law and both command shapes.
 
-TO CHANGE IT, uncomment one of the blocks below and name it in the ONE
-fixs.driver() call at the end of this file. There is exactly one such call --
-a second would mean two drivers, and FIXS refuses to guess which you meant.
+TO CHANGE IT, uncomment one of the blocks below, then move the '#' among the
+three Driver lines at the end so the matching one is live. Only ever one:
+two drivers and FIXS refuses to guess which you meant.
 
 EMBEDDED ONLY: FIXS imports this once and calls it every CARLA step. A control
 law served at the 0.1 s feed would read the advisory back as its own measured
@@ -25,7 +25,8 @@ import fixs
 #  reached, and THAT is what gets commanded -- so the cell is in the loop
 #  rather than beside it. Next step you read ego.speed back.
 #
-#  Uncomment, then:   Driver = fixs.driver(exchange)
+#  Uncomment it, then switch the Driver line at the end of the file to
+#  the one that names it.
 #
 #  For REAL hardware, replace the body. The packet, the port and the rate are
 #  yours, and FIXS has no interface for them. Three things bite: NEVER BLOCK
@@ -46,7 +47,8 @@ import fixs
 #  law, no agent. FIXS still builds the class and calls it every step, so you
 #  write a function, never __init__ or a method named control.
 #
-#  Uncomment, then:   Driver = fixs.driver(usercontrol=my_control)
+#  Uncomment it, then switch the Driver line at the end of the file to
+#  the one that names it.
 #
 #  A DYNAMOMETER STILL WORKS: uncomment the block above too and call it inside
 #  my_control, wherever you want it -- `target = dyno.exchange(target, dt)`.
