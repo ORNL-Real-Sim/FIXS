@@ -62,20 +62,9 @@ _kParkZ = -200.0
 _kDefaultExtent = carla.Vector3D(2.3, 1.0, 0.75)
 # How far above the wire's road-surface z a vehicle is CREATED. Transient:
 # setVehiclePose overwrites the pose in the same tick, before world.tick, so
-# nothing is ever rendered at this height -- it only has to clear the spawn's
-# collision test.
-#
-# 0.1 did not. CARLA refuses a spawn whose bounding box intersects the road, and
-# the larger blueprints do at 10 cm: measured on the MLK warm-up burst, 9 of 197
-# vehicles were refused, 8 of them vehicle.mercedes.coupe and one
-# vehicle.bmw.grandtourer. Each was refused ALONE in an empty world at the same
-# transform, while a vehicle.tesla.model3 at that identical transform was
-# accepted -- so it was the model, not the spot and not congestion.
-#
-# A refused vehicle is skipped for the exchange and retried on the next one, so
-# the corridor silently lost nine cars for 0.1 s at every burst, and WHICH nine
-# depended on which blueprint they happened to draw. Sweeping the lift: 0.1 ->
-# 9 refused, 0.2 and above -> 0 refused. 0.5 keeps a wide margin over that edge.
+# nothing is rendered at this height -- it only has to clear the spawn's
+# collision test, which 0.1 did not for the larger blueprints. Measured: 0.1 ->
+# 9 of 197 refused, 0.2 and above -> 0. See FIXS#373 / PR #374.
 _kSpawnOffsetZ = 0.5
 
 
