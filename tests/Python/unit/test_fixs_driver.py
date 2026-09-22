@@ -29,6 +29,19 @@ CarlaSetup: {EnableCosimulation: true, EnablePythonBackend: true}
 
 
 @pytest.fixture
+def scenario_off(tmp_path):
+    """A scenario on disk with no bench, for loading a template."""
+    p = tmp_path / 's.yaml'
+    p.write_text(_SCENARIO % 'false')
+    old = os.environ.get('FIXS_CONFIG_YAML')
+    os.environ['FIXS_CONFIG_YAML'] = str(p)
+    yield str(p)
+    os.environ.pop('FIXS_CONFIG_YAML', None)
+    if old is not None:
+        os.environ['FIXS_CONFIG_YAML'] = old
+
+
+@pytest.fixture
 def scenario(request):
     """A yaml on disk, with or without the simulated dyno declared."""
     with tempfile.NamedTemporaryFile('w', suffix='.yaml', delete=False) as f:
@@ -294,3 +307,111 @@ def test_two_drivers_in_one_file_is_refused(tmp_path):
     with pytest.raises(ControllerError) as e:
         loadController(p)
     assert 'twice' in str(e.value) or '2 times' in str(e.value)
+
+
+# -- the shipped template ---------------------------------------------------
+
+def _template():
+    return os.path.join(os.path.dirname(__file__), '..', '..', '..',
+                        'Carla', 'templates', 'driver_template.py')
+
+
+def test_the_template_is_a_working_driver(scenario_off):
+    """It is a TEMPLATE: copy it, point a scenario at it, and it drives. The
+    version this replaces was 86 lines of docstring and one statement -- it
+    would have failed at load with 'defines none of Controller, control', and
+    a test that only grepped its prose passed anyway."""
+    from CommonLib.VirEnv.EgoControllerHost import loadController
+    lc = loadController(_template())
+    assert callable(getattr(lc._obj, 'control', None))
+
+
+def test_the_template_names_keys_and_files_that_exist():
+    """How the last one rotted: pre-EgoSetup yaml keys, a pointer to a file
+    that does not exist, and a config key that reads back empty."""
+    src = io.open(_template(), encoding='utf-8').read()
+    for wrong in ('EgoActuationSource', 'EgoController:', 'IEgoController',
+                  'EgoRoutePoints'):
+        assert wrong not in src, wrong
+    assert 'EgoSetup' in src
+
+
+def test_the_template_shows_the_other_two_forms():
+    src = io.open(_template(), encoding='utf-8').read()
+    assert 'exchange' in src and 'usercontrol' in src
+
+
+# -- your own driving, through the same factory ------------------------------
+
+class _FakeEgo:
+    speed = 4.0
+    speedDesired = 0.0
+    feedAge = 0.0
+
+    def set(self, **kw):
+        self.cmd = kw
+
+
+@pytest.mark.parametrize('scenario', [False], indirect=True)
+def test_usercontrol_replaces_the_driving_entirely(scenario):
+    """Your logic, called with the same (ego, dt), writing the same way --
+    and none of the driver's own runs."""
+    seen = []
+
+    def mine(ego, dt):
+        seen.append(dt)
+        ego.set(speedDesired=9.0)
+
+    d = _build(driver(usercontrol=mine))
+    ego = _FakeEgo()
+    d.control(ego, 0.05)
+    assert seen == [0.05]
+    assert ego.cmd == {'speedDesired': 9.0}
+    assert d.agent is None, 'the CARLA agent was built for logic that is not ours'
+
+
+@pytest.mark.parametrize('scenario', [False], indirect=True)
+def test_usercontrol_needs_no_name_and_no_method(scenario):
+    """The point of it: you write a function, not a class with control()."""
+    from CommonLib.VirEnv.EgoControllerHost import loadController
+    cls = driver(usercontrol=lambda ego, dt: None)
+    assert callable(getattr(cls, 'control', None))
+
+
+def test_usercontrol_and_exchange_together_is_refused():
+    """Your control decides when to ask a cell; ours would never call it."""
+    with pytest.raises(TypeError):
+        driver(exchange=lambda v, dt: v, usercontrol=lambda ego, dt: None)
+
+
+def test_a_non_callable_usercontrol_is_refused_at_the_call():
+    with pytest.raises(TypeError):
+        driver(usercontrol=42)
+
+
+def test_the_template_makes_exactly_one_driver():
+    """Following its own instructions must not break the run.
+
+    The version this replaced had `Driver = fixs.driver(usercontrol=...)`
+    inside a commented block AND one at the end. Uncommenting the block, as
+    the file told you to, gave two drivers -- and the loader refuses to guess
+    which was meant. So: one live call, and no commented-out one waiting to
+    become a second.
+    """
+    import ast
+    src = io.open(_template(), encoding='utf-8').read()
+
+    live = [n for n in ast.walk(ast.parse(src))
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+            and n.func.attr == 'driver']
+    assert len(live) == 1, 'live fixs.driver() calls'
+
+    # The alternatives are allowed, but only BESIDE the live one, where
+    # swapping which line carries the '#' is obvious. The bug was one buried
+    # in a block far above: uncommenting that block left two.
+    lines = src.splitlines()
+    live = [i for i, ln in enumerate(lines) if ln.startswith('Driver =')]
+    commented = [i for i, ln in enumerate(lines)
+                 if ln.startswith('#') and ln.lstrip('#').strip().startswith('Driver =')]
+    assert len(live) == 1, live
+    assert all(abs(i - live[0]) <= 3 for i in commented), (live, commented)

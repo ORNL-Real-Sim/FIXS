@@ -320,6 +320,7 @@ class Controller:
     #: Both set by :func:`driver`. None means "ask the scenario".
     _EXCHANGE = None
     _OPTIONS = None
+    _USERCONTROL = None
 
     def __init__(self, config, egoId):
         opt = _options(config, getattr(self, '_OPTIONS', None))
@@ -434,11 +435,21 @@ class Controller:
             self.agent.ignore_traffic_lights(True)
 
     def control(self, ego, dt):
-        if self.agent is None:
-            self._build()
         if dt > 0:
             self.dt = dt
         self.elapsed += dt
+
+        # YOUR driving, if you handed some to fixs.driver(). It is called with
+        # the same (ego, dt) FIXS calls us with, and writes its command the
+        # same way -- ego.set(...). Nothing of ours runs: no ceilings, no
+        # pedal law, no agent. You wanted your logic, so you get your logic.
+        if self._USERCONTROL is not None:
+            self._USERCONTROL(ego, dt)
+            self.steps += 1
+            return
+
+        if self.agent is None:
+            self._build()
 
         advisory = self._advisoryOf(ego)
         wanted = advisory if advisory is not None else self.fallbackSpeed
@@ -694,7 +705,7 @@ class Controller:
                ',%.4f,%.4f,%.4f,%.4f\n' % self._dbg))
 
 
-def driver(exchange=None, **options):
+def driver(exchange=None, usercontrol=None, **options):
     """(callable) -> class -- the controller the scenario should name.
 
     ``exchange(vref, dt) -> mps`` is yours: a speed goes in, the speed your
@@ -719,11 +730,21 @@ def driver(exchange=None, **options):
     ``options`` override the module defaults, and the scenario's own
     ``--command-shape`` still wins over both, being nearer the run.
     """
-    if exchange is not None and not callable(exchange):
-        raise TypeError('fixs.driver(exchange): %r is not callable'
-                        % (exchange,))
+    for name, fn in (('exchange', exchange), ('usercontrol', usercontrol)):
+        if fn is not None and not callable(fn):
+            raise TypeError('fixs.driver(%s): %r is not callable' % (name, fn))
+    if usercontrol is not None and exchange is not None:
+        # Your control() decides when to ask a cell and what to do with the
+        # answer. Taking an exchange too would mean we called it somewhere
+        # inside logic we are not running.
+        raise TypeError(
+            'fixs.driver(): usercontrol replaces the driving, so an exchange '
+            'here would never be called -- ask your cell inside your own '
+            'control(ego, dt).')
     cls = type('Controller', (Controller,),
                dict(_EXCHANGE=staticmethod(exchange) if exchange else None,
+                    _USERCONTROL=staticmethod(usercontrol) if usercontrol
+                    else None,
                     _OPTIONS=dict(options)))
     _BUILT.append(cls)
     return cls

@@ -105,7 +105,10 @@ def test_an_unknown_value_is_refused_rather_than_ignored(tmp_path):
 
     with pytest.raises(SystemExit) as exc:
         parse(tmp_path, ego={"Dynamics": "virenv", "ActuationSource": "autopilot"})
-    assert "simulator|fixs|user" in str(exc.value)
+    # 'fixs' is accepted but deliberately not offered: it selects the
+    # geometric L0 fallback, which drives, so reaching for it by mistake does
+    # not look wrong.
+    assert "simulator|user" in str(exc.value)
 
 
 def test_xil_says_where_that_case_actually_lives(tmp_path):
@@ -198,3 +201,10 @@ def test_the_legacy_spelling_is_refused_the_same_way(tmp_path):
                                "EgoL0Driver": "Actuation",
                                "EnablePythonBackend": True})
     assert "needs a Controller on the Python" in str(exc.value)
+
+
+def test_actuation_source_fixs_still_works_though_it_is_not_offered(tmp_path):
+    """Not surfacing a value is not removing it: every scenario that names it
+    keeps running, and the L0 fallback it selects is untouched."""
+    cfg = parse(tmp_path, ego={"Dynamics": "virenv", "ActuationSource": "fixs"})
+    assert ego(cfg)["ActuationSource"] == "fixs"

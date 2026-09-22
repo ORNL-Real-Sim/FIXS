@@ -206,6 +206,12 @@ class ConfigHelper:
 
         # ActuationSource -- WHO PRODUCES THE PEDALS AND STEER. "user" is ONE
         # value; the Controller key decides where it runs.
+        #
+        # "fixs" is still accepted and still works: it selects the geometric
+        # L0 fallback in CommonLib/VirEnv/EgoDriver.py, for a map CARLA cannot
+        # route. It is left out of the message on purpose -- reaching for it
+        # from a scenario that wants a controller gets pure pursuit and a
+        # constant-map pedal law, which drives, so it does not look wrong.
         src = self.parserString(ego_node, "ActuationSource", "").strip().lower()
         if not src:
             l0 = (self.parserString(carla_node, "EgoL0Driver", "") or "").strip().lower()
@@ -213,7 +219,7 @@ class ConfigHelper:
                    "egodriver": "fixs", "actuation": "user", "embedded": "user"}.get(l0, "")
         if src and src not in ("simulator", "fixs", "user"):
             raise SystemExit(
-                "ERROR: EgoSetup.ActuationSource must be one of simulator|fixs|user, "
+                "ERROR: EgoSetup.ActuationSource must be one of simulator|user, "
                 "got '%s'" % src)
         self.Ego_setup["ActuationSource"] = src
 
