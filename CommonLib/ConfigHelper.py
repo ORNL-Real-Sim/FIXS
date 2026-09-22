@@ -138,6 +138,13 @@ class ConfigHelper:
         # Carla render sub-step (interpolate the feed for smoother motion). 0 -> 1:1.
         self.Carla_setup["CarlaTimeStep"] = self.parserDouble(carla_node, "CarlaTimeStep", 0.0)
 
+        # Vehicles spawned UP FRONT and handed out when the traffic arrives,
+        # instead of spawning each one the first time its id is seen. 0 is off
+        # and is the old behaviour. Size it from the scenario's peak concurrent
+        # vehicle count; the bridge prints the peak it saw at shutdown. Python
+        # bridge only -- VirCarlaEnv.exe ignores it. Why: FIXS#373 / PR #374.
+        self.Carla_setup["SpareVehiclePool"] = self.parserInteger(carla_node, "SpareVehiclePool", 0)
+
         # Spectator BEV follow (rigid top-down snap). Default ON, 50 m up, north-up.
         self.Carla_setup["CenteredViewId"] = self.parserString(carla_node, "CenteredViewId", "ego")
         self.Carla_setup["EnableSpectatorFollow"] = self.parserFlag(carla_node, "EnableSpectatorFollow", True)

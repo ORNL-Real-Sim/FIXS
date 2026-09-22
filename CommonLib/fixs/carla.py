@@ -64,7 +64,7 @@ import importlib
 import math
 
 __all__ = ['client', 'world', 'map', 'ego', 'available', 'bind', 'refresh',
-           'apply_control', 'apply_ackermann_control']
+           'apply_control', 'apply_ackermann_control', 'precompute_route']
 
 _carla = None
 _mapCache = None
@@ -245,6 +245,8 @@ _kPlanMargin = 200
 _routeOwned = True
 #: Whether the vehicle feed has already reported itself unreadable.
 _feedFailed = False
+#: The route plan, once built. See precompute_route.
+_planCache = None
 
 
 def bind(agent, egoId='', route=True):
@@ -286,6 +288,41 @@ def bind(agent, egoId='', route=True):
     if _routeOwned:
         _layRoute(agent, first=True)
     return agent
+
+
+def precompute_route():
+    """Build the ego's route plan NOW, before there is an ego. -> waypoints built.
+
+    Everything :func:`bind` does needs the agent, and the agent needs the actor,
+    which the traffic simulator does not insert until its depart time. The PLAN
+    does not: it is EgoRoutePoints snapped to the map, and both of those exist the
+    moment CARLA has loaded. Left to `bind`, the snap therefore happens on the
+    first controlled tick -- 2561 waypoints, measured at 0.16-0.20 s, inside the
+    tick where the ego enters and the whole warm-up network arrives at once.
+
+    Calling this from a controller's constructor moves it to bridge start-up,
+    where the bridge is about to block in recv for the whole warm-up anyway.
+    `bind` then finds the plan already built.
+
+    Safe without an ego, and that is measured, not assumed: `_routeElevation`
+    falls back from the ego's z to the map's first spawn point, and on the MLK
+    corridor that is 210.21 m against the ego's 205.29 -- yet the two plans agree
+    on road and lane at 2560 of 2560 points, with identical geometry. The seed
+    only feeds the FIRST query; from there the elevation is carried forward off
+    each returned waypoint, so the chain corrects itself. (Holding z at 0 for
+    every query instead differs at 341 of 2560, which is how that comparison was
+    shown to detect a difference at all.)
+
+    Idempotent, and a no-op when the scenario has no route.
+    """
+    global _planCache
+    if _planCache is None:
+        plan = _routePlan()
+        # A route-less scenario is not a built plan: caching [] here while
+        # _routePlan refuses to would make the two disagree about what "no plan
+        # yet" means, and the agent would be handed an empty plan for good.
+        _planCache = plan or None
+    return len(_planCache or ())
 
 
 def apply_control(control):                                     # noqa: N802
@@ -433,6 +470,9 @@ def _routePlan():
     Snapping is trustworthy here because the points are lane centres: the median
     distance from a route point to the lane CARLA returns is 0.06 m.
     """
+    global _planCache
+    if _planCache is not None:
+        return _planCache
     pts = _configured('EgoRoutePoints', None) or []
     if len(pts) < 2:
         return []
@@ -476,6 +516,7 @@ def _routePlan():
           % (len(out), changes,
              '' if not missing else ', %d points had no lane' % missing), flush=True)
     _dumpPlan(out)
+    _planCache = out
     return out
 
 
@@ -690,8 +731,9 @@ def __getattr__(name):
 def _reset():
     """Drop everything cached per run -- for tests, and for a backend swapped
     mid-process."""
-    global _mapCache, _view, _lapsLaid, _feedFailed, _routeOwned
+    global _mapCache, _view, _lapsLaid, _feedFailed, _routeOwned, _planCache
     _mapCache = None
+    _planCache = None
     _view = None
     _lapsLaid = 0
     _routeOwned = True

@@ -26,6 +26,7 @@ constant.
 import csv
 import math
 import os
+import hashlib
 import random
 
 import carla
@@ -227,15 +228,48 @@ class BridgeHelper:
     #: the bounding box, and extent.x is the pose anchor, so an unseeded draw
     #: moves every vehicle run to run. Seed from CarlaSetup.BlueprintSeed. FIXS#355.
     _blueprintRng = random.Random(_kBlueprintSeed)
+    #: The seed itself, kept so the per-vehicle draw can derive from it.
+    _blueprintSeed = _kBlueprintSeed
 
     @staticmethod
     def setBlueprintSeed(seed):
         """Re-seed the blueprint draw (CarlaSetup.BlueprintSeed)."""
+        BridgeHelper._blueprintSeed = seed
         BridgeHelper._blueprintRng = random.Random(seed)
 
     @staticmethod
-    def map_Sumo_vClass_to_Carla_blueprintId(vClass):
-        """(string) -> string -- a blueprint id for one SUMO vehicle class."""
+    def _blueprintIndexOf(vehId, n):
+        """(string, int) -> int -- a stable index from (seed, vehicle id).
+
+        blake2b rather than hash(): Python randomises str hashing per process
+        unless PYTHONHASHSEED is set, so hash() would give a different model
+        every run -- the exact thing the seed exists to prevent.
+        """
+        key = ('%s|%s' % (BridgeHelper._blueprintSeed, vehId)).encode('utf-8')
+        return int.from_bytes(hashlib.blake2b(key, digest_size=8).digest(),
+                              'big') % n
+
+    @staticmethod
+    def map_Sumo_vClass_to_Carla_blueprintId(vClass, vehId=''):
+        """(string[, string]) -> string -- a blueprint id for one SUMO vehicle.
+
+        Given the vehicle's id, the blueprint is a function of (seed, id) and of
+        nothing else. Without it, the old sequential draw.
+
+        The sequential draw was reproducible only by accident. Every vehicle took
+        the next value from one shared generator, so a vehicle's model depended on
+        how many vehicles had drawn BEFORE it -- and a spawn CARLA refuses still
+        consumes a draw, then draws again when the core retries it next exchange.
+        Measured on MLK: nine refusals in the warm-up burst shifted the sequence
+        by nine, and 46 vehicles got a different model. That matters because the
+        blueprint fixes bounding_box.extent.x, which is the pose anchor (the wire
+        carries the vehicle's NOSE, a CARLA actor is placed by its CENTRE), so
+        those 46 sat up to 1.58 m from where they had been -- for their whole
+        lives, and in front of an agent reading them as its leader.
+
+        Keyed on the id, a retry, a refusal, an arrival order or a spare pool
+        cannot change what any vehicle looks like.
+        """
         pool = BridgeHelper._BY_VCLASS.get(vClass)
         if pool is None:
             if vClass not in BridgeHelper._warnedVClasses:
@@ -246,6 +280,8 @@ class BridgeHelper:
                       'Defaulting to vehicle.tesla.model3.'
                       % (vClass, ', '.join(sorted(BridgeHelper._BY_VCLASS))))
             return 'vehicle.tesla.model3'          # default to a passenger car
+        if vehId:
+            return pool[BridgeHelper._blueprintIndexOf(vehId, len(pool))]
         return BridgeHelper._blueprintRng.choice(pool)
 
     # --------------------------------------------------------- signal states
