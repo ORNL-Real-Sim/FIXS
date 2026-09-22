@@ -70,7 +70,9 @@ APP_ROOT = os.path.dirname(FIXS_ROOT)      # FIXS -> the app dir (holds initiali
 # SimulationSetup.TrafficSimulatorPort and CarlaSetup.CarlaClientPort, so editing
 # the yaml moves the ports for every component instead of just some of them.
 DEFAULT_TRACI_PORT = 1337    # SUMO TraCI server (TrafficLayer connects as its client)
-DEFAULT_BRIDGE_PORT = 440    # TrafficLayer serves VirCarlaEnv here
+DEFAULT_BRIDGE_PORT = 4440  # TrafficLayer serves VirCarlaEnv here. >= 1024: below that
+                            # needs root on Linux, and this default lands in every
+                            # config run_cosim generates (#65).
 DEFAULT_CARLA_HOST = "localhost"   # CARLA RPC; CarlaSetup.CarlaServerIP overrides
 DEFAULT_CARLA_PORT = 2000
 
