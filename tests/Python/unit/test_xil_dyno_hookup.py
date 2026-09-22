@@ -296,25 +296,49 @@ def test_the_yaml_cap_reaches_the_cell(tmp_path):
         d.close()
 
 
-def test_a_capped_robot_holds_the_envelope():
-    """The cap is on the PEDAL, so what it buys is an acceleration envelope.
-    Uncapped this cell reaches 7.4 m/s^2 -- more than a traffic simulator
-    holding the ego to 2.0 will deliver, and the gap does not close because the
-    cell integrates on from a speed the ego never had."""
+def test_the_envelope_holds_at_any_speed():
+    """Quoted in m/s^2, and it has to mean the same thing at 20 m/s as off the
+    line -- which is why it is not a pedal cap. A pedal bounds TORQUE, and the
+    acceleration that buys falls away as road load and the power limit take
+    their share."""
     from CommonLib.xil.dynosim import Dyno, DynoSim
     from CommonLib.xil.vehicle import Vehicle
     from CommonLib.xil.driver import RobotDriver
 
-    def peak(**kw):
+    def peaks(**kw):
         sim = DynoSim(Vehicle(mass_kg=2100.0),
                       Dyno(road_A_N=111.0, roller_inertia_kgm2=40.0),
                       RobotDriver(**kw))
-        a, p = 0.0, 0.0
+        slow, fast, p = [], [], 0.0
         for _ in range(400):
-            v = sim.step(20.0, 0.1).speed
-            a = max(a, (v - p) / 0.1)
+            v = sim.step(25.0, 0.1).speed
+            (slow if v < 5.0 else fast).append((v - p) / 0.1)
             p = v
-        return a
+        return max(slow), max(fast)
 
-    assert peak() > 5.0, "uncapped, this cell is quick"
-    assert peak(max_throttle=0.27) < 2.0, "capped, it stays inside the envelope"
+    assert min(peaks()) > 5.0, 'uncapped, this cell is quick'
+    slow, fast = peaks(max_accel_mps2=1.8)
+    assert slow < 2.0 and fast < 2.0, (slow, fast)
+    assert abs(slow - fast) < 0.3, 'the envelope must not sag with speed'
+
+
+def test_the_envelope_ramps_rather_than_clamping():
+    """Clamping the reference to the measured speed looks equivalent and is
+    not: it parks the setpoint permanently just ahead of actual, the integrator
+    winds on that standing error, and the pedal grows until the vehicle exceeds
+    the very rate the clamp was meant to impose. Measured that way, a 2.0 cap
+    delivered 2.92. The ramp is what keeps the error small enough for the rate
+    to be the ramp's."""
+    from CommonLib.xil.dynosim import Dyno, DynoSim
+    from CommonLib.xil.vehicle import Vehicle
+    from CommonLib.xil.driver import RobotDriver
+
+    sim = DynoSim(Vehicle(mass_kg=2100.0),
+                  Dyno(road_A_N=111.0, roller_inertia_kgm2=40.0),
+                  RobotDriver(max_accel_mps2=1.8, max_decel_mps2=1.8))
+    p, worst = 0.0, 0.0
+    for _ in range(400):
+        v = sim.step(25.0, 0.1).speed
+        worst = max(worst, (v - p) / 0.1)
+        p = v
+    assert worst < 2.0, worst
