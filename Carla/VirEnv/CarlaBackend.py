@@ -43,6 +43,11 @@ kZMismatchTolM = 0.5
 #: missed now, and it still removes four fifths of the cost.
 kZAuditStride = 5
 
+#: How far below the world a spare vehicle waits. Physics is off, so it neither
+#: falls nor collides; this only has to clear the network, and 200 m clears every
+#: corridor FIXS has imported (MLK's road surface sits near z 205).
+_kParkZ = -200.0
+
 # The SUMO/FIXS wire carries the FRONT-of-vehicle position; a CARLA actor
 # transform is the actor PIVOT, which sits at the bounding-box CENTRE
 # horizontally. Landing the model's FRONT on the SUMO front therefore means
@@ -95,11 +100,22 @@ class CarlaBackend(IVirEnvBackend):
         """
         return self._egoActor
 
-    def __init__(self, world, client, useVehicleTypeAsBlueprint, verbose):
+    def __init__(self, world, client, useVehicleTypeAsBlueprint, verbose,
+                 sparePoolSize=0):
         self._world = world
         self._client = client
         self._useVType = useVehicleTypeAsBlueprint
         self._verbose = verbose
+
+        #: CarlaSetup.SpareVehiclePool -- actors to spawn UP FRONT and hand out
+        #: when the traffic arrives. 0 is off, and off is today's behaviour.
+        self._sparePoolSize = max(0, int(sparePoolSize or 0))
+        self._spares = {}                # blueprint id -> [unused carla.Vehicle]
+        self._sparesLeft = 0             # how many are still parked
+        self._spareHits = 0              # handed out instead of spawned
+        self._spareMisses = 0            # wanted a spare, had none of that blueprint
+        self._spareTaken = False         # has the pool been drawn from at all
+        self._peakMapped = 0             # most vehicles alive at once, for the report
 
         self._bpLib = None
         self._map = None                 # cached for the z-alignment guard
@@ -176,9 +192,144 @@ class CarlaBackend(IVirEnvBackend):
         self._trafficLightMap = BridgeHelper.readTrafficLightTable(path)
 
     def initTrafficPool(self):
-        """CARLA spawns lazily; this only caches the blueprint library."""
-        if self._bpLib is None and self._world is not None:
+        """Everything this backend can pay for BEFORE the first exchange.
+
+        The core calls this on the first step, at simTime 0 -- the one iteration
+        that does no recv -- so with a warm-up the bridge then blocks here for the
+        whole warm-up and anything done now is done in dead time. Three things,
+        each of which otherwise lands in the tick where the traffic arrives:
+
+        * the blueprint library;
+        * the MAP. ``world.get_map()`` serialises and re-parses the whole
+          OpenDRIVE and is not shared between callers -- measured twice back to
+          back in one process at 0.640 s and 0.578 s. The z-alignment audit is its
+          only user here and first runs on the exchange that carries the traffic,
+          so without this the parse is paid inside that exchange;
+        * the spare pool, when CarlaSetup.SpareVehiclePool asks for one.
+        """
+        if self._world is None:
+            return
+        if self._bpLib is None:
             self._bpLib = self._world.get_blueprint_library()
+        if self._map is None:
+            self._map = self._world.get_map()
+        if self._sparePoolSize and not self._spares:
+            self._preSpawnSpares(self._sparePoolSize)
+
+    # --- the spare pool ----------------------------------------------------
+    def _parkTransform(self, i, cols=25, pitch=8.0):
+        """A lattice well below the road surface, keyed off the map's own extent.
+
+        Physics is off, so a parked actor neither falls nor collides; the depth
+        only has to clear the network. Measured on the MLK corridor (road surface
+        ~z 205): 250 of 250 spawned at z = -200, none failed. WHERE they sit makes
+        no difference to what they cost -- 0.030 ms/tick each below the map
+        against 0.039 ms/tick 20 km away -- so this is about not colliding with
+        the road, not about hiding them from the camera.
+        """
+        cx, cy = 0.0, 0.0
+        spawn = self._map.get_spawn_points() if self._map is not None else []
+        if spawn:
+            cx = sum(p.location.x for p in spawn) / len(spawn)
+            cy = sum(p.location.y for p in spawn) / len(spawn)
+        return carla.Transform(carla.Location(
+            x=cx + (i % cols) * pitch, y=cy + (i // cols) * pitch, z=_kParkZ))
+
+    def _spareBlueprints(self, n):
+        """Which blueprints to stock, and how many of each.
+
+        Round-robin over the passenger set, NOT a draw from it. The draw that
+        matters belongs to the vehicles: map_Sumo_vClass_to_Carla_blueprintId
+        picks from a seeded generator, and the blueprint it picks fixes
+        bounding_box.extent.x, which is the pose anchor (FIXS#355). Consuming that
+        generator here would hand every vehicle a different model than before. A
+        spare is used only when its blueprint id MATCHES what the vehicle drew, so
+        nothing about the result changes; an even spread only maximises how often
+        that match is there to be had.
+
+        A vClass whose blueprints are not stocked, and every vehicle when
+        UseVehicleTypeAsBlueprint is on, falls through to try_spawn_actor exactly
+        as before.
+        """
+        pool = BridgeHelper._BY_VCLASS.get('passenger') or ()
+        if not pool:
+            return []
+        return [pool[i % len(pool)] for i in range(n)]
+
+    def _preSpawnSpares(self, n):
+        """Park n actors now so the arrival burst does not have to spawn them."""
+        made = 0
+        for i, bpId in enumerate(self._spareBlueprints(n)):
+            try:
+                bp = self._bpLib.find(bpId)
+            except (IndexError, RuntimeError):
+                continue
+            actor = self._world.try_spawn_actor(bp, self._parkTransform(i))
+            if actor is None:
+                continue
+            actor.set_simulate_physics(False)
+            self._spares.setdefault(bpId, []).append(actor)
+            made += 1
+        self._sparesLeft = made
+        print('Spare vehicle pool: %d of %d parked across %d blueprints; the '
+              'arrival burst is handed these instead of spawning them.'
+              % (made, n, len(self._spares)))
+        if made < n:
+            print('[Warning] only %d of %d spares could be parked; the rest of the '
+                  'burst spawns as before.' % (made, n))
+
+    def _takeSpare(self, bpId):
+        """(string) -> carla.Vehicle or None -- an unused actor of that blueprint."""
+        free = self._spares.get(bpId)
+        if not free:
+            if self._sparesLeft:
+                self._spareMisses += 1
+            return None
+        actor = free.pop()
+        self._sparesLeft -= 1
+        self._spareHits += 1
+        self._spareTaken = True
+        return actor
+
+    def spareTaken(self):
+        """() -> bool -- has the pool been drawn from? The driver's cue to trim."""
+        return self._spareTaken
+
+    def trimSpares(self):
+        """Destroy whatever the burst did not need. Once, and not before it.
+
+        A parked actor is not free: measured, it costs ~0.03 ms of EVERY
+        world.tick just by existing, so a pool left standing taxes the whole run
+        to have saved one exchange. Removing one is cheap by comparison -- 0.16 ms
+        batched against 1.6-3.8 ms to spawn it -- so the leftovers go as soon as
+        the burst is over.
+        """
+        left = [a for free in self._spares.values() for a in free]
+        self._spares = {}
+        self._sparesLeft = 0
+        if not left:
+            return 0
+        if self._client is not None:
+            self._client.apply_batch_sync(
+                [carla.command.DestroyActor(a.id) for a in left], False)
+        else:                                   # no client (tests): per actor
+            for a in left:
+                a.destroy()
+        print('Spare vehicle pool: trimmed %d unused (a parked actor still costs '
+              'every tick).' % len(left))
+        return len(left)
+
+    def spareReport(self):
+        """() -> string -- what the pool did, and what to set it to next time."""
+        if not self._sparePoolSize and not self._peakMapped:
+            return ''
+        enough = self._sparePoolSize >= self._peakMapped
+        return ('Spare vehicle pool: %d configured, %d handed out, %d found none of '
+                'their blueprint and spawned; peak %d vehicles alive at once%s'
+                % (self._sparePoolSize, self._spareHits, self._spareMisses,
+                   self._peakMapped,
+                   '.' if enough else
+                   ' -- CarlaSetup.SpareVehiclePool: %d covers it.' % self._peakMapped))
 
     def spawnVehicle(self, vType, vClass, spawnPose):
         if self._world is None:
@@ -203,15 +354,22 @@ class CarlaBackend(IVirEnvBackend):
             self.logError('Blueprint not found: %s' % bpId)
             return kNoHandle
 
-        actor = self._world.try_spawn_actor(bp, carlaTf)
+        # A parked spare of the SAME blueprint is this vehicle, already made. The
+        # pose it is parked at is as transient as a spawn transform: setVehiclePose
+        # corrects both in this same step, before world.tick.
+        actor = self._takeSpare(bpId)
         if actor is None:
-            if self._verbose:
-                print('[Warning] Failed to spawn actor (vClass=%s)' % vClass)
-            return kNoHandle
-        actor.set_simulate_physics(False)
+            actor = self._world.try_spawn_actor(bp, carlaTf)
+            if actor is None:
+                if self._verbose:
+                    print('[Warning] Failed to spawn actor (vClass=%s)' % vClass)
+                return kNoHandle
+            actor.set_simulate_physics(False)
 
         h = int(actor.id)
         self._actors[h] = actor
+        if len(self._actors) > self._peakMapped:
+            self._peakMapped = len(self._actors)
         if self._verbose:
             print('Spawned Carla actor %d (%s)' % (h, bpId))
         return h

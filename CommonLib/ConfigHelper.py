@@ -138,6 +138,26 @@ class ConfigHelper:
         # Carla render sub-step (interpolate the feed for smoother motion). 0 -> 1:1.
         self.Carla_setup["CarlaTimeStep"] = self.parserDouble(carla_node, "CarlaTimeStep", 0.0)
 
+        # How many vehicles to spawn UP FRONT and hand out when the traffic
+        # arrives, instead of spawning each one the first time its id is seen.
+        # 0 -- off, and off is today's behaviour exactly.
+        #
+        # It exists for the warm-up boundary. With WarmUpUntilEgoEntry the whole
+        # network arrives in ONE exchange, and try_spawn_actor costs 1.6-3.8 ms
+        # each, so a corridor carrying ~200 vehicles freezes the co-sim for about
+        # half a second at the instant the ego enters -- the worst possible moment
+        # for a bench in the loop. Pre-spawned actors turn that exchange into the
+        # pose flush it would have been anyway.
+        #
+        # Set it to the scenario's PEAK CONCURRENT vehicle count; the bridge prints
+        # what it actually saw at shutdown, so the number need not be guessed twice.
+        # Deliberately NOT written back here by any tool: a value this file did not
+        # ask for makes every staged config read as locally edited (FIXS#372).
+        # Leftovers are destroyed once the arrival burst is over, because a resident
+        # actor costs ~0.03 ms of EVERY world.tick whether or not it is being used.
+        # Python bridge only; VirCarlaEnv.exe ignores it and behaves as before.
+        self.Carla_setup["SpareVehiclePool"] = self.parserInteger(carla_node, "SpareVehiclePool", 0)
+
         # Spectator BEV follow (rigid top-down snap). Default ON, 50 m up, north-up.
         self.Carla_setup["CenteredViewId"] = self.parserString(carla_node, "CenteredViewId", "ego")
         self.Carla_setup["EnableSpectatorFollow"] = self.parserFlag(carla_node, "EnableSpectatorFollow", True)
