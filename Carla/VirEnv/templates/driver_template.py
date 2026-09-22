@@ -18,16 +18,16 @@ import fixs
 
 
 # --------------------------------------------------------------------------- #
-#  1. A DYNAMOMETER.  Uncomment, and the driver asks it after every decision
-#     and before it commands anything -- so the cell is in the loop rather
-#     than beside it. Next step the driver reads ego.speed back.
+#  A DYNAMOMETER.  You decide a speed, the cell says what a real vehicle
+#  reached, and THAT is what gets commanded -- so the cell is in the loop
+#  rather than beside it. Next step you read ego.speed back.
 #
-#     For REAL hardware, replace the body: the packet, the port and the rate
-#     are yours, and FIXS has no interface for them. Three things bite.
-#     NEVER BLOCK -- send, then take an answer that has ALREADY arrived. When
-#     none has, return vref: it is the only value that cannot invent motion.
-#     COUNT those, because nothing else will, and a run ending with many of
-#     them did not test what it claims to have tested.
+#  For REAL hardware, replace the body of exchange(). The packet, the port and
+#  the rate are yours, and FIXS has no interface for them. Three things bite:
+#  NEVER BLOCK -- send, then take an answer that has ALREADY arrived; when
+#  none has, return vref, the only value that cannot invent motion; and COUNT
+#  those, because nothing else will and a run ending with many of them did not
+#  test what it claims to have tested.
 # --------------------------------------------------------------------------- #
 # import fixs.xil
 #
@@ -35,33 +35,47 @@ import fixs
 #
 # def exchange(vref, dt):
 #     return dyno.exchange(vref, dt)                  # a speed in, reached out
+#
+# Driver = fixs.driver(exchange)      # the driver calls it at the right point
 
 
 # --------------------------------------------------------------------------- #
-#  2. YOUR OWN DRIVING.  Uncomment, and none of the driver's logic runs -- no
-#     ceilings, no pedal law, no agent. FIXS still builds the class and calls
-#     it every step, so you write a function, never __init__ or a method
-#     named control. Ask your own cell inside it, wherever you want it.
+#  YOUR OWN DRIVING.  None of the driver's logic runs -- no ceilings, no pedal
+#  law, no agent. FIXS still builds the class and calls it every step, so you
+#  write a function, never __init__ or a method named control.
 #
-#     ego.speed / positionX / positionY / heading / acceleration are LIVE.
-#     speedDesired, signalLightColor, precedingVehicleDistance were HELD since
-#     the last feed, ego.feedAge seconds ago.
+#  A DYNAMOMETER STILL WORKS HERE: you call it yourself, wherever you want it
+#  in your own logic. What you cannot do is hand fixs.driver() an exchange as
+#  well -- there is no point left in the tick for it to be called from, so it
+#  is refused rather than silently ignored.
 #
-#     speedDesired IS DUAL-USE: the advisory arrives in it, and your command
-#     goes out through it. Read it only when ego.feedAge is 0 -- between feeds
-#     you are reading back your own last command. (Measured before that was
-#     understood: 1299 of 2554 ticks matched the previous tick's own target.)
+#  ego.speed / positionX / positionY / heading / acceleration are LIVE.
+#  speedDesired, signalLightColor, precedingVehicleDistance were HELD since
+#  the last feed, ego.feedAge seconds ago.
 #
-#     steerAngleDesired IS AN ANGLE, in radians. A CARLA agent's control.steer
-#     is normalised [-1, 1]; command through fixs.carla.apply_control, which
-#     converts in the one place that belongs, or multiply by fixs.MAX_STEER_RAD.
+#  speedDesired IS DUAL-USE: the advisory arrives in it, and a speed command
+#  goes back out through it. Read it only when ego.feedAge is 0 -- between
+#  feeds you are reading back your own last command. (Measured before that was
+#  understood: 1299 of 2554 ticks matched the previous tick's own target.)
+#
+#  steerAngleDesired IS AN ANGLE, in radians, where a CARLA agent's
+#  control.steer is normalised [-1, 1]. Commanding through fixs.carla does the
+#  conversion in the one place it belongs; ego.set(...) is the FIXS-native
+#  form and expects radians.
 # --------------------------------------------------------------------------- #
+# import fixs.carla as carla
+# import fixs.xil
+#
+# dyno = fixs.xil.dyno(vehicle={'mass_kg': 2100.0})
+#
 # def my_control(ego, dt):
 #     target = ego.speedDesired if ego.feedAge == 0 else 8.33
-#     ego.set(speedDesired=target, steerAngleDesired=0.0)
+#     target = dyno.exchange(target, dt)        # your cell, called by YOU
+#     carla.apply_ackermann_control(
+#         carla.VehicleAckermannControl(speed=max(0.0, target), steer=0.0))
+#
+# Driver = fixs.driver(usercontrol=my_control)
 
 
 #: fixs.driver() tells FIXS what it built, so this name is yours to pick.
-#: Add exchange=... from block 1, or usercontrol=... from block 2 -- not both:
-#: your own control decides when to ask a cell, so ours would never call it.
 Driver = fixs.driver()
