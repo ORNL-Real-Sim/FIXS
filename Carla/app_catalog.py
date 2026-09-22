@@ -624,8 +624,11 @@ def _ask(app_id, pending, index):
     changed.
 
     Enter is the safe non-answer: it keeps your file AND records nothing, so
-    hurrying past this can neither lose an edit nor silence an update - you are
-    simply asked again next run."""
+    hurrying past this can neither lose an edit nor silence an update - the same
+    question simply comes back on the NEXT launch. 'k' is the deliberate version:
+    it keeps your file and marks this upstream version settled, so only a later,
+    different change asks again. The first wording said "keep mine, ask again"
+    without saying WHEN, which reads as "this will nag me every time"."""
     changed = False
     for item in pending:
         base, src, dst = item["base"], item["src"], item["dst"]
@@ -642,8 +645,9 @@ def _ask(app_id, pending, index):
         print(f"\n[apps] {base} changed in the repo, and your copy has local edits.{label}")
         while True:
             try:
-                ans = input("[apps]   [Enter] keep mine, ask again   d) diff   "
-                            "o) take the repo's (backup kept)   k) keep mine, stop asking: ")
+                ans = input("[apps]   [Enter] not now, ask me next launch   "
+                            "d) see the diff   o) take the repo's (yours backed up)   "
+                            "k) keep mine, never ask about this version again: ")
             except EOFError:
                 return changed
             ans = ans.strip().lower()
