@@ -11,43 +11,16 @@ speed, so FIXS refuses that combination. For a client on the feed instead, see
 the application repo's apps/_template.
 
 As written this is a working driver -- the eco advisory read off the wire, the
-signal and leader ceilings, a speed-to-pedal law and both command shapes. The
-two blocks below add a dynamometer, or replace the driving with your own.
+signal and leader ceilings, a speed-to-pedal law and both command shapes.
+Uncomment the block below to drive it yourself instead.
 """
 import fixs
-
-
-# --------------------------------------------------------------------------- #
-#  A DYNAMOMETER.  You decide a speed, the cell says what a real vehicle
-#  reached, and THAT is what gets commanded -- so the cell is in the loop
-#  rather than beside it. Next step you read ego.speed back.
-#
-#  For REAL hardware, replace the body of exchange(). The packet, the port and
-#  the rate are yours, and FIXS has no interface for them. Three things bite:
-#  NEVER BLOCK -- send, then take an answer that has ALREADY arrived; when
-#  none has, return vref, the only value that cannot invent motion; and COUNT
-#  those, because nothing else will and a run ending with many of them did not
-#  test what it claims to have tested.
-# --------------------------------------------------------------------------- #
-# import fixs.xil
-#
-# dyno = fixs.xil.dyno(vehicle={'mass_kg': 2100.0})   # or your own rig
-#
-# def exchange(vref, dt):
-#     return dyno.exchange(vref, dt)                  # a speed in, reached out
-#
-# Driver = fixs.driver(exchange)      # the driver calls it at the right point
 
 
 # --------------------------------------------------------------------------- #
 #  YOUR OWN DRIVING.  None of the driver's logic runs -- no ceilings, no pedal
 #  law, no agent. FIXS still builds the class and calls it every step, so you
 #  write a function, never __init__ or a method named control.
-#
-#  A DYNAMOMETER STILL WORKS HERE: you call it yourself, wherever you want it
-#  in your own logic. What you cannot do is hand fixs.driver() an exchange as
-#  well -- there is no point left in the tick for it to be called from, so it
-#  is refused rather than silently ignored.
 #
 #  ego.speed / positionX / positionY / heading / acceleration are LIVE.
 #  speedDesired, signalLightColor, precedingVehicleDistance were HELD since
@@ -59,22 +32,47 @@ import fixs
 #  understood: 1299 of 2554 ticks matched the previous tick's own target.)
 #
 #  steerAngleDesired IS AN ANGLE, in radians, where a CARLA agent's
-#  control.steer is normalised [-1, 1]. Commanding through fixs.carla does the
-#  conversion in the one place it belongs; ego.set(...) is the FIXS-native
-#  form and expects radians.
+#  control.steer is normalised [-1, 1]. Commanding through fixs.carla does
+#  that conversion in the one place it belongs; ego.set(...) is the
+#  FIXS-native form and expects radians.
 # --------------------------------------------------------------------------- #
 # import fixs.carla as carla
-# import fixs.xil
-#
-# dyno = fixs.xil.dyno(vehicle={'mass_kg': 2100.0})
 #
 # def my_control(ego, dt):
 #     target = ego.speedDesired if ego.feedAge == 0 else 8.33
-#     target = dyno.exchange(target, dt)        # your cell, called by YOU
 #     carla.apply_ackermann_control(
 #         carla.VehicleAckermannControl(speed=max(0.0, target), steer=0.0))
 #
 # Driver = fixs.driver(usercontrol=my_control)
+
+
+# --------------------------------------------------------------------------- #
+#  A DYNAMOMETER, in either form. You decide a speed, the cell says what a
+#  real vehicle reached, and THAT is what gets commanded -- so the cell is in
+#  the loop rather than beside it. Next step you read ego.speed back.
+#
+#      import fixs.xil
+#      dyno = fixs.xil.dyno(vehicle={'mass_kg': 2100.0})    # or your own rig
+#
+#      def exchange(vref, dt):
+#          return dyno.exchange(vref, dt)     # a speed in, the speed reached
+#
+#  With the driver's own driving, hand it over and it calls it at the right
+#  point:                Driver = fixs.driver(exchange)
+#
+#  With your own, call it yourself, wherever you want it in my_control:
+#                        target = dyno.exchange(target, dt)
+#
+#  Not both: replacing the driving leaves no point in the tick for an exchange
+#  to be called from, so fixs.driver(exchange=..., usercontrol=...) is refused
+#  rather than silently ignored.
+#
+#  For REAL hardware, replace the body of exchange(). The packet, the port and
+#  the rate are yours, and FIXS has no interface for them. Three things bite:
+#  NEVER BLOCK -- send, then take an answer that has ALREADY arrived; when
+#  none has, return vref, the only value that cannot invent motion; and COUNT
+#  those, because nothing else will.
+# --------------------------------------------------------------------------- #
 
 
 #: fixs.driver() tells FIXS what it built, so this name is yours to pick.
