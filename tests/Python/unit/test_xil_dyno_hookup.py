@@ -271,3 +271,50 @@ def test_enabled_refuses_to_guess_like_dyno_does(tmp_path, monkeypatch):
     monkeypatch.delenv('FIXS_CONFIG_YAML', raising=False)
     with pytest.raises(fixs.FixsError):
         fixsxil.enabled()
+
+
+# -- the robot driver, capped to an envelope (#24) ---------------------------
+
+def test_the_robot_driver_comes_from_the_yaml(tmp_path):
+    """Vehicle and Dyno were settable and the ROBOT was not, so a bench could
+    not be held inside an acceleration envelope without pretending the car had
+    less torque than it has. On a real cell the robot is the one of the three
+    that is yours to set."""
+    y = dict(xilOn(), Driver={"max_throttle": 0.27, "max_brake": 0.27})
+    cfg = ConfigHelper()
+    cfg.getConfig(write(tmp_path, y, name="driver.yaml"))
+    assert cfg.Xil_setup["Driver"] == {"max_throttle": 0.27, "max_brake": 0.27}
+
+
+def test_the_yaml_cap_reaches_the_cell(tmp_path):
+    d = fixsxil.dyno(write(tmp_path,
+                           dict(xilOn(), Driver={"max_throttle": 0.27}),
+                           name="capped.yaml"))
+    try:
+        assert d.sim.driver.max_throttle == 0.27
+    finally:
+        d.close()
+
+
+def test_a_capped_robot_holds_the_envelope():
+    """The cap is on the PEDAL, so what it buys is an acceleration envelope.
+    Uncapped this cell reaches 7.4 m/s^2 -- more than a traffic simulator
+    holding the ego to 2.0 will deliver, and the gap does not close because the
+    cell integrates on from a speed the ego never had."""
+    from CommonLib.xil.dynosim import Dyno, DynoSim
+    from CommonLib.xil.vehicle import Vehicle
+    from CommonLib.xil.driver import RobotDriver
+
+    def peak(**kw):
+        sim = DynoSim(Vehicle(mass_kg=2100.0),
+                      Dyno(road_A_N=111.0, roller_inertia_kgm2=40.0),
+                      RobotDriver(**kw))
+        a, p = 0.0, 0.0
+        for _ in range(400):
+            v = sim.step(20.0, 0.1).speed
+            a = max(a, (v - p) / 0.1)
+            p = v
+        return a
+
+    assert peak() > 5.0, "uncapped, this cell is quick"
+    assert peak(max_throttle=0.27) < 2.0, "capped, it stays inside the envelope"
