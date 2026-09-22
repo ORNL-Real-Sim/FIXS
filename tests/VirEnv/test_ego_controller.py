@@ -230,22 +230,6 @@ def test_class_without_control(tmp_path):
     ''', name='noctl.py')
     with pytest.raises(ControllerError, match='no control'):
         loadController(f)
-
-
-def test_shipped_template_loads_and_commands(tmp_path):
-    """The template is documentation people copy; if it stops working, the first
-    thing anyone writes is broken."""
-    template = os.path.join(_ROOT, 'Carla', 'VirEnv', 'templates',
-                            'controller_template.py')
-    c = loadController(template)
-    c.setup({'EgoRoutePoints': [(0.0, 0.0), (10.0, 0.0)]}, 'ego')
-    ego = makeEgo(speed=6.0, speedDesired=8.0)
-    c.control(ego, 0.05)
-    assert fixs.commandKind(ego) == 'actuation'
-    fixs._validateCommand(ego)
-    c.shutdown()
-
-
 # --------------------------------------------------------------------------
 # runController -- the whole path against a mock backend, no simulator
 #

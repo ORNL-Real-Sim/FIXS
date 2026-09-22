@@ -313,7 +313,7 @@ def test_two_drivers_in_one_file_is_refused(tmp_path):
 
 def _template():
     return os.path.join(os.path.dirname(__file__), '..', '..', '..',
-                        'Carla', 'VirEnv', 'templates', 'driver_template.py')
+                        'Carla', 'templates', 'driver_template.py')
 
 
 def test_the_template_is_a_working_driver(scenario_off):
