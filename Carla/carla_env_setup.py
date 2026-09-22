@@ -605,13 +605,23 @@ def _warn_if_not_requested(py_exe, name):
 # CarlaServerIP -> localhost), and no pandas/shapely turns traffic-light sync off.
 RUNTIME_MODULES = ("yaml", "pandas", "shapely", "traci", "sumolib")
 
+# The exception to that: Carla/carla_agents needs networkx, and without it a
+# controller that brings a CARLA agent cannot be imported at all - mainVirCarla
+# exits and run_cosim stops the stack (#378). So it is checked here too, and
+# reported as fatal-when-used rather than as a degradation.
+AGENT_MODULES = ("networkx",)
+
+# Everything the bound interpreter is checked for. One tuple, so a caller cannot
+# check half the list: the two above are kept apart only to word the message.
+CHECKED_MODULES = RUNTIME_MODULES + AGENT_MODULES
+
 # The distribution that provides a module, where the two names differ.
 PIP_NAME = {"yaml": "pyyaml"}
 
 
 def missing_runtime(py_exe):
-    """Which of RUNTIME_MODULES `py_exe` cannot import."""
-    return [m for m in RUNTIME_MODULES if not _python_can_import(py_exe, (m,))]
+    """Which of CHECKED_MODULES `py_exe` cannot import."""
+    return [m for m in CHECKED_MODULES if not _python_can_import(py_exe, (m,))]
 
 
 def _warn_if_incomplete(py_exe):
@@ -624,21 +634,36 @@ def _warn_if_incomplete(py_exe):
     ways that name something else (see RUNTIME_MODULES above), and setup is the one
     moment where saying so costs a single line instead of an afternoon.
 
+    AGENT_MODULES is reported separately because it is not a degradation: without
+    networkx a CARLA-agent controller does not import and the stack stops (#378),
+    so calling that a misbehaviour would send the reader looking for a symptom
+    they will never reach.
+
     carla is deliberately not checked here: ensure_carla installs it right after
     this, so its absence now is expected, not a defect."""
     if not py_exe:
         return
-    lacks = missing_runtime(py_exe)
-    if not lacks:
+    missing = missing_runtime(py_exe)
+    if not missing:
         return
-    pkgs = " ".join(PIP_NAME.get(m, m) for m in lacks)
-    print(f"[setup] NOTE: this interpreter cannot import: {', '.join(lacks)}\n"
-          f"        {py_exe}\n"
-          f"        The co-sim will still start, and will misbehave in ways that name "
-          f"something else: no yaml makes every scenario setting read as its default "
-          f"(CarlaServerIP -> localhost), and no pandas/shapely turns traffic-light "
-          f"sync off.\n"
-          f"        Fix it with:\n"
+    lacks = [m for m in missing if m in RUNTIME_MODULES]
+    agent_lacks = [m for m in missing if m in AGENT_MODULES]
+    pkgs = " ".join(PIP_NAME.get(m, m) for m in missing)
+    if lacks:
+        print(f"[setup] NOTE: this interpreter cannot import: {', '.join(lacks)}\n"
+              f"        {py_exe}\n"
+              f"        The co-sim will still start, and will misbehave in ways that name "
+              f"something else: no yaml makes every scenario setting read as its default "
+              f"(CarlaServerIP -> localhost), and no pandas/shapely turns traffic-light "
+              f"sync off.")
+    if agent_lacks:
+        print(f"[setup] NOTE: this interpreter cannot import: "
+              f"{', '.join(agent_lacks)}\n"
+              f"        {py_exe}\n"
+              f"        Carla/carla_agents needs it. A controller that brings a CARLA "
+              f"agent will not import, so mainVirCarla exits at startup and the whole "
+              f"stack stops. A run whose ego is driven some other way is unaffected.")
+    print(f"        Fix it with:\n"
           f"            \"{py_exe}\" -m pip install {pkgs}")
 
 
@@ -732,7 +757,7 @@ def _no_env_fallback(name):
     a machine ends up running the co-sim without pyyaml: everything starts, and
     the first symptom is a scenario setting quietly reading as its default."""
     print(f"[setup] the '{name}' env could not be created or found. The co-sim "
-          f"needs: {', '.join(RUNTIME_MODULES)} (+ carla).")
+          f"needs: {', '.join(CHECKED_MODULES)} (+ carla).")
     here = sys.executable
     lacks = missing_runtime(here)
     print(f"   [1] use this interpreter and pip-install what it lacks\n"
@@ -744,9 +769,11 @@ def _no_env_fallback(name):
     if ans == "1":
         if lacks:
             # environment.yml is a conda spec, so there is no conda-free way to
-            # replay it; these are its importable dependencies. NB it does not
-            # list shapely at all, though the TL-table generator needs it (#221).
-            pkgs = ["pyyaml", "pandas", "shapely", "eclipse-sumo", "traci", "sumolib"]
+            # replay it; these are its importable dependencies. Keep this list and
+            # RUNTIME_MODULES/AGENT_MODULES in step with that file - the whole of
+            # #378 was one import declared in a manifest nothing installs.
+            pkgs = ["pyyaml", "pandas", "shapely", "networkx",
+                    "eclipse-sumo", "traci", "sumolib"]
             # This is the riskiest install in the file: reached precisely when
             # conda is absent or broken, which is when `here` is most likely to
             # BE the OS python.

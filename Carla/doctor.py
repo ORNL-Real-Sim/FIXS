@@ -148,12 +148,14 @@ def _check_python(rep, cfg, env_mod):
     if not os.path.isfile(py):
         return py
     missing = env_mod.missing_runtime(py)
-    for mod in env_mod.RUNTIME_MODULES:
+    for mod in env_mod.CHECKED_MODULES:
         hurt = {"yaml": "scenario yamls read as defaults - endpoints silently wrong",
                 "pandas": "no TL table; traffic lights will not sync",
                 "shapely": "no TL table; traffic lights will not sync",
                 "traci": "cannot drive SUMO",
-                "sumolib": "cannot read the SUMO net"}.get(mod, "")
+                "sumolib": "cannot read the SUMO net",
+                "networkx": "a CARLA-agent controller will not import; "
+                            "mainVirCarla exits and the stack stops"}.get(mod, "")
         rep.add("Python", mod, FAIL if mod in missing else OK,
                 hurt if mod in missing else "")
     # carla exposes no __version__; the wheel metadata is the reliable source.
