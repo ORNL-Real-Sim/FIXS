@@ -76,7 +76,10 @@ import fixs
 #         carla.VehicleAckermannControl(speed=max(0.0, target), steer=0.0))
 
 
-#: THE ONE CALL. Add exchange or usercontrol=my_control here once you have
-#: uncommented the block that defines it. The name is yours to pick:
-#: fixs.driver() tells FIXS what it built.
-Driver = fixs.driver()
+#: PICK ONE -- exactly one of these three is live at a time. Uncomment the
+#: block above that defines what you name here, then swap which line below
+#: carries the '#'. The name on the left is yours: fixs.driver() tells FIXS
+#: what it built, so nothing here has to be spelled a particular way.
+Driver = fixs.driver()                          # the driver as it is
+# Driver = fixs.driver(exchange)                # ... with a dynamometer
+# Driver = fixs.driver(usercontrol=my_control)  # your own driving

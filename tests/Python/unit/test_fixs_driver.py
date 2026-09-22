@@ -406,6 +406,12 @@ def test_the_template_makes_exactly_one_driver():
             and n.func.attr == 'driver']
     assert len(live) == 1, 'live fixs.driver() calls'
 
-    commented = [ln for ln in src.splitlines()
+    # The alternatives are allowed, but only BESIDE the live one, where
+    # swapping which line carries the '#' is obvious. The bug was one buried
+    # in a block far above: uncommenting that block left two.
+    lines = src.splitlines()
+    live = [i for i, ln in enumerate(lines) if ln.startswith('Driver =')]
+    commented = [i for i, ln in enumerate(lines)
                  if ln.startswith('#') and ln.lstrip('#').strip().startswith('Driver =')]
-    assert commented == [], commented
+    assert len(live) == 1, live
+    assert all(abs(i - live[0]) <= 3 for i in commented), (live, commented)
