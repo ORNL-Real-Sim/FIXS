@@ -422,6 +422,15 @@ def resetFeedAge():
 def runController(backend, controller, ego, dt, onFeed, maxSteerRad):
     """One step: hand the controller state, apply whatever shape it commanded.
 
+    ``backend`` may be None. That is the case where the TRAFFIC SIMULATOR owns
+    the ego (EgoSetup.Dynamics: traffic) and the controller is a cell in the
+    speed loop rather than the driver of a physics actor: there is no ego actor
+    to read a state from or to apply a command to. The record IS the state --
+    it already carries the traffic simulator's pose and speed -- and the command
+    written onto it is forwarded to TrafficLayer by the caller instead of being
+    applied here. Everything between those two ends is identical, which is what
+    lets one controller file serve both.
+
     Backend-agnostic on purpose -- it touches only ``readEgoState``,
     ``applyEgoActuation`` and ``applyEgoSpeedSteer``, all IVirEnvBackend verbs.
     That is what lets tests/VirEnv drive a real controller against
@@ -444,9 +453,13 @@ def runController(backend, controller, ego, dt, onFeed, maxSteerRad):
 
     if ego is None:
         return None
-    es = EgoState()
-    if not backend.readEgoState(ego.id.strip(), es):
-        return None
+    # No backend -> no physics ego: the record already holds the traffic
+    # simulator's view of it, which is the only state there is on that rung.
+    es = None
+    if backend is not None:
+        es = EgoState()
+        if not backend.readEgoState(ego.id.strip(), es):
+            return None
 
     if onFeed:
         resetFeedAge()
@@ -467,11 +480,12 @@ def runController(backend, controller, ego, dt, onFeed, maxSteerRad):
     # EgoState is flat and already in the canonical FIXS wire frame -- the
     # backend removed its own anchor before returning, so nothing is converted
     # here (IVirEnvBackend.EgoState).
-    object.__setattr__(ego, 'positionX', es.x)
-    object.__setattr__(ego, 'positionY', es.y)
-    object.__setattr__(ego, 'positionZ', es.z)
-    object.__setattr__(ego, 'heading', es.heading)
-    object.__setattr__(ego, 'speed', es.speed)
+    if es is not None:
+        object.__setattr__(ego, 'positionX', es.x)
+        object.__setattr__(ego, 'positionY', es.y)
+        object.__setattr__(ego, 'positionZ', es.z)
+        object.__setattr__(ego, 'heading', es.heading)
+        object.__setattr__(ego, 'speed', es.speed)
     object.__setattr__(ego, 'feedAge', _feedAge[0])
 
     # Clear what the LAST step wrote before asking for this one. The record
@@ -488,6 +502,21 @@ def runController(backend, controller, ego, dt, onFeed, maxSteerRad):
         _egoRecord[0] = None
 
     kind = fixs.commandKind(ego)
+    if backend is None:
+        # Nothing to apply here: the caller forwards ego.speedDesired to
+        # TrafficLayer and the traffic simulator integrates it. Pedals cannot be
+        # forwarded -- there is no plant on this rung to turn one into a speed --
+        # so refuse rather than drop them, which would leave the LOWER-port
+        # controller's command as the last write and hand the run quietly back
+        # to it while this one looked like it was driving.
+        if kind == 'actuation':
+            raise ControllerError(
+                "the controller commanded pedals, but EgoSetup.Dynamics is "
+                "'traffic': the traffic simulator integrates the ego and there "
+                "is no plant to turn a pedal into a speed. Command a speed "
+                "instead -- ego.set(speedDesired=...), or --command-shape speed "
+                "if this is fixs.driver.")
+        return kind
     if kind == 'actuation':
         backend.applyEgoActuation(ego.acceleratorPedalDesired,
                                   ego.brakePedalDesired,
