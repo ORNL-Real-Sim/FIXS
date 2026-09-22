@@ -557,16 +557,46 @@ class Controller:
         actually reached, and that speed is commanded back for the traffic
         simulator to integrate.
 
-        The signal and leader ceilings still apply, unchanged. They are computed
-        from wire fields and touch no simulator, so this rung's longitudinal
-        intent is the same function of the same inputs as the virenv rung's --
-        which is what leaves the cell as the only difference between them.
+        THE CEILINGS DO NOT APPLY HERE, and that is the whole of the difference
+        from the virenv path.
+
+        There, the advisory is a TARGET a CARLA agent tracks, and _signalCeiling
+        and _leaderCeiling are that agent's envelope -- it plans in a world the
+        wire cannot see, so it is given room to be wrong in. Here the advisory
+        is nobody's target: the eco controller writes speedDesired and the
+        traffic simulator integrates it. That IS the rung below. Applying the
+        envelopes on top double-counts a stop the eco controller has already
+        planned -- _signalCeiling alone commands a 2 m/s^2 deceleration to the
+        bar from as far as 200 m out -- and the ego slows long before a bar it
+        was never going to overrun.
+
+        Nor is safety lost by dropping them. SumoSetup.SpeedMode leaves the
+        traffic simulator's own checks on, so what is commanded here is still
+        clamped to its safe speed, its leader gap and its red lights. There are
+        not two opinions about the stop bar on this rung; there is one, and it
+        is not this file's.
+
+        The invariant that buys: with no cell -- or a cell that returns its
+        reference unchanged -- this rung reproduces the rung below it EXACTLY.
+        Anything else and the cell is not the only thing being measured.
         """
-        advisory = self._advisoryOf(ego)
-        wanted = advisory if advisory is not None else self.fallbackSpeed
-        self.vSignal = self._signalCeiling(ego)
-        self.vLeader = self._leaderCeiling(ego)
-        target = max(0.0, min(wanted, self.vSignal, self.vLeader))
+        # The eco controller's command, as received, and nothing else done to
+        # it. Not _advisoryOf: that drops anything <= 0.01 as 'no advisory', and
+        # a command of ZERO is exactly what the eco controller writes AT a stop
+        # bar -- read as absent, it was replaced by fallbackSpeed and the ego
+        # was told to accelerate away from the bar it had just been asked to
+        # stop at. There is no fallback on this rung either: nothing here is
+        # entitled to invent a speed the eco controller did not ask for.
+        #
+        # Safe to read the field directly: it is dual-use, but runController
+        # restores the feed's value before every call, so what is here is the
+        # eco controller's, never this driver's own last command (FIXS#305).
+        advisory = float(getattr(ego, 'speedDesired', 0.0) or 0.0)
+        self.advisory = advisory
+        #: Neither computed nor applied. Logged as such, so a passive trace
+        #: cannot be read as though an envelope had bound.
+        self.vSignal = self.vLeader = _NO_LIMIT
+        target = advisory
 
         vRef = self.vRef = target
         if self.benchInLoop:
