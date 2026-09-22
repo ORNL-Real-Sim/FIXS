@@ -387,3 +387,25 @@ def test_usercontrol_and_exchange_together_is_refused():
 def test_a_non_callable_usercontrol_is_refused_at_the_call():
     with pytest.raises(TypeError):
         driver(usercontrol=42)
+
+
+def test_the_template_makes_exactly_one_driver():
+    """Following its own instructions must not break the run.
+
+    The version this replaced had `Driver = fixs.driver(usercontrol=...)`
+    inside a commented block AND one at the end. Uncommenting the block, as
+    the file told you to, gave two drivers -- and the loader refuses to guess
+    which was meant. So: one live call, and no commented-out one waiting to
+    become a second.
+    """
+    import ast
+    src = io.open(_template(), encoding='utf-8').read()
+
+    live = [n for n in ast.walk(ast.parse(src))
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+            and n.func.attr == 'driver']
+    assert len(live) == 1, 'live fixs.driver() calls'
+
+    commented = [ln for ln in src.splitlines()
+                 if ln.startswith('#') and ln.lstrip('#').strip().startswith('Driver =')]
+    assert commented == [], commented
