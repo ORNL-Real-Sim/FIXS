@@ -29,6 +29,19 @@ CarlaSetup: {EnableCosimulation: true, EnablePythonBackend: true}
 
 
 @pytest.fixture
+def scenario_off(tmp_path):
+    """A scenario on disk with no bench, for loading a template."""
+    p = tmp_path / 's.yaml'
+    p.write_text(_SCENARIO % 'false')
+    old = os.environ.get('FIXS_CONFIG_YAML')
+    os.environ['FIXS_CONFIG_YAML'] = str(p)
+    yield str(p)
+    os.environ.pop('FIXS_CONFIG_YAML', None)
+    if old is not None:
+        os.environ['FIXS_CONFIG_YAML'] = old
+
+
+@pytest.fixture
 def scenario(request):
     """A yaml on disk, with or without the simulated dyno declared."""
     with tempfile.NamedTemporaryFile('w', suffix='.yaml', delete=False) as f:
@@ -303,10 +316,19 @@ def _template():
                         'Carla', 'VirEnv', 'templates', 'driver_template.py')
 
 
+def test_the_template_is_a_working_driver(scenario_off):
+    """It is a TEMPLATE: copy it, point a scenario at it, and it drives. The
+    version this replaces was 86 lines of docstring and one statement -- it
+    would have failed at load with 'defines none of Controller, control', and
+    a test that only grepped its prose passed anyway."""
+    from CommonLib.VirEnv.EgoControllerHost import loadController
+    lc = loadController(_template())
+    assert callable(getattr(lc._obj, 'control', None))
+
+
 def test_the_template_names_keys_and_files_that_exist():
-    """Shipped example code that is never checked is how the last one rotted:
-    it used the pre-EgoSetup yaml keys, pointed at a file that does not exist,
-    and read a config key that reads back empty."""
+    """How the last one rotted: pre-EgoSetup yaml keys, a pointer to a file
+    that does not exist, and a config key that reads back empty."""
     src = io.open(_template(), encoding='utf-8').read()
     for wrong in ('EgoActuationSource', 'EgoController:', 'IEgoController',
                   'EgoRoutePoints'):
@@ -314,11 +336,9 @@ def test_the_template_names_keys_and_files_that_exist():
     assert 'EgoSetup' in src
 
 
-def test_the_template_offers_the_three_forms():
+def test_the_template_shows_the_other_two_forms():
     src = io.open(_template(), encoding='utf-8').read()
-    for form in ('fixs.driver()', 'fixs.driver(exchange)',
-                 'fixs.driver(usercontrol=my_control)'):
-        assert form in src, form
+    assert 'exchange' in src and 'usercontrol' in src
 
 
 # -- your own driving, through the same factory ------------------------------
