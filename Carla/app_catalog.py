@@ -128,10 +128,16 @@ values into the repo. So a declared config is COPIED to
 
     ~/.fixs/apps/<app_id>/<basename>.yaml
 
-on first use and read from there. Edits are yours and never tracked. The copy is
-never silently clobbered: stage_configs() records the source hash, refreshes the
-copy only while you have not touched it, and otherwise drops the new upstream
-version beside it as <basename>.yaml.new and says so.
+on first use and read from there. Edits are yours and never tracked.
+
+Keeping that copy current is the whole difficulty, because ~/.fixs is per-MACHINE
+while a checkout is per-branch, and one machine here holds twenty-odd worktrees of
+the same repo. stage_configs() therefore remembers every upstream version of a file
+it has already shown you or written for you, and asks only when the repo has moved
+AND the copy in front of you is one you edited yourself. A copy you never touched is
+refreshed without a question, since nothing of yours can be lost; an edited one is
+never overwritten without a backup you chose to take. Nothing is left beside your
+file for you to find later and have to reason about.
 """
 import hashlib
 import json
@@ -478,6 +484,8 @@ def choose_app(apps, root=None, current=None):
 # Scenario yamls: repo -> ~/.fixs/apps/<id>/
 # --------------------------------------------------------------------------- #
 def _sha256(path):
+    """Whole-file digest. Kept only to recognise a record written by the older
+    scheme, so an upgrade does not re-ask about a version already settled."""
     h = hashlib.sha256()
     try:
         with open(path, "rb") as f:
@@ -488,17 +496,74 @@ def _sha256(path):
     return h.hexdigest()
 
 
+def _norm_lines(path):
+    """The file's lines with the incidental stripped: universal newlines, trailing
+    whitespace gone, blank lines dropped. None if unreadable.
+
+    Comments are KEPT. In these configs a comment carries the reason a value is what
+    it is, so an upstream comment fix is something to be offered, not hidden - and a
+    local copy whose reasoning has quietly gone stale is its own kind of trap."""
+    try:
+        with open(path, "rb") as f:
+            raw = f.read()
+    except OSError:
+        return None
+    return [l for l in (s.rstrip() for s in raw.decode("utf-8", "replace").splitlines())
+            if l.strip()]
+
+
+def _norm_hash(path):
+    """sha256 of the normalized content, or None if unreadable.
+
+    Hashing the raw bytes made an editor's CRLF-to-LF rewrite, or one stray blank
+    line, read as a local edit - and once a copy read as edited it could never be
+    refreshed from upstream again."""
+    lines = _norm_lines(path)
+    if lines is None:
+        return None
+    return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()
+
+
+def _settings_only(lines):
+    """`lines` without full-line comments, for LABELLING a change as comments-only.
+    Never used to decide whether to offer one. Inline trailing comments are left
+    alone: cutting at '#' would mangle any quoted value that contains one."""
+    return [l for l in lines if not l.lstrip().startswith("#")]
+
+
 def _stage_index_path(app_id):
     return os.path.join(apps_home(app_id), ".sources.json")
 
 
 def _load_stage_index(app_id):
+    """The staging record: {basename: {"source": <rel path>, "seen": [hash, ...]}}.
+
+    `seen` is every normalized upstream version of that file you have already been
+    shown or accepted. It is a LIST, not one value, because ~/.fixs is shared by
+    every checkout on the machine: with a single slot, alternating between two
+    worktrees rewrote it each time and asked again each time, forever.
+
+    An older {"source", "hash"} record is read too, its whole-file digest carried as
+    "legacy" for stage_configs to redeem once against the file it names."""
     try:
         with open(_stage_index_path(app_id), encoding="utf-8") as f:
             doc = json.load(f)
-        return doc if isinstance(doc, dict) else {}
     except (OSError, ValueError):
         return {}
+    if not isinstance(doc, dict):
+        return {}
+    index = {}
+    for base, rec in doc.items():
+        if not isinstance(rec, dict):
+            continue
+        seen = rec.get("seen")
+        entry = {"source": rec.get("source") or "", "seen": []}
+        if isinstance(seen, list):
+            entry["seen"] = [h for h in seen if isinstance(h, str)]
+        elif isinstance(rec.get("hash"), str):
+            entry["legacy"] = rec["hash"]
+        index[base] = entry
+    return index
 
 
 def _save_stage_index(app_id, index):
@@ -507,28 +572,140 @@ def _save_stage_index(app_id, index):
         with open(_stage_index_path(app_id), "w", encoding="utf-8") as f:
             json.dump(index, f, indent=2)
     except OSError:
-        pass  # the index is an optimisation; a lost one only costs a refresh notice
+        pass  # the record is an optimisation; a lost one only costs one extra ask
 
 
-def stage_configs(app, root=None, quiet=False):
+SEEN_LIMIT = 10
+
+# (app_id, basename, upstream hash) already put to the user in THIS process.
+# _bind_app calls stage_configs again whenever the setup's app could have changed,
+# and being asked the same question twice for one launch is just noise.
+_ASKED = set()
+
+
+def _remember(entry, digest):
+    """Record `digest` as a version of this file the user has settled, newest last."""
+    if not digest:
+        return
+    seen = entry.setdefault("seen", [])
+    if digest in seen:
+        seen.remove(digest)
+    seen.append(digest)
+    del seen[:-SEEN_LIMIT]
+    entry.pop("legacy", None)
+
+
+def _backup(path):
+    """Copy `path` aside as <name>.bak-<stamp> and return that name, or None.
+    Taken before every overwrite, so saying yes is always reversible."""
+    import shutil
+    import time
+    dest = path + ".bak-" + time.strftime("%Y%m%d%H%M%S")
+    try:
+        shutil.copy2(path, dest)
+    except OSError as exc:
+        _warn(f"could not back up {os.path.basename(path)} ({exc}).")
+        return None
+    return os.path.basename(dest)
+
+
+def _print_diff(src, dst):
+    """The repo's version against yours: what you would gain, and what of yours you
+    would lose. Normalized on both sides, so the diff shows changes and not the
+    line endings an editor happened to write."""
+    import difflib
+    for line in difflib.unified_diff(_norm_lines(dst) or [], _norm_lines(src) or [],
+                                     fromfile="yours", tofile="the repo's", lineterm=""):
+        print(f"    {line}")
+
+
+def _ask(app_id, pending, index):
+    """Ask about the configs the user actually edited. Returns True if the record
+    changed.
+
+    Enter is the safe non-answer: it keeps your file AND records nothing, so
+    hurrying past this can neither lose an edit nor silence an update - you are
+    simply asked again next run."""
+    changed = False
+    for item in pending:
+        base, src, dst = item["base"], item["src"], item["dst"]
+        key = (app_id, base, item["hash"])
+        if key in _ASKED:
+            continue
+        _ASKED.add(key)
+        # Says the overwrite is SAFE, not that upstream only touched prose: it
+        # fires when your settings and the repo's already agree, so taking theirs
+        # changes nothing that runs. An edit of yours to a real value is therefore
+        # never quietly filed under "just comments".
+        label = ("  (only comments differ - taking it changes nothing that runs)"
+                 if item["comments_only"] else "")
+        print(f"\n[apps] {base} changed in the repo, and your copy has local edits.{label}")
+        while True:
+            try:
+                ans = input("[apps]   [Enter] keep mine, ask again   d) diff   "
+                            "o) take the repo's (backup kept)   k) keep mine, stop asking: ")
+            except EOFError:
+                return changed
+            ans = ans.strip().lower()
+            if ans == "":
+                break
+            if ans == "d":
+                _print_diff(src, dst)
+                continue
+            if ans == "o":
+                import shutil
+                kept = _backup(dst)
+                try:
+                    shutil.copy2(src, dst)
+                except OSError as exc:
+                    _warn(f"could not update {base} ({exc}); your copy is unchanged.")
+                    break
+                print(f"[apps]   took the repo's {base}"
+                      + (f"; yours is kept as {kept}" if kept else ""))
+                _remember(index[base], item["hash"])
+                changed = True
+                break
+            if ans == "k":
+                _remember(index[base], item["hash"])
+                changed = True
+                break
+            print("[apps]   press Enter, or d, o or k.")
+    return changed
+
+
+def stage_configs(app, root=None, quiet=False, interactive=None):
     """Copy the app's declared scenario yamls into ~/.fixs/apps/<id>/ and return
     [{path, title, engine, source}] for the ones that exist (path = the STAGED copy,
     which is what run_cosim reads and the user edits).
 
-    Update policy, so a machine-specific edit is never lost and an upstream fix is
-    never silently withheld:
-      - copy missing         -> copy it
-      - upstream unchanged   -> leave it alone
-      - upstream changed, copy untouched -> refresh in place (you had no edits)
-      - upstream changed, copy edited    -> keep yours, write <name>.yaml.new, say so
-    """
+    What happens when the repo's version has moved on:
+      staged copy missing     copy it, and remember this version
+      it matches the repo     nothing to do
+      you were already
+        offered this exact
+        version               nothing to do - you decided once, and that holds
+      your copy is one WE
+        wrote                 you never edited it, so nothing of yours can be lost:
+                              refresh it and say so in one line
+      your copy is YOURS      ask, and never overwrite without a backup
+
+    Only the last case prompts, which is the whole point: someone who has not edited
+    a config has no decision to make, and on a fresh install that is every config.
+
+    Nothing is written beside your file and left for you to find. The older scheme
+    dropped a <name>.yaml.new next to an edited copy and moved on, which left a
+    fossil matching neither side - in one case older than the file it claimed to
+    update, so merging it as invited would have reverted a committed decision."""
     import shutil
     staged = []
     if not app or not app.get("configs"):
         return staged
+    if interactive is None:
+        interactive = (not quiet) and sys.stdin.isatty()
     dest_dir = apps_home(app["id"])
     index = _load_stage_index(app["id"])
     changed = False
+    pending = []
     for cfg in app["configs"]:
         src = os.path.join(app_dir(app, root), *cfg["path"].split("/"))
         if not os.path.isfile(src):
@@ -536,8 +713,8 @@ def stage_configs(app, root=None, quiet=False):
             continue
         base = os.path.basename(src)
         dst = os.path.join(dest_dir, base)
-        src_hash = _sha256(src)
-        recorded = (index.get(base) or {}).get("hash")
+        entry = index.setdefault(base, {"source": cfg["path"], "seen": []})
+        entry["source"] = cfg["path"]
         try:
             os.makedirs(dest_dir, exist_ok=True)
             if not os.path.isfile(dst):
@@ -546,28 +723,56 @@ def stage_configs(app, root=None, quiet=False):
                     print(f"[apps] staged {base} -> {dst}\n"
                           f"[apps]   edit that copy for machine-specific values "
                           f"(IPs, ports); it is never committed.")
-                index[base] = {"source": cfg["path"], "hash": src_hash}
+                _remember(entry, _norm_hash(src))
                 changed = True
-            elif src_hash and src_hash != recorded:
-                if recorded and _sha256(dst) == recorded:
-                    shutil.copy2(src, dst)          # untouched copy: safe to refresh
+            else:
+                src_hash = _norm_hash(src)
+                dst_hash = _norm_hash(dst)
+                legacy = entry.get("legacy")
+                if legacy and _sha256(src) == legacy:
+                    # Upgraded from the whole-file record: this is the version
+                    # already settled under the old scheme, so carry that decision
+                    # over rather than reopening a question you have answered.
+                    _remember(entry, src_hash)
+                    changed = True
+                elif src_hash is None or src_hash == dst_hash:
+                    if src_hash and src_hash not in entry["seen"]:
+                        _remember(entry, src_hash)
+                        changed = True
+                elif dst_hash in entry["seen"]:
+                    # Your copy is one WE wrote and you have not touched it, so
+                    # taking the repo's costs you nothing. No question, one line.
+                    # Tested before "already offered", and that order is the point:
+                    # an unedited copy tracks whichever checkout you launched from,
+                    # so alternating worktrees each get their own version. Asking
+                    # first whether this version had been offered left the copy
+                    # frozen at whichever branch reached it first.
+                    shutil.copy2(src, dst)
                     if not quiet:
-                        print(f"[apps] {base} updated upstream and your copy was "
-                              f"unedited; refreshed {dst}")
+                        print(f"[apps] updated {base} from the repo "
+                              f"(you had no local edits to it).")
+                    _remember(entry, src_hash)
+                    changed = True
+                elif src_hash in entry["seen"]:
+                    pass                    # offered before; you decided, once
                 else:
-                    new = dst + ".new"
-                    shutil.copy2(src, new)
-                    if not quiet:
-                        print(f"[apps] {base} changed upstream but your copy has local "
-                              f"edits.\n[apps]   keeping yours; new version written to "
-                              f"{os.path.basename(new)} - merge if you want it.")
-                index[base] = {"source": cfg["path"], "hash": src_hash}
-                changed = True
+                    src_set = _settings_only(_norm_lines(src) or [])
+                    dst_set = _settings_only(_norm_lines(dst) or [])
+                    pending.append({"base": base, "src": src, "dst": dst,
+                                    "hash": src_hash,
+                                    "comments_only": src_set == dst_set})
         except OSError as exc:
             _warn(f"app '{app['id']}': could not stage {base} ({exc}); using the repo copy.")
             dst = src
         staged.append({"path": dst, "title": cfg["title"] or base,
                        "engine": cfg["engine"], "source": src})
+    if pending:
+        if interactive:
+            changed = _ask(app["id"], pending, index) or changed
+        elif not quiet:
+            names = ", ".join(p["base"] for p in pending)
+            print(f"[apps] {names} changed in the repo and your copy has local "
+                  f"edits; keeping yours (run interactively to review).")
     if changed:
         _save_stage_index(app["id"], index)
     return staged
