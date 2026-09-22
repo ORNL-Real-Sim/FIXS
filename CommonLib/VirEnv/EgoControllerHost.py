@@ -154,17 +154,18 @@ class LoadedController:
         self._state = None
         self._instance = None
 
-    def setup(self, config, egoId, backend=None, core=None):
+    def setup(self, config, egoId, backend=None, core=None, dynamics=None):
         # Registered before the controller is built, because a CARLA-shaped
         # agent asks its map road questions inside its own constructor. The
         # controller's own signature is unchanged: it does not take a backend,
         # it asks FIXS -- see currentBackend.
-        global _backend, _core, _config
+        global _backend, _core, _config, _dynamics
         # The scenario's own words for its controller, verbatim. FIXS resolves
         # the path and carries the rest; what the options MEAN is the
         # controller's business, so no option of its ever reaches this schema.
         config['EgoControllerArgs'] = self.argv
         _backend, _core, _config = backend, core, config
+        _dynamics = dynamics
         if self._isClass:
             self._instance = self._obj(config, egoId)
         elif self._setup is not None:
@@ -232,6 +233,7 @@ def _importFromPath(path):
 _backend = None
 _core = None
 _config = None
+_dynamics = None
 
 
 def currentConfig():
@@ -244,6 +246,18 @@ def currentCore():
     """The VirEnvCore this bridge is running, for a controller that must map a
     wire id to the CARLA actor mirroring it. None outside a run."""
     return _core
+
+
+def currentDynamics():
+    """EgoSetup.Dynamics for this run: 'virenv', 'traffic', or None outside one.
+
+    A controller asks this rather than whether a CARLA ego exists, because the
+    two are not the same question. On a virenv rung with a deferred spawn there
+    is no ego actor either, for the first few hundred ticks -- 'not yet' and
+    'never' would be indistinguishable. Dynamics is the declared, permanent
+    answer, so a driver can decide once what kind of run it is in.
+    """
+    return _dynamics
 
 
 def currentBackend():

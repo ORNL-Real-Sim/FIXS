@@ -336,6 +336,14 @@ class Controller:
         self.fallbackSpeed = float(config.get('EgoTargetSpeed') or 8.33)
         self.useAdvisory = USE_ADVISORY
         self.agent = None
+        #: TELEPORT. EgoSetup.Dynamics: traffic -- the traffic simulator
+        #: integrates the ego and no CARLA actor is spawned, so there is nothing
+        #: for an agent to drive. Asked of the SCENARIO, not of whether
+        #: carla.ego exists: on a virenv rung with a deferred spawn there is no
+        #: actor either for the first few hundred ticks, and 'not yet' must not
+        #: read as 'never'.
+        from CommonLib.VirEnv.EgoControllerHost import currentDynamics
+        self.passive = currentDynamics() == 'traffic'
         self.log = _openLog(
             config.get('EgoControllerLog', '_datalog/agent_embedded.csv'),
             'fixs.driver shape=%s loop=%s %s %s exchange=%s'
@@ -448,6 +456,10 @@ class Controller:
             self.steps += 1
             return
 
+        if self.passive:
+            self._controlPassive(ego)
+            return
+
         if self.agent is None:
             self._build()
 
@@ -534,6 +546,43 @@ class Controller:
             carla.apply_control(carla.VehicleControl(
                 throttle=thr, brake=brk, steer=control.steer))
         self._logStep(ego, control, target, advisory)
+
+    def _controlPassive(self, ego):
+        """TELEPORT: the cell is the whole driver.
+
+        No CARLA actor, so no agent, no steering, no obstacle sweep -- the
+        traffic simulator owns all of that. What is left is the longitudinal
+        intent, which is exactly what a bench answers: the advisory comes off
+        the wire, the cell says what a vehicle with mass and a torque delay
+        actually reached, and that speed is commanded back for the traffic
+        simulator to integrate.
+
+        The signal and leader ceilings still apply, unchanged. They are computed
+        from wire fields and touch no simulator, so this rung's longitudinal
+        intent is the same function of the same inputs as the virenv rung's --
+        which is what leaves the cell as the only difference between them.
+        """
+        advisory = self._advisoryOf(ego)
+        wanted = advisory if advisory is not None else self.fallbackSpeed
+        self.vSignal = self._signalCeiling(ego)
+        self.vLeader = self._leaderCeiling(ego)
+        target = max(0.0, min(wanted, self.vSignal, self.vLeader))
+
+        vRef = self.vRef = target
+        if self.benchInLoop:
+            vRef = self.vRef = self.exchange(vRef)
+
+        # THE COMMAND. speedDesired only: steer belongs to whoever owns the
+        # lateral, and here that is the traffic simulator.
+        #
+        # The command SHAPE is not consulted and does not need to be. It picks
+        # who closes the speed loop against a plant; there is no plant on this
+        # rung, so both shapes arrive at the same place -- the speed the traffic
+        # simulator is asked to hold. A scenario therefore carries the same
+        # Controller line as its virenv sibling, and the pair differs by
+        # Dynamics alone.
+        ego.set(speedDesired=max(0.0, vRef))
+        self._logStep(ego, None, target, advisory)
 
     def _advisoryOf(self, ego):
         """The eco controller's advisory, read only on the tick it is new.
@@ -686,18 +735,27 @@ class Controller:
         self.steps += 1
         if self.log is None:
             return
-        lp = self.agent.get_local_planner()
+        # Agent-side columns are blank on a passive run: there is no planner,
+        # no CARLA command and no world to count actors in. The columns stay so
+        # the two rungs' logs load with one reader.
+        lp = None if self.agent is None else self.agent.get_local_planner()
+        thr, brk, ste = ((0.0, 0.0, 0.0) if cmd is None
+                         else (cmd.throttle, cmd.brake, cmd.steer))
+        wpLeft = 0 if lp is None else len(lp.get_plan())
+        nSeen = (0 if self.agent is None
+                 else len(self.agent._world.get_actors().filter('*vehicle*')))
+        agentTarget = 0.0 if lp is None else lp._target_speed
         self.log.write(
             '%.3f,%.3f,%.3f,%.3f,%.3f,%s,%.3f,%.4f,%.4f,%.4f,%d,%s,%s,%s,'
             '%d,%.3f,%.3f,%s,%s,%s'
             % (self.elapsed, getattr(ego, 'feedAge', 0.0), ego.positionX,
                ego.positionY, ego.speed,
                '' if advisory is None else '%.3f' % advisory, target,
-               cmd.throttle, cmd.brake, cmd.steer, len(lp.get_plan()),
+               thr, brk, ste, wpLeft,
                ego.precedingVehicleDistance, ego.signalLightColor,
                ego.signalLightDistance,
-               len(self.agent._world.get_actors().filter('*vehicle*')),
-               float(getattr(ego, 'speedLimit', 0.0) or 0.0), lp._target_speed,
+               nSeen,
+               float(getattr(ego, 'speedLimit', 0.0) or 0.0), agentTarget,
                _col(self.vSignal), _col(self.vLeader),
                '' if self.vDyno is None else '%.4f' % self.vDyno)
             + (',' if self.vRef is None else ',%.4f' % self.vRef)

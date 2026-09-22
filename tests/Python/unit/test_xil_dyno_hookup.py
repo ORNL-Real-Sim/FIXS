@@ -137,16 +137,32 @@ def test_a_silent_bench_gives_the_reference_straight_back(tmp_path):
         d.close()
 
 
-# ----------------------------------------------------------- the one refusal
+# ------------------------------------------ the bench, on either integrator
 
-@pytest.mark.parametrize("dynamics", ["traffic", "xil"])
-def test_a_bench_needs_the_virenv_to_own_the_ego(tmp_path, dynamics):
-    """EnableXil puts a bench in the CONTROLLER's loop. The virtual environment
-    still integrates position, heading and everything lateral. Saying otherwise
-    is a run with two answers to who computes the ego's motion."""
+def test_dynamics_xil_is_refused(tmp_path):
+    """'xil' as a Dynamics VALUE is unimplemented, bench or no bench. Unrelated
+    to who integrates the ego -- see the two tests below, which both pass."""
     with pytest.raises(SystemExit):
         ConfigHelper().getConfig(
-            write(tmp_path, xilOn(), dynamics=dynamics, name=dynamics + ".yaml"))
+            write(tmp_path, xilOn(), dynamics="xil", name="xil.yaml"))
+
+
+def test_traffic_with_a_bench_is_accepted(tmp_path):
+    """A bench is not a plant that owns the ego, so it does not need the
+    VIRTUAL ENVIRONMENT to own one either (#24).
+
+    This was refused until the passive driver existed, on the reading that a
+    cell only makes sense while CARLA's physics move the ego. The sentence
+    holds for the traffic simulator word for word: it integrates position,
+    heading and everything lateral, the driver runs passive -- no agent, no
+    steering, no obstacle sweep -- and the cell answers the one question left,
+    the longitudinal one. Both rungs then run the same controller file and the
+    same cell, which is the whole point of having the pair."""
+    cfg = ConfigHelper()
+    cfg.getConfig(write(tmp_path, xilOn(), dynamics="traffic",
+                        name="traffic.yaml"))
+    assert cfg.Xil_setup['EnableXil'] is True
+    assert cfg.Ego_setup['Dynamics'] == 'traffic'
 
 
 def test_virenv_with_a_bench_is_accepted(tmp_path):

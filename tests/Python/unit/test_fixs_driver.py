@@ -415,3 +415,90 @@ def test_the_template_makes_exactly_one_driver():
                  if ln.startswith('#') and ln.lstrip('#').strip().startswith('Driver =')]
     assert len(live) == 1, live
     assert all(abs(i - live[0]) <= 3 for i in commented), (live, commented)
+
+
+# -- passive: the ego the TRAFFIC SIMULATOR owns (#24) -----------------------
+#
+# These drive the real Controller.control(), which is the half the stub-based
+# host tests do not reach. The first version of this feature passed every test
+# in the suite and then died on the first controlled tick of a real run, inside
+# _build, because control() reached for carla.ego on a rung that never spawns
+# one. A test that stops short of control() cannot see that.
+
+
+def _passiveEgo(**fields):
+    """An ego record shaped the way the bridge hands one over."""
+    ego = object.__new__(fixs.Vehicle)
+    object.__setattr__(ego, 'id', 'ego')
+    object.__setattr__(ego, '_written', frozenset())
+    defaults = dict(positionX=0.0, positionY=0.0, positionZ=0.0, heading=90.0,
+                    speed=4.0, speedDesired=9.0, feedAge=0.0,
+                    acceleratorPedalDesired=0.0, brakePedalDesired=0.0,
+                    steerAngleDesired=0.0, speedLimit=13.4,
+                    signalLightColor='', signalLightDistance=0.0,
+                    hasPrecedingVehicle=0, precedingVehicleDistance=0.0,
+                    precedingVehicleSpeed=0.0)
+    defaults.update(fields)
+    for k, v in defaults.items():
+        object.__setattr__(ego, k, v)
+    return ego
+
+
+@pytest.fixture
+def passive(scenario_off):
+    """EgoSetup.Dynamics: traffic, as the host publishes it, and no wire-field
+    guard (that is a property of a connection these tests do not have)."""
+    from CommonLib.VirEnv import EgoControllerHost as host
+    saved, host._dynamics = host._dynamics, 'traffic'
+    savedFields = fixs._declaredFields
+    fixs._declaredFields = None
+    yield
+    host._dynamics = saved
+    fixs._declaredFields = savedFields
+
+
+def test_the_cell_drives_a_traffic_owned_ego(passive):
+    """No agent is built and no simulator is touched: the cell's answer is
+    written straight onto the record for the traffic simulator to integrate."""
+    d = _build(driver(lambda v, dt: v * 0.5))
+    assert d.passive is True
+
+    ego = _passiveEgo(speedDesired=9.0)
+    d.control(ego, 0.1)
+
+    assert d.agent is None, 'passive must not reach for a CARLA agent'
+    assert 'speedDesired' in ego._written
+    assert ego.speedDesired == pytest.approx(4.5)
+    assert fixs.commandKind(ego) == 'speedsteer'
+
+
+def test_passive_leaves_the_lateral_alone(passive):
+    """Steering belongs to whoever owns the lateral, and on this rung that is
+    the traffic simulator. Writing one would be a command nothing asked for."""
+    d = _build(driver(lambda v, dt: v))
+    ego = _passiveEgo()
+    d.control(ego, 0.1)
+    assert 'steerAngleDesired' not in ego._written
+
+
+def test_passive_still_applies_the_ceilings(passive):
+    """The wire's signal and leader envelopes are computed from record fields
+    and touch no simulator, so they apply on both rungs -- which is what leaves
+    the cell as the only difference between them."""
+    d = _build(driver(lambda v, dt: v))
+    ego = _passiveEgo(speedDesired=25.0, hasPrecedingVehicle=1,
+                      precedingVehicleDistance=6.0, precedingVehicleSpeed=0.0)
+    d.control(ego, 0.1)
+    assert ego.speedDesired < 25.0, 'a stopped leader 6 m ahead must bind'
+
+
+def test_the_command_shape_is_inert_when_nothing_integrates_pedals(passive):
+    """--command-shape picks who closes the loop against a plant. There is no
+    plant here, so both shapes arrive at the same place and a scenario carries
+    the same Controller line as its virenv sibling."""
+    for shape in ('speed', 'pedals'):
+        d = _build(driver(lambda v, dt: v * 0.5, shape=shape))
+        ego = _passiveEgo(speedDesired=8.0)
+        d.control(ego, 0.1)
+        assert ego.speedDesired == pytest.approx(4.0), shape
+        assert 'acceleratorPedalDesired' not in ego._written, shape
