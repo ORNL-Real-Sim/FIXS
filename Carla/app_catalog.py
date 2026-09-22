@@ -670,6 +670,15 @@ def _ask(app_id, pending, index):
                 changed = True
                 break
             if ans == "k":
+                # Say how to undo this, HERE, because 'k' is the only answer that
+                # closes a door: you will not be asked about this version again, so
+                # without this line changing your mind later means waiting for an
+                # unrelated commit to touch the file. Deleting the copy is not a
+                # workaround - a missing copy is staged fresh, which is the first
+                # case stage_configs handles.
+                print(f"[apps]   keeping yours. To take the repo's version later, "
+                      f"delete {dst}\n[apps]   (save a copy first - deleting it is "
+                      f"not backed up) and launch again.")
                 _remember(index[base], item["hash"])
                 changed = True
                 break

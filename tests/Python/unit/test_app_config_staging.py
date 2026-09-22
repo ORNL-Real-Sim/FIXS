@@ -343,3 +343,34 @@ def test_an_old_record_for_a_different_version_still_asks(home, monkeypatch):
     asked = _answers(monkeypatch, "")
     app_catalog.stage_configs(APP, root=root, interactive=True)
     assert asked == []
+
+
+def test_keeping_yours_for_good_says_how_to_undo_it(home, monkeypatch, capsys):
+    """'k' is the only answer that closes a door - you are not asked about this
+    version again. Without a way back named at that moment, changing your mind
+    means waiting for an unrelated commit to touch the file."""
+    root, src = _repo(home)
+    app_catalog.stage_configs(APP, root=root, interactive=False)
+    _edited(home, src)
+
+    _answers(monkeypatch, "k")
+    app_catalog.stage_configs(APP, root=root, interactive=True)
+    out = capsys.readouterr().out
+    assert "delete" in out and str(_staged(home)) in out
+    assert "not backed up" in out, "deleting your copy loses it; say so"
+
+
+def test_deleting_your_copy_really_does_resync(home, monkeypatch):
+    """The undo the line above promises. A missing copy is staged fresh, so this
+    is the existing first case, not a workaround bolted on."""
+    root, src = _repo(home)
+    app_catalog.stage_configs(APP, root=root, interactive=False)
+    _edited(home, src)
+    _answers(monkeypatch, "k")
+    app_catalog.stage_configs(APP, root=root, interactive=True)
+
+    os.remove(str(_staged(home)))
+    app_catalog._ASKED.clear()
+    _answers(monkeypatch)
+    app_catalog.stage_configs(APP, root=root, interactive=True)
+    assert _staged(home).read_text(encoding="utf-8") == THEIRS
