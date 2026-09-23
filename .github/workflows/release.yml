@@ -43,19 +43,20 @@ on:
 
 permissions:
   contents: write        # create/update the rolling release + tag on publish
-  pull-requests: read    # the detect step lists the PR's changed files via the API
+  pull-requests: read    # the changes job lists the PR's changed files via the API
 
 jobs:
-  build-publish:
-    # windows-2022 = VS 2022 (v17), matching the generator dispatch derives from
-    # dependencies.yaml. windows-latest ships VS 2026 (v18), incompatible.
-    runs-on: windows-2022
-    # Consumed by the Linux bundle jobs below, so the two platforms land on ONE
-    # release under ONE channel tag rather than each resolving it separately.
+  # One build decision for BOTH platforms. It lived inside build-publish, which
+  # left linux-bundle two choices: wait for the whole Windows build to borrow the
+  # answer (the publish gap, see linux-bundle), or build unconditionally -- a full
+  # Linux compile for a PR that only touches tests/ (#318). As its own job it is
+  # API-only, no checkout, so both builds wait seconds for it and still run in
+  # parallel with each other.
+  changes:
+    name: Detect build-relevant changes
+    runs-on: ubuntu-latest
     outputs:
       should_build: ${{ steps.detect.outputs.should_build }}
-      publish:      ${{ steps.channel.outputs.publish }}
-      tag:          ${{ steps.channel.outputs.tag }}
     steps:
       # Decide BEFORE checking out. This gate used to run AFTER a fetch-depth:0
       # checkout, so a PR with nothing to build still paid the full ~1 GB clone
@@ -63,9 +64,9 @@ jobs:
       # on to skip the build. The PR's file list comes from the API instead, which
       # needs no working tree, so a no-op PR now costs seconds.
       #
-      # The job still RUNS either way (only its steps are gated), so the required
-      # build-publish check keeps reporting green without relying on branch
-      # protection treating a skipped job as a pass. Pushes always build. #191.
+      # The build jobs still RUN either way (only their steps are gated), so their
+      # checks keep reporting green without relying on branch protection treating
+      # a skipped job as a pass. Pushes always build. #191.
       - name: Detect build-relevant changes
         id: detect
         shell: bash
@@ -82,8 +83,10 @@ jobs:
 
           # release.yml defines THIS build, so a change to it must still build -
           # otherwise a change to the build pipeline would never test itself.
-          if echo "$files" | grep -qE '^\.github/workflows/release\.yml$'; then
-            echo "release.yml itself changed -> build to validate the pipeline."
+          # check_source_lists.py is a .py the ignore-list below would drop, but
+          # linux-bundle EXECUTES it as a guard, so a change to it is a build input.
+          if echo "$files" | grep -qE '^\.github/workflows/release\.yml$|^scripts/check_source_lists\.py$'; then
+            echo "The pipeline or one of its guards changed -> build to validate it."
             echo "should_build=true" >> "$GITHUB_OUTPUT"; exit 0
           fi
 
@@ -113,6 +116,17 @@ jobs:
             echo "should_build=true" >> "$GITHUB_OUTPUT"
           fi
 
+  build-publish:
+    # windows-2022 = VS 2022 (v17), matching the generator dispatch derives from
+    # dependencies.yaml. windows-latest ships VS 2026 (v18), incompatible.
+    runs-on: windows-2022
+    needs: changes
+    # Consumed by linux-publish below, so the two platforms land on ONE release
+    # under ONE channel tag rather than each resolving it separately.
+    outputs:
+      publish:      ${{ steps.channel.outputs.publish }}
+      tag:          ${{ steps.channel.outputs.tag }}
+    steps:
       # fetch-depth: 0 is mandatory - `git describe --match 'v[0-9]*'` (below, and
       # in generate_version.ps1) needs every commit and tag to find the nearest
       # version ancestor. What it does NOT need is the file *contents* of those
@@ -125,7 +139,7 @@ jobs:
       #   sparse-checkout    -> HEAD is 231 MiB, but tests/ (197 MiB) and doc/
       #                         (21 MiB) are 218 MiB of that and are never read by
       #                         scripts/dispatch/dispatch.bat or 8_create_zip.ps1 -
-      #                         the same two directories the detect step above
+      #                         the same two directories the changes job above
       #                         already ignores. Measured: excluding them takes the
       #                         working tree from 231 MiB to 13 MiB. (CommonLib/
       #                         YAMLMatlab/Tests is NOT affected - it lives under
@@ -134,7 +148,7 @@ jobs:
       #                         "include these", not "everything except these".
       # Mirrors the fix PR #240 applied to bundle-guard.yml (24 min -> 1 s there).
       - name: Checkout (full history for git describe; blobs on demand)
-        if: steps.detect.outputs.should_build == 'true'
+        if: needs.changes.outputs.should_build == 'true'
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -147,7 +161,7 @@ jobs:
           submodules: false
 
       - name: Add MSBuild to PATH
-        if: steps.detect.outputs.should_build == 'true'
+        if: needs.changes.outputs.should_build == 'true'
         uses: microsoft/setup-msbuild@v2
 
       # Speed: yaml-cpp is vendored and rebuilt (Release+Debug) from source every
@@ -157,7 +171,7 @@ jobs:
       # Gated too: with the checkout skipped there is no working tree, so
       # hashFiles() would resolve to an empty string and poison the cache key.
       - name: Cache yaml-cpp build
-        if: steps.detect.outputs.should_build == 'true'
+        if: needs.changes.outputs.should_build == 'true'
         uses: actions/cache@v4
         with:
           path: CommonLib/yaml-cpp/build
@@ -171,7 +185,7 @@ jobs:
       # and nothing publishes.
       - name: Resolve release channel
         id: channel
-        if: steps.detect.outputs.should_build == 'true'
+        if: needs.changes.outputs.should_build == 'true'
         shell: pwsh
         run: '& scripts/dispatch/release_channel.ps1 -Ref "${{ github.ref }}"'
 
@@ -201,13 +215,13 @@ jobs:
       # release is published yet this soft-warns and VirCarlaEnv is simply absent
       # from the zip - it never fails the build. #109.
       - name: Cache libcarla (native deps)
-        if: steps.detect.outputs.should_build == 'true'
+        if: needs.changes.outputs.should_build == 'true'
         uses: actions/cache@v4
         with:
           path: CommonLib/libcarla
           key: libcarla-${{ runner.os }}-${{ hashFiles('dependencies.yaml') }}
       - name: Fetch libcarla (prebuilt) for the VirCarlaEnv build
-        if: steps.detect.outputs.should_build == 'true'
+        if: needs.changes.outputs.should_build == 'true'
         shell: pwsh
         run: |
           & scripts/dispatch/fetch_native_deps.ps1 -Component carla -Mode prebuilt
@@ -224,13 +238,13 @@ jobs:
       # fails with a clear message instead of a link error 10 minutes later.
       # Cached on dependencies.yaml so it downloads at most once per deps version.
       - name: Cache libsumo (native deps)
-        if: steps.detect.outputs.should_build == 'true'
+        if: needs.changes.outputs.should_build == 'true'
         uses: actions/cache@v4
         with:
           path: CommonLib/libsumo
           key: libsumo-${{ runner.os }}-${{ hashFiles('dependencies.yaml') }}
       - name: Fetch libsumo (prebuilt, required)
-        if: steps.detect.outputs.should_build == 'true'
+        if: needs.changes.outputs.should_build == 'true'
         shell: pwsh
         run: |
           & scripts/dispatch/fetch_native_deps.ps1 -Component sumo
@@ -244,7 +258,7 @@ jobs:
       # by 8_create_zip.ps1 through dispatch step 8. Empty on PRs, where the
       # script falls back to the commit-traceable git describe name.
       - name: Build + package (proprietary steps skipped; VE.lib builds on 0.9.0)
-        if: steps.detect.outputs.should_build == 'true'
+        if: needs.changes.outputs.should_build == 'true'
         shell: cmd
         env:
           RS_FIXS_VERSION_LABEL: ${{ steps.channel.outputs.tag }}
@@ -265,7 +279,7 @@ jobs:
       # binaries. The bundle-guard PR check makes the missing-bundle case
       # unmergeable in the first place (#191).
       - name: Overlay proprietary bundle (Binaries-<key>, if published)
-        if: steps.detect.outputs.should_build == 'true'
+        if: needs.changes.outputs.should_build == 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -298,7 +312,7 @@ jobs:
           & powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dispatch/8_create_zip.ps1 -RunMode inline
 
       - name: Sanity-check the packaged zip
-        if: steps.detect.outputs.should_build == 'true'
+        if: needs.changes.outputs.should_build == 'true'
         shell: pwsh
         run: |
           $zip = Get-ChildItem build -Filter 'fixs-build-*.zip' -ErrorAction SilentlyContinue |
@@ -317,7 +331,7 @@ jobs:
           }
 
       - name: Upload packaged zip as a workflow artifact (inspect on PRs)
-        if: steps.detect.outputs.should_build == 'true'
+        if: needs.changes.outputs.should_build == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: fixs-build-zip
@@ -369,10 +383,10 @@ jobs:
   # measured by running both across all three. The jammy/noble legs in
   # linux-build.yml stay a COMPILE gate; their artifacts must never ship.
   # ===========================================================================
-  # NO `needs:`. This used to wait on build-publish purely to borrow two strings
-  # from it -- should_build for a gate, and the channel tag for the zip's name --
-  # and paid for them with the entire Windows build in wall-clock before this one
-  # started. That ordering is what opens the publish gap: build-publish RECREATES
+  # Needs `changes`, NOT build-publish. This used to wait on build-publish purely
+  # to borrow two strings from it -- should_build for a gate, and the channel tag
+  # for the zip's name -- and paid for them with the entire Windows build in
+  # wall-clock before this one started. That ordering is what opens the publish gap: build-publish RECREATES
   # the rolling release (delete + create is how the tag is re-pointed), which
   # drops every asset and re-adds only the Windows zip, so the release carries no
   # Linux bundle until this job has built one and linux-publish has uploaded it.
@@ -385,16 +399,18 @@ jobs:
   # `gh release create`, which moves the publish out of the Windows build job --
   # a bigger change that wants a Windows run to trust.
   #
-  # The cost of dropping the gate: a docs-only PR now builds a Linux bundle it
-  # will not use, a few Ubuntu runner minutes. Cheaper than a second copy of the
-  # change-detection logic, which would then have to be kept in step with the
-  # first one.
+  # The build gate comes from the `changes` job instead, shared with build-publish
+  # (one copy of the detection logic) and done in seconds, so the parallelism
+  # above is kept. Steps are gated, not the job, for the same reason as
+  # build-publish: the check still reports green on a PR with nothing to build.
   linux-bundle:
     name: Linux bundle (focal)
     runs-on: ubuntu-latest
     container: ubuntu:20.04
+    needs: changes
     steps:
       - name: Install toolchain
+        if: needs.changes.outputs.should_build == 'true'
         run: |
           export DEBIAN_FRONTEND=noninteractive
           apt-get update -qq
@@ -404,23 +420,28 @@ jobs:
             build-essential cmake ninja-build git ca-certificates curl unzip zip python3
 
       - uses: actions/checkout@v4
+        if: needs.changes.outputs.should_build == 'true'
         with:
           fetch-depth: 0        # git describe needs tags for the version stamp
           submodules: false     # ProprietaryFiles is private and not needed here
 
       # git refuses to run in a checkout owned by another uid (container vs runner).
       - name: Trust the workspace
+        if: needs.changes.outputs.should_build == 'true'
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Guard - MSBuild and CMake TU lists agree
+        if: needs.changes.outputs.should_build == 'true'
         run: python3 scripts/check_source_lists.py
 
       - name: Fetch native deps (prebuilt libtraci + libcarla)
+        if: needs.changes.outputs.should_build == 'true'
         run: |
           ./scripts/fetch_native_deps.sh
           ./scripts/fetch_native_deps.sh --component carla
 
       - name: Build
+        if: needs.changes.outputs.should_build == 'true'
         run: |
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build -j "$(nproc)"
@@ -438,9 +459,11 @@ jobs:
       # linux-publish renames the file to the channel before uploading. The tag
       # still has exactly one source of truth.
       - name: Pack the Linux bundle
+        if: needs.changes.outputs.should_build == 'true'
         run: ./scripts/dispatch/pack_linux_bundle.sh --out-dir dist
 
       - name: Upload bundle as a workflow artifact (inspect on PRs)
+        if: needs.changes.outputs.should_build == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: fixs-build-zip-linux
