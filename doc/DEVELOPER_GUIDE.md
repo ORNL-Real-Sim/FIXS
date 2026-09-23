@@ -126,8 +126,9 @@ Writing docs:
   its own entry in the left panel, so `doc/_ext/single_title.py` fails the build on a
   second one.
 - Internal design documents (e.g. `156_drivingsim_dll_design_proposal.md`,
-  `gui-design/`) stay in the repo but are listed in `exclude_patterns` in `doc/conf.py`,
-  so they are not published.
+  `gui-design/`, the XIL design studies) stay in the repo but are listed in `exclude_patterns` in `doc/conf.py`,
+  so they are not published. A published page may still link to one; the link opens
+  the file on GitHub.
 - Link repo files outside `doc/` relatively (`../tests/Vissim/Ipg/`), so the link
   also works on GitHub. On Read the Docs, `doc/_ext/repo_links.py` turns each one
   into a GitHub link at the commit being built. A link to a file that does not

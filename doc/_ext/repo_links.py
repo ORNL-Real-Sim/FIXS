@@ -2,9 +2,10 @@
 
 The pages are also read on GitHub, so they link repo files relatively
 (``../tests/Vissim/Ipg/``, ``../CLAUDE.md``). Sphinx only builds doc/, so on
-Read the Docs those links have no target. This rewrites each one whose target
-exists in the repo to a GitHub URL pinned to the commit being built, so every
-docs version links the code it was built from. A link whose target does not
+Read the Docs those links have no target. The same goes for a link to a page
+kept out of the site by ``exclude_patterns`` (internal design documents). This
+rewrites each one whose target exists in the repo to a GitHub URL pinned to the
+commit being built, so every docs version links the code it was built from. A link whose target does not
 exist anywhere is left alone, so MyST still warns about it.
 """
 import functools
@@ -45,16 +46,21 @@ class RepoLinks(SphinxPostTransform):
                 continue
             if node["refdomain"] == "doc":
                 # MyST already made these relative to doc/ and dropped ".md".
+                # A built page resolves normally; a .md outside doc/ or one
+                # left out of the site (exclude_patterns) goes to GitHub.
+                if node["reftarget"] in self.env.all_docs:
+                    continue
                 target, anchor = node["reftarget"] + ".md", node.get("reftargetid")
                 path = os.path.join(srcdir, target)
             else:
                 target, _, anchor = unquote(node["reftarget"]).partition("#")
                 refdoc = self.env.doc2path(node.get("refdoc", self.env.docname))
                 path = os.path.join(os.path.dirname(refdoc), target)
+                if not os.path.relpath(path, srcdir).startswith(".."):
+                    continue  # inside doc/: Sphinx/MyST handle it
             path = os.path.normpath(path)
             rel = os.path.relpath(path, repo_root)
-            outside_doc = os.path.relpath(path, srcdir).startswith("..")
-            if rel.startswith("..") or not outside_doc or not os.path.exists(path):
+            if rel.startswith("..") or not os.path.exists(path):
                 continue
             url = base_url.format(
                 kind="tree" if os.path.isdir(path) else "blob",

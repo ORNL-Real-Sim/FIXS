@@ -38,8 +38,6 @@ Real-Sim Documentation
    :caption: XIL Bench
 
    xil/AxleDynoCarMakerCoupling
-   xil/CarlaDynoCoupling
-   xil/DynoDataChecks
 
 .. toctree::
    :maxdepth: 3

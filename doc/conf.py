@@ -26,7 +26,8 @@ repo_links_github = "https://github.com/ORNL-Real-Sim/FIXS"
 templates_path = ["_templates"]
 # Internal design documents: kept in the repo, not published as reader docs.
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store",
-                    "156_drivingsim_dll_design_proposal.md", "gui-design/**"]
+                    "156_drivingsim_dll_design_proposal.md", "gui-design/**",
+                    "xil/CarlaDynoCoupling.md", "xil/DynoDataChecks.md"]
 
 # Recognize both .rst and .md files
 source_suffix = {
@@ -48,9 +49,9 @@ myst_heading_anchors = 5
 #Options for HTML output
 html_theme = "sphinx_rtd_theme"
 html_theme_options = {
-    "collapse_navigation": False,
+    "collapse_navigation": True,    # expand only the page being read
     "sticky_navigation": True,
     "includehidden": True,        
-    "navigation_depth": 4,        # <-- ensure depth is enough for your nesting
+    "navigation_depth": 2,        # page title + its ## sections
 }
 
