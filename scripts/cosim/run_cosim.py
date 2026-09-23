@@ -181,16 +181,19 @@ def _run_initialize(tag):
     could only grow: since #272 the updater itself lives in FIXS and is fetched
     per release, so the ONE thing an app repo is guaranteed to expose is its
     documented entry point. Naming that instead means the engine no longer tracks
-    any downstream repo's internal layout."""
-    if platform.system() == "Windows":
-        front_door = os.path.join(APP_ROOT, "run_cosim.bat")
-        cmd = ["cmd", "/c", front_door]
-    else:
-        front_door = os.path.join(APP_ROOT, "run_cosim.sh")
-        cmd = ["bash", front_door]
-    if not os.path.isfile(front_door):
-        print(f"[cosim] cannot self-update: {front_door} not found.")
+    any downstream repo's internal layout.
+
+    FIXS.bat/.sh first - the front door FIXS ships (#313) - then the per-repo
+    run_cosim.bat/.sh it replaces. Looking only for the old name made every repo
+    that had switched report "cannot self-update"."""
+    windows = platform.system() == "Windows"
+    names = ("FIXS.bat", "run_cosim.bat") if windows else ("FIXS.sh", "run_cosim.sh")
+    front_door = next((os.path.join(APP_ROOT, n) for n in names
+                       if os.path.isfile(os.path.join(APP_ROOT, n))), None)
+    if front_door is None:
+        print(f"[cosim] cannot self-update: no {' or '.join(names)} in {APP_ROOT}.")
         return False
+    cmd = ["cmd", "/c", front_door] if windows else ["bash", front_door]
     print(f"[cosim] updating FIXS -> {tag} via {os.path.basename(front_door)} ...")
     # --update-fixs exits before the front door's bootstrap gate and never re-runs
     # python, so this cannot recurse back into run_cosim.py.

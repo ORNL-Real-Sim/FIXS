@@ -275,3 +275,29 @@ def test_a_missing_controller_stops_the_run_before_anything_starts(
 def test_controllers_the_bridge_would_not_open_are_left_alone(tmp_path, monkeypatch, ego):
     monkeypatch.setattr(run_cosim, "_read_scenario_config", lambda _y: _Parsed(**ego))
     run_cosim.check_ego_controller("scen.yaml", cwd=str(tmp_path))
+
+
+# --------------------------------------------------------------------------- #
+# self-update goes through whichever front door the repo has
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("present,expected", [
+    (["FIXS.bat", "FIXS.sh", "run_cosim.bat", "run_cosim.sh"], "FIXS"),   # new wins
+    (["run_cosim.bat", "run_cosim.sh"], "run_cosim"),                     # legacy repo
+])
+def test_self_update_uses_the_front_door_the_repo_has(tmp_path, monkeypatch,
+                                                      present, expected):
+    for name in present:
+        (tmp_path / name).write_text("")
+    monkeypatch.setattr(run_cosim, "APP_ROOT", str(tmp_path))
+    calls = []
+    monkeypatch.setattr(run_cosim.subprocess, "call",
+                        lambda cmd, *a, **k: calls.append(cmd) or 0)
+    assert run_cosim._run_initialize("v0.10.0") is True
+    assert os.path.basename(calls[0][-3]).startswith(expected)
+    assert calls[0][-2:] == ["--update-fixs", "v0.10.0"]
+
+
+def test_self_update_says_which_front_doors_it_looked_for(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(run_cosim, "APP_ROOT", str(tmp_path))
+    assert run_cosim._run_initialize("v0.10.0") is False
+    assert "FIXS." in capsys.readouterr().out

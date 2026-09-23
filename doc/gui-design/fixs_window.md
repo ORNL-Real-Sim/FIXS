@@ -10,6 +10,10 @@ FIXS.bat --gui          (Windows)      ./FIXS.sh --gui          (Linux)
 run_cosim.py --gui      (from a source checkout: scripts/cosim/run_cosim.py --gui)
 ```
 
+Double-clicking `FIXS.bat` (or running `./FIXS.sh` with no arguments from a
+terminal) prints the common options and asks for them once. Type `gui` there to
+open the window.
+
 ## How it is built: the engine is the backend
 
 The window does not implement co-simulation. Each button starts `run_cosim` with
