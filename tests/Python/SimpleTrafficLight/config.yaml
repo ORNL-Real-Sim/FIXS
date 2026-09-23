@@ -16,6 +16,11 @@ SimulationSetup:
     # specify which traffic simulator
     SelectedTrafficSimulator: 'SUMO'
 
+    # When the run ends. Under TraCI, SUMO ignores the sumocfg's <end>, so this is
+    # the only end time in force; unset, it defaults to 90000 s. The ego leaves the
+    # network at t = 102.2 s, and nothing is under test after that (#318).
+    SimulationEndTime: 110
+
     # Use setPreviousSpeed instead of setSpeed to respect SUMO's acceleration dynamics
     EnableExternalDynamics: true
 
