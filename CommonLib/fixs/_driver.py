@@ -337,6 +337,14 @@ class Controller:
         self.fallbackSpeed = float(config.get('EgoTargetSpeed') or 8.33)
         self.useAdvisory = USE_ADVISORY
         self.agent = None
+        #: TELEPORT. EgoSetup.Dynamics: traffic -- the traffic simulator
+        #: integrates the ego and no CARLA actor is spawned, so there is nothing
+        #: for an agent to drive. Asked of the SCENARIO, not of whether
+        #: carla.ego exists: on a virenv rung with a deferred spawn there is no
+        #: actor either for the first few hundred ticks, and 'not yet' must not
+        #: read as 'never'.
+        from CommonLib.VirEnv.EgoControllerHost import currentDynamics
+        self.passive = currentDynamics() == 'traffic'
         self.log = _openLog(
             config.get('EgoControllerLog', '_datalog/agent_embedded.csv'),
             'fixs.driver shape=%s loop=%s %s %s exchange=%s'
@@ -381,8 +389,13 @@ class Controller:
         # asking unconditionally would make the driver unusable without CARLA.
         # None is what BasicAgent already treats as "make your own", so the
         # no-bridge path is exactly the old behaviour.
+        #: ... and not on a passive rung, where there is no agent to hand them
+        #: to. _build never runs there (control() returns before it), so the map
+        #: and the planner would be built, paid for, and never read. FIXS#373
+        #: moved this work off the first controlled tick because it cost 0.73 s
+        #: there; on this rung it costs that at start-up for nothing at all.
         self._map, self._grp = None, None
-        if carla.available():
+        if not self.passive and carla.available():
             self._map = carla.map      # FIXS caches it; the agent reuses it
             #: 2.0 m is BasicAgent's own _sampling_resolution. Passing the
             #: planner in only skips rebuilding it; it is not a different one.
@@ -484,6 +497,10 @@ class Controller:
             self.steps += 1
             return
 
+        if self.passive:
+            self._controlPassive(ego)
+            return
+
         if self.agent is None:
             self._build()
 
@@ -570,6 +587,73 @@ class Controller:
             carla.apply_control(carla.VehicleControl(
                 throttle=thr, brake=brk, steer=control.steer))
         self._logStep(ego, control, target, advisory)
+
+    def _controlPassive(self, ego):
+        """TELEPORT: the cell is the whole driver.
+
+        No CARLA actor, so no agent, no steering, no obstacle sweep -- the
+        traffic simulator owns all of that. What is left is the longitudinal
+        intent, which is exactly what a bench answers: the advisory comes off
+        the wire, the cell says what a vehicle with mass and a torque delay
+        actually reached, and that speed is commanded back for the traffic
+        simulator to integrate.
+
+        THE CEILINGS DO NOT APPLY HERE, and that is the whole of the difference
+        from the virenv path.
+
+        There, the advisory is a TARGET a CARLA agent tracks, and _signalCeiling
+        and _leaderCeiling are that agent's envelope -- it plans in a world the
+        wire cannot see, so it is given room to be wrong in. Here the advisory
+        is nobody's target: the eco controller writes speedDesired and the
+        traffic simulator integrates it. That IS the rung below. Applying the
+        envelopes on top double-counts a stop the eco controller has already
+        planned -- _signalCeiling alone commands a 2 m/s^2 deceleration to the
+        bar from as far as 200 m out -- and the ego slows long before a bar it
+        was never going to overrun.
+
+        Nor is safety lost by dropping them. SumoSetup.SpeedMode leaves the
+        traffic simulator's own checks on, so what is commanded here is still
+        clamped to its safe speed, its leader gap and its red lights. There are
+        not two opinions about the stop bar on this rung; there is one, and it
+        is not this file's.
+
+        The invariant that buys: with no cell -- or a cell that returns its
+        reference unchanged -- this rung reproduces the rung below it EXACTLY.
+        Anything else and the cell is not the only thing being measured.
+        """
+        # The eco controller's command, as received, and nothing else done to
+        # it. Not _advisoryOf: that drops anything <= 0.01 as 'no advisory', and
+        # a command of ZERO is exactly what the eco controller writes AT a stop
+        # bar -- read as absent, it was replaced by fallbackSpeed and the ego
+        # was told to accelerate away from the bar it had just been asked to
+        # stop at. There is no fallback on this rung either: nothing here is
+        # entitled to invent a speed the eco controller did not ask for.
+        #
+        # Safe to read the field directly: it is dual-use, but runController
+        # restores the feed's value before every call, so what is here is the
+        # eco controller's, never this driver's own last command (FIXS#305).
+        advisory = float(getattr(ego, 'speedDesired', 0.0) or 0.0)
+        self.advisory = advisory
+        #: Neither computed nor applied. Logged as such, so a passive trace
+        #: cannot be read as though an envelope had bound.
+        self.vSignal = self.vLeader = _NO_LIMIT
+        target = advisory
+
+        vRef = self.vRef = target
+        if self.benchInLoop:
+            vRef = self.vRef = self.exchange(vRef)
+
+        # THE COMMAND. speedDesired only: steer belongs to whoever owns the
+        # lateral, and here that is the traffic simulator.
+        #
+        # The command SHAPE is not consulted and does not need to be. It picks
+        # who closes the speed loop against a plant; there is no plant on this
+        # rung, so both shapes arrive at the same place -- the speed the traffic
+        # simulator is asked to hold. A scenario therefore carries the same
+        # Controller line as its virenv sibling, and the pair differs by
+        # Dynamics alone.
+        ego.set(speedDesired=max(0.0, vRef))
+        self._logStep(ego, None, target, advisory)
 
     def _advisoryOf(self, ego):
         """The eco controller's advisory, read only on the tick it is new.
@@ -722,18 +806,27 @@ class Controller:
         self.steps += 1
         if self.log is None:
             return
-        lp = self.agent.get_local_planner()
+        # Agent-side columns are blank on a passive run: there is no planner,
+        # no CARLA command and no world to count actors in. The columns stay so
+        # the two rungs' logs load with one reader.
+        lp = None if self.agent is None else self.agent.get_local_planner()
+        thr, brk, ste = ((0.0, 0.0, 0.0) if cmd is None
+                         else (cmd.throttle, cmd.brake, cmd.steer))
+        wpLeft = 0 if lp is None else len(lp.get_plan())
+        nSeen = (0 if self.agent is None
+                 else len(self.agent._world.get_actors().filter('*vehicle*')))
+        agentTarget = 0.0 if lp is None else lp._target_speed
         self.log.write(
             '%.3f,%.3f,%.3f,%.3f,%.3f,%s,%.3f,%.4f,%.4f,%.4f,%d,%s,%s,%s,'
             '%d,%.3f,%.3f,%s,%s,%s'
             % (self.elapsed, getattr(ego, 'feedAge', 0.0), ego.positionX,
                ego.positionY, ego.speed,
                '' if advisory is None else '%.3f' % advisory, target,
-               cmd.throttle, cmd.brake, cmd.steer, len(lp.get_plan()),
+               thr, brk, ste, wpLeft,
                ego.precedingVehicleDistance, ego.signalLightColor,
                ego.signalLightDistance,
-               len(self.agent._world.get_actors().filter('*vehicle*')),
-               float(getattr(ego, 'speedLimit', 0.0) or 0.0), lp._target_speed,
+               nSeen,
+               float(getattr(ego, 'speedLimit', 0.0) or 0.0), agentTarget,
                _col(self.vSignal), _col(self.vLeader),
                '' if self.vDyno is None else '%.4f' % self.vDyno)
             + (',' if self.vRef is None else ',%.4f' % self.vRef)

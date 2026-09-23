@@ -137,16 +137,32 @@ def test_a_silent_bench_gives_the_reference_straight_back(tmp_path):
         d.close()
 
 
-# ----------------------------------------------------------- the one refusal
+# ------------------------------------------ the bench, on either integrator
 
-@pytest.mark.parametrize("dynamics", ["traffic", "xil"])
-def test_a_bench_needs_the_virenv_to_own_the_ego(tmp_path, dynamics):
-    """EnableXil puts a bench in the CONTROLLER's loop. The virtual environment
-    still integrates position, heading and everything lateral. Saying otherwise
-    is a run with two answers to who computes the ego's motion."""
+def test_dynamics_xil_is_refused(tmp_path):
+    """'xil' as a Dynamics VALUE is unimplemented, bench or no bench. Unrelated
+    to who integrates the ego -- see the two tests below, which both pass."""
     with pytest.raises(SystemExit):
         ConfigHelper().getConfig(
-            write(tmp_path, xilOn(), dynamics=dynamics, name=dynamics + ".yaml"))
+            write(tmp_path, xilOn(), dynamics="xil", name="xil.yaml"))
+
+
+def test_traffic_with_a_bench_is_accepted(tmp_path):
+    """A bench is not a plant that owns the ego, so it does not need the
+    VIRTUAL ENVIRONMENT to own one either (#24).
+
+    This was refused until the passive driver existed, on the reading that a
+    cell only makes sense while CARLA's physics move the ego. The sentence
+    holds for the traffic simulator word for word: it integrates position,
+    heading and everything lateral, the driver runs passive -- no agent, no
+    steering, no obstacle sweep -- and the cell answers the one question left,
+    the longitudinal one. Both rungs then run the same controller file and the
+    same cell, which is the whole point of having the pair."""
+    cfg = ConfigHelper()
+    cfg.getConfig(write(tmp_path, xilOn(), dynamics="traffic",
+                        name="traffic.yaml"))
+    assert cfg.Xil_setup['EnableXil'] is True
+    assert cfg.Ego_setup['Dynamics'] == 'traffic'
 
 
 def test_virenv_with_a_bench_is_accepted(tmp_path):
@@ -255,3 +271,74 @@ def test_enabled_refuses_to_guess_like_dyno_does(tmp_path, monkeypatch):
     monkeypatch.delenv('FIXS_CONFIG_YAML', raising=False)
     with pytest.raises(fixs.FixsError):
         fixsxil.enabled()
+
+
+# -- the robot driver, capped to an envelope (#24) ---------------------------
+
+def test_the_robot_driver_comes_from_the_yaml(tmp_path):
+    """Vehicle and Dyno were settable and the ROBOT was not, so a bench could
+    not be held inside an acceleration envelope without pretending the car had
+    less torque than it has. On a real cell the robot is the one of the three
+    that is yours to set."""
+    y = dict(xilOn(), Driver={"max_throttle": 0.27, "max_brake": 0.27})
+    cfg = ConfigHelper()
+    cfg.getConfig(write(tmp_path, y, name="driver.yaml"))
+    assert cfg.Xil_setup["Driver"] == {"max_throttle": 0.27, "max_brake": 0.27}
+
+
+def test_the_yaml_cap_reaches_the_cell(tmp_path):
+    d = fixsxil.dyno(write(tmp_path,
+                           dict(xilOn(), Driver={"max_throttle": 0.27}),
+                           name="capped.yaml"))
+    try:
+        assert d.sim.driver.max_throttle == 0.27
+    finally:
+        d.close()
+
+
+def test_the_envelope_holds_at_any_speed():
+    """Quoted in m/s^2, and it has to mean the same thing at 20 m/s as off the
+    line -- which is why it is not a pedal cap. A pedal bounds TORQUE, and the
+    acceleration that buys falls away as road load and the power limit take
+    their share."""
+    from CommonLib.xil.dynosim import Dyno, DynoSim
+    from CommonLib.xil.vehicle import Vehicle
+    from CommonLib.xil.driver import RobotDriver
+
+    def peaks(**kw):
+        sim = DynoSim(Vehicle(mass_kg=2100.0),
+                      Dyno(road_A_N=111.0, roller_inertia_kgm2=40.0),
+                      RobotDriver(**kw))
+        slow, fast, p = [], [], 0.0
+        for _ in range(400):
+            v = sim.step(25.0, 0.1).speed
+            (slow if v < 5.0 else fast).append((v - p) / 0.1)
+            p = v
+        return max(slow), max(fast)
+
+    assert min(peaks()) > 5.0, 'uncapped, this cell is quick'
+    slow, fast = peaks(max_accel_mps2=1.8)
+    assert slow < 2.0 and fast < 2.0, (slow, fast)
+    assert abs(slow - fast) < 0.3, 'the envelope must not sag with speed'
+
+
+def test_the_envelope_ramps_rather_than_clamping():
+    """Clamping the reference to the measured speed looks equivalent and is
+    not: it parks the setpoint permanently just ahead of actual, the integrator
+    winds on that standing error, and the pedal grows until the vehicle exceeds
+    the very rate the clamp was meant to impose. Measured that way, a 2.0 cap
+    delivered 2.92. The ramp is what keeps the error small enough for the rate
+    to be the ramp's."""
+    from CommonLib.xil.dynosim import Dyno, DynoSim
+    from CommonLib.xil.vehicle import Vehicle
+    from CommonLib.xil.driver import RobotDriver
+
+    sim = DynoSim(Vehicle(mass_kg=2100.0),
+                  Dyno(road_A_N=111.0, roller_inertia_kgm2=40.0),
+                  RobotDriver(max_accel_mps2=1.8, max_decel_mps2=1.8))
+    p, worst = 0.0, 0.0
+    for _ in range(400):
+        v = sim.step(25.0, 0.1).speed
+        worst = max(worst, (v - p) / 0.1)
+        p = v
+    assert worst < 2.0, worst

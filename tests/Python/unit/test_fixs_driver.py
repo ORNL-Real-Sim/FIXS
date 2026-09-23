@@ -415,3 +415,163 @@ def test_the_template_makes_exactly_one_driver():
                  if ln.startswith('#') and ln.lstrip('#').strip().startswith('Driver =')]
     assert len(live) == 1, live
     assert all(abs(i - live[0]) <= 3 for i in commented), (live, commented)
+
+
+# -- passive: the ego the TRAFFIC SIMULATOR owns (#24) -----------------------
+#
+# These drive the real Controller.control(), which is the half the stub-based
+# host tests do not reach. The first version of this feature passed every test
+# in the suite and then died on the first controlled tick of a real run, inside
+# _build, because control() reached for carla.ego on a rung that never spawns
+# one. A test that stops short of control() cannot see that.
+
+
+def _passiveEgo(**fields):
+    """An ego record shaped the way the bridge hands one over."""
+    ego = object.__new__(fixs.Vehicle)
+    object.__setattr__(ego, 'id', 'ego')
+    object.__setattr__(ego, '_written', frozenset())
+    defaults = dict(positionX=0.0, positionY=0.0, positionZ=0.0, heading=90.0,
+                    speed=4.0, speedDesired=9.0, feedAge=0.0,
+                    acceleratorPedalDesired=0.0, brakePedalDesired=0.0,
+                    steerAngleDesired=0.0, speedLimit=13.4,
+                    signalLightColor='', signalLightDistance=0.0,
+                    hasPrecedingVehicle=0, precedingVehicleDistance=0.0,
+                    precedingVehicleSpeed=0.0)
+    defaults.update(fields)
+    for k, v in defaults.items():
+        object.__setattr__(ego, k, v)
+    return ego
+
+
+@pytest.fixture
+def passive(scenario_off):
+    """EgoSetup.Dynamics: traffic, as the host publishes it, and no wire-field
+    guard (that is a property of a connection these tests do not have)."""
+    from CommonLib.VirEnv import EgoControllerHost as host
+    saved, host._dynamics = host._dynamics, 'traffic'
+    savedFields = fixs._declaredFields
+    fixs._declaredFields = None
+    yield
+    host._dynamics = saved
+    fixs._declaredFields = savedFields
+
+
+def test_the_cell_drives_a_traffic_owned_ego(passive):
+    """No agent is built and no simulator is touched: the cell's answer is
+    written straight onto the record for the traffic simulator to integrate."""
+    d = _build(driver(lambda v, dt: v * 0.5))
+    assert d.passive is True
+
+    ego = _passiveEgo(speedDesired=9.0)
+    d.control(ego, 0.1)
+
+    assert d.agent is None, 'passive must not reach for a CARLA agent'
+    assert 'speedDesired' in ego._written
+    assert ego.speedDesired == pytest.approx(4.5)
+    assert fixs.commandKind(ego) == 'speedsteer'
+
+
+def test_passive_leaves_the_lateral_alone(passive):
+    """Steering belongs to whoever owns the lateral, and on this rung that is
+    the traffic simulator. Writing one would be a command nothing asked for."""
+    d = _build(driver(lambda v, dt: v))
+    ego = _passiveEgo()
+    d.control(ego, 0.1)
+    assert 'steerAngleDesired' not in ego._written
+
+
+def test_a_null_cell_reproduces_the_rung_below(passive):
+    """THE INVARIANT. A cell that hands back its reference unchanged must leave
+    the advisory exactly as the eco controller wrote it -- because that, with no
+    cell at all, IS the rung below. If this drifts, a dyno comparison is not
+    measuring the dyno."""
+    d = _build(driver(lambda v, dt: v))
+    for advisory in (0.25, 4.0, 9.75, 13.4):
+        ego = _passiveEgo(speedDesired=advisory)
+        d.control(ego, 0.1)
+        assert ego.speedDesired == pytest.approx(advisory, abs=1e-12), advisory
+
+
+def test_no_cell_at_all_reproduces_the_rung_below(passive):
+    """Same invariant with nothing in the loop: fixs.driver() without an
+    exchange is a pass-through on this rung."""
+    d = _build(driver())
+    ego = _passiveEgo(speedDesired=9.75)
+    d.control(ego, 0.1)
+    assert ego.speedDesired == pytest.approx(9.75, abs=1e-12)
+
+
+def test_an_almost_massless_cell_tracks_the_advisory(passive):
+    """A bench with almost no dynamics must be almost invisible. This is the
+    cheap check that a dyno run can be trusted: make the cell nearly ideal and
+    the two rungs should sit on top of each other."""
+    d = _build(driver(lambda v, dt: v * 0.999))
+    ego = _passiveEgo(speedDesired=12.0)
+    d.control(ego, 0.1)
+    assert ego.speedDesired == pytest.approx(12.0, rel=2e-3)
+
+
+def test_the_stop_bar_is_not_planned_twice(passive):
+    """A red ahead must NOT pull the command down here.
+
+    The eco controller has already planned its approach to that bar and written
+    the result into speedDesired; this rung hands that to the traffic simulator.
+    Re-applying _signalCeiling on top commanded a 2 m/s^2 stop from as far as
+    200 m out, and the ego crawled toward a bar it was never going to overrun.
+    Safety is not lost by leaving it out -- SumoSetup.SpeedMode keeps the
+    traffic simulator's own red-light and safe-speed checks on."""
+    d = _build(driver(lambda v, dt: v))
+    ego = _passiveEgo(speedDesired=11.0, signalLightColor=1,   # _RED
+                      signalLightDistance=150.0, speed=11.0)
+    d.control(ego, 0.1)
+    assert ego.speedDesired == pytest.approx(11.0, abs=1e-12)
+
+
+def test_a_leader_is_not_planned_twice(passive):
+    """Same, for the vehicle ahead: the traffic simulator's car-following owns
+    the gap on this rung, and it still runs under SpeedMode."""
+    d = _build(driver(lambda v, dt: v))
+    ego = _passiveEgo(speedDesired=11.0, hasPrecedingVehicle=1,
+                      precedingVehicleDistance=6.0, precedingVehicleSpeed=0.0)
+    d.control(ego, 0.1)
+    assert ego.speedDesired == pytest.approx(11.0, abs=1e-12)
+
+
+def test_the_command_shape_is_inert_when_nothing_integrates_pedals(passive):
+    """--command-shape picks who closes the loop against a plant. There is no
+    plant here, so both shapes arrive at the same place and a scenario carries
+    the same Controller line as its virenv sibling."""
+    for shape in ('speed', 'pedals'):
+        d = _build(driver(lambda v, dt: v * 0.5, shape=shape))
+        ego = _passiveEgo(speedDesired=8.0)
+        d.control(ego, 0.1)
+        assert ego.speedDesired == pytest.approx(4.0), shape
+        assert 'acceleratorPedalDesired' not in ego._written, shape
+
+
+def test_a_zero_advisory_is_a_command_not_an_absence(passive):
+    """Zero is what the eco controller writes AT a stop bar.
+
+    _advisoryOf drops anything <= 0.01 as 'no advisory', which on the virenv
+    path means 'hold the last target'. Taken literally here it meant the
+    fallback speed, so the ego was told to accelerate away from the bar it had
+    just been asked to stop at. The cell must see the zero, and the zero must
+    reach the traffic simulator."""
+    seen = []
+    d = _build(driver(lambda v, dt: (seen.append(v), v)[1]))
+    ego = _passiveEgo(speedDesired=0.0, speed=0.0)
+    d.control(ego, 0.1)
+    assert seen == [pytest.approx(0.0)], 'the cell must be asked for the stop'
+    assert ego.speedDesired == pytest.approx(0.0, abs=1e-12)
+
+
+def test_nothing_invents_a_speed_the_eco_controller_did_not_ask_for(passive):
+    """No fallback on this rung. Whatever came off the wire is what the cell is
+    handed, across the range -- there is no floor below which this driver
+    substitutes an opinion of its own."""
+    d = _build(driver())
+    for advisory in (0.0, 0.005, 0.01, 0.5, 8.33, 20.0):
+        ego = _passiveEgo(speedDesired=advisory)
+        d.control(ego, 0.1)
+        assert ego.speedDesired == pytest.approx(advisory, abs=1e-12), advisory

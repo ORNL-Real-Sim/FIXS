@@ -103,6 +103,12 @@ class ConfigHelper:
         # An unknown one is refused there, not ignored.
         self.Xil_setup["Vehicle"] = dict(xil_node.get("Vehicle") or {})
         self.Xil_setup["Dyno"] = dict(xil_node.get("Dyno") or {})
+        # The ROBOT DRIVER on the bench. Its own block because it is not the
+        # vehicle and not the dyno: on a real cell it is the one of the three
+        # that is yours to set. Capping its pedal is how a bench is held to an
+        # acceleration envelope without pretending the vehicle has less torque
+        # than it has (#24).
+        self.Xil_setup["Driver"] = dict(xil_node.get("Driver") or {})
 
         # Carla Setup
         carla_node = config.get("CarlaSetup", {})
@@ -211,15 +217,19 @@ class ConfigHelper:
                 "ERROR: EgoSetup.Dynamics must be one of traffic|virenv|xil, got '%s'" % dyn)
         self.Ego_setup["Dynamics"] = dyn
         # A dynamometer in the controller's loop is not a plant that owns the
-        # ego -- the virtual environment still integrates position, heading and
+        # ego: whoever integrates the ego still owns position, heading and
         # everything lateral, and the bench supplies one longitudinal number the
-        # controller consults. Say so, rather than let a run claim two different
-        # answers to who computes the ego's motion.
-        if self.Xil_setup["EnableXil"] and dyn and dyn != "virenv":
-            raise SystemExit(
-                "ERROR: XilSetup.EnableXil puts a dynamometer in the ego "
-                "controller's speed loop, which only exists while the virtual "
-                "environment owns the ego. EgoSetup.Dynamics is '%s'." % dyn)
+        # controller consults.
+        #
+        # This used to be refused unless Dynamics was virenv, on the reading
+        # that a cell only exists while the VIRTUAL ENVIRONMENT owns the ego.
+        # That was too narrow: the sentence holds for the traffic simulator
+        # word for word (#24). On Dynamics: traffic the driver runs passive --
+        # no agent, no steering, no obstacle sweep, because the traffic
+        # simulator owns all of that -- and the cell answers the one question
+        # that is left. Both rungs run the same controller file and the same
+        # cell, which is what makes them comparable; refusing one of them made
+        # the comparison impossible to set up.
 
         # ActuationSource -- WHO PRODUCES THE PEDALS AND STEER. "user" is ONE
         # value; the Controller key decides where it runs.

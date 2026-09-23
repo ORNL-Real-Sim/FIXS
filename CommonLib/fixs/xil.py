@@ -52,7 +52,7 @@ def enabled(configPath=None):
     return bool(_scenario(configPath)['EnableXil'])
 
 
-def dyno(configPath=None, vehicle=None, dyno=None):
+def dyno(configPath=None, vehicle=None, dyno=None, driver=None):
     """The dynamometer this scenario declares, or None when it declares none.
 
     A bench is not a plant that owns the ego. The virtual environment still
@@ -80,6 +80,14 @@ def dyno(configPath=None, vehicle=None, dyno=None):
         XilSetup:
           Vehicle: {mass_kg: 2100.0, torque_bandwidth_Hz: 5.0}
           Dyno:    {road_A_N: 111.0, roller_inertia_kgm2: 40.0}
+          Driver:  {max_throttle: 0.28, max_brake: 0.30}
+
+    ``Driver`` is the ROBOT on the bench, and the one of the three a real cell
+    lets you set: the vehicle's torque is the vehicle's, but how hard the robot
+    presses is yours. Capping its pedal is how a bench is held inside an
+    acceleration envelope without pretending the car has less torque than it
+    has -- which matters when the traffic simulator moving the ego has an
+    envelope of its own and the two must describe the same vehicle.
 
     Forwarded by name, so the yaml names the parameter rather than restating
     a list -- and an unknown one fails the run rather than leaving a bench
@@ -97,7 +105,8 @@ def dyno(configPath=None, vehicle=None, dyno=None):
     # as well to be believed.
     return _Dyno(xil['Transport'], host, port,
                  vehicle=dict(xil['Vehicle'], **(vehicle or {})),
-                 dyno=dict(xil['Dyno'], **(dyno or {})))
+                 dyno=dict(xil['Dyno'], **(dyno or {})),
+                 driver=dict(xil.get('Driver') or {}, **(driver or {})))
 
 
 class _Dyno:
@@ -108,8 +117,9 @@ class _Dyno:
     """
 
     def __init__(self, transport, host='127.0.0.1', port=None,
-                 vehicle=None, dyno=None):
+                 vehicle=None, dyno=None, driver=None):
         from CommonLib.xil.dynosim import Dyno, DynoSim
+        from CommonLib.xil.driver import RobotDriver
         from CommonLib.xil.link import LocalLink, TcpLink, UdpLink
         from CommonLib.xil.vehicle import Vehicle
 
@@ -120,7 +130,8 @@ class _Dyno:
             # Named parameters, straight through. CommonLib.xil refuses one it
             # does not know rather than ignoring it, so a typo in the yaml is a
             # failed run and not a bench quietly running on its defaults.
-            self.sim = DynoSim(Vehicle(**(vehicle or {})), Dyno(**(dyno or {})))
+            self.sim = DynoSim(Vehicle(**(vehicle or {})), Dyno(**(dyno or {})),
+                               RobotDriver(**(driver or {})))
             self.link = LocalLink()
         elif transport == 'tcp':
             self.link = (TcpLink('simulator', peer_ip=host, port=port)
