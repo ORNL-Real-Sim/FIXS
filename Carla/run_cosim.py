@@ -4284,6 +4284,9 @@ def main():
         print(f"[cosim] note: packaged CARLA - traffic lights and signs cannot be "
               f"placed here (that needs a source build's editor). TL sync depends on "
               f"what '{target_map}' was cooked with.")
+        if platform.system() == "Windows":
+            print("[cosim] note: packaged CARLA on Windows is EXPERIMENTAL - it needs "
+                  "the map's Windows cook, which few library maps publish yet.")
 
         # The other silent one: a cook made for a different shader platform. The
         # level loads and every actor is where it should be, so nothing downstream
@@ -4298,9 +4301,13 @@ def main():
                   f"geometry and traffic lights will be correct, the road surface will "
                   f"render grey.")
             if want_sp == "d3d" and "vulkan" in have_sp:
-                print(f"[cosim]   Launching CARLA with -vulkan may resolve them "
-                      f"(unverified). Otherwise use a source build, or ask the map "
-                      f"library for a Windows cook. See FIXS_Applications#29.")
+                # -vulkan is not a way out: measured on 0.9.15, a Linux cook under
+                # -vulkan crashed CARLA on load, and -vulkan -RenderOffScreen
+                # crashes even a stock town at startup.
+                print(f"[cosim]   This is a Linux cook. Re-run with --reimport to "
+                      f"install the library's Windows cook (*_cooked_windows.tar.gz) "
+                      f"if it publishes one, or use a source build. See "
+                      f"FIXS_Applications#29.")
 
     # SUMO slot: --sumocfg wins; else the scenario the app reported; else an
     # already-extracted sumo/, else the chosen bundle's. This also runs for the paths

@@ -6,7 +6,8 @@ to ~/.fixs/carla.json. run_cosim.py reads that config and launches seamlessly; i
 no config exists, run_cosim.py invokes this on the first run.
 
 Three flavours:
-  packaged  a released build (CarlaUE4.exe / .sh) - stock maps
+  packaged  a released build (CarlaUE4.exe / .sh) - stock maps, plus library maps
+            that publish a precooked build for this OS (Windows: experimental)
   source    an Unreal source build - the only one that can cook a custom map
   client    no CARLA on this machine at all. It says nothing about where CARLA
             is: there may be one on another host, reached over the network, or
@@ -1024,32 +1025,32 @@ def _pick_file(title):
 
 
 def run_setup(allow_packaged_windows=False):
-    """Interactive setup; writes and returns the config."""
+    """Interactive setup; writes and returns the config.
+
+    `allow_packaged_windows` is accepted and ignored: packaged is offered on every
+    OS now, so the flag that used to unlock it on Windows has nothing to do."""
     print("=== CARLA environment setup ===")
-    # On Windows, importing a *custom* map into a packaged CARLA is unsupported
-    # by CARLA itself (map ingestion is Linux + Docker only - see
-    # Util/ImportAssets.sh; there is no ImportAssets.bat). Custom-map apps on
-    # Windows therefore need a source build. We skip the packaged option here to
-    # avoid a dead end; pass allow_packaged_windows=True (--allow-packaged-windows)
-    # if you only need stock maps (Town01, ...) from a packaged build.
+    # Packaged on Windows is EXPERIMENTAL. A packaged build cannot cook, so a
+    # library map runs only if the library publishes a cook for this OS - on
+    # Windows `<map>_cooked_windows.tar.gz` - and few maps have one yet. A Linux
+    # cook installs and loads but renders grey (FIXS_Applications#29).
     #
-    # [3] client is offered EVERYWHERE, Windows included: the reasoning above is
-    # about importing a map, and a client machine never imports one - the host
-    # running CARLA does. It is how a workstation with no CARLA at all drives a
-    # remote one.
-    offer_packaged = platform.system() != "Windows" or allow_packaged_windows
+    # [3] client is offered EVERYWHERE: a client machine never imports a map -
+    # the host running CARLA does. It is how a workstation with no CARLA at all
+    # drives a remote one.
+    windows = platform.system() == "Windows"
     print("Which CARLA do you want to use?")
-    if offer_packaged:
-        print("  [1] Packaged CARLA  (a released build with CarlaUE4.exe / CarlaUE4.sh)")
+    print("  [1] Packaged CARLA  (a released build with CarlaUE4.exe / CarlaUE4.sh)"
+          + ("  - EXPERIMENTAL on Windows" if windows else ""))
+    if windows:
+        print("      (runs stock towns, and library maps that publish a Windows cook;")
+        print("       for any other map use a source build)")
     print("  [2] Source build    (run through the Unreal editor: UE4Editor -game)")
     print("  [3] No CARLA on this machine")
     print("      (SUMO and TrafficLayer run here, which is all a traffic-only run")
     print("       needs: run_cosim --sumo-only. To drive a CARLA on ANOTHER host")
     print("       from here instead, name it at run time: run_cosim --peer HOST.)")
-    if not offer_packaged:
-        print("  (packaged is not offered on Windows: custom-map import is Linux+Docker")
-        print("   only in CARLA. Only need stock maps? re-run with --allow-packaged-windows)")
-    valid = ("1", "2", "3") if offer_packaged else ("2", "3")
+    valid = ("1", "2", "3")
     choice = input(f"Enter {' or '.join(valid)}: ").strip()
     if choice not in valid:
         sys.exit(f"[setup] invalid choice (expected {' or '.join(valid)}).")
@@ -1154,9 +1155,9 @@ def main():
                     help="re-resolve ONLY the python env (carla + SUMO client) and save "
                          "it; the CARLA / UE4 paths are kept. Use after creating the env "
                          "setup asked for, or to move off one you picked by mistake")
+    # Kept so existing scripts that pass it still parse; packaged is always offered.
     ap.add_argument("--allow-packaged-windows", action="store_true",
-                    help="on Windows, also offer packaged CARLA (stock maps only; "
-                         "custom-map import is unsupported in Windows packages)")
+                    help=argparse.SUPPRESS)
     args = ap.parse_args()
     if args.show:
         cfg = load_config()
