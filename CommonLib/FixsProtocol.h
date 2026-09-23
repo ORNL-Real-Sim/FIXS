@@ -30,10 +30,20 @@ static constexpr double kFeedPeriodS = 0.1;
 // the grid arithmetic actually wants.
 static constexpr double kFeedHz = 10.0;
 
+// Index of the exchange interval `simTime` is in. A host whose clock is a SUM of
+// steps (CarMaker's SimCore.Time) must gate on this changing, not on
+// onFeedBoundary: the sum drifts, and once the drift outgrows a fixed tolerance
+// the boundary test never passes again (#169 -- about 7160 s at a 1 ms step).
+// An edge on the slot is only ever late by the drift, never silent. The 1e-3
+// slot of slack puts the edge on the boundary tick itself, not one tick after.
+inline long long feedSlot(double simTime) {
+    return (long long)(simTime * kFeedHz + 1e-3);   // floor: simTime >= 0
+}
+
 // True when `simTime` sits on an exchange boundary. `tol` is applied to the
-// scaled clock (simTime * kFeedHz), which is how both hosts have always done it:
-// the host clock accumulates from repeated += step, so it lands a few ulp off a
-// whole multiple rather than exactly on it.
+// scaled clock (simTime * kFeedHz). Only safe on a clock computed as
+// stepCount * step (the CARLA hosts), whose error does not grow with run time;
+// a summed clock uses feedSlot.
 inline bool onFeedBoundary(double simTime, double tol) {
     const double slots = simTime * kFeedHz;
     // llround without <cmath>: slots >= 0 here (sim time never runs backwards).
