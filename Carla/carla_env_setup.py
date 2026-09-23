@@ -35,6 +35,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -46,8 +47,46 @@ ENV_YML = os.path.normpath(os.path.join(HERE, "..", "environment.yml"))
 CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".fixs")
 CONFIG_PATH = os.path.join(CONFIG_DIR, "carla.json")
 
+# the tool-version manifest, beside environment.yml. Read for the SUMO pin below.
+DEPS_YAML = os.path.normpath(os.path.join(HERE, "..", "dependencies.yaml"))
+
 # SUMO-side deps that come from the realsim env regardless of CARLA flavour.
 SUMO_MODULES = ("traci", "sumolib")
+
+
+def sumo_version():
+    """The SUMO version this checkout targets, from dependencies.yaml, or None.
+
+    Read with a regex rather than yaml.safe_load on purpose: the one caller is
+    the path taken when conda is absent or broken, so the interpreter it runs
+    under is exactly the one that may not have pyyaml yet.
+
+    Why pin at all: the clients are published in lockstep with the server, and
+    an unpinned `pip install traci` takes whatever is newest -- measured at 1.27.1
+    against a build targeting 1.22.0, five minor versions of protocol apart, with
+    nothing warning. Worse, a machine-level PYTHONPATH=%SUMO_HOME%/tools shadows
+    site-packages, so the installed metadata reports a client that is not the one
+    running. FIXS#221.
+    """
+    try:
+        with open(DEPS_YAML, encoding="utf-8") as f:
+            text = f.read()
+    except OSError:
+        return None
+    m = re.search(r"^\s*sumo:\s*$.*?^\s*version:\s*[\"']?([0-9][0-9.]*)",
+                  text, re.M | re.S)
+    return m.group(1) if m else None
+
+
+def sumo_client_pkgs():
+    """The three SUMO pip names, pinned to dependencies.yaml when it can be read.
+
+    Unpinned is the fallback rather than an error: an env that cannot be pinned
+    is still better than no env, and the caller prints what it is about to do.
+    """
+    v = sumo_version()
+    names = ("eclipse-sumo", "traci", "sumolib")
+    return [n + "==" + v for n in names] if v else list(names)
 
 
 # ----------------------------------------------------------------- config io
@@ -771,9 +810,10 @@ def _no_env_fallback(name):
             # environment.yml is a conda spec, so there is no conda-free way to
             # replay it; these are its importable dependencies. Keep this list and
             # RUNTIME_MODULES/AGENT_MODULES in step with that file - the whole of
-            # #378 was one import declared in a manifest nothing installs.
-            pkgs = ["pyyaml", "pandas", "shapely", "networkx",
-                    "eclipse-sumo", "traci", "sumolib"]
+            # #378 was one import declared in a manifest nothing installs. The
+            # SUMO half is derived rather than listed, so its VERSION at least
+            # cannot drift from dependencies.yaml the way a written-down one did.
+            pkgs = ["pyyaml", "pandas", "shapely", "networkx"] + sumo_client_pkgs()
             # This is the riskiest install in the file: reached precisely when
             # conda is absent or broken, which is when `here` is most likely to
             # BE the OS python.

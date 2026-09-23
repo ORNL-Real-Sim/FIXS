@@ -32,7 +32,7 @@
 ## Installation
 
 1. Clone the repository.
-2. Check `requirements.txt`.
+2. Check `dependencies.yaml` for the external tool versions this checkout targets.
 3. Run the `env.check.py` file to install required frameworks and packages.  
    - This script checks for each required tool, prompts to auto-install, and installs any missing Python packages.
 4. Run the program in your IDE.
@@ -83,7 +83,7 @@ See the [Config Setup](ConfigSetup.md) page for test case setup details.
 ## Troubleshooting
 
 ### Missing packages
-1. Check `requirements.txt` and run the `env.check.py` script.  
+1. Check `environment.yml` and run the `env.check.py` script.  
 2. You should get a confirmation message if all dependencies are installed.  
 3. If not, manually install missing requirements and rerun the script.  
 4. Ensure your system meets all prerequisites.
@@ -95,5 +95,5 @@ See the [Config Setup](ConfigSetup.md) page for test case setup details.
 
 ### Cannot run the script
 1. If the script fails, manually install the correct Python version first.  
-2. Verify all frameworks listed in `requirements.txt` are installed.  
+2. Verify the external tools listed in `dependencies.yaml` are installed.  
 3. Rerun `env.check.py` to finalize environment setup.

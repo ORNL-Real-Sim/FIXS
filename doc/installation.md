@@ -13,10 +13,12 @@ This page collects the cross-cutting install steps referenced throughout the sim
 
 ```powershell
 # from the repo root
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
+conda env create -f environment.yml
+conda activate realsim
 ```
+
+`environment.yml` is a conda spec, so conda has to build it: `pip install -r` has
+nothing to read and a venv cannot consume it.
 
 Alternatively, run `env.check.py` to let the project script verify/repair your Conda-based toolchain.
 

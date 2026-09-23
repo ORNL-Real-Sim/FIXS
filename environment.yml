@@ -9,8 +9,9 @@ dependencies:
   # Carla/carla_agents' global_route_planner imports networkx, so a controller
   # that brings a CARLA agent (BasicAgent/BehaviorAgent) fails to import at all
   # without it: mainVirCarla dies at startup and takes the stack down with it
-  # (#378). It was declared in requirements.txt (#305) - a file nothing installs,
-  # which is why an env built from this spec never got it.
+  # (#378). It was declared in requirements.txt (#305) - a file nothing installed,
+  # which is why an env built from this spec never got it. That file has since been
+  # removed (#221): one manifest for the python, dependencies.yaml for the tools.
   - networkx
   - numpy
   - pandas
