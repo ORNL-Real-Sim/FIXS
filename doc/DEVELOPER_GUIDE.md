@@ -7,6 +7,7 @@ This guide provides comprehensive information about the FIXS repository structur
 - [Build Scripts](#build-scripts)
 - [Setup Scripts](#setup-scripts)
 - [Usage Guide](#usage-guide)
+- [Documentation (Read the Docs)](#documentation-read-the-docs)
 
 ---
 
@@ -95,6 +96,48 @@ Proprietary or licensed files not for public distribution. Includes:
 
 #### **.github/**
 GitHub-specific configuration (workflows, issue templates, CI/CD).
+
+---
+
+## Documentation (Read the Docs)
+
+The docs site is https://real-sim.readthedocs.io. It carries one version per
+release channel, under the channel's name:
+
+| Branch | Docs version |
+|---|---|
+| `main` | `stable` (the default) |
+| `beta_vX.Y.Z` | `vX.Y.Z-beta` |
+| `dev_vX.Y.Z` | `vX.Y.Z-alpha` |
+
+Each version is built from its channel's tag, so the docs move when the channel is
+published. The `docs-publish` job at the end of `.github/workflows/release.yml`
+asks Read the Docs to rebuild that version right after the release is published,
+using the `RTD_TOKEN` repository secret. On the Read the Docs side, an automation
+rule activates the channel tags as they appear.
+
+A build clones the repo at that commit, reads `.readthedocs.yml`, installs
+`doc/requirements_doc.txt`, and runs Sphinx on `doc/` with `doc/conf.py`. Warnings
+are errors.
+
+Writing docs:
+- A page must be listed in a `toctree` in `doc/index.rst`, or it is built but
+  unreachable.
+- Link repo files outside `doc/` relatively (`../tests/Vissim/Ipg/`), so the link
+  also works on GitHub. On Read the Docs, `doc/_ext/repo_links.py` turns each one
+  into a GitHub link at the commit being built. A link to a file that does not
+  exist fails the build.
+
+Checking a change: every PR runs `.github/workflows/docs.yml`, which builds the site
+with warnings as errors. To build locally:
+
+```bash
+pip install -r doc/requirements_doc.txt
+python -m sphinx -W --keep-going -b html doc _build/html
+```
+
+With Windows Python 3.10 the build can crash intermittently inside docutils; build
+under WSL or Python 3.11 instead.
 
 ---
 
@@ -448,5 +491,5 @@ For simulator-specific details, see:
 - [CARLA Interface](CARLAdoc.md)
 
 For general setup and configuration:
-- [Configuration Guide](../ConfigSetup.md)
-- [Setup Guide](../setupGuide.md)
+- [Configuration Guide](ConfigSetup.md)
+- [Setup Guide](setupGuide.md)

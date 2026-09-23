@@ -46,7 +46,7 @@ Please start with reading through the documentation, and playwith included Examp
 - VirtrualEnvironment.lib
 
 To simplify CarMaker project build process, we will build a library called VirtrualEnvironment.lib that contains all the
-required helper functions. Open [VirtualEnvironment.sln](..%2FVirtualEnvironment%2FVirtualEnvironment.sln)
+required helper functions. Open [VirtualEnvironment.sln](../VirtualEnvironment/VirtualEnvironment.sln)
 inside the VirtualEnvironment folder using Visual Studio 2022. in Visual Studio 2022, find the solution explorer window on the right of the screen, right click the _VirtualEnvironment_, select _Properties_,
 Then in the Property Page, find C/C++ -> General -> Additional Include Directories. Edit the carmaker version if necessary. And make sure yaml-cpp are included:
 ![VirtualEvn_cppsetup.png](img/VirtualEvn_cppsetup.png)
@@ -280,7 +280,7 @@ Using either relative path to the working directory or absolute path are OK
 ### Setup CM dSPACE
 
 #### Obtain dSPACE library
-RealSim comes with precompiled dSPACE library file that can be used directly under \CommonLib. If plan to use these libraries directly, can skip the next section  and go to [this section](#prepare-for-dspace-build-configuration-desk) directly. Otherwise, follow the next section to compile customized dSPACE library.
+RealSim comes with precompiled dSPACE library file that can be used directly under \CommonLib. If plan to use these libraries directly, can skip the next section  and go to [this section](#prepare-for-dspace-build-configurationdesk) directly. Otherwise, follow the next section to compile customized dSPACE library.
 
 #### Compile dSPACE library
 
@@ -304,7 +304,7 @@ Tips: You can copy the `DsBuildLibrary.mk` into the CommonLib Folder and rename 
 _Refer to the following dSPACE documentation https://www.dspace.com/en/inc/home/support/kb/faqs/faq012.cfm._
 
 After successfully execute the `buildRS_XXXX.bat` file, you should have something appear on command line window like
-```commandline
+```text
 ...
 C:\Program Files\Common Files\dSPACE\CFD Compiler 24.1\target\x86_64-linux-gnu\bin\x86_64-linux-gnu-ar.exe: creating libRealSimDsLib_2024a_CM13_1_3.a
 a - SocketHelper.o64

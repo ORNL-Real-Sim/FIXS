@@ -2,8 +2,10 @@
 Real-Sim Documentation
 ======================
 
-.. mdinclude:: README.md
-   :start-line: 1
+.. include:: ../README.md
+   :parser: myst_parser.sphinx_
+   :start-after: <!-- rtd-intro-start: doc/index.rst includes from here to rtd-intro-end -->
+   :end-before: <!-- rtd-intro-end -->
 
 .. toctree::
    :maxdepth: 2

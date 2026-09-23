@@ -506,3 +506,39 @@ jobs:
           # --clobber replaces only this asset name; the Windows bundle on the
           # same rolling release is untouched.
           gh release upload "$CHANNEL_TAG" "$want" --repo "$GITHUB_REPOSITORY" --clobber
+
+  # Read the Docs serves one docs version per channel under the channel's own
+  # name (stable, vX.Y.Z-beta, vX.Y.Z-alpha), built from the tag published above
+  # (#137). Ask RTD to rebuild it here, so the docs move exactly when the channel
+  # does, whatever RTD's webhook makes of a tag that was deleted and recreated.
+  docs-publish:
+    name: Rebuild the channel's docs on Read the Docs
+    needs: build-publish
+    if: needs.build-publish.outputs.publish == 'true' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger the RTD build for the channel's version
+        env:
+          RTD_TOKEN: ${{ secrets.RTD_TOKEN }}
+          CHANNEL_TAG: ${{ needs.build-publish.outputs.tag }}
+        run: |
+          if [ -z "$RTD_TOKEN" ]; then
+            echo "::warning::No RTD_TOKEN secret - the $CHANNEL_TAG docs were not rebuilt."
+            exit 0
+          fi
+          api=https://app.readthedocs.org/api/v3/projects/real-sim
+          # RTD learns about the recreated tag from the webhook. Until it has
+          # synced, the version can be missing or still inactive, so sync + retry.
+          for attempt in 1 2 3 4 5 6; do
+            code=$(curl -sS -o resp.json -w '%{http_code}' -X POST \
+                     -H "Authorization: Token $RTD_TOKEN" "$api/versions/$CHANNEL_TAG/builds/")
+            if [ "$code" = 202 ]; then
+              echo "RTD build for $CHANNEL_TAG: $(jq -r '.build.urls.build' resp.json)"
+              exit 0
+            fi
+            echo "attempt $attempt: HTTP $code $(cat resp.json)"
+            curl -sS -o /dev/null -X POST -H "Authorization: Token $RTD_TOKEN" "$api/sync-versions/" || true
+            sleep 20
+          done
+          echo "::error::Read the Docs would not build '$CHANNEL_TAG'. Check the version exists and is active (RTD automation rule for channel tags)."
+          exit 1

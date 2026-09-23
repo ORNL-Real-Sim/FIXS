@@ -2,10 +2,13 @@
 import os, sys
 from datetime import datetime
 sys.path.insert(0, os.path.abspath(".."))
+sys.path.insert(0, os.path.abspath("_ext"))
 # Project information
 project = "Real-Sim"
-author = "Real-Sim Team " 
-release = "0.10"  # version string
+author = "Real-Sim Team "
+# The version RTD is building (v0.9.1-alpha, stable, latest). RTD clones
+# shallow and without tags, so git describe can't answer this there.
+release = os.environ.get("READTHEDOCS_VERSION_NAME", "local")
 root_doc = "index" # ensure doc/index.md or doc/index.rst exists
 
 #General configuration
@@ -13,8 +16,11 @@ extensions = [
     "myst_parser",          # enable Markdown (MyST)
     "sphinx.ext.autodoc",   # pull in docstrings
     "sphinx.ext.napoleon",  # Google/NumPy style docstrings
-     "sphinx.ext.viewcode"    
+     "sphinx.ext.viewcode",
+    "repo_links",           # links out of doc/ -> GitHub at the built commit
 ]
+
+repo_links_github = "https://github.com/ORNL-Real-Sim/FIXS"
 
 templates_path = ["_templates"]
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]

@@ -11,12 +11,14 @@ zhoua@ornl.gov
 
 
 ## About
+<!-- rtd-intro-start: doc/index.rst includes from here to rtd-intro-end -->
 This interface is part of the **Real-Sim** project funded by Department of Energy (DOE)-Vehicle Technology Office (VTO)-Energy Efficient Mobility Systems (EEMS) program. It is part of the core tools of EEMS.
 
 Real-Sim develops a multi-resolution X-in-the-loop (XIL) simulation framework to support inclusive testing and evaluation of emerging technologies such as connected and automated vehicles. The Real-Sim framework connects different simulation components and integrates various traffic and vehicle simulation tools, virtual environments, and XIL systems through a Flexible Interface for XIL Simulation (FIXS). Connections among different tools are transparent to users and handled by the interface behind the scenes. Co-simulation of various vehicle and traffic simulation tools with different XIL systems can be easily achieved and become a transparent "plug-and-play" process to users. 
 
 **Real-Sim Project Lead**: Oak Ridge National Lab\
 **Real-Sim Project Team**: University of Georgia, University of Texas-Dallas
+<!-- rtd-intro-end -->
 
 **Links to current project presentation**\
 https://www1.eere.energy.gov/vehiclesandfuels/downloads/2024_AMR/EEMS101_Chen_2024_o.pdf \
