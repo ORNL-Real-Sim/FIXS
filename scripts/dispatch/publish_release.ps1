@@ -41,6 +41,14 @@ $ZipPath = $ZipFiles[0].FullName
 $ZipName = $ZipFiles[0].Name
 Write-Host "Publishing: $ZipName"
 
+# Checksum sidecar, in sha256sum's "<hex>  <name>" form, which update_fixs.ps1
+# and update_fixs.sh verify every download against (#204). Written as plain
+# ASCII: Windows PowerShell's Set-Content would prepend a BOM to the hex.
+$ZipSha = (Get-FileHash $ZipPath -Algorithm SHA256).Hash.ToLower()
+$ShaPath = "$ZipPath.sha256"
+[System.IO.File]::WriteAllText($ShaPath, "$ZipSha  $ZipName`n", [System.Text.Encoding]::ASCII)
+Write-Host "SHA-256: $ZipSha"
+
 # Check gh CLI is available
 if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
     Write-Error "GitHub CLI (gh) is required. Install from https://cli.github.com/"
@@ -55,7 +63,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # Get commit info for release notes
-$commit = git rev-parse --short HEAD 2>$null
+$commit = git rev-parse HEAD 2>$null
 $branch = git rev-parse --abbrev-ref HEAD 2>$null
 $msg = git log -1 --pretty=%s 2>$null
 $date = Get-Date -Format 'yyyy-MM-dd HH:mm'
@@ -66,6 +74,7 @@ FIXS Build - $date
 - Branch: $branch
 - Commit: $commit ($msg)
 - Zip: $ZipName
+- SHA-256: $ZipSha
 "@
 
 # Anchor releases to the built commit; without --target a new tag defaults to
@@ -87,7 +96,7 @@ if ($Rolling -or $Tag -eq 'latest') {
     if (-not $Title) {
         $Title = if ($Tag -eq 'latest') { 'Latest Dev Build' } else { "Rolling build: $Tag" }
     }
-    gh release create $Tag $ZipPath @targetArgs `
+    gh release create $Tag $ZipPath $ShaPath @targetArgs `
         --prerelease `
         --title $Title `
         --notes $notes
@@ -103,7 +112,7 @@ if ($Rolling -or $Tag -eq 'latest') {
     }
 
     if (-not $Title) { $Title = "FIXS $Tag" }
-    gh release create $Tag $ZipPath @targetArgs `
+    gh release create $Tag $ZipPath $ShaPath @targetArgs `
         --title $Title `
         --notes $notes
 }
