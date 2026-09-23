@@ -715,7 +715,10 @@ int ConfigHelper::getConfig(string configName) {
 			}
 		}
 		else {
-			CarlaSetup.CarlaClientPort = 2001;
+			// Matches ConfigHelper.py and run_cosim's DEFAULT_BRIDGE_PORT. This
+			// said 2001 while the Python half said 430 and run_cosim wrote 440 --
+			// three defaults for one endpoint, none of which agreed.
+			CarlaSetup.CarlaClientPort = 4440;
 		}
 	}
 	if (node["CarlaMap"]) {

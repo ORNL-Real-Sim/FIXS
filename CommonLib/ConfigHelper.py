@@ -120,9 +120,19 @@ class ConfigHelper:
         self.Carla_setup["EnablePythonBackend"] = self.parserFlag(
             carla_node, "EnablePythonBackend", True)
         self.Carla_setup["CarlaServerIP"] = self.parserString(carla_node, "CarlaServerIP", "127.0.0.1")
-        self.Carla_setup["CarlaServerPort"] = self.parserInteger(carla_node, "CarlaServerPort", 420)
+        # 2000 is CARLA's own RPC default, and what ConfigHelper.cpp has always
+        # returned here. This half said 420 -- privileged on Linux AND not a port
+        # CARLA ever listens on, so a config without a CarlaSetup block made
+        # run_cosim launch the server with -carla-rpc-port=420, which exits 139
+        # before opening it. The two halves must agree: run_cosim is Python and
+        # VirCarlaEnv is C++, and they dial the same server.
+        self.Carla_setup["CarlaServerPort"] = self.parserInteger(carla_node, "CarlaServerPort", 2000)
         self.Carla_setup["CarlaClientIP"] = self.parserString(carla_node, "CarlaClientIP", "127.0.0.1")
-        self.Carla_setup["CarlaClientPort"] = self.parserInteger(carla_node, "CarlaClientPort", 430)
+        # NOT CARLA: this is TrafficLayer's bridge endpoint, which VirCarlaEnv
+        # dials. 430 was privileged; 4440 is what run_cosim writes into every
+        # config it generates (DEFAULT_BRIDGE_PORT), so a defaulted config and a
+        # generated one now name the same port instead of three different ones.
+        self.Carla_setup["CarlaClientPort"] = self.parserInteger(carla_node, "CarlaClientPort", 4440)
         self.Carla_setup["CarlaMapName"] = self.parserString(carla_node, "CarlaMapName", "Town01")
         # 0 == every Carla tick. This key is the pose RE-APPLY cadence and, absent,
         # must not impose one: the bridge resolves 0 to CarlaTimeStep. The old 0.1
@@ -143,6 +153,13 @@ class ConfigHelper:
         self.Carla_setup["RealtimePacing"] = self.parserFlag(carla_node, "RealtimePacing", False)
         # Carla render sub-step (interpolate the feed for smoother motion). 0 -> 1:1.
         self.Carla_setup["CarlaTimeStep"] = self.parserDouble(carla_node, "CarlaTimeStep", 0.0)
+
+        # Vehicles spawned UP FRONT and handed out when the traffic arrives,
+        # instead of spawning each one the first time its id is seen. 0 is off
+        # and is the old behaviour. Size it from the scenario's peak concurrent
+        # vehicle count; the bridge prints the peak it saw at shutdown. Python
+        # bridge only -- VirCarlaEnv.exe ignores it. Why: FIXS#373 / PR #374.
+        self.Carla_setup["SpareVehiclePool"] = self.parserInteger(carla_node, "SpareVehiclePool", 0)
 
         # Spectator BEV follow (rigid top-down snap). Default ON, 50 m up, north-up.
         self.Carla_setup["CenteredViewId"] = self.parserString(carla_node, "CenteredViewId", "ego")

@@ -218,7 +218,8 @@ def main(argv=None):
     applySyncSettings(world, carlaStep, verbose)
     clearStaleActors(world, verbose)
 
-    backend = CarlaBackend(world, client, cs['UseVehicleTypeAsBlueprint'], verbose)
+    backend = CarlaBackend(world, client, cs['UseVehicleTypeAsBlueprint'], verbose,
+                           sparePoolSize=cs['SpareVehiclePool'])
     core = VirEnvCore()
     core.setBackend(backend)
     core.interpolateTraffic = (carlaStep < feed - 1e-9)   # sub-step -> interpolate
@@ -309,6 +310,8 @@ def main(argv=None):
 
         stepCount = 0
         simTime = 0.0
+        #: 0 the pool is untouched, 1 the burst has drawn from it, 2 trimmed.
+        spareState = 0
         wallStart = time.monotonic()
         loopStart = time.monotonic()   # rate summary at the end
         feedCount = 0
@@ -348,6 +351,19 @@ def main(argv=None):
                                        useEmbedded, sp, False):
                         break
                     egoIsUp = True
+
+            # ---- spare pool: the burst gets its exchange, then the rest go ---
+            # State, not a countdown, because the burst is ONE exchange by
+            # construction: the warm-up boundary opens once and the whole network
+            # arrives together. Waiting a further exchange before trimming costs
+            # nothing and keeps the pool available if the burst spills over a
+            # second one; waiting longer would tax every tick for spares that the
+            # ~2 arrivals/s afterwards can afford to spawn for themselves.
+            if spareState == 0 and backend.spareTaken():
+                spareState = 1
+            elif spareState == 1 and onFeedBoundary(simTime, 1e-6):
+                backend.trimSpares()
+                spareState = 2
             # #266/#267: the batch is NOT flushed here. It is flushed just before
             # world.tick(), AFTER the spectator has been queued into it, so the
             # camera and the vehicles it follows are applied by ONE acknowledged
@@ -598,6 +614,9 @@ def main(argv=None):
                       "p99 %.1f  max %.1f  sd %.1f ms  (%.1f exchanges/s)"
                       % (_mean, _s[_n // 2], _s[int(_n * 0.95)], _s[int(_n * 0.99)],
                          _s[-1], _sd, 1000.0 / _mean))
+        _spare = backend.spareReport()
+        if _spare:
+            print(_spare)
         if dataLog.isOpen():
             print('DataLogger closed: %s' % dataLog.path())
             dataLog.close()

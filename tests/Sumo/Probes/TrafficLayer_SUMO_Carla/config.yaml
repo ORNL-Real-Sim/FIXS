@@ -9,7 +9,7 @@
 #
 # Data flow (visualization-first; ego stays SUMO-driven):
 #
-#   SUMO --[TraCI vehicle states]--> TrafficLayer --[VehFullData @ port 440]--> VirCarlaEnv.exe
+#   SUMO --[TraCI vehicle states]--> TrafficLayer --[VehFullData @ port 4440]--> VirCarlaEnv.exe
 #                                                                                   │
 #                                                                          spawn / SetTransform
 #                                                                                   ▼
@@ -38,7 +38,7 @@ SumoSetup:
     SpeedMode: 32
 
 # Carla connects to the FIXS Application publish endpoint (ip/port[0] below).
-# CarlaSetup.CarlaClientPort must match this port (440).
+# CarlaSetup.CarlaClientPort must match this port (4440).
 ApplicationSetup:
     EnableApplicationLayer: true
     VehicleSubscription:
@@ -53,7 +53,7 @@ ApplicationSetup:
         # regardless of ego position, matching the SUMO-CM probe's vehicle set.
         attribute: { id: ['ego'], radius: [500] }
         ip: ['127.0.0.1']
-        port: [440]
+        port: [4440]
 
 XilSetup:
     EnableXil: false
@@ -81,7 +81,7 @@ CarlaSetup:
 
     # Where VirCarlaEnv connects to TrafficLayer (must equal ApplicationSetup port).
     CarlaClientIP: 127.0.0.1
-    CarlaClientPort: 440
+    CarlaClientPort: 4440
 
     TrafficRefreshRate: 0.1
 
