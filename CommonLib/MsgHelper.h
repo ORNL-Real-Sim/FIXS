@@ -9,6 +9,7 @@ This MsgHelper Class is dedicated to handling the messages.
 
 #include <unordered_map>
 #include <unordered_set>
+#include <cstdint>   // #65: uintN_t used below; don't rely on a transitive include
 #include "VehDataMsgDefs.h"
 
 #ifndef RS_DSPACE

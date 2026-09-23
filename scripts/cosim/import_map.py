@@ -61,6 +61,8 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
+import xml.etree.ElementTree as ET
 import zipfile
 
 import env_setup as env
@@ -268,10 +270,17 @@ def _try_gh_download(package_url):
     return None, None
 
 
-def _select_package(name, package_url, precooked=False):
+def _select_package(name, package_url, precooked=False, inside=("xodr", "fbx")):
     """Let the user point at a package they downloaded by hand - a native file
     picker, falling back to a typed path. This is the portable path: no GitHub
     CLI / auth needed, just browser access to the release.
+
+    `inside` names the files that identify this kind of thing once it has been
+    extracted: a map export is known by its .xodr/.fbx, a SUMO scenario by its
+    .sumocfg. They are what makes one dialog enough - see below - so they are the
+    caller's to state. Hardcoding the map's extensions here filtered a SUMO
+    scenario's own files out of its dialog, which opened on an empty listing and
+    read as the explorer having failed to appear.
 
     `precooked` says which artefact this CARLA can actually take, and it has to be
     asked for by name. A PACKAGED build cooks nothing, so the only thing it can
@@ -281,40 +290,52 @@ def _select_package(name, package_url, precooked=False):
     A SOURCE build is the mirror image: it cooks, so it wants the .zip or the
     extracted folder and cannot use a cooked tarball.
 
-    For a source build we still ask zip-or-folder first, because the two need
-    different dialogs and askopenfilename cannot select a directory. Everything
-    downstream already accepts a folder (_stage_from_path copies a tree); only this
-    dialog could not offer one, which made the picker's "select a local .zip /
-    folder" a half truth - a typed path was the sole way to hand it a raw
-    extracted export. A precooked package is always one file, so it asks nothing."""
-    what = "precooked package (*_cooked.tar.gz)" if precooked else ".zip (or extracted folder)"
+    ONE explorer, and no zip-or-folder question. tkinter cannot select a file or a
+    directory in the same box - but it does not need to, because picking any file
+    INSIDE an extracted package identifies it just as well as selecting its folder
+    would. So the dialog lists the bundle (.zip) and the `inside` files, and
+    anything that is not an archive resolves to its containing folder. The
+    zip-or-folder decision ends up where it belongs - in what the user clicks -
+    instead of in a question asked before the explorer even opens, and there is
+    never a second dialog to cancel into. Everything downstream already takes
+    either (_stage_from_path copies a tree or unpacks an archive)."""
+    shown = "/".join("." + e for e in inside)
+    what = ("precooked package (*_cooked.tar.gz)" if precooked
+            else f".zip (or an extracted folder, by its {shown})")
     print(f"\n[import] Select the downloaded '{name}' {what}.")
+    if not precooked:
+        print(f"[import] Either the .zip, or - if it is already extracted - the "
+              f"{shown} inside it (the folder is taken from it).")
     if package_url:
         print("[import] If you don't have it yet, download it (browser is fine - "
               "you need access to the release):")
         print(f"             {package_url}")
-    folder = (not precooked) and sys.stdin.isatty() and _prompt(
-        "[import] Is it a .zip or an extracted folder? "
-        "[Z = zip, F = folder, Enter = zip]: ").strip().lower().startswith("f")
+    start = _browse_start_dir()
     try:
         import tkinter as tk
         from tkinter import filedialog
         root = tk.Tk()
         root.withdraw()
         root.update()
-        if folder:
-            path = filedialog.askdirectory(
-                title=f"Select the extracted {name} package folder")
-        elif precooked:
+        if precooked:
             path = filedialog.askopenfilename(
                 title=f"Select the downloaded precooked {name} package (*_cooked.tar.gz)",
+                initialdir=start,
                 filetypes=[("Precooked map packages", "*.tar.gz"), ("All files", "*.*")])
         else:
+            pats = " ".join("*." + e for e in inside)
             path = filedialog.askopenfilename(
-                title=f"Select the downloaded {name} package (.zip)",
-                filetypes=[("Zip archives", "*.zip"), ("All files", "*.*")])
+                title=f"Select the {name} (.zip), or the {shown} of an "
+                      f"extracted one",
+                initialdir=start,
+                filetypes=[(f"{name} (.zip or {shown})", f"*.zip {pats}"),
+                           ("Zip archives", "*.zip"),
+                           (f"Extracted ({shown})", pats),
+                           ("All files", "*.*")])
+            path = _folder_of_export_file(path)
         root.destroy()
         if path:
+            _report_pick(path, inside)
             return path
     except Exception as exc:  # no display / no tkinter
         print(f"[import] file picker unavailable ({exc}); type the path instead.")
@@ -328,7 +349,69 @@ def _select_package(name, package_url, precooked=False):
     path = _prompt(f"[import] Path to the downloaded {what}: ").strip().strip('"')
     if not path or not os.path.exists(path):
         sys.exit(f"[import] path not found: {path!r}")
+    _report_pick(path)
     return path
+
+
+def _folder_of_export_file(path):
+    """A pick from the single explorer, resolved to what staging actually wants.
+
+    An archive is the thing itself. Anything else was clicked to point AT a folder
+    - that is the whole reason the dialog offers .xodr/.fbx - so hand back the
+    directory containing it. A folder typed or dragged in already is left alone."""
+    if not path or os.path.isdir(path):
+        return path
+    if path.lower().endswith((".zip", ".tar.gz", ".tgz")):
+        return path
+    parent = os.path.dirname(path)
+    print(f"[import] taking the export folder of {os.path.basename(path)}")
+    return parent
+
+
+def _browse_start_dir():
+    """Where the file dialogs open. The map cache holds everything import_map has
+    downloaded, so it is where a hand-fetched bundle most often lands too. Falls
+    back to the home directory rather than to wherever the process happens to be -
+    a picker opening in FIXS/Carla helps nobody."""
+    for d in (_map_cache_dir(), os.path.expanduser("~")):
+        if d and os.path.isdir(d):
+            return d
+    return None
+
+
+def _report_pick(path, inside=("xodr", "fbx")):
+    """Say what is actually in what was just picked.
+
+    A folder is only the right one if it holds the thing, and until now nothing
+    said so until _describe_export failed several steps later with "no .xodr
+    under ...". Naming what was found makes a good pick obvious; listing the
+    subfolders of a bad one turns "wrong folder" into "it is one level down",
+    which is the mistake the nesting in these bundles invites
+    (Import/UGA_Campus/UGA_Campus/Carla_material/Exports).
+
+    `inside` is the caller's - what counts as found differs by what is being
+    picked, and reporting "no .xodr here" about a SUMO scenario would be noise
+    dressed up as a diagnosis."""
+    try:
+        if os.path.isfile(path):
+            print(f"[import] picked {os.path.basename(path)} "
+                  f"({os.path.getsize(path) / (1 << 20):.0f} MB)")
+            return
+        names = sorted(os.listdir(path))
+        hits = [f for f in names
+                if f.lower().endswith(tuple("." + e for e in inside))]
+        print(f"[import] picked {path}")
+        if hits:
+            print(f"[import]   contains {', '.join(hits[:6])}"
+                  + (f" (+{len(hits) - 6} more)" if len(hits) > 6 else ""))
+            return
+        shown = "/".join("." + e for e in inside)
+        subs = [f for f in names if os.path.isdir(os.path.join(path, f))]
+        print(f"[import]   no {shown} directly here"
+              + (f"; subfolders: {', '.join(subs[:8])}" if subs else "")
+              + ("" if not subs else " - it may be one of these."))
+    except OSError:
+        pass          # reporting must never be what stops an import
 
 
 def _has_descriptor(src):
@@ -590,9 +673,19 @@ def stage_package(carla_root, name, package_url=None, package_dir=None, package_
     download of --package-url, else a file picker for a hand-downloaded copy."""
     import_dir = os.path.join(carla_root, "Import")
     descriptor = _descriptor(carla_root, name)
-    if os.path.isfile(descriptor) and not package_url and not package_dir and not package_pick:
-        print(f"[import] package already staged: {descriptor}")
-        return import_dir
+    # What is already in Import/ under this name is what CARLA would cook, so it is
+    # announced and offered before anything is written over it - see
+    # resolve_existing_staging. The defaults reproduce the previous behaviour.
+    have_source = bool(package_url or package_dir or package_pick)
+    if resolve_existing_staging(carla_root, name, have_source) == "use":
+        if os.path.isfile(descriptor):
+            print(f"[import] using the staged package: {descriptor}")
+            return import_dir
+        print(f"[import] no descriptor beside the staged folder; staging afresh.")
+    else:
+        # Restaging: the old copy is superseded, and leaving it is not inert.
+        # CARLA cooks every descriptor in Import/. FIXS#358.
+        clear_staging(carla_root, name)
 
     os.makedirs(import_dir, exist_ok=True)
     tmpdir = None
@@ -605,6 +698,9 @@ def stage_package(carla_root, name, package_url=None, package_dir=None, package_
             src, tmpdir = _try_gh_download(package_url)
             if src is None:
                 src = _select_package(name, package_url)
+        # Only the CARLA half of a Digital-Twin-Library bundle belongs in Import/;
+        # the sumo half lands in the map cache. FIXS#358.
+        src = _carla_half(src, name)
         if _has_descriptor(src):
             # Hand-authored package: <name>.json + its <name>/ asset folder land
             # directly under Import/.
@@ -616,17 +712,28 @@ def stage_package(carla_root, name, package_url=None, package_dir=None, package_
             print(f"[import] '{name}' ships no CARLA descriptor; treating it as a "
                   f"raw RoadRunner export and generating one.")
             raw_dest = os.path.join(import_dir, name)
-            fresh = not os.path.isdir(raw_dest)
+            # REPLACE, never merge. This directory is derived from `src`, and
+            # _describe_export renames the geometry inside it to the map name - so
+            # a run that staged successfully and then died later (a cook that
+            # crashed) leaves <name>.fbx here, and _stage_from_path copies the
+            # export's own ugaaa.fbx back in beside it. _export_fbx then sees two
+            # unrelated .fbx and refuses, identically, on every retry: the import
+            # became unrecoverable without deleting this folder by hand. The old
+            # `fresh` guard could not help - it only covered a descriptor failure
+            # on a directory that same call had created, and by the second attempt
+            # the directory was no longer new.
+            if os.path.isdir(raw_dest):
+                print(f"[import] re-staging: replacing {raw_dest}")
+                shutil.rmtree(raw_dest, ignore_errors=True)
             os.makedirs(raw_dest, exist_ok=True)
             _stage_from_path(src, raw_dest)
             try:
                 generate_descriptor(import_dir, name)
             except SystemExit:
-                # Don't leave a half-staged export behind for the next attempt to
-                # trip over: an abandoned copy reads as the same map staged twice.
-                if fresh:
-                    shutil.rmtree(raw_dest, ignore_errors=True)
-                    print(f"[import] removed the partially staged {raw_dest}")
+                # Unconditional now: the directory above is always this call's, so
+                # there is never someone else's staging to preserve.
+                shutil.rmtree(raw_dest, ignore_errors=True)
+                print(f"[import] removed the partially staged {raw_dest}")
                 raise
     finally:
         if tmpdir:
@@ -637,6 +744,73 @@ def stage_package(carla_root, name, package_url=None, package_dir=None, package_
                  f"         (a packaged map must contain {name}.json; a raw export "
                  f"must be named after the map so one can be generated)")
     return import_dir
+
+
+def _carla_half(src, name):
+    """The CARLA package inside `src`, splitting a bundle if that is what it is.
+
+    A Digital-Twin-Library map ships as `carla/` + `sumo/`. Handed whole to
+    Import/, it stages a SECOND descriptor at Import/carla/<name>.json beside the
+    one already there -- and CARLA's Import.py cooks every descriptor it finds,
+    so the map is cooked twice and the second pass crashes Unreal. Splitting also
+    puts the sumo half where the co-sim reads it. FIXS#358.
+    """
+    try:
+        carla_src, _sumo = open_bundle(src, cache_name=name)
+    except Exception as exc:                                    # noqa: BLE001
+        print(f"[import] could not split '{src}' as a bundle ({exc}); "
+              f"staging it as-is.")
+        return src
+    if carla_src and os.path.exists(carla_src) and carla_src != src:
+        print(f"[import] bundle: staging its CARLA half ({carla_src})")
+        return carla_src
+    return src
+
+
+def nested_duplicate_roots(import_dir, name):
+    """Directories under `import_dir` holding a SECOND `<name>.json`, below the top.
+
+    The canonical staging is Import/<name>.json beside Import/<name>/. A copy at
+    any greater depth is a duplicate CARLA would cook a second time. Returns the
+    directory that holds each one - the package root to move or delete - deepest
+    first, and never `import_dir` itself.
+    """
+    roots = []
+    want = (name + ".json").lower()
+    for base, _dirs, files in os.walk(import_dir):
+        if os.path.abspath(base) == os.path.abspath(import_dir):
+            continue
+        if any(f.lower() == want for f in files):
+            roots.append(base)
+    # Deepest first, so removing a parent cannot invalidate a child's path.
+    roots.sort(key=lambda p: p.count(os.sep), reverse=True)
+    # Drop any root nested inside another one already listed.
+    kept = []
+    for r in roots:
+        if not any(r != k and r.startswith(k + os.sep) for k in roots):
+            kept.append(r)
+    return kept
+
+
+def clear_staging(carla_root, name):
+    """Delete what a past import staged in Import/ for `name`.
+
+    Only for a caller that has decided to restage; see resolve_existing_staging.
+    Duplicates below the top level go too: they are what made CARLA cook the map
+    twice, and a restage supersedes every copy, not just the canonical one.
+    """
+    import_dir = os.path.join(carla_root, "Import")
+    targets = list(staged_import_paths(carla_root, name))
+    targets += nested_duplicate_roots(import_dir, name)
+    for p in targets:
+        print(f"[import] clearing the previous staging: {p}")
+        if os.path.isdir(p):
+            shutil.rmtree(p, ignore_errors=True)
+        else:
+            try:
+                os.remove(p)
+            except OSError as exc:                              # noqa: PERF203
+                print(f"[import]   could not remove it ({exc}); leaving it.")
 
 
 def _looks_like_bundle(names):
@@ -676,7 +850,11 @@ def open_bundle(src, cache_name=None):
         sumo = os.path.join(src, "sumo")
         if os.path.isdir(carla):
             return carla, (sumo if os.path.isdir(sumo) else None)
-        return src, None
+        # Handed something INSIDE carla/ - what the picker returns for an
+        # already-extracted bundle, where the user clicks the .xodr rather
+        # than the .zip. Recover the sibling sumo/ instead of dropping it;
+        # carla_src stays `src`, so staging and naming are unchanged.
+        return src, _bundle_sumo_beside(src)
     if os.path.isfile(src) and src.lower().endswith(".zip"):
         with zipfile.ZipFile(src) as z:
             if not _looks_like_bundle(z.namelist()):
@@ -735,12 +913,18 @@ def bundle_sumocfg(sumo_dir):
     return os.path.join(sumo_dir, cfgs[0])
 
 
-def map_name_in(carla_src):
+def map_name_in(carla_src, descriptor_only=False):
     """The real map/package name a staged CARLA source describes - the stem of its
     lone `<name>.json` descriptor, else its lone `<name>.xodr`. This is the name
     CARLA actually cooks/loads, which need NOT equal a release/location tag (e.g.
     the `roosevelt` bundle's carla/ describes `Roosevelt_07142026`). None if it
-    cannot be told unambiguously (0 or >1 candidates)."""
+    cannot be told unambiguously (0 or >1 candidates).
+
+    `descriptor_only` drops the .xodr fallback, for callers that must distinguish
+    "this bundle DECLARES its package name, and it is not ours to change" from
+    "there is only an export here, so the name is still open". Those are different
+    answers and the fallback conflated them: a raw export always yields its .xodr
+    stem, which then overrode a name the user had just been asked for."""
     if not carla_src or not os.path.isdir(carla_src):
         return None
 
@@ -755,6 +939,8 @@ def map_name_in(carla_src):
     jsons = [j for j in stems(".json") if j.lower() != "roadpainter_decals"]
     if len(jsons) == 1:
         return jsons[0]
+    if descriptor_only:
+        return None
     xodrs = list(set(stems(".xodr")))
     if len(xodrs) == 1:
         return xodrs[0]
@@ -832,6 +1018,52 @@ def classify_source(src, cache_name=None):
     return carla_src, None                          # carla-only
 
 
+def _bundle_sumo_beside(src):
+    """The sumo/ half of the bundle `src` sits inside, or None.
+
+    Ascends, because the file picker returns the folder holding the clicked
+    .xodr/.fbx and its depth inside carla/ varies across the library (atlanta ships
+    carla/<name>.xodr, roosevelt and mlk ship carla/<name>/<name>.xodr). Bounded,
+    and the ascent must pass through the bundle's own carla/, so an export sitting
+    beside an unrelated sumo/ is never adopted."""
+    if not src or not os.path.isdir(src):
+        return None
+    cur = os.path.normpath(src)
+    for _ in range(4):
+        parent = os.path.dirname(cur)
+        if not parent or parent == cur:
+            return None
+        if os.path.basename(cur).lower() == "carla" and \
+                os.path.isdir(os.path.join(parent, "sumo")):
+            return os.path.join(parent, "sumo")
+        cur = parent
+    return None
+
+
+def local_pick_carries_sumo(path):
+    """Does a locally-picked map source already come with a SUMO scenario?
+
+    Read-only and cheap - a zip is listed, a folder walked, nothing extracted or
+    copied - which is what lets the run questionnaire ask it while it is still only
+    making decisions. classify_source answers the same question but EXTRACTS a
+    bundle to do it, so it stays after the decisions rather than inside them.
+
+    False for a raw RoadRunner export and for a precooked *_cooked.tar.gz: the two
+    picks that leave run_cosim's SUMO slot empty."""
+    if not path:
+        return False
+    if os.path.isfile(path) and path.lower().endswith(".zip"):
+        try:
+            with zipfile.ZipFile(path) as z:
+                return any(n.lower().endswith(".sumocfg") for n in z.namelist())
+        except (OSError, zipfile.BadZipFile):
+            return False               # unreadable: let the late chain report it
+    if os.path.isdir(path):
+        return (_dir_with_sumocfg(path) is not None
+                or _bundle_sumo_beside(path) is not None)
+    return False
+
+
 def fetch_catalog(repo):
     """The DT-Library catalog (list of map entries), fetched fresh via gh from
     `repo`'s catalog.json and cached at ~/.fixs/catalog.json. Falls back to the
@@ -896,6 +1128,18 @@ def run_import(carla_root, ue4_root, name):
         proc_env["UE4_ROOT"] = ue4_root
     if not proc_env.get("UE4_ROOT"):
         print("[import] WARNING: UE4_ROOT not set; the cook commandlet may fail.")
+    # #311 again, on the one editor launch FIXS does not build the argv for.
+    # env.EDITOR_LAUNCH_FLAGS carries -DisableFrameTraceCapture onto every UE4Editor
+    # FIXS starts itself (run_cosim, place_tls, place_signs), but the cook goes
+    # through CARLA's Util/BuildTools/Import.py, which assembles its own commandlet
+    # command line - so the flag never reached it and the RenderDoc "Locate main
+    # RenderDoc executable..." dialog still blocked the cook. UE4 appends whatever
+    # UE-CmdLineArgs holds to any command line it parses (Engine/Source/Runtime/Core,
+    # LogSuppressionInterface.cpp:634), which is how a flag gets into an argv owned
+    # by someone else without patching their script.
+    extra = " ".join(env.EDITOR_LAUNCH_FLAGS)
+    proc_env["UE-CmdLineArgs"] = (
+        f"{proc_env['UE-CmdLineArgs']} {extra}" if proc_env.get("UE-CmdLineArgs") else extra)
     cmd = [sys.executable, import_py, f"--package={name}"]
     print(f"[import] running: {' '.join(cmd)}  (cwd={carla_root})")
     print("[import] cooking the map can take several minutes ...")
@@ -911,14 +1155,63 @@ def run_import(carla_root, ue4_root, name):
         restore()
 
 
+def _stash_dir(import_dir):
+    """Where set-aside packages wait out a cook: beside Import/, never in TEMP.
+
+    A sibling of Import/ rather than a child, because CARLA's Import.py cooks what
+    it finds under Import/ and a stash living there could be swept into the very
+    cook it is being hidden from. Beside it is invisible to that scan, sits next to
+    the data it belongs to, and - unlike TEMP - is not something Windows deletes on
+    its own schedule."""
+    return os.path.join(os.path.dirname(os.path.abspath(import_dir)),
+                        ".fixs-import-stash")
+
+
+def _restore_stash(import_dir, stash, names=None):
+    """Move `names` (default: everything) back from `stash` into `import_dir`."""
+    if not os.path.isdir(stash):
+        return []
+    back = []
+    for n in (names if names is not None else sorted(os.listdir(stash))):
+        src, dst = os.path.join(stash, n), os.path.join(import_dir, n)
+        if os.path.exists(src) and not os.path.exists(dst):
+            # `n` may be a relative path: a duplicate set aside from BELOW the
+            # top level comes back to exactly where it was. FIXS#358.
+            parent = os.path.dirname(dst)
+            if parent and not os.path.isdir(parent):
+                os.makedirs(parent, exist_ok=True)
+            shutil.move(src, dst)
+            back.append(n)
+    # Nested entries leave their parent directories behind; drop the empty ones
+    # so the stash still disappears when everything has gone home.
+    for base, dirs, files in os.walk(stash, topdown=False):
+        if not dirs and not files and os.path.abspath(base) != os.path.abspath(stash):
+            os.rmdir(base)
+    if os.path.isdir(stash) and not os.listdir(stash):
+        os.rmdir(stash)
+    return back
+
+
 def _isolate_import(import_dir, keep):
     """Temporarily move every package under `import_dir` except `keep` aside, so
     CARLA's Import.py cooks only `keep`. Returns a restore() to move them back
     (call it in a finally). `keep`'s own descriptor + asset folder and the shared
-    roadpainter_decals.json stay put."""
+    roadpainter_decals.json stay put.
+
+    Recovers first. restore() runs in a finally, which covers an exception but not
+    a killed process - and a cook is long, so it is exactly the thing people kill.
+    That used to strand every other package in a TEMP directory nobody would think
+    to look in: 1.3 GB of maps, sitting where Windows cleans up on its own
+    schedule, with Import/ simply looking like the maps had been deleted. Now the
+    stash is somewhere findable and the next import puts it back on its own."""
     if not os.path.isdir(import_dir):
         return lambda: None
-    stash = tempfile.mkdtemp(prefix="fixs-import-stash-")
+    stash = _stash_dir(import_dir)
+    recovered = _restore_stash(import_dir, stash)
+    if recovered:
+        print(f"[import] a previous cook did not finish; restored "
+              f"{len(recovered)} set-aside Import/ item(s) first.")
+    os.makedirs(stash, exist_ok=True)
     moved = []
     for f in sorted(os.listdir(import_dir)):
         if not f.lower().endswith(".json") or f.lower() == "roadpainter_decals.json":
@@ -932,16 +1225,37 @@ def _isolate_import(import_dir, keep):
         if os.path.isdir(folder):
             shutil.move(folder, os.path.join(stash, base))
             moved.append(base)
+    # CARLA cooks EVERY descriptor under Import/, so a second `<keep>.json` at any
+    # depth cooks the map twice and the repeat crashes Unreal. Set those aside as
+    # well, by relative path so restore() puts them back exactly. Guarded on the
+    # canonical one existing, so this can never hide the only copy. FIXS#358.
+    if os.path.isfile(os.path.join(import_dir, keep + ".json")):
+        for nested in nested_duplicate_roots(import_dir, keep):
+            rel = os.path.relpath(nested, import_dir)
+            dst = os.path.join(stash, rel)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.move(nested, dst)
+            moved.append(rel)
+            print(f"[import] set aside a duplicate package for '{keep}': {rel}")
     if moved:
         print(f"[import] isolating '{keep}' for the cook (set aside {len(moved)} "
               f"other Import/ item(s), restored after)")
+    # What CARLA will actually see. Said out loud rather than assumed: a second
+    # descriptor here is a double cook, and the crash it causes is 20 minutes
+    # into Unreal with a traceback that names none of this.
+    left = nested_duplicate_roots(import_dir, keep)
+    if left:
+        print(f"[import] WARNING: {len(left)} further copy(ies) of '{keep}' remain "
+              f"under Import/ and could not be set aside:")
+        for p in left:
+            print(f"[import]   {os.path.relpath(p, import_dir)}")
 
     def restore():
-        for m in moved:
-            src = os.path.join(stash, m)
-            if os.path.exists(src):
-                shutil.move(src, os.path.join(import_dir, m))
-        shutil.rmtree(stash, ignore_errors=True)
+        _restore_stash(import_dir, stash, moved)
+        # Only if empty: rmtree would delete anything an earlier crash left that
+        # this cook did not set aside itself, which is the opposite of the point.
+        if os.path.isdir(stash) and not os.listdir(stash):
+            os.rmdir(stash)
     return restore
 
 
@@ -1025,6 +1339,28 @@ def ensure_map(name, carla_root=None, ue4_root=None, package_url=None,
 
     rc = run_import(carla_root, ue4_root, name)
     ok = os.path.isfile(umap)
+
+    # An Unreal commandlet that dies takes Import.py's remaining steps with it
+    # (invoke_commandlet uses check_call). Report it every time - the exit code is
+    # otherwise swallowed by the .umap check below - and retry ONCE when the map
+    # did not survive. Retrying is worth doing because the crash we see is not
+    # deterministic: the same commandlet on the same package succeeds on a re-run.
+    # It is deliberately not retried when the map IS there; that work succeeded,
+    # and repeating a multi-minute cook to re-attempt one skipped step is a worse
+    # trade than saying clearly what was skipped.
+    if rc != 0:
+        _report_import_failure(name, rc, ok,
+                               capture_import_evidence(carla_root, name))
+        if not ok:
+            print(f"[import] retrying the import for '{name}' (attempt 2 of 2) ...")
+            rc = run_import(carla_root, ue4_root, name)
+            ok = os.path.isfile(umap)
+            if rc != 0:
+                _report_import_failure(name, rc, ok,
+                                       capture_import_evidence(carla_root, name,
+                                                               tag="_retry"))
+            elif ok:
+                print(f"[import] the retry succeeded; '{name}' imported.")
 
     if os.path.isdir(backup):
         if ok:
@@ -1435,6 +1771,54 @@ def _app_map_choice(name, catalog, cooked):
     return None
 
 
+def library_bundles(releases, catalog, tag_prefix=""):
+    """The source bundles `releases` publish, one row per bundle.
+
+    A release can carry more than one source bundle - `mlk` holds the corridor
+    and its U-turn variant - and the thing anyone picks between is the bundle,
+    not the tag it happens to be hosted on. catalog.json already calls itself
+    the index for the picker and already says which bundles exist and which .zip
+    each one is, so that is what the menu is built from. Listing releases
+    instead made a second bundle on a tag unreachable from the menu, and left
+    `--map <tag>` resolving to whichever entry happened to come first.
+
+    Each row: {name, label, asset, release}.
+      name    what the caller returns and what --map takes (the `location`)
+      label   the real cooked map name, so an Online row and its Local twin read
+              as the same map ('roosevelt_full' in both) rather than as two
+              unrelated things ('roosevelt' vs 'roosevelt_full')
+      asset   the exact .zip to download - what stops a release carrying several
+              from being a lottery, the same way catalog_cooked_asset does for
+              the precooked tier
+      release the release it is published on
+
+    A release no catalog entry claims still gets one row, named from its tag: a
+    bundle published before its catalog entry lands must not be invisible.
+
+    Precooked packages are not rows here. They are .tar.gz published beside the
+    source zips, they carry the same map, and which one a packaged CARLA needs is
+    answered by catalog_cooked_asset at download time - not by a second menu
+    line for the same map.
+    """
+    by_release = {}
+    for m in catalog or []:
+        by_release.setdefault(m.get("release"), []).append(m)
+    rows = []
+    for r in releases:
+        pkg = _package_from_tag(r["tag"], tag_prefix)
+        entries = by_release.get(r["tag"]) or by_release.get(pkg) or []
+        if not entries:
+            rows.append({"name": pkg, "label": pkg, "asset": None, "release": r})
+            continue
+        for ent in entries:
+            name = ent.get("location") or pkg
+            rows.append({"name": name,
+                         "label": ent.get("map_name") or name,
+                         "asset": ent.get("asset"),
+                         "release": r})
+    return rows
+
+
 def choose_map(repo, tag_prefix="", carla_root=None, catalog=None,
                preferred=None, app_label=None, current=None):
     """Interactive chooser. Two sections plus `L` for a file the user downloaded by
@@ -1476,31 +1860,28 @@ def choose_map(repo, tag_prefix="", carla_root=None, catalog=None,
     resolved_app = [r for r in (_app_map_choice(n, catalog, cooked) for n in preferred) if r]
     app_tags = {tag for _k, _l, _f, tag in resolved_app if tag}
     app_names = {label for _k, label, _f, _t in resolved_app}
+    bundles = library_bundles(releases, catalog, tag_prefix)
+    # Narrow to the app's own maps by matching the BUNDLE, not its tag: two
+    # bundles can share a release, so an app pinned to one of them must not be
+    # offered the other as if the two were interchangeable.
     if app_tags:
-        releases = [r for r in releases if r["tag"] in app_tags]
+        bundles = [b for b in bundles
+                   if b["label"] in app_names or b["release"]["tag"] in app_tags]
 
     print("\n[import] Pick a map to run:")
-    menu = []          # menu number -> ("release", release) | ("cooked", name)
+    menu = []          # menu number -> ("bundle", bundle) | ("cooked", name)
     default_idx = 1    # menu number Enter selects; the app's map when there is one
     current_idx = 0    # ... unless the setup already runs one of these
-    if releases:
+    if bundles:
         who = f" for {app_label}" if app_tags and app_label else ""
         print(f"  Online (Digital-Twin-Library){who}:")
-        for r in releases:
-            menu.append(("release", r))
-            pkg = _package_from_tag(r["tag"], tag_prefix)
-            # Label with the REAL cooked map name when the catalog knows one, so an
-            # Online entry and its Local twin read as the same map ('roosevelt_full'
-            # in both lists) instead of two unrelated things ('roosevelt' vs
-            # 'roosevelt_full'). The release tag stays the identifier we return and
-            # what --map accepts; only the display changes. Safe because
-            # catalog_entry() resolves location, map_name and release alike.
-            ent = catalog_entry(catalog, pkg)
-            label = (ent or {}).get("map_name") or pkg
+        for b in bundles:
+            menu.append(("bundle", b))
+            r, label = b["release"], b["label"]
             flag = "  (pre-release)" if r["prerelease"] else ""
             if label in cooked:
                 flag += "  (already imported)"
-            if label == current:
+            if current in (label, b["name"]):
                 flag += "  (current)"
                 current_idx = len(menu)
             print(f"   {len(menu):>2}) {label:<26} {r['date']}{flag}")
@@ -1520,7 +1901,7 @@ def choose_map(repo, tag_prefix="", carla_root=None, catalog=None,
                 current_idx = len(menu)     # cooked beats the library copy
             print(f"   {len(menu):>2}) {name}{mark}")
     if not menu:
-        print("   (no online releases or imported maps found)")
+        print("   (no online bundles or imported maps found)")
     print("   L) select a local precooked *_cooked.tar.gz instead" if packaged
           else "   L) select a local .zip / folder instead")
     if current_idx:
@@ -1571,8 +1952,8 @@ def choose_map(repo, tag_prefix="", carla_root=None, catalog=None,
             return name, None, path
         if ans.isdigit() and 1 <= int(ans) <= len(menu):
             kind, payload = menu[int(ans) - 1]
-            if kind == "release":
-                return _package_from_tag(payload["tag"], tag_prefix), payload["tag"], None
+            if kind == "bundle":
+                return payload["name"], payload["release"]["tag"], None
             return payload, None, None  # cooked: already imported, run as-is
         print("[import] invalid choice; enter a number, or L for a local file.")
 
@@ -1588,10 +1969,14 @@ def choose_sumo_source(cache_name=None):
         return None
     print("\n[cosim] the chosen map has no SUMO scenario; select one now "
           "(a .zip or folder containing a .sumocfg).")
-    path = _select_package("SUMO scenario", None)  # native picker / typed path
+    # A scenario is known by its .sumocfg, not by a map's .xodr/.fbx - state it,
+    # or the dialog filters this scenario's own files out and opens empty.
+    path = _select_package("SUMO scenario", None, inside=("sumocfg",))
     _carla_src, sumo_dir = classify_source(path, cache_name)
     if sumo_dir is None:
         print(f"[cosim] no .sumocfg found in {path}")
+    else:
+        record_source(cache_name, "sumo", path)
     return sumo_dir
 
 
@@ -1810,6 +2195,210 @@ def map_sumo_dir(name):
     return _dir_with_sumocfg(os.path.join(_map_cache_dir(name), "sumo"))
 
 
+def _cached_bundle_zip(cache_name):
+    """The bundle zip sitting in ~/.fixs/maps/<name>/, or None.
+
+    download_release_zip leaves it there so a re-import is free; it is also the only
+    local record of what the library actually published for this map, which is what
+    makes the parity check below possible without a network round trip."""
+    d = _map_cache_dir(cache_name)
+    if not os.path.isdir(d):
+        return None
+    zips = sorted(f for f in os.listdir(d) if f.lower().endswith(".zip"))
+    if not zips:
+        return None
+    # More than one only happens if a map was re-fetched under a new asset name;
+    # prefer the one named after the map, else the sole candidate.
+    named = [z for z in zips if os.path.splitext(z)[0] == cache_name]
+    return os.path.join(d, (named or zips)[0])
+
+
+def scenario_outputs(sumo_dir):
+    """Basenames the scenario itself writes into its own directory.
+
+    SUMO resolves a relative path in a .sumocfg against the CONFIG FILE, not the
+    process working directory, so a scenario that names its outputs relatively
+    writes them next to itself - into the map cache. MLK's does: its additional-file
+    carries
+
+        <timedEvent type="SaveTLSSwitchStates" dest="signal_result.xml"/>
+
+    and that one cannot be redirected from the command line the way --fcd-output and
+    --tripinfo-output are, so signal_result.xml reappears in sumo/ after every run.
+
+    Those files are byproducts of running, not evidence that anyone edited the
+    scenario, and a parity check that flagged them would fire on every launch - which
+    is the same as not warning at all, except louder. Collected from the cfg's own
+    output declarations and from the `dest` of every timedEvent in the additional
+    files it names."""
+    outputs = set()
+    cfg = bundle_sumocfg(sumo_dir)
+    if not cfg:
+        return outputs
+    try:
+        root = ET.parse(cfg).getroot()
+    except (OSError, ET.ParseError):
+        return outputs
+    additional = []
+    for el in root.iter():
+        val = el.get("value")
+        if val is None:
+            continue
+        if el.tag.endswith("-output") or el.tag in ("log", "error-log"):
+            outputs.update(os.path.basename(v.strip()) for v in val.split(",") if v.strip())
+        elif el.tag in ("additional-files", "route-files"):
+            additional += [v.strip() for v in val.split(",") if v.strip()]
+    for rel in additional:
+        path = rel if os.path.isabs(rel) else os.path.join(sumo_dir, rel)
+        try:
+            for el in ET.parse(path).getroot().iter():
+                dest = el.get("dest")
+                if dest:
+                    outputs.add(os.path.basename(dest.strip()))
+        except (OSError, ET.ParseError):
+            continue
+    return outputs
+
+
+def bundle_parity(cache_name, half="sumo"):
+    """Whether the extracted `half`/ still holds exactly what the bundle ships.
+
+    Returns (verdict, changed, extra, missing):
+      "match"    - every file the bundle ships is present, byte for byte
+      "diverged" - the three lists say how
+      "unknown"  - no cached zip here to compare against, so nothing can be claimed
+
+    Compared by CRC32, which the zip already stores per entry in its central
+    directory, against zlib.crc32 of the file on disk. That reads each side once and
+    needs no extraction, no temp copy and no second download - cheap enough to run on
+    every launch, which is the point: a check that only runs when asked is a check
+    that answers after the divergent run, not before it.
+
+    A run whose results are meant to be comparable to anyone else's depends on this
+    being "match". The cache is declared re-creatable (see _map_cache_dir), so
+    divergence is not a thing to protect - it is a thing to SAY, because the same
+    .sumocfg name over different bytes produces different traffic and nothing else in
+    the run would ever mention it."""
+    import zlib
+    zip_path = _cached_bundle_zip(cache_name)
+    root = os.path.join(_map_cache_dir(cache_name), half)
+    if not zip_path or not os.path.isdir(root):
+        return "unknown", [], [], []
+
+    prefix = half + "/"
+    changed, missing = [], []
+    shipped = set()
+    try:
+        with zipfile.ZipFile(zip_path) as z:
+            for info in z.infolist():
+                if not info.filename.startswith(prefix) or info.filename.endswith("/"):
+                    continue
+                rel = info.filename[len(prefix):]
+                shipped.add(rel)
+                disk = os.path.join(root, rel.replace("/", os.sep))
+                if not os.path.isfile(disk):
+                    missing.append(rel)
+                    continue
+                crc = 0
+                with open(disk, "rb") as f:
+                    for chunk in iter(lambda: f.read(1 << 20), b""):
+                        crc = zlib.crc32(chunk, crc)
+                if crc != info.CRC:
+                    changed.append(rel)
+    except (OSError, zipfile.BadZipFile):
+        return "unknown", [], [], []
+    if not shipped:
+        return "unknown", [], [], []
+
+    # A file the scenario writes itself is a byproduct of running it, not a sign that
+    # anyone changed it - see scenario_outputs.
+    generated = scenario_outputs(root) if half == "sumo" else set()
+    extra = []
+    for dirpath, _dirs, files in os.walk(root):
+        for f in files:
+            rel = os.path.relpath(os.path.join(dirpath, f), root).replace(os.sep, "/")
+            if rel not in shipped and os.path.basename(rel) not in generated:
+                extra.append(rel)
+
+    verdict = "match" if not (changed or extra or missing) else "diverged"
+    return verdict, sorted(changed), sorted(extra), sorted(missing)
+
+
+def bundle_is_current(zip_path, repo, tag, asset):
+    """Is the cached zip the asset the release publishes today?
+
+    "current" / "stale" / "unknown" (no network, no gh, or the release does not
+    say). GitHub reports a sha256 per release asset, so this is one API call and a
+    local digest - no download. Without it the parity check answers a narrower
+    question than it appears to: the extracted files can match a zip that is itself
+    months behind the library."""
+    if not (zip_path and repo and tag and asset):
+        return "unknown"
+    try:
+        out = subprocess.run(
+            ["gh", "api", f"repos/{repo}/releases/tags/{tag}",
+             "--jq", f'.assets[] | select(.name=="{asset}") | .digest'],
+            capture_output=True, text=True, timeout=8)
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+    digest = (out.stdout or "").strip()
+    if out.returncode != 0 or not digest.startswith("sha256:"):
+        return "unknown"
+    import hashlib
+    h = hashlib.sha256()
+    try:
+        with open(zip_path, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk)
+    except OSError:
+        return "unknown"
+    return "current" if h.hexdigest() == digest.split(":", 1)[1] else "stale"
+
+
+def report_bundle_parity(cache_name, half="sumo", where=None,
+                         repo=None, tag=None, asset=None):
+    """Print what this run is about to use and whether it is what the library ships.
+
+    Always prints something. A cached half that silently differs from the published
+    bundle is the failure this exists to prevent: the run looks ordinary, the .sumocfg
+    has the name it always had, and the numbers come out different from everyone
+    else's with nothing on screen to explain it. Returns the verdict."""
+    verdict, changed, extra, missing = bundle_parity(cache_name, half)
+    at = f": {where}" if where else ""
+    zip_path = _cached_bundle_zip(cache_name)
+    zname = os.path.basename(zip_path) if zip_path else "the bundle"
+    fresh = bundle_is_current(zip_path, repo, tag, asset)
+    if verdict == "match":
+        print(f"[cosim] using the cached {half.upper()} half of '{cache_name}'{at}")
+        if fresh == "current":
+            print(f"[cosim]   matches {zname}, which is what the library publishes today")
+        elif fresh == "stale":
+            print(f"[cosim]   matches your copy of {zname} - but the library has "
+                  f"PUBLISHED A NEWER ONE since. --reimport fetches it.")
+        else:
+            print(f"[cosim]   matches your copy of {zname} (could not reach the "
+                  f"library to confirm that is the current one)")
+        return verdict
+    if verdict == "unknown":
+        print(f"[cosim] using the cached {half.upper()} half of '{cache_name}'{at}")
+        print(f"[cosim]   no local copy of the bundle here, so it cannot be compared "
+              f"with what the Digital-Twin-Library publishes. --reimport re-downloads "
+              f"and re-extracts.")
+        return verdict
+    print(f"[cosim] using the cached {half.upper()} half of '{cache_name}'{at}")
+    newer = " (and the library has published a newer one)" if fresh == "stale" else ""
+    print(f"[cosim]   *** it DIFFERS from {zname}{newer} ***")
+    for label, items in (("modified", changed), ("missing", missing),
+                         ("not in the bundle", extra)):
+        if not items:
+            continue
+        head = ", ".join(items[:4]) + (f", +{len(items) - 4} more" if len(items) > 4 else "")
+        print(f"[cosim]   {label:>18}: {head}")
+    print(f"[cosim]   this run will use the files ON DISK, not the published ones. "
+          f"--reimport restores the bundle's copy.")
+    return verdict
+
+
 # ------------------------------------------------ which bundle produced a map
 
 # A cooked map is identified by a DIRECTORY NAME (resolve_cooked_map), so it has no
@@ -1843,6 +2432,34 @@ def _write_sha(directory, sha):
         with open(os.path.join(directory, SHA_FILE), "w", encoding="utf-8") as f:
             f.write(sha.strip() + "\n")
     except OSError:
+        pass
+
+
+def record_source(cache_name, half, path):
+    """Note where a locally-picked half came from, in ~/.fixs/maps/<name>/source.json.
+
+    A local pick otherwise leaves no trace: .source_sha is written only for release
+    downloads, so _check_map_source declines to check a hand-picked map at all. A
+    note per HALF rather than one digest, because the two halves of a local map come
+    from unrelated trees (a RoadRunner export and a SUMO folder), so there is no
+    shared identity to compare - only an origin to record. Best effort: a missing
+    note costs bookkeeping, not a run."""
+    import json
+    if not cache_name or not path:
+        return
+    dest = os.path.join(_map_cache_dir(cache_name), "source.json")
+    try:
+        doc = {}
+        if os.path.isfile(dest):
+            with open(dest, encoding="utf-8") as f:
+                doc = json.load(f) or {}
+        doc[half] = {"path": os.path.abspath(path),
+                     "mtime": int(os.stat(path).st_mtime),
+                     "recorded": int(time.time())}
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        with open(dest, "w", encoding="utf-8") as f:
+            json.dump(doc, f, indent=2, sort_keys=True)
+    except (OSError, ValueError):
         pass
 
 
@@ -1916,20 +2533,32 @@ def _download_release_asset(repo, tag, pattern, suffix, force_redownload=False,
     got = [f for f in os.listdir(tag_dir) if f.lower().endswith(suffix)]
     if not got:
         sys.exit(f"[import] release '{tag}' has no {what} matching '{pattern}'.")
+    # An exact asset name wins over whatever else the cache dir holds. The
+    # download itself already fetched only that one, but a dir shared by two
+    # bundles would otherwise hand back a sibling by listing order.
+    if pattern in got:
+        return os.path.join(tag_dir, pattern)
     # Note WHICH asset this is, while we still know. The cache dir is named for the
     # map, not the release, so nothing else here can answer that afterwards.
     _write_sha(tag_dir, _release_asset_sha(repo, tag, pattern))
     return os.path.join(tag_dir, got[0])
 
 
-def download_release_zip(repo, tag, force_redownload=False, cache_name=None):
+def download_release_zip(repo, tag, force_redownload=False, cache_name=None,
+                         asset=None):
     """Return a local path to the release's .zip asset, downloading it via gh into
     the ~/.fixs/maps/<cache_name or tag>/ cache (cache_name = the cooked map name,
     so the zip sits beside the extracted carla/+sumo/). If a cached copy already
     exists, ask whether to reuse or re-download (default reuse); force_redownload
-    skips the prompt. The zip stays in the cache so re-imports are free."""
-    return _download_release_asset(repo, tag, "*.zip", ".zip", force_redownload,
-                                   cache_name, what="source bundle (.zip)")
+    skips the prompt. The zip stays in the cache so re-imports are free.
+
+    `asset` is the exact published name, from the catalog entry. Without it the
+    glob picks whichever .zip the release happens to list first, which is wrong
+    the moment a release carries more than one bundle - the same reason
+    download_cooked_tar has always taken its asset by name."""
+    return _download_release_asset(repo, tag, asset or "*.zip", ".zip",
+                                   force_redownload, cache_name,
+                                   what="source bundle (.zip)")
 
 
 def download_cooked_tar(repo, tag, asset, force_redownload=False, cache_name=None):
@@ -1975,7 +2604,7 @@ def pick_and_import(repo, tag_prefix="", carla_root=None, ue4_root=None, force=F
     catalog = fetch_catalog(repo)
     name, tag, local = choose_map(repo, tag_prefix, carla_root, catalog=catalog)
 
-    # The picker returns what the RELEASE is called ('mlk'); the cooked map inside
+    # The picker returns what the BUNDLE is called ('mlk'); the cooked map inside
     # it is often named differently ('mlk_no_signal'). Everything below - the
     # already-imported check, the install, the message - is about the map, so
     # resolve it here, exactly as run_cosim does before its own preflight.
@@ -2000,7 +2629,9 @@ def pick_and_import(repo, tag_prefix="", carla_root=None, ue4_root=None, force=F
                           local=local, force=force)
         return 0
 
-    zip_path = local if local else download_release_zip(repo, tag, force_redownload=force)
+    zip_path = local if local else download_release_zip(
+        repo, tag, force_redownload=force,
+        asset=(entry or {}).get("asset"))
     return ensure_map(name, carla_root=carla_root, ue4_root=ue4_root,
                       package_dir=zip_path, force=force,
                       source_sha=_read_sha(os.path.dirname(zip_path)))
@@ -2049,6 +2680,625 @@ def import_named(name, carla_root=None, ue4_root=None, package_url=None,
     install_precooked(carla_root, name, repo=repo, tag=(entry or {}).get("release"),
                       entry=entry, local=package_dir, force=force)
     return 0
+
+
+# ------------------------------------------------------------- purge a map
+
+# Content/ subdirectories that belong to CARLA itself, or to FIXS's own installed
+# assets, and never to an imported map. Named explicitly because the structural
+# test below is not sufficient on its own: CARLA's Content/Carla/ ships a
+# Config/Carla.Package.json exactly like an imported package does, so "has a
+# package descriptor" would offer the engine's own content up for deletion.
+ENGINE_CONTENT = frozenset((
+    "Carla", "Collections", "Developers", "FIXS", "Movies", "Splash",
+    "Cinematics", "HDRIBackdrop", "Localization", "PropsFactory",
+))
+
+
+def _dir_size(path):
+    """Bytes under `path`; 0 when it is absent. Entries that cannot be stat'd are
+    skipped rather than raising: this number exists for a human deciding what to
+    delete, and one unreadable file must not cost them the whole listing."""
+    total = 0
+    if not path or not os.path.isdir(path):
+        return 0
+    for root, _dirs, files in os.walk(path):
+        for name in files:
+            try:
+                total += os.path.getsize(os.path.join(root, name))
+            except OSError:
+                pass
+    return total
+
+
+def human_bytes(n):
+    """'1.4 GB', for a listing someone reads before agreeing to a deletion."""
+    if not n:
+        return "-"
+    size = float(n)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if size < 1024 or unit == "TB":
+            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024.0
+
+
+def purge_candidates(carla_root=None, mode=None):
+    """What every map on this machine occupies locally: one record per name,
+    sorted, as {"name", "pieces", "cooked_umap"}. `pieces` is a list of
+    (label, path, bytes) with label in ("cooked", "staged", "cache").
+
+    A name qualifies on ANY ONE of four pieces of evidence, because the three
+    locations age independently and a purge exists precisely for the states where
+    they disagree:
+
+      - Maps/<name>/<name>.umap        a finished cook
+      - Config/<name>.Package.json     a cook that died part-way, which is exactly
+                                       the wreckage this command exists to clear
+      - Import/<name>/                 staging a past import left behind
+      - ~/.fixs/maps/<name>/           a downloaded bundle, cooked or not
+
+    A lone Import/<name>.json never qualifies a name by itself - it is swept up
+    only once something else has - because CARLA's own Import/ holds descriptors
+    (roadpainter_decals.json) that name no map at all. ENGINE_CONTENT is
+    subtracted last, so no amount of evidence can offer CARLA's own content up.
+
+    carla_root=None is a valid call: a machine with no configured CARLA still has
+    a bundle cache, and being able to reclaim it is the whole point of asking."""
+    names = set()
+
+    content = content_root(carla_root, mode) if carla_root else None
+    if content and os.path.isdir(content):
+        for name in os.listdir(content):
+            if not os.path.isdir(os.path.join(content, name)):
+                continue
+            if os.path.isfile(cooked_map_path(carla_root, name, mode)) or \
+                    os.path.isfile(package_descriptor(carla_root, name, mode)):
+                names.add(name)
+
+    import_dir = os.path.join(carla_root, "Import") if carla_root else None
+    if import_dir and os.path.isdir(import_dir):
+        for entry in os.listdir(import_dir):
+            if os.path.isdir(os.path.join(import_dir, entry)):
+                names.add(entry)
+
+    cache_root = _map_cache_dir()
+    if os.path.isdir(cache_root):
+        for name in os.listdir(cache_root):
+            if os.path.isdir(os.path.join(cache_root, name)):
+                names.add(name)
+
+    records = []
+    for name in sorted(names - ENGINE_CONTENT):
+        pieces = []
+        if carla_root:
+            cooked = cooked_content_dir(carla_root, name, mode)
+            if os.path.isdir(cooked):
+                pieces.append(("cooked", cooked, _dir_size(cooked)))
+            # The .bak_reimport a failed re-import leaves behind is the same map's
+            # content under another name; purging the map without it would leave a
+            # full copy on disk that nothing will ever look at again.
+            backup = cooked + ".bak_reimport"
+            if os.path.isdir(backup):
+                pieces.append(("cooked", backup, _dir_size(backup)))
+            for path in staged_import_paths(carla_root, name):
+                pieces.append(("staged", path,
+                               _dir_size(path) if os.path.isdir(path)
+                               else os.path.getsize(path)))
+        # os.path.join, NOT _map_cache_dir(name): that helper CREATES the folder
+        # it names, and an inventory must not bring into being the very thing it
+        # is reporting on. An empty one is skipped too - there is nothing there to
+        # reclaim, and offering it would make a purge look bigger than it is.
+        cache = os.path.join(cache_root, name)
+        if os.path.isdir(cache) and os.listdir(cache):
+            pieces.append(("cache", cache, _dir_size(cache)))
+        if not pieces:
+            continue
+        records.append({
+            "name": name,
+            "pieces": pieces,
+            "cooked_umap": bool(carla_root) and os.path.isfile(
+                cooked_map_path(carla_root, name, mode)),
+        })
+    return records
+
+
+def staged_import_paths(carla_root, name):
+    """The staging a past import left in CARLA's Import/ for `name`: the folder and
+    the descriptor beside it. Either can outlive the other, so both are looked for
+    independently."""
+    import_dir = os.path.join(carla_root, "Import")
+    return [p for p in (os.path.join(import_dir, name),
+                        os.path.join(import_dir, name + ".json"))
+            if os.path.exists(p)]
+
+
+# --------------------------------------------------------------------------- #
+# Import/ hygiene. CARLA's Import.py cooks whatever it finds in that one folder,
+# so what is left there from previous imports is not inert - it is input. The two
+# helpers below make that visible: one before a map is staged over an existing
+# copy, one to clear the copies nothing is going to use again.
+# --------------------------------------------------------------------------- #
+def staging_report(carla_root, name):
+    """What Import/ already holds for `name`, as [(path, bytes, mtime), ...]."""
+    out = []
+    for p in staged_import_paths(carla_root, name):
+        size = _dir_size(p) if os.path.isdir(p) else os.path.getsize(p)
+        out.append((p, size, os.path.getmtime(p)))
+    return out
+
+
+def _mb(n):
+    return "%.1f MB" % (n / (1024.0 * 1024.0)) if n >= 1024 * 1024 else "%.0f KB" % (n / 1024.0)
+
+
+def _stamp(t):
+    return time.strftime("%Y-%m-%d %H:%M", time.localtime(t))
+
+
+def resolve_existing_staging(carla_root, name, have_source, interactive=None):
+    """Report an Import/ staging that already exists for `name`, and decide what to
+    do about it. Returns "use", "restage" or "abort".
+
+    Only INTERRUPTS when have_source is False - when nothing tells this call where
+    to copy from, so reusing whatever is already in Import/<name>/ is a guess: it
+    could be a leftover from an earlier import of a DIFFERENT export that happened
+    to share this name. That guess is what deserves a human's eyes.
+
+    have_source=True means the opposite: a path, a URL, or an explicit pick was
+    already given, so there is nothing to decide - restaging from it is not a
+    guess, it is what was just asked for. Interrupting there anyway (every prior
+    version of this function did) turned a certainty into a keystroke on every
+    single --reimport, forever, for a caller who by definition already knows the
+    answer before being asked."""
+    existing = staging_report(carla_root, name)
+    if not existing:
+        return "restage" if have_source else "use"
+
+    if have_source:
+        print(f"[import] replacing the staged package for '{name}' with the "
+              f"source you gave.")
+        return "restage"
+
+    print("")
+    print(f"[import] Import/ ALREADY holds a staged package for '{name}':")
+    for path, size, mtime in existing:
+        kind = "folder" if os.path.isdir(path) else "file  "
+        print(f"[import]   {kind} {path}  ({_mb(size)}, {_stamp(mtime)})")
+    print(f"[import]   Nothing else was supplied, so THIS copy is what would be "
+          f"cooked - not a fresh one.")
+
+    if not (sys.stdin.isatty() if interactive is None else interactive):
+        print("[import]   non-interactive: continuing with 'use'.")
+        return "use"
+
+    while True:
+        ans = _prompt("[import] [U]se the staged copy / [A]bort? [U]: ").strip().lower()
+        if ans in ("", "u"):
+            return "use"
+        if ans.startswith("a"):
+            sys.exit("[import] aborted at the staging prompt; nothing was changed.")
+        print("[import] please answer with one of the letters shown.")
+
+
+# Files in Import/ that belong to CARLA (or to us) rather than to a staged map.
+IMPORT_KEEP = {"readme.md", "roadpainter_decals.json"}
+
+
+def import_staging_inventory(carla_root, keep=None):
+    """Split CARLA's Import/ into (staged, other).
+
+    `staged` is one record per package - {"name", "paths", "bytes"} - built from a
+    <name>.json descriptor, a <name>/ asset folder, or both, since either can
+    outlive the other. `keep` (the map about to be imported) is excluded.
+
+    `other` is everything this must not decide about: CARLA's own files, and the
+    strays that accumulate in Import/ by hand (a .zip, a .bak). They are reported,
+    never removed - guessing at a file nobody staged is how a clean-up becomes a
+    data loss."""
+    import_dir = os.path.join(carla_root, "Import")
+    if not os.path.isdir(import_dir):
+        return [], []
+    names, other = set(), []
+    for entry in sorted(os.listdir(import_dir)):
+        full = os.path.join(import_dir, entry)
+        low = entry.lower()
+        if low in IMPORT_KEEP or entry == os.path.basename(_stash_dir(import_dir)):
+            continue
+        if os.path.isdir(full):
+            names.add(entry)
+        elif low.endswith(".json"):
+            names.add(entry[:-len(".json")])
+        else:
+            other.append((full, os.path.getsize(full)))
+    staged = []
+    for name in sorted(n for n in names if n != keep):
+        paths = staged_import_paths(carla_root, name)
+        if not paths:
+            continue
+        total = sum(_dir_size(p) if os.path.isdir(p) else os.path.getsize(p)
+                    for p in paths)
+        staged.append({"name": name, "paths": paths, "bytes": total})
+    return staged, other
+
+
+def clean_import_dir(carla_root, keep=None, interactive=None, assume_yes=False):
+    """Clear stale per-map staging out of CARLA's Import/. Returns bytes reclaimed.
+
+    Complements --purge-map rather than duplicating it: a purge removes everything
+    ONE map owns (cooked content, staging, cache), and deliberately will not let a
+    lone Import/<name>.json qualify a name on its own. This is the other axis -
+    every staged package except the one being imported now - which is what clears
+    the descriptors a purge leaves behind and the packages of maps that are long
+    gone.
+
+    Never touches CARLA's own files, the set-aside stash, or anything it cannot
+    identify as staging: those are listed instead, for a human to judge."""
+    staged, other = import_staging_inventory(carla_root, keep)
+    if not staged:
+        print(f"[import] Import/ has no stale staging to clear"
+              + (f" (keeping '{keep}')." if keep else "."))
+        return 0
+
+    total = sum(s["bytes"] for s in staged)
+    print("")
+    print(f"[import] Import/ holds staging for {len(staged)} package(s) "
+          f"not being imported now ({_mb(total)}):")
+    for s in staged:
+        print(f"[import]   {s['name']:<24} {_mb(s['bytes'])}")
+        for p in s["paths"]:
+            print(f"[import]       {p}")
+    if keep:
+        print(f"[import]   (keeping '{keep}', which this run imports)")
+    if other:
+        print(f"[import]   NOT touching {len(other)} unrecognised item(s) - "
+              f"remove by hand if you want them gone:")
+        for path, size in other:
+            print(f"[import]       {path}  ({_mb(size)})")
+
+    if not assume_yes:
+        if not (sys.stdin.isatty() if interactive is None else interactive):
+            print("[import] non-interactive and no confirmation: nothing removed.")
+            return 0
+        ans = _prompt(f"[import] remove the {len(staged)} staged package(s) above? "
+                      f"[y/N]: ").strip().lower()
+        if not ans.startswith("y"):
+            print("[import] left Import/ as it was.")
+            return 0
+
+    freed = 0
+    for s in staged:
+        for p in s["paths"]:
+            try:
+                if os.path.isdir(p):
+                    shutil.rmtree(p)
+                else:
+                    os.remove(p)
+            except OSError as exc:
+                print(f"[import]   could not remove {p}: {exc}")
+                continue
+        freed += s["bytes"]
+        print(f"[import]   removed staging for '{s['name']}'")
+    print(f"[import] Import/ cleaned: {_mb(freed)} reclaimed.")
+    return freed
+
+
+def capture_import_evidence(carla_root, name, dest_root=None, tag=""):
+    """Copy Unreal's logs and its newest crash dump somewhere they will survive.
+
+    Unreal rotates Saved/Logs on EVERY editor launch, and one import is four
+    launches - so by the time anyone looks, the log of the run that failed has
+    usually been pushed out. A cook that dies is exactly when those files matter,
+    so they are taken at that moment rather than hunted for afterwards. Returns
+    the directory, or None if there was nothing to take."""
+    saved = os.path.join(carla_root, "Unreal", "CarlaUE4", "Saved")
+    logs, crashes = os.path.join(saved, "Logs"), os.path.join(saved, "Crashes")
+    if not os.path.isdir(logs):
+        return None
+    dest_root = dest_root or os.path.join(os.getcwd(), "RealSim_tmp")
+    stamp = time.strftime("%Y%m%d_%H%M%S")
+    dest = os.path.join(dest_root, f"import_crash_{name}{tag}_{stamp}")
+    try:
+        os.makedirs(dest, exist_ok=True)
+        shutil.copytree(logs, os.path.join(dest, "Logs"), dirs_exist_ok=True)
+        if os.path.isdir(crashes):
+            dumps = [os.path.join(crashes, d) for d in os.listdir(crashes)]
+            dumps = [d for d in dumps if os.path.isdir(d)]
+            if dumps:
+                newest = max(dumps, key=os.path.getmtime)
+                shutil.copytree(newest, os.path.join(dest, os.path.basename(newest)),
+                                dirs_exist_ok=True)
+    except OSError as exc:
+        print(f"[import] could not save crash evidence: {exc}")
+        return None
+    return dest
+
+
+def _report_import_failure(name, rc, produced, evidence):
+    """Say plainly that Unreal failed, what it cost, and where to look.
+
+    Never silent, and never dressed up as a warning: Import.py exiting non-zero
+    means an Unreal process died. When the .umap survives it (the cook writes it
+    one step before the step that usually crashes) the run can go on, but 'went on'
+    is not 'was fine' - the steps after the crash did not run, and this is the only
+    place that difference is visible."""
+    bar = "=" * 68
+    signed = rc - (1 << 32) if rc and rc > 0x7FFFFFFF else rc
+    hexrc = f" (0x{rc & 0xFFFFFFFF:08X})" if rc and rc not in (1, 2) else ""
+    print(f"\n[import] {bar}")
+    print(f"[import] Import.py FAILED for '{name}': exit {signed}{hexrc}")
+    if hexrc and (rc & 0xFFFFFFFF) == 0xC0000005:
+        print(f"[import]   0xC0000005 = access violation: an Unreal commandlet crashed.")
+    if produced:
+        print(f"[import]   The map WAS written, so the run can continue - but "
+              f"Import.py")
+        print(f"[import]   stopped at the crash, so the steps after it did not run "
+              f"(the")
+        print(f"[import]   Traffic-Manager binary Maps/{name}/TM/ is the one that "
+              f"goes missing;")
+        print(f"[import]   a SUMO-driven co-sim never reads it).")
+    else:
+        print(f"[import]   The map was NOT written. Retrying once.")
+    if evidence:
+        print(f"[import]   Unreal's logs + crash dump saved to:")
+        print(f"[import]     {evidence}")
+        print(f"[import]   (Unreal rotates Saved/Logs on every launch; without this "
+              f"copy they")
+        print(f"[import]    are usually gone within minutes.)")
+    print(f"[import] {bar}\n")
+
+
+def record_bytes(record, with_cache=False):
+    """Bytes a purge of `record` would actually reclaim, given the cache choice."""
+    return sum(b for label, _p, b in record["pieces"]
+               if with_cache or label != "cache")
+
+
+def purge_maps(records, drop_cache=False):
+    """Delete what `records` describe. Returns (removed, failed), both lists of
+    (name, label, path, bytes); `failed` rows carry the OSError message in place of
+    the byte count's usefulness.
+
+    Takes the records purge_candidates built rather than names to re-resolve, so
+    what is deleted is exactly what the caller printed and the user agreed to -
+    there is no second lookup that could drift from the one shown."""
+    removed, failed = [], []
+    for record in records:
+        for label, path, size in record["pieces"]:
+            if label == "cache" and not drop_cache:
+                continue
+            try:
+                if os.path.isdir(path):
+                    shutil.rmtree(path)
+                else:
+                    os.remove(path)
+                removed.append((record["name"], label, path, size))
+            except OSError as exc:
+                failed.append((record["name"], label, path, str(exc)))
+    return removed, failed
+
+
+def _purge_ask(msg):
+    """input() where EOF means 'answered nothing'. Deliberately not _prompt: that
+    one exits with advice about --map / --package, which is the wrong advice here
+    and, worse, exits mid-command. A purge that cannot ask must cancel, never
+    fall through to a default - the next step deletes."""
+    try:
+        return input(msg).strip()
+    except EOFError:
+        return ""
+
+
+def parse_selection(answer, count):
+    """0-based indices named by a picker answer: '2', '1,3,4', '2-5', 'all'. None
+    when the answer does not parse or names nothing - the caller re-asks or
+    cancels rather than acting on a guess, because what follows is a deletion.
+
+    Public, and shared with run_profile's setup picker. Two lists a user deletes
+    from should not accept two different syntaxes, and the only way to be sure they
+    do not drift apart is for there to be one of them."""
+    answer = (answer or "").strip().lower()
+    if answer in ("a", "all", "*"):
+        return list(range(count))
+    chosen = set()
+    for part in answer.replace(" ", "").split(","):
+        if not part:
+            continue
+        lo, dash, hi = part.partition("-")
+        if dash:
+            if not (lo.isdigit() and hi.isdigit()):
+                return None
+            lo, hi = int(lo), int(hi)
+            if not (1 <= lo <= hi <= count):
+                return None
+            chosen.update(range(lo - 1, hi))
+        elif part.isdigit() and 1 <= int(part) <= count:
+            chosen.add(int(part) - 1)
+        else:
+            return None
+    return sorted(chosen) or None
+
+
+def _purge_table(records, indent="   "):
+    """The inventory as a numbered table: one row per map, one column per place a
+    map occupies. Three columns rather than one total, because they are not
+    equally expensive to rebuild and whoever is choosing needs to see that before
+    they choose."""
+    print(f"{indent}{'#':>3}  {'map':<22}{'cooked':>10}{'staged':>10}{'cache':>10}")
+    for i, record in enumerate(records, 1):
+        by = {}
+        for label, _path, size in record["pieces"]:
+            by[label] = by.get(label, 0) + size
+        note = "" if record["cooked_umap"] else "   (staging only, never cooked)"
+        print(f"{indent}{i:>3}) {record['name']:<22}"
+              f"{human_bytes(by.get('cooked')):>10}"
+              f"{human_bytes(by.get('staged')):>10}"
+              f"{human_bytes(by.get('cache')):>10}{note}")
+
+
+def purge(carla_root, mode=None, named="", drop_cache=None, interactive=False,
+          carla_busy=None, carla_kill=None):
+    """Delete imported maps from this machine. Returns a shell exit code.
+
+    A map occupies three places that age independently, so all three are shown
+    and the cache is chosen separately rather than swept along with the rest:
+
+      Content/<name>/       what the cook produced. Rebuilding it costs a re-cook.
+      Import/<name>/        the staging that cook read. Rebuilding costs a re-stage.
+      ~/.fixs/maps/<name>/  the downloaded bundle. Rebuilding it costs a DOWNLOAD,
+                            and this one is additionally read at RUN time - the
+                            .sumocfg a co-sim runs comes out of its sumo/ half. So
+                            deleting it does not merely make the next import
+                            slower, it stops the next RUN until something
+                            re-fetches it. Different blast radius, its own yes.
+
+    `named` selects without asking: "" opens the picker, "all" takes everything,
+    otherwise a comma-separated list of map names.
+
+    `interactive` is the caller's answer to "may this stop and ask?", the same
+    contract choose_imported_map takes and for the same reason: a --serve host has
+    a terminal and nobody sitting at it, and isatty() cannot tell the difference.
+
+    `carla_kill` is an optional callable taking that pid and ending the process
+    tree; when both it and a terminal are present, a running CARLA is offered up to
+    be closed instead of the purge simply refusing.
+
+    `carla_busy` is an optional zero-argument callable returning the pid of a
+    CARLA holding this machine's Content/ open, or None. Injected rather than
+    detected here because process inspection belongs to the caller - the same way
+    doctor.run takes who_has_port.
+
+    Nothing here re-resolves a name after the listing: the records shown are the
+    records deleted, so what is printed and what goes cannot drift apart."""
+    if carla_root is None:
+        print("[purge] no CARLA configured here; looking at the bundle cache only.")
+
+    records = purge_candidates(carla_root, mode)
+    if not records:
+        print("[purge] nothing to purge: no imported maps or cached bundles found.")
+        return 0
+
+    named = (named or "").strip()
+    grand = sum(record_bytes(r, True) for r in records)
+
+    print()
+    print(f"[purge] maps on this machine ({human_bytes(grand)} in total):")
+    _purge_table(records)
+    print()
+
+    if named:
+        if named.lower() in ("a", "all", "*"):
+            chosen = list(records)
+        else:
+            by_name = {r["name"].lower(): r for r in records}
+            chosen, unknown = [], []
+            for want in named.split(","):
+                want = want.strip()
+                if not want:
+                    continue
+                record = by_name.get(want.lower())
+                if record:
+                    chosen.append(record)
+                else:
+                    unknown.append(want)
+            if unknown:
+                sys.exit(f"[purge] not on this machine: {', '.join(unknown)}. "
+                         f"Run --purge-map with no name to see the list.")
+    elif not interactive:
+        sys.exit("[purge] non-interactive session: name what to purge "
+                 "(--purge-map NAME[,NAME] or --purge-map all).")
+    else:
+        picked = parse_selection(
+            _purge_ask(f"[purge] Purge which? [1-{len(records)}, a list like "
+                       f"1,3,4, or 'all'; Enter to cancel]: "), len(records))
+        if picked is None:
+            print("[purge] cancelled; nothing was deleted.")
+            return 0
+        chosen = [records[i] for i in picked]
+
+    # The cache question: asked once for the whole selection, and only when there
+    # is a cache to lose. drop_cache answers it up front for a caller that knows.
+    cache_bytes = sum(size for r in chosen for label, _p, size in r["pieces"]
+                      if label == "cache")
+    if drop_cache is None:
+        if cache_bytes and interactive:
+            print()
+            print(f"[purge] {human_bytes(cache_bytes)} of that is the downloaded "
+                  f"bundle under ~/.fixs/maps.")
+            print("[purge] Re-creating it means a download - and a co-sim reads "
+                  "its scenario")
+            print("[purge] (.sumocfg) from there, so the next run needs it back.")
+            drop_cache = _purge_ask(
+                "[purge] Drop the cached bundles too? [y/N]: ").lower().startswith("y")
+        else:
+            drop_cache = False
+
+    total = sum(record_bytes(r, drop_cache) for r in chosen)
+    print()
+    print(f"[purge] will delete ({human_bytes(total)}):")
+    for record in chosen:
+        for label, path, size in record["pieces"]:
+            verb = "keep  " if (label == "cache" and not drop_cache) else "delete"
+            print(f"   {verb}  {path}   ({human_bytes(size)})")
+    print()
+
+    # CARLA keeps every package under Content/ open, and Windows will not unlink a
+    # mapped file - so a purge with CARLA up deletes half a map and then raises a
+    # PermissionError from somewhere in the middle of it. Refuse before touching
+    # anything, rather than leaving the wreckage that a half-delete makes.
+    busy = carla_busy() if (carla_busy and carla_root) else None
+    if busy:
+        print(f"[purge] CARLA is running (pid {busy}) and holds files under "
+              f"Content/ open, so a delete would fail part-way through.")
+        # Offer rather than refuse. The delete cannot proceed either way, so the
+        # only question is who closes CARLA - and sending the user away to do it by
+        # hand costs a whole round trip to reach the identical state. Only offered
+        # when there is someone to ask AND a way to do it; `carla_kill` is passed in
+        # by the caller for the same reason carla_busy is - this module knows what
+        # holds the files, not how to end a process tree on this platform.
+        if interactive and carla_kill:
+            if not _purge_ask(f"[purge] Close CARLA (pid {busy}) now and continue? "
+                              f"[y/N]: ").lower().startswith("y"):
+                sys.exit("[purge] cancelled; nothing was deleted and CARLA is "
+                         "still running.")
+            print(f"[purge] closing CARLA (pid {busy}) ...")
+            carla_kill(busy)
+            # Confirm rather than assume: taskkill returns before the process tree
+            # is actually gone, and deleting while a handle survives is the
+            # half-delete this guard exists to prevent. A few seconds is generous
+            # for a kill that landed and short enough to be worth waiting out.
+            for _ in range(20):
+                time.sleep(0.5)
+                busy = carla_busy()
+                if not busy:
+                    break
+            if busy:
+                sys.exit(f"[purge] CARLA (pid {busy}) is still holding files after "
+                         f"the close request; nothing was deleted. Close it by hand "
+                         f"and run this again.")
+            print("[purge] CARLA closed.")
+        else:
+            sys.exit(f"[purge] close it and run this again"
+                     + ("" if interactive else " (non-interactive: not closing it "
+                        "for you)") + ".")
+
+    if interactive and not _purge_ask(
+            "[purge] Proceed? [y/N]: ").lower().startswith("y"):
+        print("[purge] cancelled; nothing was deleted.")
+        return 0
+
+    removed, failed = purge_maps(chosen, drop_cache=drop_cache)
+    freed = sum(size for _n, _l, _p, size in removed)
+    print(f"[purge] removed {len(removed)} item(s), {human_bytes(freed)} freed.")
+    if failed:
+        print(f"[purge] {len(failed)} could NOT be removed:")
+        for name, label, path, err in failed:
+            print(f"   {name} ({label}): {path}")
+            print(f"      {err}")
+        print("[purge] something still holding a file open (CARLA, the Unreal "
+              "editor, an explorer window) is the usual cause.")
+        return 1
+    return 0
+
 
 
 # The map library FIXS ships knowing about. A consuming repo therefore declares

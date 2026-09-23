@@ -4,17 +4,17 @@
 //============================================================================
 #include "DataLogger.h"
 
-#include <windows.h>     // CreateDirectoryA (CommonLib stays C++14: no std::filesystem)
+#include "PlatformCompat.h"   // createDirectory (CommonLib stays C++14: no std::filesystem)
 #include <cstdio>
 
 namespace fixs {
 
-// Best-effort: create every ancestor directory of 'path' (Win32, C++14-safe).
+// Best-effort: create every ancestor directory of 'path' (C++14-safe).
 static void ensureParentDir(const std::string& path) {
     std::string cur;
     for (char c : path) {
         if ((c == '/' || c == '\\') && !cur.empty() && cur.back() != ':')
-            CreateDirectoryA(cur.c_str(), NULL);
+            FIXS::Platform::createDirectory(cur);
         cur.push_back(c);
     }
 }
@@ -67,6 +67,12 @@ std::string DataLogger::cell(const std::string& f, const VehFullData_t& v) {
     if (f == "type")          return v.type;
     if (f == "vehicleClass")  return v.vehicleClass;
     if (f == "linkId")        return v.linkId;
+    // The actuation channel. Logging these is how a run separates "was the
+    // vehicle told to move?" from "did it move?" -- indistinguishable in a
+    // position/speed trace, and with completely different causes.
+    if (f == "acceleratorPedalDesired") return num(v.acceleratorPedalDesired);
+    if (f == "brakePedalDesired")       return num(v.brakePedalDesired);
+    if (f == "steerAngleDesired")       return num(v.steerAngleDesired);
     return "";                // unknown field -> empty cell (safe)
 }
 

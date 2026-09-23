@@ -380,6 +380,32 @@ if ($CountPython -gt 0) {
     [void]$sb.AppendLine("  $CrossSymbol CommonLib Python package          [No .py files staged]")
 }
 
+# The check above counts TOP-LEVEL .py only, which is the same blind spot the
+# staging had: CommonLib\VirEnv, \fixs and \xil could all be missing from a build
+# while this printed a tick and a file count. Compare the packages the SOURCE has
+# against the ones that reached the build, and name any that did not arrive -- a
+# release whose Python bridge cannot import should say so here, not at the first
+# co-simulation someone runs.
+function Get-PyPackageNames {
+    param([string]$Root)
+    if (-not (Test-Path $Root)) { return @() }
+    @(Get-ChildItem $Root -Directory -ErrorAction SilentlyContinue |
+        Where-Object { Test-Path (Join-Path $_.FullName '__init__.py') } |
+        ForEach-Object { $_.Name })
+}
+$srcPkgs   = Get-PyPackageNames (Join-Path $RepoRoot 'CommonLib')
+$builtPkgs = Get-PyPackageNames (Join-Path $BuildDir 'CommonLib')
+$missing   = @($srcPkgs | Where-Object { $builtPkgs -notcontains $_ })
+if ($srcPkgs.Count -eq 0) {
+    # Nothing to assert against (a source tree without CommonLib packages).
+} elseif ($missing.Count -eq 0) {
+    $label = "  $CheckSymbol CommonLib Python subpackages"
+    $padding = ' ' * [Math]::Max(0, 50 - $label.Length)
+    [void]$sb.AppendLine("$label$padding[$($builtPkgs -join ', ')]")
+} else {
+    [void]$sb.AppendLine("  $CrossSymbol CommonLib Python subpackages      [MISSING: $($missing -join ', ')]")
+}
+
 [void]$sb.AppendLine()
 [void]$sb.AppendLine('BUILD ENVIRONMENT')
 [void]$sb.AppendLine('-----------------')
