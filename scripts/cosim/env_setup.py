@@ -84,6 +84,20 @@ def save_config(cfg):
     print(f"[setup] saved CARLA env -> {CONFIG_PATH}")
 
 
+# Opt-in to a uv env instead of conda: {"use_uv": true}. Its own file, not a key in
+# carla.json, because run_setup writes carla.json from scratch and would drop it.
+ENV_FLAG_PATH = os.path.join(CONFIG_DIR, "env.json")
+
+
+def use_uv():
+    """True when ~/.fixs/env.json opts this machine into a uv env."""
+    try:
+        with open(ENV_FLAG_PATH, encoding="utf-8") as f:
+            return json.load(f).get("use_uv") is True
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
 # ------------------------------------------------------- the configured python
 # carla.json names ONE interpreter, and every FIXS entry point must run under it -
 # it is the only env that has the carla client, the SUMO clients and whatever an
@@ -388,7 +402,17 @@ def _interpreter_kind(py_exe):
     whether that env is SHARED - a system python (owned by the OS and its
     package manager) or a conda base env (shared by every other env on the
     machine). Installing into a shared interpreter reaches well beyond FIXS,
-    which is why every install path gates on this via _confirm_install."""
+    which is why every install path gates on this via _confirm_install.
+
+    A venv is private whoever made it: installing there reaches nothing else.
+    Tested first, and on the unresolved path, because on Linux a venv's
+    bin/python is a symlink to the base interpreter it was made from."""
+    root = _env_root(py_exe)
+    if os.path.isfile(os.path.join(root, "pyvenv.cfg")):
+        uv_envs = os.path.normcase(os.path.abspath(UV_ENVS_DIR)) + os.sep
+        if os.path.normcase(root).startswith(uv_envs):
+            return "uv env '%s'" % os.path.basename(root), False
+        return "venv (%s)" % root, False
     real = os.path.normcase(os.path.realpath(py_exe))
     roots = _conda_roots()
     # Named envs first: <root>/envs/<name> also lives under <root>, so testing
@@ -467,6 +491,87 @@ def _conda_create_env(conda_exe, yml_path, name):
     return subprocess.call(cmd) == 0
 
 
+# ----------------------------------------------------------- uv env (opt-in)
+# The same env as environment.yml, built by uv from pyproject.toml + uv.lock at the
+# FIXS root. A uv env is a plain venv, found by NAME under ~/.fixs/envs - the
+# counterpart of a named conda env - so FIXS_ENV_NAME means the same thing for both.
+
+UV_PROJECT = os.path.dirname(ENV_YML)
+UV_ENVS_DIR = os.path.join(CONFIG_DIR, "envs")
+
+
+def _venv_python(env_dir):
+    if platform.system() == "Windows":
+        return os.path.join(env_dir, "Scripts", "python.exe")
+    return os.path.join(env_dir, "bin", "python")
+
+
+def _uv_env_python(name):
+    """python of the uv env called `name`, or None."""
+    py = _venv_python(os.path.join(UV_ENVS_DIR, name))
+    return py if os.path.isfile(py) else None
+
+
+def _find_uv():
+    """Locate the uv executable, or None. Its installer puts it in ~/.local/bin,
+    which a shell started before the install does not have on PATH yet."""
+    found = shutil.which("uv")
+    if found:
+        return found
+    exe = "uv.exe" if platform.system() == "Windows" else "uv"
+    local = os.path.join(os.path.expanduser("~"), ".local", "bin", exe)
+    return local if os.path.isfile(local) else None
+
+
+def _is_uv_venv(py_exe):
+    """True when py_exe is in a venv uv made (its pyvenv.cfg carries `uv = <ver>`)."""
+    try:
+        with open(os.path.join(_env_root(py_exe), "pyvenv.cfg"), encoding="utf-8") as f:
+            return any(line.split("=")[0].strip() == "uv" for line in f)
+    except OSError:
+        return False
+
+
+def _uv_create_env(uv_exe, name):
+    """Build ~/.fixs/envs/<name> from uv.lock. --locked refuses a lock that no
+    longer matches pyproject.toml rather than quietly re-resolving it."""
+    env_dir = os.path.join(UV_ENVS_DIR, name)
+    cmd = [uv_exe, "sync", "--locked", "--project", UV_PROJECT]
+    print(f"[setup] UV_PROJECT_ENVIRONMENT={env_dir} {' '.join(cmd)}")
+    return subprocess.call(cmd, env=dict(os.environ, UV_PROJECT_ENVIRONMENT=env_dir)) == 0
+
+
+def _resolve_uv_python(name):
+    """The uv env called `name`, creating it if asked. None when it cannot be had,
+    and the caller falls back to the conda/detection path."""
+    py = _uv_env_python(name)
+    if py:
+        print(f"[setup] found the '{name}' uv env: {py}")
+        return py
+    uv = _find_uv()
+    if not uv:
+        print(f"[setup] {ENV_FLAG_PATH} asks for a uv env, but uv is not installed.\n"
+              f"        Install it (https://docs.astral.sh/uv/) and re-run setup.")
+        return None
+    lock = os.path.join(UV_PROJECT, "uv.lock")
+    if not os.path.isfile(lock):
+        print(f"[setup] {ENV_FLAG_PATH} asks for a uv env, but there is no {lock}.")
+        return None
+    print(f"[setup] the '{name}' uv env is not installed (uv found: {uv}).")
+    ans = input(f"        create it now from {lock}? [Y/n]: ").strip().lower()
+    if ans not in ("", "y", "yes"):
+        return None
+    if _uv_create_env(uv, name):
+        py = _uv_env_python(name)
+        if py:
+            print(f"[setup] created '{name}': {py}")
+            return py
+    else:
+        print("[setup] 'uv sync' FAILED; its output is above.")
+    print("[setup] the uv env was not created; falling back to detection.")
+    return None
+
+
 def resolve_python():
     """Resolve the interpreter that runs the co-sim, then report the two ways the
     result can differ from what was asked for: a different env than FIXS_ENV_NAME
@@ -521,6 +626,8 @@ def _resolve_python():
     """Resolve the interpreter that runs the co-sim.
 
     Order:
+      0. with ~/.fixs/env.json use_uv: the uv env of that name, built from uv.lock
+         if it is missing; if that cannot be had, carry on with 1-3;
       1. the canonical env (FIXS_ENV_NAME, else environment.yml's name) if it exists;
       2. else, if conda is available, offer to create it from environment.yml;
       3. else fall back to any conda env that already has the co-sim deps
@@ -528,6 +635,12 @@ def _resolve_python():
     This keeps the reproducible 'realsim' path primary while staying usable on
     machines that named their env differently."""
     name = _canonical_env_name()
+
+    # 0. opted into uv.
+    if use_uv():
+        py = _resolve_uv_python(name)
+        if py:
+            return py
 
     # 1. canonical env already installed -> good to go.
     py = _named_env_python(name)
@@ -674,7 +787,7 @@ def _warn_if_incomplete(py_exe):
               f"agent will not import, so mainVirCarla exits at startup and the whole "
               f"stack stops. A run whose ego is driven some other way is unaffected.")
     print(f"        Fix it with:\n"
-          f"            \"{py_exe}\" -m pip install {pkgs}")
+          f"            {_pip_hint(py_exe, pkgs.split())}")
 
 
 # Where an application's applied-dependency stamp lives, relative to the env root.
@@ -732,17 +845,17 @@ def ensure_app_deps(py_exe, app_id, req_path, refresh=False):
         print(f"[setup] '{app_id}' dependencies not installed; the app will run "
               f"without them.\n"
               f"        Install them yourself with:\n"
-              f"            \"{py_exe}\" -m pip install -r \"{req_path}\"")
+              f"            {_pip_hint(py_exe, ['-r', req_path])}")
         return False
     print(f"[setup] applying '{app_id}' dependencies "
           f"({os.path.basename(req_path)}) to {py_exe} ...")
-    rc = subprocess.call([py_exe, "-m", "pip", "install", "-r", req_path])
+    rc = subprocess.call(_pip_cmd(py_exe) + ["-r", req_path])
     if rc != 0:
         # Loud and specific: the alternative is an ImportError minutes into a run,
         # naming a module rather than the app whose requirements never applied.
         print(f"[setup] FAILED to install '{app_id}' dependencies (pip exit {rc}).\n"
               f"        Install them by hand, or re-run with --refresh-deps:\n"
-              f"            \"{py_exe}\" -m pip install -r \"{req_path}\"")
+              f"            {_pip_hint(py_exe, ['-r', req_path])}")
         return False
     try:
         os.makedirs(os.path.dirname(stamp), exist_ok=True)
@@ -827,8 +940,23 @@ def find_source_wheel(carla_root, py_exe=None):
     return sorted(wheels)[-1]  # newest by name
 
 
+def _pip_cmd(py_exe):
+    """The command that pip-installs into py_exe. A uv-made venv has no pip in it,
+    so installs into one go through uv."""
+    uv = _find_uv() if _is_uv_venv(py_exe) else None
+    if uv:
+        return [uv, "pip", "install", "--python", py_exe]
+    return [py_exe, "-m", "pip", "install"]
+
+
+def _pip_hint(py_exe, args):
+    """_pip_cmd as a line to paste into a shell."""
+    return " ".join(f'"{a}"' if " " in a or a == py_exe else a
+                    for a in _pip_cmd(py_exe) + list(args))
+
+
 def _pip_install(py_exe, args):
-    cmd = [py_exe, "-m", "pip", "install", *args]
+    cmd = _pip_cmd(py_exe) + list(args)
     print(f"[setup] {' '.join(cmd)}")
     return subprocess.call(cmd) == 0
 

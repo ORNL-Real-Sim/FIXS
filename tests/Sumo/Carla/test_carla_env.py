@@ -237,6 +237,122 @@ def test_confirm_install_question_always_asks(monkeypatch):
     assert env._confirm_install("py", "wheel", "reinstall? [y/N]: ") is False
 
 
+# ------------------------------------------------------------ uv env (opt-in)
+
+def _make_venv(env_dir, uv=True):
+    """A fake venv: its python file and a pyvenv.cfg, uv-made or not."""
+    py = env._venv_python(str(env_dir))
+    os.makedirs(os.path.dirname(py), exist_ok=True)
+    open(py, "w").close()
+    cfg = "home = /base\n" + ("uv = 0.8.8\n" if uv else "") + "version_info = 3.10.18\n"
+    (env_dir / "pyvenv.cfg").write_text(cfg, encoding="utf-8")
+    return py
+
+
+@pytest.fixture
+def fixs_home(tmp_path, monkeypatch):
+    """~/.fixs redirected into tmp: the flag file and the uv envs dir."""
+    home = tmp_path / ".fixs"
+    home.mkdir()
+    monkeypatch.setattr(env, "ENV_FLAG_PATH", str(home / "env.json"))
+    monkeypatch.setattr(env, "UV_ENVS_DIR", str(home / "envs"))
+    return home
+
+
+@pytest.mark.parametrize("content, expected", [
+    (None, False),                       # no file: conda, as before
+    ('{"use_uv": true}', True),
+    ('{"use_uv": false}', False),
+    ('{"use_uv": "yes"}', False),        # only a JSON true opts in
+    ('["use_uv"]', False),
+    ("not json", False),
+])
+def test_use_uv_reads_the_flag_file(fixs_home, content, expected):
+    if content is not None:
+        (fixs_home / "env.json").write_text(content, encoding="utf-8")
+    assert env.use_uv() is expected
+
+
+def test_interpreter_kind_venvs_are_private(fixs_home, tmp_path):
+    """A uv env under ~/.fixs/envs, and any other venv, is FIXS-private: installing
+    into it reaches nothing else, so it must not get the system-python warning."""
+    named = _make_venv(fixs_home / "envs" / "fixs_applications")
+    label, shared = env._interpreter_kind(named)
+    assert label == "uv env 'fixs_applications'" and shared is False
+
+    other = _make_venv(tmp_path / "proj" / ".venv", uv=False)
+    label, shared = env._interpreter_kind(other)
+    assert label.startswith("venv") and shared is False
+
+
+def test_pip_cmd_goes_through_uv_for_a_uv_venv(fixs_home, tmp_path, monkeypatch):
+    """A uv venv has no pip, so `python -m pip` fails there; a plain venv keeps it."""
+    monkeypatch.setattr(env, "_find_uv", lambda: "uv")
+    uv_py = _make_venv(fixs_home / "envs" / "x")
+    assert env._pip_cmd(uv_py) == ["uv", "pip", "install", "--python", uv_py]
+
+    plain = _make_venv(tmp_path / "plain", uv=False)
+    assert env._pip_cmd(plain) == [plain, "-m", "pip", "install"]
+
+    # uv gone: fall back to pip rather than to nothing.
+    monkeypatch.setattr(env, "_find_uv", lambda: None)
+    assert env._pip_cmd(uv_py) == [uv_py, "-m", "pip", "install"]
+
+
+def _no_conda(monkeypatch):
+    def _boom(*_):
+        raise AssertionError("the conda path was consulted")
+    monkeypatch.setattr(env, "_named_env_python", _boom)
+    monkeypatch.setattr(env, "_find_conda", _boom)
+
+
+def test_resolve_python_uv_flag_binds_the_uv_env(fixs_home, monkeypatch):
+    (fixs_home / "env.json").write_text('{"use_uv": true}', encoding="utf-8")
+    monkeypatch.setenv("FIXS_ENV_NAME", "fixs_applications")
+    py = _make_venv(fixs_home / "envs" / "fixs_applications")
+    _no_conda(monkeypatch)
+    assert env._resolve_python() == py
+
+
+def test_resolve_python_uv_flag_creates_the_env_from_the_lock(fixs_home, tmp_path,
+                                                               monkeypatch):
+    (fixs_home / "env.json").write_text('{"use_uv": true}', encoding="utf-8")
+    monkeypatch.setenv("FIXS_ENV_NAME", "fixs_applications")
+    (tmp_path / "uv.lock").write_text("", encoding="utf-8")
+    monkeypatch.setattr(env, "UV_PROJECT", str(tmp_path))
+    monkeypatch.setattr(env, "_find_uv", lambda: "uv")
+    monkeypatch.setattr("builtins.input", lambda *_: "")
+    made = []
+
+    def _sync(uv, name):
+        made.append(name)
+        _make_venv(fixs_home / "envs" / name)
+        return True
+    monkeypatch.setattr(env, "_uv_create_env", _sync)
+    _no_conda(monkeypatch)
+
+    py = env._resolve_python()
+    assert made == ["fixs_applications"]
+    assert py == env._venv_python(str(fixs_home / "envs" / "fixs_applications"))
+
+
+def test_resolve_python_uv_flag_without_uv_falls_back_to_conda(fixs_home, monkeypatch,
+                                                               capsys):
+    (fixs_home / "env.json").write_text('{"use_uv": true}', encoding="utf-8")
+    monkeypatch.setattr(env, "_find_uv", lambda: None)
+    monkeypatch.setattr(env, "_named_env_python", lambda name: "conda_py")
+    assert env._resolve_python() == "conda_py"
+    assert "uv is not installed" in capsys.readouterr().out
+
+
+def test_resolve_python_without_flag_ignores_uv_envs(fixs_home, monkeypatch):
+    """No flag, no change: a uv env on disk does not outrank the conda env."""
+    monkeypatch.setenv("FIXS_ENV_NAME", "fixs_applications")
+    _make_venv(fixs_home / "envs" / "fixs_applications")
+    monkeypatch.setattr(env, "_named_env_python", lambda name: "conda_py")
+    assert env._resolve_python() == "conda_py"
+
+
 def test_find_source_wheel_prefers_tag(tmp_path):
     """Wheel auto-resolution picks one matching the interpreter's cpXY tag."""
     dist = tmp_path / "PythonAPI" / "carla" / "dist"

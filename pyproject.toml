@@ -1,0 +1,39 @@
+# The FIXS python env as a uv project - the same env environment.yml builds, for
+# machines that opted into uv (~/.fixs/env.json: {"use_uv": true}).
+#
+# env_setup builds it with `uv sync --frozen` into ~/.fixs/envs/<name>, so uv.lock
+# pins every version on every machine. After editing this file, run `uv lock` and
+# commit both.
+#
+# Keep the list in step with environment.yml; test_env_spec_covers_imports checks
+# both against what the shipped python imports.
+[project]
+name = "fixs-env"
+version = "0"
+# The CARLA 0.9.15 client wheel exists for CPython 3.7-3.10 only.
+requires-python = "==3.10.*"
+dependencies = [
+    "networkx",
+    "numpy",
+    "pandas",
+    "plotly",
+    "pygame",
+    "protobuf",
+    "pytest",
+    "pyyaml",
+    "shapely",
+    "lxml",
+    # On PyPI, so unlike carla there is no reason to leave them to a later step.
+    # Floor = the SUMO version FIXS builds against (dependencies.yaml).
+    "traci>=1.22",
+    "sumolib>=1.22",
+]
+# Not here, on purpose: carla. ensure_carla installs it after the env exists,
+# because a source-build CARLA needs its own wheel rather than the PyPI one.
+
+[tool.uv]
+# An env, not a package: nothing to build or install from this directory.
+package = false
+# uv's own CPython, never the system one, so the env does not break when a system
+# python is upgraded or removed.
+python-preference = "only-managed"
