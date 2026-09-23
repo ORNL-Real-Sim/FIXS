@@ -54,3 +54,20 @@ def app_root(start=None):
 def env_yml(start=None):
     """The canonical conda spec shipped at the FIXS root."""
     return os.path.join(fixs_root(start), SENTINEL)
+
+
+def use_carla_modules(start=None):
+    """Make the CARLA component's modules (place_tls, place_signs, props,
+    check_ego_route ...) importable from the co-sim engine. Returns Carla/.
+
+    #313 moved the engine to cosim/ and left what is actually CARLA in Carla/, so
+    those stopped being flat siblings - and every `import place_tls` in the engine
+    became a ModuleNotFoundError at the point a run first needed it, which on a
+    source build is minutes in, after the app has started. APPENDED, not inserted:
+    Carla/ still holds forwarding shims named run_cosim / import_map /
+    carla_env_setup, and the engine's own modules must keep winning over them."""
+    import sys
+    carla = os.path.join(fixs_root(start), "Carla")
+    if carla not in sys.path:
+        sys.path.append(carla)
+    return carla

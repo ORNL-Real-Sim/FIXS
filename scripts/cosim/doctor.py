@@ -331,13 +331,9 @@ def _check_scenario(rep, scenario):
         rep.add("Scenario", "net", WARN, "no .net.xml found for this scenario")
         return
     try:
-        # The checker is CARLA-side tooling and stayed in Carla/ when #313 moved
-        # this module to cosim/, so it is no longer a flat sibling to import.
+        # CARLA-side tooling, left in Carla/ when #313 moved this module to cosim/.
         import fixs_paths
-        carla_dir = os.path.join(fixs_paths.fixs_root(
-            os.path.dirname(os.path.abspath(__file__))), "Carla")
-        if carla_dir not in sys.path:
-            sys.path.insert(0, carla_dir)
+        fixs_paths.use_carla_modules(os.path.dirname(os.path.abspath(__file__)))
         import check_ego_route
     except ImportError as exc:
         rep.add("Scenario", "ego route", WARN, f"checker unavailable: {exc}")

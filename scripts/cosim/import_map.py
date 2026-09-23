@@ -68,6 +68,8 @@ import zipfile
 import env_setup as env
 import fixs_paths
 
+fixs_paths.use_carla_modules(os.path.dirname(os.path.abspath(__file__)))  # props
+
 
 def _mode(mode=None):
     """The CARLA flavour to resolve paths for: the caller's, else the saved

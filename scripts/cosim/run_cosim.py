@@ -24,6 +24,7 @@ Examples:
   python run_cosim.py --peer 192.168.140.56      # on the traffic machine
 """
 import argparse
+import atexit
 import csv
 import io
 import json
@@ -61,7 +62,7 @@ FIXS_ROOT = fixs_paths.fixs_root(HERE)     # the FIXS bundle root
 APP_ROOT = fixs_paths.app_root(HERE)       # the app dir that holds FIXS/
 # The CARLA component keeps its own folder in the bundle; reach into it from the
 # root rather than from HERE, which is no longer inside it.
-CARLA_DIR = os.path.join(FIXS_ROOT, "Carla")
+CARLA_DIR = fixs_paths.use_carla_modules(HERE)   # and place_tls & co. importable
 # CARLA's own standalone bridge. It lives OUTSIDE Carla/ (#330) because
 # 8_create_zip.ps1 packs Carla/ wholesale and this speaks no FIXS: it drives SUMO
 # over its own TraCI connection and takes no controller, XIL component or
@@ -3311,6 +3312,25 @@ _IN_PROGRESS = {}
 _CHECKPOINT = {}
 
 
+def _reap_if_running(proc, name):
+    """atexit: stop a process this run started if nothing else did. A no-op once a
+    stack runner's teardown has already stopped it, which is the normal case."""
+    if proc.poll() is None:
+        print(f"[cosim] stopping {name} (pid {proc.pid}): this run started it and "
+              f"is exiting before handing it to the stack.", flush=True)
+        if platform.system() == "Windows":
+            # A launch script is cmd.exe with the interpreter under it.
+            _kill_pid_tree(proc.pid)
+        else:
+            # Not _kill_pid_tree: that signals the process GROUP, and the app shares
+            # this process's group - it would signal the engine mid-exit.
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+
+
 def _say_checkpoint_kept():
     """Point at the saved setup, once, on a run that failed after it was written.
 
@@ -4522,6 +4542,13 @@ def main():
         app_proc, app_sumocfg = start_app(app, args.config or setup.get("config"),
                                           sumo_only=args.sumo_only,
                                           sumocfg=args.sumocfg or map_sumocfg)
+        # The app is only handed to a stack runner (whose `finally` stops it) a few
+        # hundred lines further down, after the bundle, the cook and the placers.
+        # Anything that fails in between used to leave it running, waiting for a
+        # TrafficLayer that never came - found by the next run's leftover sweep,
+        # and meanwhile holding the output pipe a front end reads to its end.
+        if app_proc is not None:
+            atexit.register(_reap_if_running, app_proc, app["id"])
 
     # Same condition as the preflight above, resumed. Split rather than moved so the
     # app can start between the two: everything above this line only DECIDES what the
