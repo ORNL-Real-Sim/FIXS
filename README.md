@@ -1,7 +1,8 @@
 # Flexible Interface for XIL Simulation (FIXS)
 
+<!-- rtd-about-start: doc/about.md includes from here to rtd-about-end -->
 ## FIXS Contacts
-**Primary Maintainer**: University of Georgia\
+**Primary Maintainer**: University of Georgia
 
 Oak Ridge National Lab PIs
 Max Chen\
@@ -30,6 +31,7 @@ https://www1.eere.energy.gov/vehiclesandfuels/downloads/2022_AMR/eems067_deter_2
 https://www.energy.gov/sites/default/files/2021-06/eems101_deter_2021_o_5-19_645pm_LR_ML.pdf
 
 Publication list is upcoming...
+<!-- rtd-about-end -->
 
 # Other links
 This README contains general information of the interface. For specific documentation of different simulators, check the following links:
@@ -133,8 +135,8 @@ scripts\dispatch\2_core_components.bat
 # VISSIM components only
 scripts\dispatch\3_vissim_components.bat
 
-# CarMaker components only (auto-generates BuildConfig files)
-powershell -ExecutionPolicy Bypass -File scripts\dispatch\4a_carmaker_components.ps1
+# CarMaker components only
+powershell -ExecutionPolicy Bypass -File scripts\dispatch\5a_carmaker_components.ps1
 ```
 
 For complete build system documentation including Debug/Release configurations, troubleshooting, and architecture details, see **[doc/BUILD.md](doc/BUILD.md)**.

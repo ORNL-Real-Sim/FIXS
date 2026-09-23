@@ -209,20 +209,20 @@ The release build process executes the following steps:
    - `DriverModel_RealSim_legacy.dll` - VISSIM driver model, legacy/frozen (long API, VISSIM ≤ 2020)
    - Output: `ProprietaryFiles/VISSIMserver/` + copied to `build/`
 
-4. **CarMaker Components** (`4a_carmaker_components.ps1`)
+4. **CarMaker Components** (`5a_carmaker_components.ps1`)
    - Generates BuildConfig Python files for each CarMaker version
    - `CarMaker.win64.exe` - CarMaker Office executables
    - `libcarmaker4sl.mexw64` - CarMaker for Simulink MEX files
    - Built for each version in `dependencies.yaml` (e.g., CM11, CM13)
    - Output: `CarMaker/CM*/` + copied to `build/CarMaker/`
 
-5. **dSPACE Libraries** (`4b_carmaker_dspace.ps1`) - Optional
+5. **dSPACE Libraries** (`5b_carmaker_dspace.ps1`) - Optional
    - `libRealSimDsLib_2024a_CM*.a` - Version-specific dSPACE libraries
    - Only built if dSPACE ConfigurationDesk is detected
    - Built for each CarMaker version
    - Output: `CommonLib/` + copied to `build/CarMaker/`
 
-6. **MEX RealSimSocket** (`5_mex_realsim_socket.ps1`) - Optional
+6. **MEX RealSimSocket** (`6_mex_realsim_socket.ps1`) - Optional
    - `RealSimSocket.mexw64` - MATLAB interface for socket communication
    - Only built if MATLAB is detected
    - Output: `CommonLib/` + copied to `build/`
@@ -265,14 +265,19 @@ FIXS releases are produced by a GitHub Actions pipeline (`.github/workflows/rele
 - **Public source → built on the hosted runner every push** (`windows-2022`, matching the VS 2022 generator; `windows-latest` ships VS 2026 and is incompatible): yaml-cpp, `TrafficLayer.exe`, `CoordMerge.exe`, `VirtualEnvironment.lib` (SDK-free on the 0.9.0 train, #174), and all `Carla/` + `CommonLib` Python. No private submodule, no token.
 - **Licensed-toolchain source → built manually on a licensed workstation**: the VISSIM DriverModel DLLs, CarMaker executables + CM4SL MEX, dSPACE libraries, and the MATLAB MEX. These need installed proprietary toolchains, so the hosted runner cannot build them. They ship as a prebuilt **bundle** that CI overlays into the build.
 
-The hosted path is made proprietary-aware by the `RS_FIXS_AUTOMATION` environment flag, which tells `dispatch.bat` to skip the licensed steps (3 / 4a / 4b / 5) and consume the downloaded bundle instead.
+The hosted path is made proprietary-aware by the `RS_FIXS_AUTOMATION` environment flag, which tells `dispatch.bat` to skip the licensed steps (VISSIM 3 / CarMaker 5a / dSPACE 5b / MEX 6) and consume the downloaded bundle instead.
 
 ### Rolling release channels
 
 | Branch | Rolling prerelease | Notes |
 |--------|--------------------|-------|
-| `main` | `latest` | current train |
-| `dev_v0.9.0` | `v0.9.0-alpha` | 0.9.0 train (SDK-free VirtualEnvironment, #174) |
+| `main` | `stable` | release tier |
+| `beta_vX.Y.Z` | `vX.Y.Z-beta` | test tier |
+| `dev_vX.Y.Z` | `vX.Y.Z-alpha` | dev tier (e.g. `dev_v0.9.0` → `v0.9.0-alpha`, SDK-free VirtualEnvironment, #174) |
+
+`scripts/dispatch/release_channel.ps1` owns this mapping. Each channel also has a
+Read the Docs version under the same name (see the Developer Guide's documentation
+section).
 
 On every push to a release branch the pipeline builds the public core, overlays the matching proprietary bundle, packs one canonical zip, and (re)publishes the rolling prerelease anchored to that commit. Pull requests build + package only (no publish), and upload the zip as a workflow artifact for inspection.
 
@@ -342,7 +347,7 @@ Builds VISSIM driver model DLLs. Run this when modifying VISSIM interface code.
 
 #### 4. CarMaker Components Only
 ```batch
-powershell -ExecutionPolicy Bypass -File scripts\dispatch\4a_carmaker_components.ps1
+powershell -ExecutionPolicy Bypass -File scripts\dispatch\5a_carmaker_components.ps1
 ```
 Builds CarMaker executables. Automatically:
 - Reads CarMaker versions from `dependencies.yaml`
@@ -352,13 +357,13 @@ Builds CarMaker executables. Automatically:
 
 #### 5. dSPACE Libraries Only
 ```batch
-powershell -ExecutionPolicy Bypass -File scripts\dispatch\4b_carmaker_dspace.ps1
+powershell -ExecutionPolicy Bypass -File scripts\dispatch\5b_carmaker_dspace.ps1
 ```
 Builds dSPACE libraries for CarMaker HIL integration. Run this when modifying dSPACE interface code.
 
 #### 6. MEX RealSimSocket Only
 ```batch
-powershell -ExecutionPolicy Bypass -File scripts\dispatch\5_mex_realsim_socket.ps1
+powershell -ExecutionPolicy Bypass -File scripts\dispatch\6_mex_realsim_socket.ps1
 ```
 Builds MATLAB MEX file for socket communication. Run this when modifying MATLAB interface code.
 
@@ -376,7 +381,7 @@ scripts\dispatch\3_vissim_components.bat
 
 **Scenario 3: Modified CarMaker User.c or integration**
 ```batch
-powershell -ExecutionPolicy Bypass -File scripts\dispatch\4a_carmaker_components.ps1
+powershell -ExecutionPolicy Bypass -File scripts\dispatch\5a_carmaker_components.ps1
 ```
 
 **Scenario 4: Testing full release package**
@@ -506,7 +511,7 @@ The `detect_tool_paths.ps1` script automatically locates installed tools:
 CarMaker builds require a BuildConfig Python file that specifies compiler settings, include paths, and library dependencies. The build system automatically generates these:
 
 **Process:**
-1. `4a_carmaker_components.ps1` reads `dependencies.yaml`
+1. `5b_carmaker_dspace.ps1` reads `dependencies.yaml`
 2. For each CarMaker version (e.g., 11.1.2, 13.1.3):
    - Detects MATLAB version
    - Locates CarMaker installation
@@ -527,7 +532,7 @@ If you need custom BuildConfig settings, you can:
 2. Manually edit the generated Python file
 3. Re-run CarMaker build
 
-Note: Re-running `4a_carmaker_components.ps1` will regenerate and overwrite custom changes.
+Note: Re-running `5b_carmaker_dspace.ps1` will regenerate and overwrite custom changes.
 
 ## Troubleshooting
 
@@ -571,7 +576,7 @@ Error: Could not find MATLAB installation
 - Ensure MATLAB is installed
 - Update `dependencies.yaml` with correct MATLAB version
 - Check MATLAB registry entries exist
-- Try specifying MATLAB path manually in `5_mex_realsim_socket.ps1`
+- Try specifying MATLAB path manually in `6_mex_realsim_socket.ps1`
 
 ---
 

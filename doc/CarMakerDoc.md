@@ -288,7 +288,7 @@ RealSim comes with precompiled dSPACE library file that can be used directly und
 
 The dispatch system automatically builds dSPACE libraries for all CarMaker versions when dSPACE is detected:
 ```batch
-powershell -ExecutionPolicy Bypass -File scripts\dispatch\4b_carmaker_dspace.ps1
+powershell -ExecutionPolicy Bypass -File scripts\dispatch\5b_carmaker_dspace.ps1
 ```
 
 This script:
@@ -354,7 +354,7 @@ Note: currently, it is only for SCALEXIO and configuration desk dSPACE implement
 
 The dispatch system automatically generates CarMaker BuildConfig Python files with correct dSPACE settings:
 ```batch
-powershell -ExecutionPolicy Bypass -File scripts\dispatch\4a_carmaker_components.ps1
+powershell -ExecutionPolicy Bypass -File scripts\dispatch\5a_carmaker_components.ps1
 ```
 
 This generates `RS_CM{major}_{minor}_{patch}_BuildConfig_{matlab}.py` files with:

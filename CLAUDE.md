@@ -91,14 +91,14 @@ scripts\dispatch\2_core_components.bat
 # VISSIM driver models only
 scripts\dispatch\3_vissim_components.bat
 
-# CarMaker (auto-generates BuildConfig files based on dependencies.yaml)
-powershell -ExecutionPolicy Bypass -File scripts\dispatch\4a_carmaker_components.ps1
+# CarMaker executables
+powershell -ExecutionPolicy Bypass -File scripts\dispatch\5a_carmaker_components.ps1
 
 # dSPACE libraries
-powershell -ExecutionPolicy Bypass -File scripts\dispatch\4b_carmaker_dspace.ps1
+powershell -ExecutionPolicy Bypass -File scripts\dispatch\5b_carmaker_dspace.ps1
 
 # MATLAB MEX file
-powershell -ExecutionPolicy Bypass -File scripts\dispatch\5_mex_realsim_socket.ps1
+powershell -ExecutionPolicy Bypass -File scripts\dispatch\6_mex_realsim_socket.ps1
 ```
 
 ### Build System Features
@@ -490,7 +490,7 @@ Forward-looking decisions for unifying the virtual-environment bridges (CarMaker
 - **`TrafficHelper.cpp` (~1743 lines)** — SUMO and VISSIM logic is fully interleaved; tracked in milestone 0.8.0. Avoid adding to it; route new functionality to helper sub-files instead.
 - **`mainTrafficLayer.cpp` (~1396 lines)** — The main() function does too much directly. Issue #113 tracks a refactor. Prefer adding logic in helper classes, not directly in main.
 - **`ConfigHelper.cpp` (~1169 lines)** — Has dead `// TODO: add code` branches and commented-out error blocks; safe to clean up but not urgent.
-- **`MsgHelper.py` (~28k lines)** — Almost certainly has dead code paths. Any changes there should be narrow and tested; full audit deferred.
+- **`MsgHelper.py` (~680 lines)** — Likely has dead code paths. Any changes there should be narrow and tested; full audit deferred.
 
 ### No automated CI
 - Python unit tests run locally only (`tests/Python/unit/`). Issue #57 tracks GitHub Actions setup. When suggesting test commands, always direct to `python -m pytest tests/Python/unit/ -v` — this is the one simulator-free path.
@@ -503,8 +503,9 @@ Forward-looking decisions for unifying the virtual-environment bridges (CarMaker
 - External contributors see `ProprietaryFiles/` as an inaccessible submodule — don't ask them to modify it.
 
 ### Documentation gaps (issue #137)
-- RTD `doc/BUILD.md` and `doc/CarlaDoc.md` are orphaned from the TOC — they build but aren't linked in `index.rst`.
-- Python CommonLib (`ConfigHelper.py`, `MsgHelper.py`, `SocketHelper.py`) has zero docstrings; Sphinx autodoc will produce empty pages until added.
+- The docs build clean with warnings as errors (RTD `fail_on_warning` + the `docs.yml` PR check); how versions are published is in `doc/DEVELOPER_GUIDE.md` → Documentation.
+- Still open: the tutorials (`doc/tutorials/`) are stale and should be rebuilt on `tests/Python/SimpleEchoClient`.
+- Python CommonLib (`ConfigHelper.py`, `MsgHelper.py`, `SocketHelper.py`) has almost no docstrings, and `doc/api/index.md` is still a stub; autodoc waits on the docstrings.
 - C++ headers (`ConfigHelper.h`, `SocketHelper.h`, `MsgHelper.h`) have no Doxygen comments; C++ API doc is deferred until issue #137 is addressed.
 
 ### Build system

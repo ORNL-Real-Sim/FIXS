@@ -12,10 +12,7 @@ Real-Sim Documentation
    :caption: User Guide
 
    getting-started
-   installation
-   setupGuide
    ConfigSetup
-   usage
    faq
 
 .. toctree::
