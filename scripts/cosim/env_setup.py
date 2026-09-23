@@ -1140,6 +1140,74 @@ def run_setup(allow_packaged_windows=False):
     return cfg
 
 
+SETUP_MODES = ("packaged", "source", "client")
+
+
+def setup_from_args(mode, carla_root=None, ue4_root=None, python=None):
+    """run_setup with every answer given up front: validates, writes carla.json,
+    returns 0 - or exits with the reason. Never prompts and never opens a dialog.
+
+    For a caller with no terminal to answer on - the GUI's CARLA setup, a
+    provisioning script. The checks are run_setup's, in its order, so a folder the
+    wizard would refuse is refused here with the same message. What differs is only
+    what happens where the wizard would ASK:
+
+      * the interpreter: `python` if given, else the canonical env, else the one
+        running this. No env is created and no candidate list is offered - naming
+        the env is the caller's job, and a GUI can ask for it with a file picker.
+      * the carla client: installed without asking into a FIXS-private env, never
+        into a shared one (the wizard's own rule; _confirm_install reads EOF as no).
+      * a source build with no wheel under PythonAPI/carla/dist and no carla in the
+        env: refused, where the wizard would open a file dialog for the wheel."""
+    if mode not in SETUP_MODES:
+        sys.exit(f"[setup] unknown CARLA mode '{mode}' "
+                 f"(expected one of: {', '.join(SETUP_MODES)}).")
+    if mode == "packaged":
+        if not carla_root or not packaged_exe(carla_root):
+            sys.exit(f"[setup] no CarlaUE4 launcher found under {carla_root or '(no --carla-root)'}.")
+        cfg = {"mode": "packaged", "carla_root": carla_root}
+    elif mode == "source":
+        ue4_root = ue4_root or os.environ.get("UE4_ROOT")
+        if not carla_root or not ue4_root:
+            sys.exit("[setup] a source build needs --carla-root (the CARLA checkout) "
+                     "and --ue4-root (the Unreal Engine root, or set UE4_ROOT).")
+        uproject, editor = source_paths(carla_root, ue4_root)
+        if not os.path.isfile(uproject):
+            sys.exit(f"[setup] no CarlaUE4.uproject at {uproject}.")
+        if not os.path.isfile(editor):
+            sys.exit(f"[setup] no UE4Editor at {editor} (is this the engine root?).")
+        cfg = {"mode": "source", "carla_root": carla_root, "ue4_root": ue4_root}
+    else:
+        cfg = {"mode": "client"}
+
+    if python:
+        if not os.path.isfile(python):
+            sys.exit(f"[setup] no python at {python}.")
+        py = python
+    else:
+        py = _named_env_python(_canonical_env_name()) or sys.executable
+        print(f"[setup] python env: {py}")
+    _warn_if_not_requested(py, _canonical_env_name())
+    _warn_if_incomplete(py)
+    cfg["python"] = py
+
+    if mode == "source" and not _python_can_import(py, ("carla",)) \
+            and not find_source_wheel(carla_root, py):
+        sys.exit(f"[setup] carla is not importable under {py} and no wheel was found "
+                 f"under {os.path.join(carla_root, 'PythonAPI', 'carla', 'dist')}. "
+                 f"Build CARLA's PythonAPI first (make PythonAPI), or run the "
+                 f"interactive setup to pick the wheel by hand.")
+    wheel = ensure_carla(py, mode, cfg.get("carla_root"))
+    if wheel:
+        cfg["carla_wheel"] = wheel
+    save_config(cfg)
+    print(f"[setup] done: {mode}"
+          + (f" CARLA @ {cfg['carla_root']}" if cfg.get("carla_root") else
+             " (no CARLA on this machine)"))
+    print(f"[setup] python: {py}")
+    return 0
+
+
 def update_python():
     """--update-python: rebind the interpreter, keeping the CARLA choice.
 
