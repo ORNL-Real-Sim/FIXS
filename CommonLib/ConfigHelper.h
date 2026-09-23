@@ -406,6 +406,8 @@ public:
 	void resetConfig();
 
 private:
+	int parseConfig(std::string configName);
+
 	void popErrorMessageBox(std::string message, std::string title);
 
 	void extractSubscriptionAttributes(YAML::Node attnode, std::string type, std::string att, SubAttMap_t& attMap);

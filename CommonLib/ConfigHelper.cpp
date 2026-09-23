@@ -61,6 +61,19 @@ ConfigHelper::ConfigHelper() {
 }
 
 int ConfigHelper::getConfig(string configName) {
+	// #295: a yaml-cpp exception (unreadable file, wrong value type, a required
+	// key read without a presence check) used to escape uncaught and abort the
+	// process with 0xC0000409 and nothing printed. Report it and fail instead.
+	try {
+		return parseConfig(configName);
+	}
+	catch (const YAML::Exception& e) {
+		printf("\nERROR: could not parse config %s\n       %s\n", configName.c_str(), e.what());
+		return -1;
+	}
+}
+
+int ConfigHelper::parseConfig(string configName) {
 #ifdef UNICODE
 
 	//DWORD  retval = 0;
@@ -268,10 +281,27 @@ int ConfigHelper::getConfig(string configName) {
 		exit(-1);
 	}
 
+	// #295: EnableApplicationLayer and EnableXil say which client layer this
+	// config serves, so they are required and have no default. Name the missing
+	// key here; parserFlag on an absent key throws a yaml-cpp error that says
+	// only "bad conversion".
+	auto hasRequiredFlag = [](YAML::Node section, const char* sectionName, const char* key) {
+		if (section && section[key]) {
+			return true;
+		}
+		printf("\nERROR: config has no %s.%s\n"
+			"       Both ApplicationSetup.EnableApplicationLayer and XilSetup.EnableXil must be set (true or false).\n",
+			sectionName, key);
+		return false;
+	};
+
 	// ===========================================================================
 	// 			READ Application Setup section
 	// ===========================================================================
 	node = config["ApplicationSetup"];
+	if (!hasRequiredFlag(node, "ApplicationSetup", "EnableApplicationLayer")) {
+		return -1;
+	}
 	ApplicationSetup.EnableApplicationLayer = parserFlag(node, "EnableApplicationLayer");
 	parserIntegerVector(node, "ApplicationPort", ApplicationSetup.ApplicationPort);
 
@@ -286,7 +316,9 @@ int ConfigHelper::getConfig(string configName) {
 	// 			READ XIL Setup section
 	// ===========================================================================
 	node = config["XilSetup"];
-
+	if (!hasRequiredFlag(node, "XilSetup", "EnableXil")) {
+		return -1;
+	}
 	XilSetup.EnableXil = parserFlag(node, "EnableXil");
 
 	if (node["AsServer"]) {
