@@ -13,6 +13,12 @@
 #   update_fixs.ps1 -Root C:\path\to\app                  # newest installable release
 #   update_fixs.ps1 -Root C:\path\to\app -Version v0.9.0  # a specific release
 #   update_fixs.ps1 -Root . -Repo my-fork/FIXS
+#   update_fixs.ps1 -Root C:\tmp\t -Zip .\fixs-build-v0.9.1-alpha.zip -Version v0.9.1-alpha
+#   update_fixs.ps1 -List                                  # installable releases, then exit
+#
+# -Zip installs a build zip already on disk instead of downloading one; release.yml
+# uses it to test the bundle it just packed BEFORE publishing it (#273). Everything
+# after the download - unpack, native runtime, version marker - runs unchanged.
 #
 # Installs into <Root>\FIXS. Needs PowerShell 5.1+ and network access. No git, no
 # GitHub CLI, no auth - FIXS is public.
@@ -20,7 +26,7 @@
 # Exit codes: 0 = a complete bundle is in place; 1 = nothing usable was installed.
 # ============================================================================
 param(
-    [Parameter(Mandatory = $true)] [string]$Root,
+    [string]$Root,
     [string]$Version,
     [string]$Repo = 'ORNL-Real-Sim/FIXS',
     # The ref this copy of the script was downloaded from. Supplied by the app's
@@ -29,7 +35,12 @@ param(
     [string]$SelfRef,
     # The consuming app's preferred channel, offered as the Enter-default in the
     # picker. App config, not engine policy - see Select-Release.
-    [string]$DefaultVersion
+    [string]$DefaultVersion,
+    # A build zip on disk to install instead of a release asset. Needs -Version,
+    # which becomes the stamp in FIXS_VERSION.txt.
+    [string]$Zip,
+    # Print the releases the picker would offer, one tag per line, and exit.
+    [switch]$List
 )
 
 # 'Stop' is safe here: this script shells out to nothing. The old fetch_fixs.ps1
@@ -44,9 +55,17 @@ $Api     = "https://api.github.com/repos/$Repo"
 $Headers = @{ 'User-Agent' = 'fixs-fetch'; 'Accept' = 'application/vnd.github+json' }
 $DepsTag = 'fixs-native-deps'   # rolling release carrying the packed native runtimes
 
-$Root        = [System.IO.Path]::GetFullPath($Root)
-$OutputDir   = Join-Path $Root 'FIXS'
-$VersionFile = Join-Path $OutputDir 'FIXS_VERSION.txt'
+if (-not $List -and -not $Root) { Write-Error '-Root is required.'; exit 1 }
+if ($Zip) {
+    if (-not $Version) { Write-Error '-Zip needs -Version: it is what FIXS_VERSION.txt records.'; exit 1 }
+    if (-not (Test-Path $Zip -PathType Leaf)) { Write-Error "-Zip: no such file: $Zip"; exit 1 }
+    $Zip = (Resolve-Path $Zip).Path
+}
+if ($Root) {
+    $Root        = [System.IO.Path]::GetFullPath($Root)
+    $OutputDir   = Join-Path $Root 'FIXS'
+    $VersionFile = Join-Path $OutputDir 'FIXS_VERSION.txt'
+}
 
 # ---------------------------------------------------------------------------
 # A release is INSTALLABLE iff it carries a fixs-build-*.zip. That one rule is
@@ -99,27 +118,35 @@ function Get-InstallableReleases {
     @($rels | Where-Object { -not $_.draft -and (Get-BuildAsset $_) })
 }
 
+function Test-ListsSidecar($assets, [string]$name) {
+    [bool]($assets | Where-Object { $_.name -eq "$name.sha256" })
+}
+
 function Get-Asset {
     # Download <url> to <dest> and verify it against the published .sha256 sidecar.
-    # A missing/unreachable sidecar warns and proceeds (older assets may predate
-    # them); a MISMATCH is always fatal - that is a corrupt or tampered download.
-    param([string]$Url, [string]$Dest)
+    # -Required says the release LISTS that sidecar, so failing to fetch it is
+    # fatal (#273): the file is there, and something between us and it is not.
+    # Only a release that lists none - published before #204 added them - is
+    # installed unverified, with a warning. A MISMATCH is always fatal.
+    param([string]$Url, [string]$Dest, [bool]$Required)
+    $leaf = Split-Path $Url -Leaf
     Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $Dest -Headers $Headers
     try {
         # The CDN serves the tiny .sha256 as octet-stream, so .Content comes back
         # as byte[] (Invoke-WebRequest only string-decodes text content types).
         $c = (Invoke-WebRequest -UseBasicParsing -Uri "$Url.sha256" -Headers $Headers).Content
         if ($c -is [byte[]]) { $c = [System.Text.Encoding]::UTF8.GetString($c) }
-        $expected = ($c -split '\s+')[0].Trim().ToLower()
-        $actual   = (Get-FileHash $Dest -Algorithm SHA256).Hash.ToLower()
-        if ($expected -ne $actual) {
-            throw "checksum mismatch for $(Split-Path $Url -Leaf): expected $expected, got $actual"
-        }
-        Write-Host "    checksum OK ($actual)"
     } catch {
-        if ("$_" -match 'checksum mismatch') { throw }
-        Write-Warning "    could not verify .sha256 for $(Split-Path $Url -Leaf): $($_.Exception.Message) - proceeding WITHOUT verification."
+        if ($Required) { throw "the release lists $leaf.sha256 but it could not be fetched: $($_.Exception.Message)" }
+        Write-Warning "    the release publishes no $leaf.sha256 (it predates them) - proceeding WITHOUT verification."
+        return
     }
+    $expected = ($c -split '\s+')[0].Trim().ToLower()
+    $actual   = (Get-FileHash $Dest -Algorithm SHA256).Hash.ToLower()
+    if ($expected -ne $actual) {
+        throw "checksum mismatch for ${leaf}: expected $expected, got $actual"
+    }
+    Write-Host "    checksum OK ($actual)"
 }
 
 # ---------------------------------------------------------------------------
@@ -226,7 +253,18 @@ function Select-Release($releases) {
 # INVARIANT: -Version given => never prompt, never hand off. That is what bounds
 # the hand-off below to a single step and makes an infinite bounce impossible.
 # ---------------------------------------------------------------------------
-if ($Version) {
+if ($List) {
+    # What the picker offers, without the prompt, so CI can check the filter
+    # against the real release list (#273).
+    Get-InstallableReleases | ForEach-Object { $_.tag_name }
+    exit 0
+}
+if ($Zip) {
+    # A local zip has no release behind it: nothing to resolve, nothing to verify
+    # against, no hand-off. Only the fields the rest of the script reads.
+    $release = [pscustomobject]@{ prerelease = $false; target_commitish = 'local'; published_at = '(local zip)'; assets = @() }
+    $asset   = [pscustomobject]@{ name = (Split-Path $Zip -Leaf) }
+} elseif ($Version) {
     try {
         $release = Invoke-RestMethod -UseBasicParsing -Uri "$Api/releases/tags/$Version" -Headers $Headers
     } catch {
@@ -286,7 +324,7 @@ if ($Version) {
 # which commit is inside. Printing tag + commit + published-date together is what
 # pins down exactly what was installed.
 $sha7 = if ($release.target_commitish -match '^[0-9a-f]{40}$') { $release.target_commitish.Substring(0, 7) } else { $release.target_commitish }
-Write-Host "=== Fetching the FIXS build from $Repo (public, no auth) ==="
+Write-Host $(if ($Zip) { "=== Installing a local FIXS build zip ===" } else { "=== Fetching the FIXS build from $Repo (public, no auth) ===" })
 Write-Host "  release:   $Version$(if ($release.prerelease) { '  (rolling prerelease - always re-fetched)' })"
 Write-Host "  commit:    $sha7"
 Write-Host "  asset:     $($asset.name)"
@@ -299,7 +337,7 @@ Write-Host "  into:      $OutputDir"
 # 'prerelease' flag marks exactly the rolling channels release.yml publishes,
 # which is why this reads the flag instead of hardcoding a tag list: the .sh
 # used to hardcode one, and the two rules agreed only by coincidence.
-if ((Test-Path $VersionFile) -and -not $release.prerelease) {
+if (-not $Zip -and (Test-Path $VersionFile) -and -not $release.prerelease) {
     $current = (Get-Content $VersionFile | Select-Object -First 1).Trim()
     if ($current -eq $Version) {
         Write-Host "FIXS $Version is already installed (delete $VersionFile to force)."
@@ -311,9 +349,15 @@ $TempDir = Join-Path ([System.IO.Path]::GetTempPath()) "fixs-fetch-$(Get-Random)
 New-Item -ItemType Directory -Path $TempDir -Force | Out-Null
 try {
     # --- The build zip -----------------------------------------------------
-    $ZipPath = Join-Path $TempDir $asset.name
-    Write-Host "Downloading $($asset.name) ..."
-    Get-Asset -Url $asset.browser_download_url -Dest $ZipPath
+    if ($Zip) {
+        $ZipPath = $Zip
+        Write-Host "Installing the local $($asset.name) (no download, no checksum) ..."
+    } else {
+        $ZipPath = Join-Path $TempDir $asset.name
+        Write-Host "Downloading $($asset.name) ..."
+        Get-Asset -Url $asset.browser_download_url -Dest $ZipPath `
+                  -Required (Test-ListsSidecar $release.assets $asset.name)
+    }
 
     Write-Host "Extracting to $OutputDir ..."
     if (Test-Path $OutputDir) { Remove-Item -Path $OutputDir -Recurse -Force }
@@ -337,7 +381,8 @@ try {
     $sumoAsset = Select-NativeAsset $depsRelease.assets 'libsumo' (Get-BundleDepVersion 'SUMO')
     Write-Host "  downloading $($sumoAsset.name) ..."
     $SumoZip = Join-Path $TempDir $sumoAsset.name
-    Get-Asset -Url $sumoAsset.browser_download_url -Dest $SumoZip
+    Get-Asset -Url $sumoAsset.browser_download_url -Dest $SumoZip `
+              -Required (Test-ListsSidecar $depsRelease.assets $sumoAsset.name)
     # Extracting into CommonLib/ reproduces the <component>/bin layout the
     # executables already search; any future runtime asset lands the same way.
     Expand-Archive -Path $SumoZip -DestinationPath (Join-Path $OutputDir 'CommonLib') -Force
@@ -357,7 +402,7 @@ try {
     $versionText = @"
 $stamp
 Fetched: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
-Source: $Repo
+Source: $(if ($Zip) { $Zip } else { $Repo })
 Commit: $sha7
 Zip: $($asset.name)
 "@

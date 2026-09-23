@@ -101,12 +101,13 @@ jobs:
           #                          here - building validates nothing about it.
           #                          pytest is the right gate for Python (#57).
           #   environment.yml        copied into the zip only (8_create_zip.ps1:110);
-          #                          a real env check is #248, not a C++ compile
-          #   scripts/update_fixs.*  consumer-side installer (#272) - not a build
-          #                          input, and not packaged (8_create_zip.ps1:119)
+          #                          checked by python-env.yml (#248), not a C++ compile
           # NOTE: ^scripts/ must NOT be ignored wholesale - scripts/dispatch/** IS
-          # the build system, and generate_version.ps1 stamps the version.
-          ignore='^doc/|^tests/|^\.github/|^\.vscode/|\.md$|\.py$|^LICENSE$|^\.gitignore$|^\.gitattributes$|^environment\.yml$|^scripts/update_fixs\.(ps1|sh)$'
+          # the build system, and generate_version.ps1 stamps the version. Nor
+          # scripts/update_fixs.* (ignored until #273): the build now installs its
+          # fresh zip with them, and every app on a channel runs them, so a change
+          # to the installer is exactly the change that must reach that check.
+          ignore='^doc/|^tests/|^\.github/|^\.vscode/|\.md$|\.py$|^LICENSE$|^\.gitignore$|^\.gitattributes$|^environment\.yml$'
           relevant=$(echo "$files" | grep -vE "$ignore" || true)
           if [ -z "$relevant" ]; then
             echo "No build-relevant changes -> skipping build (required check still passes)."
@@ -373,6 +374,26 @@ jobs:
             Write-Host "VirtualEnvironment.lib absent (expected on the current/main train)."
           }
 
+      # Install the zip just packed exactly as a consumer would, BEFORE anything is
+      # published (#273). #238 changed the packaging, the installer was not updated
+      # to match, and it shipped: nothing ran the install path, so the first to
+      # notice was a user's --update-fixs. The checks after the publish below
+      # cover the download and the checksum; this one is what keeps a zip that
+      # cannot install off the channel.
+      - name: Install the packed zip as a consumer would (update_fixs.ps1 -Zip)
+        if: needs.changes.outputs.should_build == 'true'
+        shell: pwsh
+        env:
+          # PR builds have no channel; any tag will do, it is only stamped and read back.
+          TAG: ${{ steps.channel.outputs.tag || 'pr-build' }}
+        run: |
+          $zip = Get-ChildItem build -Filter 'fixs-build-*.zip' | Select-Object -First 1
+          $root = Join-Path $env:RUNNER_TEMP 'consumer'
+          & powershell -NoProfile -ExecutionPolicy Bypass -File scripts/update_fixs.ps1 -Root $root -Zip $zip.FullName -Version $env:TAG
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          & powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check_fixs_install.ps1 -Dir (Join-Path $root 'FIXS') -Tag $env:TAG
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
       - name: Upload packaged zip as a workflow artifact (inspect on PRs)
         if: needs.changes.outputs.should_build == 'true'
         uses: actions/upload-artifact@v4
@@ -505,6 +526,17 @@ jobs:
         if: needs.changes.outputs.should_build == 'true'
         run: ./scripts/dispatch/pack_linux_bundle.sh --out-dir dist
 
+      # The Linux half of build-publish's pre-publish install (#273), on the same
+      # focal image the bundle targets. linux-publish needs this job, so a bundle
+      # that cannot install is never uploaded.
+      - name: Install the packed zip as a consumer would (update_fixs.sh --zip)
+        if: needs.changes.outputs.should_build == 'true'
+        run: |
+          zip="$(ls dist/fixs-build-*-linux-x86_64.zip)"
+          root="$RUNNER_TEMP/consumer"; mkdir -p "$root"
+          bash scripts/update_fixs.sh --root "$root" --zip "$zip" --version pr-build
+          bash scripts/check_fixs_install.sh "$root/FIXS" pr-build
+
       - name: Upload bundle as a workflow artifact (inspect on PRs)
         if: needs.changes.outputs.should_build == 'true'
         uses: actions/upload-artifact@v4
@@ -552,6 +584,66 @@ jobs:
           # --clobber replaces only these asset names; the Windows bundle on the
           # same rolling release is untouched.
           gh release upload "$CHANNEL_TAG" "$want" "$want.sha256" --repo "$GITHUB_REPOSITORY" --clobber
+
+  # ===========================================================================
+  # After the publish: install from the channel exactly as an app's --update-fixs
+  # does (#273). The pre-publish installs above use -Zip, so they cannot see the
+  # download or the checksum; these can. A failure here means the channel is
+  # already serving a bad release - it cannot un-publish, only make that loud.
+  # ===========================================================================
+  install-check-windows:
+    name: Install the published release (Windows)
+    needs: build-publish
+    if: needs.build-publish.outputs.publish == 'true' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish))
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts
+      - name: update_fixs.ps1 -Version <channel>
+        shell: pwsh
+        env:
+          TAG: ${{ needs.build-publish.outputs.tag }}
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP 'consumer'
+          & powershell -NoProfile -ExecutionPolicy Bypass -File scripts/update_fixs.ps1 -Root $root -Version $env:TAG -Repo $env:GITHUB_REPOSITORY
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          & powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check_fixs_install.ps1 -Dir (Join-Path $root 'FIXS') -Tag $env:TAG
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+  install-check-linux:
+    name: Install the published release (Linux)
+    needs: [build-publish, linux-publish]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts
+      - name: update_fixs.sh --version <channel>
+        env:
+          TAG: ${{ needs.build-publish.outputs.tag }}
+        run: |
+          root="$RUNNER_TEMP/consumer"; mkdir -p "$root"
+          bash scripts/update_fixs.sh --root "$root" --version "$TAG" --repo "$GITHUB_REPOSITORY"
+          bash scripts/check_fixs_install.sh "$root/FIXS" "$TAG"
+
+      # The picker must offer exactly the releases that carry a build zip. The
+      # script decides that by walking the API's JSON as a key stream without
+      # jq, so check its answer against jq's reading of the same API. Neither
+      # list is allowed to be empty or to lack the channel just published.
+      - name: The picker offers exactly the installable releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.build-publish.outputs.tag }}
+        run: |
+          offered="$(bash scripts/update_fixs.sh --list --repo "$GITHUB_REPOSITORY" | sort)"
+          expected="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=30" \
+                        --jq '.[] | select(.draft | not) | select(any(.assets[]; .name | startswith("fixs-build-") and endswith(".zip"))) | .tag_name' | sort)"
+          echo "offered:";  echo "$offered"
+          echo "expected:"; echo "$expected"
+          [ -n "$offered" ] || { echo "::error::the picker offers nothing"; exit 1; }
+          echo "$offered" | grep -qx "$TAG" || { echo "::error::the picker does not offer $TAG, just published"; exit 1; }
+          [ "$offered" = "$expected" ] || { echo "::error::the picker's list differs from the releases that carry a fixs-build-*.zip"; exit 1; }
 
   # Read the Docs serves one docs version per channel under the channel's own
   # name (stable, vX.Y.Z-beta, vX.Y.Z-alpha), built from the tag published above

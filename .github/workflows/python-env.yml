@@ -1,0 +1,85 @@
+name: Python env (environment.yml)
+
+# Builds the conda env from environment.yml ALONE and runs the Python side in it
+# (#248). environment.yml is what every consumer builds from - carla_env_setup
+# offers to create it, FIXS_Applications derives its env from it - and two broken
+# specs shipped with CI green: shapely missing (#236, traffic-light sync silently
+# off) and a wheel path the release zip strips (#221, `conda env create` failed on
+# every published release). Nothing ever ran the command.
+#
+# Windows, not Linux: the spec pins vs2015_runtime / vc14_runtime, which
+# conda-forge publishes for win-64 only, so it does not resolve on linux-64.
+#
+# No path filter, on purpose. release.yml skips its build when a PR touches only
+# .py / environment.yml / tests/, and still reports green - so a Python-only PR
+# ran nothing at all. This job exists for exactly those PRs.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [dev, main, 'dev_v*', 'beta_v*']
+  push:
+    branches: [main, 'dev_v*', 'beta_v*']
+
+jobs:
+  env:
+    name: env from environment.yml + unit tests
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: bash -el {0}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            Carla
+            CommonLib
+            tests/Python
+            environment.yml
+
+      # Miniforge: conda-forge only, and no Anaconda terms-of-service plugin to
+      # stop a non-interactive create on the spec's `defaults` channel.
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          environment-file: environment.yml
+          activate-environment: realsim
+
+      # The engine's own list of what a co-sim interpreter must import, read from
+      # carla_env_setup rather than copied here, minus what the spec leaves out
+      # on purpose: carla (never in CHECKED_MODULES - ensure_carla installs it)
+      # and the SUMO clients, which environment.yml's trailing comment says are
+      # installed after the env exists. Where they should come from is #221.
+      - name: The env imports what the co-sim needs
+        run: |
+          python - <<'EOF'
+          import importlib, sys
+          sys.path.insert(0, "Carla")
+          import carla_env_setup as s
+          want = [m for m in s.CHECKED_MODULES if m not in s.SUMO_MODULES]
+          bad = []
+          for m in want:
+              try:
+                  importlib.import_module(m)
+              except Exception as e:
+                  bad.append(f"{m}: {e!r}")
+          print("checked:", ", ".join(want))
+          print("left to #221:", ", ".join(s.SUMO_MODULES))
+          if bad:
+              sys.exit("cannot import:\n  " + "\n  ".join(bad))
+          EOF
+
+      # Excludes the vendored C++ trees: yaml-cpp carries googletest's Python 2
+      # scripts, which FIXS never runs. No slashes in the pattern - MSYS bash
+      # rewrites a slash-bearing argument before python sees it.
+      - name: Byte-compile the shipped Python
+        run: python -m compileall -q -x 'yaml-cpp|libsumo|libcarla' Carla CommonLib
+
+      # What a consumer's env has once setup finishes: carla_env_setup.ensure_carla
+      # adds the PyPI client right after creating the env from the spec, and the
+      # unit tests import it (CommonLib/fixs/_driver.py -> carla_agents).
+      - name: Add the carla client, as ensure_carla does
+        run: python -m pip install carla==0.9.15
+
+      - name: Unit tests
+        run: python -m pytest tests/Python/unit -q
