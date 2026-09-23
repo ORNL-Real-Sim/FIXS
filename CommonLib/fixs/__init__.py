@@ -51,6 +51,12 @@ Three attributes are rebound on every ``recv()``:
     fixs.vehicle        every vehicle in this moment's feed
     fixs.trafficlight   this moment's signal states
 
+``fixs.launch`` is the one that is NOT rebound, and that is the whole difference:
+it answers about how this process was started rather than about a tick, so it
+works before connect() and never changes afterwards. It is where the variables
+run_cosim sets are read, so an application does not reach into os.environ for
+FIXS_SUMOCFG, FIXS_CONFIG_YAML, FIXS_HANDOFF or FIXS_SUMO_ONLY by hand.
+
 ``fixs.sim`` is a record for the same reason vehicles are: the header's values
 arrive together, so they come back together. Growth is a field on it rather than
 another module-level function, which is why there is no ``getTime()``.
@@ -74,6 +80,7 @@ import dataclasses
 import math
 import os
 import socket
+import sys
 import time as _time
 import typing
 
@@ -83,10 +90,66 @@ from CommonLib.SocketHelper import SocketHelper
 from CommonLib.VehDataMsgDefs import VehData
 
 __all__ = [
-    'connect', 'recv', 'send', 'close',
-    'sim', 'vehicle', 'trafficlight',
-    'Vehicle', 'Shutdown', 'FixsError', 'NotConnected', 'ProtocolError',
+    'connect', 'recv', 'send', 'close', 'running',
+    'simulationEndTime',
+    'sim', 'vehicle', 'trafficlight', 'launch',
+    'emit', 'transport', 'commandKind',
+    'Vehicle', 'MAX_STEER_RAD',
+    'Shutdown', 'FixsError', 'NotConnected', 'ProtocolError',
+    'driver',
 ]
+
+
+def driver(exchange=None, **options):
+    """A ready-made controller for the ego -- see :mod:`CommonLib.fixs._driver`.
+
+        Controller = fixs.driver()              # no cell
+        Controller = fixs.driver(exchange)      # yours: (vref, dt) -> mps
+
+    Imported lazily: the driver pulls in fixs.carla and CARLA's agents, which
+    a SUMO-only or CarMaker run has no reason to load.
+    """
+    from CommonLib.fixs._driver import driver as _driver
+    return _driver(exchange, **options)
+
+
+#: Full-lock front road-wheel angle [rad]. `steerAngleDesired` is an ANGLE on
+#: the wire, where a CARLA agent's VehicleControl.steer is normalised [-1, 1];
+#: the plant divides by this same constant, so multiplying by it here makes the
+#: round trip the agent's own number. Must match mainVirCarla's kMaxSteerRad.
+MAX_STEER_RAD = 0.7
+
+
+def _addCarlaAgentsToPath():
+    """Make the vendored CARLA agents importable off `import fixs`.
+
+    A controller that brings a CARLA-shaped agent writes
+
+        import fixs
+        from agents.navigation.behavior_agent import BehaviorAgent
+
+    so agents/ has to be on the path by the time the second line runs. Appended,
+    not inserted: an installed CARLA PythonAPI, or the user's own copy, wins.
+    """
+    # __file__ is CommonLib/fixs/__init__.py, so the FIXS root is three up.
+    root = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        'Carla', 'carla_agents')
+    if os.path.isdir(os.path.join(root, 'agents')) and root not in sys.path:
+        sys.path.append(root)
+
+
+_addCarlaAgentsToPath()
+
+#: The roles a connection can be opened in. A CONTROLLER decides -- it may write
+#: only the command fields, and may return only records that arrived, which is
+#: what stops a controller fabricating a record and teleporting a vehicle it
+#: never saw (ORNL-Real-Sim/FIXS_Applications#25). A VIRENV bridge MEASURES: its
+#: whole job is to report the pose and speed its backend produced, for ids the
+#: traffic simulator may not have yet. Those are opposite contracts, so the role
+#: is named at connect() rather than inferred -- no client acquires bridge powers
+#: by accident, and the controller contract does not weaken by one field.
+_ROLES = ('controller', 'virenv')
 
 
 class Shutdown(Exception):
@@ -167,12 +230,22 @@ class Vehicle(VehData):
     #: acceleration form.
     LONGITUDINAL_FIELDS = frozenset({'speedDesired', 'accelerationDesired'})
 
-    #: L4 actuation. CarlaBackend::applyEgoActuation reads all three every tick
-    #: (mainVirCarla.cpp:335), so a partial write ships whatever arrived for the
-    #: rest. Steer is a physical angle in rad; pedals are positions in [0, 1].
-    ACTUATION_FIELDS = frozenset({'steerAngleDesired',
-                                  'acceleratorPedalDesired',
-                                  'brakePedalDesired'})
+    #: The pedals. CarlaBackend::applyEgoActuation reads throttle, brake AND
+    #: steer every tick (mainVirCarla.cpp:335), so a partial write ships
+    #: whatever arrived for the rest -- hence they travel together.
+    PEDAL_FIELDS = frozenset({'acceleratorPedalDesired', 'brakePedalDesired'})
+
+    #: Steer is a physical angle in rad. It is deliberately NOT part of
+    #: PEDAL_FIELDS: it belongs to both command shapes. Pedals + steer is the
+    #: actuation command; speed + steer is the speed-and-steer command, which a
+    #: plant closes the loop on itself (Carla: apply_ackermann_control). Folding
+    #: steer into the pedal set is what used to make the second shape
+    #: unrepresentable -- set(speedDesired=..., steerAngleDesired=...) was
+    #: rejected for 'missing' pedals it was never going to send.
+    STEER_FIELD = frozenset({'steerAngleDesired'})
+
+    #: L4 actuation: pedals + steer, one command.
+    ACTUATION_FIELDS = PEDAL_FIELDS | STEER_FIELD
 
     #: Everything a client may write.
     COMMAND_FIELDS = LONGITUDINAL_FIELDS | ACTUATION_FIELDS
@@ -335,6 +408,103 @@ class _Sim:
         return f'<sim t={self._time:.2f} state={self._state}>'
 
 
+class _Launch:
+    """How this process was started, as ``fixs.launch``.
+
+    run_cosim tells an application about the run it is part of through the
+    environment -- it has to, since the app is a separate process it starts. An
+    application should not be reading those variables by hand: the name, the
+    spelling and the meaning are FIXS's, and every app that reads
+    ``os.environ['FIXS_SUMOCFG']`` is a second place they are written down.
+
+    That was already half-fixed, which is what made it worth finishing.
+    ``connect()`` has always read FIXS_CONFIG_YAML itself and ``fixs.sumo`` has
+    always written FIXS_HANDOFF itself, so two of the five never leaked; the rest
+    did, and an application ended up mixing both styles::
+
+        # before
+        if not os.environ.get('FIXS_HANDOFF'):
+            raise SystemExit('run this through run_cosim')
+        src = os.environ.get('FIXS_SUMOCFG') or MY_DEFAULT
+        tag = pathlib.Path(os.environ['FIXS_CONFIG_YAML']).stem
+
+        # after
+        if not fixs.launch.supervised:
+            raise SystemExit('run this through run_cosim')
+        src = fixs.launch.sumocfg or MY_DEFAULT
+        tag = pathlib.Path(fixs.launch.configPath).stem
+
+    NOT ON ``fixs.sim``, which is the obvious place until you try it. Every _Sim
+    property calls _require(), and connect() builds it with _NO_TICK_YET, so
+    ``fixs.sim.x`` raises until the first recv() -- while the value most wanted
+    here, ``sumocfg``, is needed BEFORE connect(), when the application builds its
+    scenario and reports it into a stack that does not exist yet. ``fixs.sumo``
+    already sits on that side of the line for the same reason. The two also have
+    different lifetimes: ``fixs.sim`` is rebound every tick; these never change
+    once the process is running.
+
+    Every property answers from the environment on each access rather than
+    latching at import, so a test can set FIXS_SUMOCFG and be believed.
+
+    Unset means "nothing told us", not a default: ``sumocfg`` is None when the
+    user passed no --sumocfg, and the application supplies its own fallback
+    rather than FIXS inventing one it cannot know.
+    """
+
+    __slots__ = ()
+
+    @property
+    def supervised(self):
+        """bool -- did run_cosim start us, and therefore SUMO and TrafficLayer?
+
+        FIXS_HANDOFF is the signal because it is the one run_cosim sets for EVERY
+        app it launches, whether or not that app ever reports a scenario back.
+        """
+        return bool(os.environ.get('FIXS_HANDOFF'))
+
+    @property
+    def configPath(self):
+        """string | None -- the scenario yaml TrafficLayer was given.
+
+        The same file connect() defaults to, so a controller deriving anything
+        from it -- a run tag, an output name -- reads the yaml actually in play
+        rather than one it guessed.
+        """
+        return os.environ.get('FIXS_CONFIG_YAML') or None
+
+    @property
+    def sumocfg(self):
+        """string | None -- the scenario the user asked for with --sumocfg.
+
+        None when they asked for nothing, which is NOT the same as the map's own:
+        only the application knows what it falls back to.
+        """
+        return os.environ.get('FIXS_SUMOCFG') or None
+
+    @property
+    def carla(self):
+        """bool | None -- is CARLA in this run? None when nothing started us.
+
+        The yaml cannot answer this: every co-sim yaml has a CarlaSetup section,
+        which is what makes it one, so an app checking the yaml gets the same
+        answer either way. Only run_cosim knows, so run_cosim says.
+        """
+        if not self.supervised:
+            return None
+        return os.environ.get('FIXS_SUMO_ONLY') != '1'
+
+    def __repr__(self):
+        if not self.supervised:
+            return '<launch: not started by run_cosim>'
+        return (f'<launch config={self.configPath!r} sumocfg={self.sumocfg!r} '
+                f'carla={self.carla}>')
+
+
+#: This run's launch facts. A singleton rather than one module-level name per
+#: variable, so growth is a property here rather than another `fixs.something`.
+launch = _Launch()
+
+
 class _VehicleView(_View):
     _KIND = 'vehicle'
 
@@ -385,6 +555,21 @@ sim: _Sim = _Sim(unavailable=_NOT_CONNECTED)
 vehicle: _VehicleView = _VehicleView(unavailable=_NOT_CONNECTED)
 trafficlight: _TrafficLightView = _TrafficLightView(unavailable=_NOT_CONNECTED)
 
+#: False once TrafficLayer has ended the run, so a controller writes
+#: `while fixs.running:` instead of `while True` with an exception for control
+#: flow. Read off the wire, never computed: it is the same state=0 that raises
+#: Shutdown, so a client cannot end its loop on a different answer than the one
+#: TrafficLayer gave -- which is how a client stops replying while the tick is
+#: still waiting for it.
+_running = False
+
+#: The config connect() resolved, so the run's own facts can be answered later
+#: without the caller repeating the path. None until connect().
+_connectedConfigPath = None
+
+#: SimulationEndTime by config path. Read once: it cannot change under a run.
+_endTimeCache = {}
+
 #: VehicleMessageField for this connection; None until connect().
 _declaredFields: typing.Optional[frozenset] = None
 #: Why tick data is unavailable, or None while a tick is held.
@@ -393,6 +578,10 @@ _noTick: typing.Optional[str] = _NOT_CONNECTED
 _helper: typing.Optional[SocketHelper] = None
 _sock: typing.Optional[socket.socket] = None
 _egoIds: typing.List[str] = []
+#: This connection's role; see _ROLES. 'controller' until connect() says otherwise.
+_role: str = 'controller'
+#: Records a virenv bridge has staged for this tick's reply via emit().
+_emitted: typing.List[VehData] = []
 
 # The tick currently held awaiting its answer.
 _armed: bool = False
@@ -410,8 +599,40 @@ def _requireConnection():
 # Connecting
 # ---------------------------------------------------------------------------
 
+_END_TIME_UNSET = object()
+
+
+def simulationEndTime(configPath=None):
+    """(string) -> double or None -- when this run ends, from the scenario yaml.
+
+    Not something an application should have to ask for: fixs.running ends its
+    loop, and fixs.sumo defaults a generated scenario to this. It is public
+    because the value has exactly one owner -- SimulationSetup.SimulationEndTime,
+    which TrafficLayer reads -- and anything that needs it should read it from
+    there rather than keep a second copy.
+
+    None when the config does not declare one. ConfigHelper applies a 90000
+    default to that key, so the parsed value cannot say "the author was silent";
+    config.raw can, and the difference matters to a caller deciding whether to
+    write an end time into a SUMO config at all.
+    """
+    configPath = (configPath or _connectedConfigPath
+                  or os.environ.get('FIXS_CONFIG_YAML') or 'config.yaml')
+    if not os.path.isfile(configPath):
+        raise FixsError(f'config not found: {configPath}')
+    cached = _endTimeCache.get(configPath, _END_TIME_UNSET)
+    if cached is not _END_TIME_UNSET:
+        return cached
+    config = ConfigHelper()
+    config.getConfig(configPath)
+    declared = (config.raw.get('SimulationSetup') or {}).get('SimulationEndTime')
+    value = None if declared is None else float(declared)
+    _endTimeCache[configPath] = value
+    return value
+
+
 def connect(configPath=None, *, port=None, host=None, ego=None,
-            connectTimeout=None, recvTimeout=None):
+            connectTimeout=None, recvTimeout=None, role='controller'):
     """(string, ...) -> (string, integer) -- connect and return the endpoint.
 
     :param configPath: the config yaml TrafficLayer is running. Defaults to
@@ -432,9 +653,17 @@ def connect(configPath=None, *, port=None, host=None, ego=None,
     :param recvTimeout: seconds to wait for the next message; ``None`` waits
         indefinitely. TrafficLayer advances only once EVERY subscriber has
         answered, so a deadline here fires when some OTHER client stalls.
+    :param role: ``'controller'`` (default) or ``'virenv'``. See :data:`_ROLES`.
+        ``'virenv'`` unlocks :func:`emit` and :func:`transport`, which a
+        controller must not have.
     """
-    global _helper, _sock, _egoIds, _declaredFields
+    global _helper, _sock, _egoIds, _declaredFields, _role
+    global _running, _connectedConfigPath
     global sim, vehicle, trafficlight, _noTick
+
+    if role not in _ROLES:
+        raise FixsError(
+            f'unknown role {role!r}. Use one of: {", ".join(_ROLES)}.')
 
     if _sock is not None:
         close()
@@ -447,6 +676,7 @@ def connect(configPath=None, *, port=None, host=None, ego=None,
     config.getConfig(configPath)
 
     declared = config.simulation_setup.get('VehicleMessageField') or ['id', 'speed']
+
 
     subscription = _selectSubscription(config, configPath, port)
     if host is None:
@@ -462,6 +692,7 @@ def connect(configPath=None, *, port=None, host=None, ego=None,
     msgHelper.set_vehicle_message_field(declared)
 
     _declaredFields = frozenset(declared)
+    _role = role
     _helper = SocketHelper(config_helper=config, msg_helper=msgHelper)
     _sock = _openSocket(host, int(port), connectTimeout, recvTimeout)
     _noTick = _NO_TICK_YET
@@ -469,6 +700,8 @@ def connect(configPath=None, *, port=None, host=None, ego=None,
     vehicle = _VehicleView(unavailable=_NO_TICK_YET,
                            fields=_declaredFields, egoIDs=_egoIds)
     trafficlight = _TrafficLightView(unavailable=_NO_TICK_YET)
+    _connectedConfigPath = configPath
+    _running = True
     atexit.register(close)          # an unanswered tick must still go out
     return host, int(port)
 
@@ -490,10 +723,31 @@ def _selectSubscription(config, configPath, port):
             f'It declares: {declaredPorts}.'
         )
     if len(subscriptions) > 1:
+        # One of them is usually not an application at all: a CARLA scenario
+        # subscribes the BRIDGE on ApplicationSetup too, and says so elsewhere in
+        # the same file as CarlaSetup.CarlaClientPort -- which is exactly what
+        # run_cosim reads to decide where to start it. So the config already
+        # distinguishes them, and a controller should not have to answer a
+        # question its own scenario yaml answers.
+        #
+        # Presence, not value: CarlaClientPort DEFAULTS to 430, which is also a
+        # perfectly ordinary application port, so a defaulted 430 would exclude
+        # the caller's own subscription. config.raw is the document as written.
+        carlaSection = (config.raw.get('CarlaSetup') or {})
+        if 'CarlaClientPort' in carlaSection:
+            bridgePort = carlaSection['CarlaClientPort']
+            mine = [e for e in subscriptions
+                    if bridgePort not in (e.get('port') or [])]
+            if len(mine) == 1:
+                return mine[0]
         declaredPorts = [p for e in subscriptions for p in e.get('port', [])]
         raise FixsError(
             f'{configPath} declares {len(subscriptions)} vehicle subscriptions '
-            f'(ports {declaredPorts}); pass port= to say which is this client.'
+            f'(ports {declaredPorts}); pass port= to say which is this client. '
+            f'A CARLA scenario normally needs no port here: '
+            f'CarlaSetup.CarlaClientPort names the subscription belonging to '
+            f'the bridge, and the one left over is the application. More than '
+            f'one was left over.'
         )
     return subscriptions[0]
 
@@ -510,6 +764,18 @@ def _openSocket(host, port, connectTimeout, recvTimeout):
     while True:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        # TCP_NODELAY: disable Nagle, as SocketHelper.cpp does on every socket it
+        # opens. The FIXS exchange is strict request/response with small messages --
+        # a render-only bridge answers with a bare 9-byte header -- which is the
+        # exact shape Nagle penalises: it holds a small write until the previous
+        # segment is acknowledged, and the peer's delayed ACK does not arrive until
+        # its timer fires. Measured on the MLK corridor, the Python bridge waited
+        # 77.41 ms per tick in the FIXS exchange against the C++ bridge's 42.66 ms
+        # on the same stack and window, while doing LESS work of its own (33.13 vs
+        # 37.41 ms). The 34.75 ms difference is a delayed-ACK interval, not
+        # computation, and it applied to every Python FIXS client -- the eco
+        # controller included, so it was a cost on the whole co-simulation.
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         try:
             sock.connect((host, port))
         except OSError as exc:
@@ -537,7 +803,7 @@ def close():
     net -- TrafficLayer is blocked waiting for it. Applications should not rely
     on this: call send() in the loop body, where it is visible.
     """
-    global _sock, _helper, _egoIds, _armed, _received
+    global _sock, _helper, _egoIds, _armed, _received, _role, _emitted
     global sim, vehicle, trafficlight, _noTick, _declaredFields
     if _armed and _sock is not None:
         try:
@@ -554,6 +820,8 @@ def close():
     _egoIds = []
     _armed = False
     _received = []
+    _role = 'controller'
+    _emitted = []
     _declaredFields = None
     _noTick = _NOT_CONNECTED
     sim = _Sim(unavailable=_NOT_CONNECTED)
@@ -572,13 +840,15 @@ def recv():
     the views, so nothing is encoded in a return value that would have to change
     shape as more status is exposed::
 
-        try:
-            while True:
-                fixs.recv()
-                ...
-                fixs.send()
-        except fixs.Shutdown:
-            pass
+        while fixs.running:
+            fixs.recv()
+            ...
+            fixs.send()
+
+    ``fixs.running`` goes False when TrafficLayer ends the run, so a controller
+    needs no end time of its own. Shutdown is still raised, because the run can
+    end in the middle of a tick this loop has already entered; catch it only if
+    there is something to do on the way out.
 
     :raises Shutdown: TrafficLayer has ended the run.
     :raises ProtocolError: the previous tick was never answered. TrafficLayer
@@ -586,7 +856,7 @@ def recv():
         would otherwise surface as an unexplained hang here.
     """
     _requireConnection()
-    global sim, vehicle, trafficlight, _armed, _received, _simState, _simTime
+    global sim, vehicle, trafficlight, _armed, _received, _simState, _simTime, _running
     global _noTick
 
     if _armed:
@@ -603,6 +873,7 @@ def recv():
         # reached is a fact, and reporting it is the natural thing to do in the
         # `except fixs.Shutdown:` block.
         _noTick = _SHUTDOWN
+        _running = False
         vehicle = _VehicleView(unavailable=_SHUTDOWN,
                                fields=_declaredFields, egoIDs=_egoIds)
         trafficlight = _TrafficLightView(unavailable=_SHUTDOWN)
@@ -641,7 +912,7 @@ def send(vehIDs=None):
     tick may advance.
     """
     _requireConnection()
-    global _armed
+    global _armed, _emitted
     if not _armed:
         raise ProtocolError(
             'there is no tick to answer. Call fixs.recv() first, and call '
@@ -671,37 +942,158 @@ def send(vehIDs=None):
     # Do NOT substitute a placeholder record when sendList is empty: it would
     # put a vehicle with an empty id and zeroed fields on the wire every idle
     # tick, which over a long run is most of the traffic.
-    _helper.vehicle_data_send_list.extend(sendList)
+    # A virenv bridge's measured records go out ahead of any echoed ones, so a
+    # bridge that both emits an id and lists it in vehIDs reports the measured
+    # value -- the last write for an id is the one TrafficLayer keeps, and the
+    # echo would otherwise overwrite the measurement with the stale input.
+    _helper.vehicle_data_send_list.extend(_emitted)
+    _helper.vehicle_data_send_list.extend(
+        r for r in sendList if r.id.strip() not in {e.id.strip() for e in _emitted})
+    _emitted = []
     _helper.sendData(_simState, _simTime, _sock)
     _armed = False
 
 
-def _validateCommand(record):
-    """Check that what was written forms a command TrafficLayer can act on."""
-    written = record._written
+def emit(record):
+    """(VehData) -> None -- report a MEASURED record on this tick's reply.
 
-    actuation = written & Vehicle.ACTUATION_FIELDS
-    if actuation and actuation != Vehicle.ACTUATION_FIELDS:
-        missing = Vehicle.ACTUATION_FIELDS - actuation
+    The bridge counterpart of :meth:`Vehicle.set`. A virtual-environment bridge
+    does not command vehicles; it reports what its backend measured -- the ego
+    pose and speed CARLA's physics produced, for an id the traffic simulator may
+    not have yet (a deferred ego spawn). Both of those are things
+    :meth:`Vehicle.set` and :func:`send` deliberately forbid a controller, so
+    this is a separate verb gated on ``role='virenv'`` rather than a relaxation
+    of the controller contract.
+
+    ``record`` is a plain :class:`~CommonLib.VehDataMsgDefs.VehData` the caller
+    built -- fields are written directly, not through ``set()``. Only fields in
+    ``SimulationSetup.VehicleMessageField`` reach the wire, exactly as for any
+    other record.
+
+    :raises NotConnected: before connect() or after close().
+    :raises ProtocolError: on a controller connection, or with no tick held.
+    """
+    _requireConnection()
+    if _role != 'virenv':
         raise ProtocolError(
-            f"'{record.id.strip()}': actuation is one command -- "
-            f"CarlaBackend::applyEgoActuation reads all three fields every "
-            f"tick, so the ones left out would ship whatever arrived. "
-            f"Missing: {', '.join(sorted(missing))}."
+            "emit() reports measured state and is only available to a bridge. "
+            "This connection is a controller; command a vehicle with "
+            "veh.set(speedDesired=...), or open the connection with "
+            "fixs.connect(..., role='virenv')."
         )
-
-    if written >= Vehicle.LONGITUDINAL_FIELDS:
+    if not _armed:
         raise ProtocolError(
-            f"'{record.id.strip()}': set speedDesired or accelerationDesired, "
-            f"not both -- TrafficLayer accepts exactly one longitudinal command "
-            f"(ConfigHelper.cpp:256)."
+            'there is no tick to answer. Call fixs.recv() before fixs.emit().')
+    if not isinstance(record, VehData):
+        raise TypeError(
+            f'emit() takes a VehData, got {type(record).__name__}')
+    _emitted.append(record)
+
+
+def transport():
+    """() -> (SocketHelper, MsgHelper) -- the codec objects behind this connection.
+
+    For a bridge that mirrors the C++ ``VirEnvCore``, which owns ``Sock_c`` and
+    ``Msg_c`` directly and walks ``Msg_c.VehDataRecv_um`` in its step body. A
+    controller has no reason to reach past the views and is refused, so this does
+    not become a back door around the read-only records.
+
+    :raises ProtocolError: on a controller connection.
+    """
+    _requireConnection()
+    if _role != 'virenv':
+        raise ProtocolError(
+            "transport() exposes the raw codec and is only available to a "
+            "bridge. Read this tick through fixs.vehicle / fixs.trafficlight / "
+            "fixs.sim instead."
+        )
+    return _helper, _helper.msg_helper
+
+
+def commandKind(record):
+    """(Vehicle) -> 'actuation' | 'speedsteer' | None -- the shape that was written.
+
+    Which fields a controller wrote IS which interface it is commanding through,
+    so the shape is read off the record rather than declared anywhere. The two
+    map onto the two interfaces a vehicle plant offers:
+
+        'actuation'   pedals + steer   -> the caller closes the loop
+                                          (Carla: apply_control)
+        'speedsteer'  speed  + steer   -> the plant closes it
+                                          (Carla: apply_ackermann_control)
+
+    ``None`` means nothing was commanded this tick, which is a real answer: the
+    last command persists, and a bridge should leave it alone rather than
+    substitute a zero.
+    """
+    written = record._written
+    if written & Vehicle.PEDAL_FIELDS:
+        return 'actuation'
+    if written & Vehicle.LONGITUDINAL_FIELDS:
+        return 'speedsteer'
+    return None
+
+
+def _validateCommand(record):
+    """Check that what was written forms a command a plant can act on."""
+    written = record._written
+    kind = commandKind(record)
+    who = record.id.strip()
+
+    if kind == 'actuation':
+        missing = Vehicle.ACTUATION_FIELDS - written
+        if missing:
+            raise ProtocolError(
+                f"'{who}': actuation is one command -- applyEgoActuation reads "
+                f"throttle, brake and steer every tick, so the ones left out "
+                f"would ship whatever arrived. Missing: "
+                f"{', '.join(sorted(missing))}."
+            )
+
+    elif kind == 'speedsteer':
+        if written >= Vehicle.LONGITUDINAL_FIELDS:
+            raise ProtocolError(
+                f"'{who}': set speedDesired or accelerationDesired, not both -- "
+                f"TrafficLayer accepts exactly one longitudinal command "
+                f"(ConfigHelper.cpp:256)."
+            )
+
+    elif written & Vehicle.STEER_FIELD:
+        # Steer alone became representable when it left PEDAL_FIELDS. It is not
+        # a command: nothing downstream knows what to do with a steer angle and
+        # no longitudinal intent, so say so rather than apply half a command.
+        raise ProtocolError(
+            f"'{who}': steerAngleDesired alone is not a command. Pair it with "
+            f"the pedals (acceleratorPedalDesired, brakePedalDesired) to close "
+            f"the loop yourself, or with speedDesired to let the plant close it."
         )
 
 
 def __getattr__(name):
+    # `import fixs` is the whole of the integration, so the submodules answer to
+    # it. Python does not bind a subpackage on a parent import, which meant an
+    # application had to write `import fixs.sumo` as well and know that fixs is
+    # laid out in parts -- the opposite of the point.
+    #
+    # On demand rather than at the top of this file: carla pulls in the CARLA
+    # side, which a client that is not driving an ego has no reason to load, and
+    # sumo reads scenario files a controller may never touch. Bound into the
+    # module afterwards, so the cost is once and later lookups are ordinary.
+    if name in ('sumo', 'carla'):
+        import importlib
+        module = importlib.import_module(f'{__name__}.{name}')
+        globals()[name] = module
+        return module
     # Detector records are received but not decoded -- SocketHelper.recv_data
     # drops them. Say so rather than handing back an empty view, which would
     # read as "no detectors this tick".
+    if name == 'running':
+        # The loop condition, owned by FIXS so an application does not compute
+        # one of its own. Refuses before connect() rather than answering False:
+        # a loop that never runs is indistinguishable from a finished one.
+        if _sock is None:
+            raise NotConnected('call fixs.connect(...) first')
+        return _running
     if name == 'detector':
         raise NotImplementedError(
             'detector data is not decoded yet -- SocketHelper.recv_data drops '

@@ -39,6 +39,15 @@ public:
     const std::vector<std::string>& events() const { return events_; }
     void clear() { events_.clear(); }
 
+    // Delimit one step in the transcript. Not a verb -- the driver calls it, the
+    // core never does. It exists so a transcript can be compared PER STEP: the
+    // order of two vehicles' verbs WITHIN one step is unordered_map iteration
+    // order, which the standard does not define and which the Python peer (an
+    // insertion-ordered dict) cannot reproduce. Per-step grouping compares the
+    // decisions, which are the thing both cores must agree on, and does not
+    // compare an order that carries no meaning.
+    void mark(const std::string& label) { events_.push_back("== " + label); }
+
     // --- IVirEnvBackend ----------------------------------------------------
     void log(const char* msg) override      { rec("log", msg); }
     void logError(const char* msg) override { rec("logError", msg); }

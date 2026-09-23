@@ -39,7 +39,13 @@ carla::geom::Transform BridgeHelper::map_transfrom_Carla_to_Sumo(const carla::ge
 
     float x = in_location.x + std::cos(yaw * M_PI / 180.0f) * extent.x;
     float y = in_location.y - std::sin(yaw * M_PI / 180.0f) * extent.x;
-    float z = in_location.z - std::sin(pitch * M_PI / 180.0f) * extent.x;
+    // #326: PLUS, not minus. This is the pivot -> front step, the inverse of the
+    // one map_transfrom_Sumo_to_Carla takes, and the front of a climbing vehicle
+    // sits ABOVE its bounding-box centre. x and y already mirror correctly (- cos
+    // forward, + cos back; y via the Y flip); z subtracted BOTH ways, so a round
+    // trip moved z by 2*sin(pitch)*extent.x instead of returning it. Inherited from
+    // CARLA sumo_integration/bridge_helper.py, which still has it.
+    float z = in_location.z + std::sin(pitch * M_PI / 180.0f) * extent.x;
 
     x += offset.x;
     y -= offset.y;

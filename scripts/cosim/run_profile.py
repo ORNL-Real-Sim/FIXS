@@ -20,7 +20,7 @@ confirm:
        1) app       roosevelt
        2) map       roosevelt_full            (Digital-Twin-Library)
        3) scenario  config.yaml               (generated, this app on this map)
-       4) engine    py                        (run_synchronization.py)
+       4) engine    py                        (Python VirEnvCore: mainVirCarla.py)
        5) CARLA     source  C:/src_ext/Carla  ->  127.0.0.1:2000
        6) SUMO      gui, step 0.05
 
@@ -75,6 +75,51 @@ SLOTS = [
     ("sumo", "SUMO"),
 ]
 SLOT_KEYS = [k for k, _ in SLOTS]
+
+
+def _carla_row_hidden(carla_cfg, derived):
+    """True when there is no CARLA for the row to describe.
+
+    'client' mode means no CARLA on this machine. With the endpoint also pointing
+    here, the row read "client (none on this machine)  ->  127.0.0.1:2000  [this
+    machine]" - which contradicts itself and offers nothing to open. A REMOTE
+    endpoint is worth a row, so --peer / --carla-host bring it straight back; that
+    is also how you set one, which is why losing the row costs nothing."""
+    # This RUN uses no CARLA. --sumo-only launches none, loads no world and dials
+    # nothing, whatever this machine happens to have installed - so the row
+    # describes something that will not happen, and opens onto a setting that
+    # changes nothing. Checked before the mode, because it holds on a full source
+    # build just as much as on a machine with no CARLA at all.
+    if (derived or {}).get("sumo_only"):
+        return True
+    if (carla_cfg or {}).get("mode") != "client":
+        return False
+    # None (endpoint not resolved yet) counts as "not remote": on a machine with
+    # no CARLA, an unresolved endpoint is no more informative than a local one.
+    return (derived or {}).get("carla_local") is not False
+
+
+def _engine_row_hidden(derived):
+    """True when no bridge will run, so there is none to choose.
+
+    The row picks WHICH VirEnvCore drives the stack - cpp VirCarlaEnv or the python
+    mainVirCarla. A run with no CARLA half starts neither, so the row named a
+    process that was never going to exist. --engine still sets it."""
+    return bool((derived or {}).get("sumo_only"))
+
+
+def visible_slots(carla_cfg=None, derived=None):
+    """SLOTS minus rows with nothing to say for this machine and this run.
+
+    The printed numbers ARE the edit keys, so show() and the reader below must
+    build from this one list - numbering a hidden row out of existence in one and
+    not the other is how "5" opens SUMO while the screen says CARLA."""
+    drop = set()
+    if _carla_row_hidden(carla_cfg, derived):
+        drop.add("carla")
+    if _engine_row_hidden(derived):
+        drop.add("engine")
+    return [(k, l) for k, l in SLOTS if k not in drop]
 
 
 def profiles_path():
@@ -150,9 +195,36 @@ def save_doc(doc):
 
 
 def save(name, rec):
-    """Store `rec` under `name` and mark it as the one that ran last."""
+    """Store `rec` under `name` and mark it as the one that ran last.
+
+    Clears `partial`: arriving here means every stage a checkpoint was standing in
+    for has completed, so the record stops advertising itself as unfinished."""
     doc = load_doc()
     rec = dict(rec)
+    rec.pop("partial", None)
+    rec["updated"] = datetime.now().isoformat(timespec="seconds")
+    doc["setups"][name] = rec
+    doc["last"] = name
+    save_doc(doc)
+    return rec
+
+
+def save_partial(name, rec, stage):
+    """Store the choices made so far, tagged with the stage that had not run yet.
+
+    The full save happens once a run is completely resolved, which is AFTER the map
+    import. A cook that fails therefore used to take the app, map and config just
+    chosen down with it, and the next run asked the whole questionnaire again - the
+    worst moment to re-ask, because a failed import is precisely when you want to
+    change one answer and retry. Writing the record early, under the same name,
+    means the retry starts from the answers instead of from nothing; the full save
+    later overwrites this one rather than leaving a second entry behind.
+
+    `stage` names what had not finished, and is shown in the list: "map import"
+    reads as a thing to retry, where a bare "incomplete" reads as corruption."""
+    doc = load_doc()
+    rec = dict(rec)
+    rec["partial"] = stage
     rec["updated"] = datetime.now().isoformat(timespec="seconds")
     doc["setups"][name] = rec
     doc["last"] = name
@@ -212,7 +284,12 @@ def summarize(rec):
             rec.get("map") or "no map",
             os.path.basename(rec.get("config") or "") or "auto config",
             "gui" if rec.get("sumo_gui", True) else "headless"]
-    return " | ".join(bits)
+    line = " | ".join(bits)
+    # An unfinished setup is still worth opening - that is the whole point of
+    # keeping it - but it must not read as one that ran, or the list would claim a
+    # map is cooked when the cook is what failed.
+    stage = rec.get("partial")
+    return f"{line}  [unfinished: {stage}]" if stage else line
 
 
 def _same_path(a, b):
@@ -259,7 +336,14 @@ def _fmt(slot, rec, carla_cfg, derived=None):
         return f"{os.path.basename(path):<26} ({where})"
     if slot == "engine":
         eng = derived.get("engine") or "py"
-        how = "run_synchronization.py" if eng == "py" else "TrafficLayer + VirCarlaEnv"
+        # --sumo-only starts no bridge at all, so naming the one the yaml declares
+        # would promise a process that never appears. The row stays rather than
+        # being hidden like the CARLA one, because TrafficLayer genuinely does run
+        # and the value is still what the next CARLA run will use.
+        if derived.get("sumo_only"):
+            return f"{eng:<26} (TrafficLayer only - --sumo-only starts no bridge)"
+        how = ("TrafficLayer + mainVirCarla.py" if eng == "py"
+               else "TrafficLayer + VirCarlaEnv")
         return f"{eng:<26} ({how}, from the yaml)"
     if slot == "carla":
         # Two different things on one line, so label them: the INSTALL comes from
@@ -288,7 +372,9 @@ def _fmt(slot, rec, carla_cfg, derived=None):
         tick = derived.get("carla_tick")
         pace = derived.get("realtime")
         bits = [gui]
-        if tick:
+        # The tick is the rate CARLA is stepped at. With --sumo-only there is no
+        # CARLA to step, so printing it describes something that will not happen.
+        if tick and not derived.get("sumo_only"):
             bits.append(f"CARLA tick {tick:g} s")
         if pace is not None:
             bits.append("realtime" if pace else "as fast as possible")
@@ -301,7 +387,7 @@ def show(name, rec, carla_cfg=None, derived=None):
     when = (rec.get("updated") or "").replace("T", " ")
     stamp = f"  (last run {when})" if when else "  (new)"
     print(f"\n[cosim] Run setup '{name}'{stamp}:")
-    for i, (slot, label) in enumerate(SLOTS, 1):
+    for i, (slot, label) in enumerate(visible_slots(carla_cfg, derived), 1):
         print(f"   {i}) {label:<10}{_fmt(slot, rec, carla_cfg, derived)}")
 
 
@@ -321,6 +407,12 @@ def choose_setup(doc, interactive=True):
         return None
     last = doc.get("last") if doc.get("last") in names else names[0]
     if not interactive:
+        # Say it out loud. Interactively the list carries the marker, but a
+        # headless run shows no list, and silently replaying a setup whose map
+        # never cooked is how the failure gets rediscovered further downstream.
+        stage = (doc["setups"].get(last) or {}).get("partial")
+        if stage:
+            print(f"[cosim] resuming '{last}', which did not finish ({stage}).")
         return last
     width = min(max(len(n) for n in names), 24)
     while True:
@@ -339,12 +431,38 @@ def choose_setup(doc, interactive=True):
         if ans in ("q", "quit"):
             return QUIT
         if ans == "d":
-            victim = _input(f"[cosim] Delete which? [1-{len(names)}], Enter = cancel: ")
-            if victim.isdigit() and 1 <= int(victim) <= len(names):
-                gone = names[int(victim) - 1]
-                delete(gone)
-                print(f"[cosim] deleted '{gone}'.")
-                doc = load_doc()
+            # Same answer syntax as --purge-map, from the same parser: these are the
+            # two lists a user deletes from, and one of them accepting '1,3,4' while
+            # the other took a single number was a difference with nothing behind it.
+            import import_map
+            picked = import_map.parse_selection(
+                _input(f"[cosim] Delete which? [1-{len(names)}, a list like 1,3,4, "
+                       f"or 'all'; Enter to cancel]: "), len(names))
+            if picked:
+                doomed = [names[i] for i in picked]
+                # One setup goes on the word 'delete' alone, as it always has.
+                # Several are named back first: a mistyped range is the one way to
+                # lose work here that a single number cannot.
+                if len(doomed) > 1:
+                    print(f"[cosim] about to delete {len(doomed)} setup(s):")
+                    for n in doomed:
+                        print(f"[cosim]    {n}")
+                    if not _input("[cosim] Delete them? [y/N]: ").startswith("y"):
+                        print("[cosim] cancelled; nothing was deleted.")
+                        continue
+                for n in doomed:
+                    delete(n)
+                print(f"[cosim] deleted {', '.join(repr(n) for n in doomed)}.")
+                # IN PLACE, not `doc = load_doc()`. The caller passed this dict and
+                # goes on using it after we return - to name the setup, to suggest a
+                # free name, to decide whether switching is possible - so rebinding a
+                # local here left every one of those reading setups that no longer
+                # exist. It showed up as "'uga_default' exists. Overwrite it?" for a
+                # setup deleted moments earlier in this very menu. Nothing was ever
+                # resurrected by it: save/save_partial/delete each re-read the file,
+                # so the damage was confined to decisions made from the stale view.
+                doc.clear()
+                doc.update(load_doc())
                 names = order(doc)
                 if not names:
                     return None
@@ -423,7 +541,9 @@ def ask(name, rec, carla_cfg=None, interactive=True, can_switch=True, derived=No
     while True:
         show(name, rec, carla_cfg, derived)
         extra = " | S = switch setup | N = new" if can_switch else ""
-        ans = _input(f"[cosim] Enter = run it | 1-{len(SLOTS)} = change "
+        slots = visible_slots(carla_cfg, derived)
+        keys = [k for k, _ in slots]
+        ans = _input(f"[cosim] Enter = run it | 1-{len(slots)} = change "
                      f"(e.g. \"2 4\"){extra} | Q = quit: ").lower()
         if ans == "":
             return RUN
@@ -434,12 +554,12 @@ def ask(name, rec, carla_cfg=None, interactive=True, can_switch=True, derived=No
         if can_switch and ans == "n":
             return NEW
         if ans in ("a", "all"):
-            return set(SLOT_KEYS)
+            return set(keys)
         picks = [t for t in ans.replace(",", " ").split() if t]
-        if picks and all(t.isdigit() and 1 <= int(t) <= len(SLOTS) for t in picks):
+        if picks and all(t.isdigit() and 1 <= int(t) <= len(slots) for t in picks):
             # Exactly what was selected. cascade() is applied by the caller, which
             # needs to tell a row the user opened from one that only fell over with
             # it - the first asks, the second settles itself where it can.
-            return {SLOT_KEYS[int(t) - 1] for t in picks}
+            return {keys[int(t) - 1] for t in picks}
         print("[cosim] enter numbers to change, Enter to run"
               + (", S / N to switch" if can_switch else "") + ", or Q.")

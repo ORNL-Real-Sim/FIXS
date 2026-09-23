@@ -12,7 +12,7 @@ live separately under `tests/`.
 ```
 Carla/                        <- self-contained co-sim component (shipped in the zip)
   sumo/                       <- the SUMO <-> CARLA co-sim runtime
-    run_synchronization/      full CARLA<->SUMO co-sim (vehicles + TL table)
+    (run_synchronization moved to ../standalone/ -- #330: it speaks no FIXS)
       sumo_integration/       CARLA's bridge (bridge_helper, sumo/carla simulation, ...)
     sumo_carla_tl_sync.py     standalone SUMO->CARLA TL mirror
     auto_place_tls.py         headless TL-actor placement (run inside the UE4 editor)
@@ -399,7 +399,7 @@ starts from the list of them rather than from a blank prompt:
    1) app       roosevelt
    2) map       roosevelt_full            (Digital-Twin-Library)
    3) scenario  config.yaml               (generated, this app on this map)
-   4) engine    py                        (run_synchronization.py)
+   4) engine    py                        (Python VirEnvCore: VirEnv/mainVirCarla.py)
    5) CARLA     source  C:/src_ext/Carla  ->  127.0.0.1:2000
    6) SUMO      gui, step 0.05
 

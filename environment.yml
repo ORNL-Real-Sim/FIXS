@@ -6,6 +6,12 @@ channel_priority: strict
 
 dependencies:
   - python=3.10
+  # Carla/carla_agents' global_route_planner imports networkx, so a controller
+  # that brings a CARLA agent (BasicAgent/BehaviorAgent) fails to import at all
+  # without it: mainVirCarla dies at startup and takes the stack down with it
+  # (#378). It was declared in requirements.txt (#305) - a file nothing installs,
+  # which is why an env built from this spec never got it.
+  - networkx
   - numpy
   - pandas
   - plotly
@@ -14,7 +20,7 @@ dependencies:
   - pytest
   - pyyaml
   - shapely
-  # Carla/sumo/run_synchronization/sumo_integration/sumo_simulation.py imports
+  # standalone/run_synchronization/sumo_integration/sumo_simulation.py imports
   # lxml.etree, and nothing else installs it, so it has to be declared here.
   - lxml
   - vs2015_runtime

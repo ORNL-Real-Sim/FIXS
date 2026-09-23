@@ -28,7 +28,8 @@ COSIM = os.path.join(ROOT, "scripts", "cosim")
 sys.path.insert(0, CARLA)
 sys.path.insert(0, COSIM)  # for run_cosim
 sys.path.insert(0, os.path.join(CARLA, "sumo"))
-sys.path.insert(0, os.path.join(CARLA, "sumo", "run_synchronization"))
+sys.path.insert(0, os.path.join(os.path.dirname(CARLA), "standalone",
+                                "run_synchronization"))
 
 CARLA_ROOT = os.environ.get("CARLA_ROOT")
 STEPS = int(os.environ.get("VERIFY_STEPS", "200"))

@@ -48,6 +48,13 @@ class VehData:
     
     activeLaneChange: int = 0  # Boolean-like integer (-1, 0, or 1)
 
+    # Brake / indicator bitfield, uint16 on the wire. Bit 0 = right indicator,
+    # bit 1 = left indicator, bit 3 = brake -- the decode VirEnvCore performs in
+    # decodeLightBits(). Sits between `height` and the EgoDriver block in the
+    # wire order (MsgHelper.cpp:395); it was absent from this port, so a config
+    # subscribing it decoded every following field one uint16 out of phase.
+    lightIndicators: int = 0  # uint16_t
+
     # #174 EgoDriver command channel (L2/L4). Serialized at the END, gated by
     # VehicleMessageField. steer is a physical angle; pedals are unitless positions.
     steerAngleDesired: float = 0.0        # rad, desired front road-wheel steer angle

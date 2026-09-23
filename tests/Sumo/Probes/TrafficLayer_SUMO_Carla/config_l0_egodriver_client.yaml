@@ -11,8 +11,8 @@
 # the EgoDriver tracks it), L4 (a real controller fills the 3 actuation fields).
 #
 # Data flow (ascending TL port order = producer before consumer):
-#   SUMO --[bg + ego]--> TrafficLayer --[420]--> ego_driver_client (actuation)
-#                                     --[440]--> VirCarlaEnv (apply + readback)
+#   SUMO --[bg + ego]--> TrafficLayer --[4420]--> ego_driver_client (actuation)
+#                                     --[4440]--> VirCarlaEnv (apply + readback)
 #   Carla ego --[VirCarlaEnv readback]--> TrafficLayer --moveToXY--> SUMO 'ego'
 #
 # Run: run_sumo_carla_l0_egodriver_client.bat
@@ -46,12 +46,12 @@ ApplicationSetup:
         # serves it BEFORE VirCarlaEnv (its actuation is in bucket B first).
         attribute: { id: ['ego'], radius: [500] }
         ip: ['127.0.0.1']
-        port: [420]
+        port: [4420]
     -   type: ego
         # VirCarlaEnv -- applies the actuation, reads the ego back.
         attribute: { id: ['ego'], radius: [500] }
         ip: ['127.0.0.1']
-        port: [440]
+        port: [4440]
 
 XilSetup:
     EnableXil: false
@@ -86,7 +86,7 @@ CarlaSetup:
     CarlaServerPort: 2000
 
     CarlaClientIP: 127.0.0.1
-    CarlaClientPort: 440
+    CarlaClientPort: 4440
 
     TrafficRefreshRate: 0.1
     CarlaTimeStep: 0.05

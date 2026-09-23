@@ -21,7 +21,8 @@ FIX = os.path.join(HERE, "fixtures")
 # the co-sim runtime lives at the repo root: FIXS_root/Carla
 CARLA = os.path.normpath(os.path.join(HERE, "..", "..", "..", "Carla"))
 sys.path.insert(0, os.path.join(CARLA, "sumo"))
-sys.path.insert(0, os.path.join(CARLA, "sumo", "run_synchronization"))
+sys.path.insert(0, os.path.join(os.path.dirname(CARLA), "standalone",
+                                "run_synchronization"))
 
 # The modules under test import `carla` (the client wheel - no server needed).
 carla = pytest.importorskip("carla", reason="needs the carla client wheel (realsim env)")

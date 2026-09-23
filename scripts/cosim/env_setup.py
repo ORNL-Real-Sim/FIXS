@@ -13,10 +13,13 @@ no config exists, run_cosim.py invokes this on the first run.
 Three flavours:
   packaged  a released build (CarlaUE4.exe / .sh) - stock maps
   source    an Unreal source build - the only one that can cook a custom map
-  client    no CARLA on this machine at all; it runs on another host and is
-            reached over the network. The traffic stack (SUMO, TrafficLayer,
-            VirCarlaEnv) still runs here, so this machine needs the carla PYTHON
-            client but no install, no Unreal, and no GPU.
+  client    no CARLA on this machine at all. It says nothing about where CARLA
+            is: there may be one on another host, reached over the network, or
+            none anywhere. Traffic-only runs (run_cosim --sumo-only) need only
+            SUMO and TrafficLayer, both of which run here; driving a remote CARLA
+            additionally needs the carla PYTHON client, which is why that is
+            offered rather than required. Either way: no install, no Unreal and
+            no GPU on this machine.
 
 Run this any time to switch CARLA (packaged <-> source build, or a different
 install/version):
@@ -93,6 +96,75 @@ def save_config(cfg):
 
 REEXEC_GUARD = "FIXS_REEXEC"
 
+# A conda env has no pyvenv.cfg, so CPython leaves ENABLE_USER_SITE on and puts the
+# PER-USER site directory (%APPDATA%\Python\PythonXY\site-packages on Windows,
+# ~/.local/lib/pythonX.Y/site-packages elsewhere) AHEAD of the env's own
+# site-packages. One `pip install --user` therefore shadows an env-installed package
+# in every env on the machine at once, and naming the right interpreter here is not
+# enough to stop it: a carla built from a source tree landed in the user directory
+# and won over the wheel this config installed, so the client spoke a different
+# protocol version than the server and died inside libcarla on ImageTmpl.h's
+# `GetWidth() * GetHeight() == size()` assertion - a C++ assert, so it took the
+# process down instead of raising something python could report. The version banner
+# said so ("Client API version = <hash>" vs "Simulator API version = 0.9.15.2") but
+# CARLA only warns there and connects anyway.
+#
+# carla.json names ONE interpreter; that interpreter has to mean one set of packages.
+# Two moves, because an env var alone cannot repair a process that has already booted:
+#   - export PYTHONNOUSERSITE, so every child - the re-exec below, TrafficLayer, the
+#     app's own launch command, the placers - starts without the directory at all;
+#   - drop it from THIS process's sys.path, for the case where we are already on the
+#     configured interpreter and so never re-exec.
+
+USER_SITE_OPT_OUT = "PYTHONNOUSERSITE"
+
+
+def quarantine_user_site():
+    """Keep per-user site-packages out of this run. Returns the paths dropped.
+
+    Empty on a healthy machine, and empty in a child we re-exec'd, which never
+    added the directory - so the caller's notice prints once, where it is news."""
+    os.environ[USER_SITE_OPT_OUT] = "1"
+    try:
+        import site
+        user_site = getattr(site, "USER_SITE", None) or site.getusersitepackages()
+    except Exception:
+        return []          # no usable site module: nothing to quarantine
+    if not user_site:
+        return []
+    target = os.path.normcase(os.path.normpath(user_site))
+    dropped = [p for p in sys.path
+               if p and os.path.normcase(os.path.normpath(p)) == target]
+    for path in dropped:
+        sys.path.remove(path)
+    return dropped
+
+
+# Run at import, not from a call each entry point has to remember: this module is the
+# first FIXS import in every one of them, and the quarantine has to beat `import carla`
+# on ALL paths - including the ones that answer and exit before
+# reexec_under_configured. run_cosim --version is the sharp case: its whole job is to
+# report which packages a run will use ("what to paste into a bug report"), and it
+# returns at the --doctor/--version branch, well above the re-exec - so it was
+# fingerprinting the shadowed copy and calling it present.
+USER_SITE_DROPPED = quarantine_user_site()
+_python_reported = False
+
+
+def report_python(tag="fixs"):
+    """Name the interpreter this run uses - once, and only when something had been
+    shadowing it.
+
+    Which directory got dropped is our problem, not the reader's. The question a
+    shadowed import makes unanswerable is "which python am I actually getting",
+    so answer that and say nothing else. Silent on a machine with no user-site
+    install, which is most of them."""
+    global _python_reported
+    if not USER_SITE_DROPPED or _python_reported:
+        return
+    _python_reported = True
+    print(f"[{tag}] python: {sys.executable}")
+
 
 def configured_python():
     """The interpreter carla.json names, if it is on disk. Else None."""
@@ -115,11 +187,18 @@ def reexec_under_configured(script, cfg=None, drop=(), tag="fixs"):
     arguments the child must not see again (run_cosim's --reconfigure has already
     been honoured by the time we switch). REEXEC_GUARD stops a config that points
     at a shim or a symlink - where the path comparison cannot tell parent from
-    child - from re-execing forever."""
+    child - from re-execing forever.
+
+    The user-site quarantine already happened at import. Naming the interpreter is
+    done here, and only on the paths that RETURN - if we re-exec, sys.executable is
+    not the python that ends up running, and the switch line below names the one
+    that does."""
     target = (cfg if cfg is not None else load_config() or {}).get("python")
     if not target or not os.path.isfile(target):
+        report_python(tag)
         return                       # nothing configured yet, or it has been removed
     if _same_python(target, sys.executable) or os.environ.get(REEXEC_GUARD) == "1":
+        report_python(tag)
         return
     print(f"[{tag}] switching to the configured python env:\n        {target}")
     cmd = [target, os.path.abspath(script), *[a for a in sys.argv[1:] if a not in drop]]
@@ -208,6 +287,34 @@ def _python_tag(py_exe):
         return out or None
     except Exception:
         return None
+
+
+def _carla_wheel_hint(py_exe):
+    """Why a carla install usually fails: the interpreter is out of range.
+
+    The client is published as a wheel for CPython 3.7-3.10 only, with no source
+    distribution, so on 3.11+ pip has nothing to install and reports that it found
+    no matching distribution - which reads as a network or index problem rather
+    than as a python that cannot be used at all. Name the version when that is the
+    reason, and say nothing when it is not, so this never talks over a real
+    failure."""
+    tag = _python_tag(py_exe) or ""
+    if not tag.startswith("cp3"):
+        return ""
+    try:
+        minor = int(tag[3:])
+    except ValueError:
+        return ""
+    if 7 <= minor <= 10:
+        return ""
+    return (
+        "\n[setup] that interpreter is python 3.%d. The CARLA client is published"
+        "\n        only for CPython 3.7-3.10 and has no source distribution, so"
+        "\n        there is no wheel for it to install - this is not a network"
+        "\n        problem. Bind a 3.10 env instead:"
+        "\n            conda env create -n %s -f environment.yml"
+        "\n            python carla_env_setup.py --update-python"
+        % (minor, _canonical_env_name()))
 
 
 def _conda_roots():
@@ -397,7 +504,7 @@ def ensure_runtime(cfg, force=False):
         print("[setup] saved config has no usable python env (carla not importable); "
               "resolving it now (CARLA paths kept) ...")
     cfg["python"] = resolve_python()
-    # .get: 'client' mode has no carla_root by design (CARLA is on another host).
+    # .get: 'client' mode has no carla_root by design (no CARLA on this machine).
     wheel = ensure_carla(cfg["python"], cfg["mode"], cfg.get("carla_root"))
     if wheel:
         cfg["carla_wheel"] = wheel
@@ -508,13 +615,23 @@ def _warn_if_not_requested(py_exe, name):
 # CarlaServerIP -> localhost), and no pandas/shapely turns traffic-light sync off.
 RUNTIME_MODULES = ("yaml", "pandas", "shapely", "traci", "sumolib")
 
+# The exception to that: Carla/carla_agents needs networkx, and without it a
+# controller that brings a CARLA agent cannot be imported at all - mainVirCarla
+# exits and run_cosim stops the stack (#378). So it is checked here too, and
+# reported as fatal-when-used rather than as a degradation.
+AGENT_MODULES = ("networkx",)
+
+# Everything the bound interpreter is checked for. One tuple, so a caller cannot
+# check half the list: the two above are kept apart only to word the message.
+CHECKED_MODULES = RUNTIME_MODULES + AGENT_MODULES
+
 # The distribution that provides a module, where the two names differ.
 PIP_NAME = {"yaml": "pyyaml"}
 
 
 def missing_runtime(py_exe):
-    """Which of RUNTIME_MODULES `py_exe` cannot import."""
-    return [m for m in RUNTIME_MODULES if not _python_can_import(py_exe, (m,))]
+    """Which of CHECKED_MODULES `py_exe` cannot import."""
+    return [m for m in CHECKED_MODULES if not _python_can_import(py_exe, (m,))]
 
 
 def _warn_if_incomplete(py_exe):
@@ -527,21 +644,36 @@ def _warn_if_incomplete(py_exe):
     ways that name something else (see RUNTIME_MODULES above), and setup is the one
     moment where saying so costs a single line instead of an afternoon.
 
+    AGENT_MODULES is reported separately because it is not a degradation: without
+    networkx a CARLA-agent controller does not import and the stack stops (#378),
+    so calling that a misbehaviour would send the reader looking for a symptom
+    they will never reach.
+
     carla is deliberately not checked here: ensure_carla installs it right after
     this, so its absence now is expected, not a defect."""
     if not py_exe:
         return
-    lacks = missing_runtime(py_exe)
-    if not lacks:
+    missing = missing_runtime(py_exe)
+    if not missing:
         return
-    pkgs = " ".join(PIP_NAME.get(m, m) for m in lacks)
-    print(f"[setup] NOTE: this interpreter cannot import: {', '.join(lacks)}\n"
-          f"        {py_exe}\n"
-          f"        The co-sim will still start, and will misbehave in ways that name "
-          f"something else: no yaml makes every scenario setting read as its default "
-          f"(CarlaServerIP -> localhost), and no pandas/shapely turns traffic-light "
-          f"sync off.\n"
-          f"        Fix it with:\n"
+    lacks = [m for m in missing if m in RUNTIME_MODULES]
+    agent_lacks = [m for m in missing if m in AGENT_MODULES]
+    pkgs = " ".join(PIP_NAME.get(m, m) for m in missing)
+    if lacks:
+        print(f"[setup] NOTE: this interpreter cannot import: {', '.join(lacks)}\n"
+              f"        {py_exe}\n"
+              f"        The co-sim will still start, and will misbehave in ways that name "
+              f"something else: no yaml makes every scenario setting read as its default "
+              f"(CarlaServerIP -> localhost), and no pandas/shapely turns traffic-light "
+              f"sync off.")
+    if agent_lacks:
+        print(f"[setup] NOTE: this interpreter cannot import: "
+              f"{', '.join(agent_lacks)}\n"
+              f"        {py_exe}\n"
+              f"        Carla/carla_agents needs it. A controller that brings a CARLA "
+              f"agent will not import, so mainVirCarla exits at startup and the whole "
+              f"stack stops. A run whose ego is driven some other way is unaffected.")
+    print(f"        Fix it with:\n"
           f"            \"{py_exe}\" -m pip install {pkgs}")
 
 
@@ -635,7 +767,7 @@ def _no_env_fallback(name):
     a machine ends up running the co-sim without pyyaml: everything starts, and
     the first symptom is a scenario setting quietly reading as its default."""
     print(f"[setup] the '{name}' env could not be created or found. The co-sim "
-          f"needs: {', '.join(RUNTIME_MODULES)} (+ carla).")
+          f"needs: {', '.join(CHECKED_MODULES)} (+ carla).")
     here = sys.executable
     lacks = missing_runtime(here)
     print(f"   [1] use this interpreter and pip-install what it lacks\n"
@@ -647,9 +779,11 @@ def _no_env_fallback(name):
     if ans == "1":
         if lacks:
             # environment.yml is a conda spec, so there is no conda-free way to
-            # replay it; these are its importable dependencies. NB it does not
-            # list shapely at all, though the TL-table generator needs it (#221).
-            pkgs = ["pyyaml", "pandas", "shapely", "eclipse-sumo", "traci", "sumolib"]
+            # replay it; these are its importable dependencies. Keep this list and
+            # RUNTIME_MODULES/AGENT_MODULES in step with that file - the whole of
+            # #378 was one import declared in a manifest nothing installs.
+            pkgs = ["pyyaml", "pandas", "shapely", "networkx",
+                    "eclipse-sumo", "traci", "sumolib"]
             # This is the riskiest install in the file: reached precisely when
             # conda is absent or broken, which is when `here` is most likely to
             # BE the OS python.
@@ -780,14 +914,37 @@ def ensure_carla(py_exe, mode, carla_root=None):
     for source.
 
     'client' takes the PyPI wheel because there is no local build to take one
-    from. run_cosim still needs `import carla` on this machine - it is what
-    drives load_world, the readiness check and the spectator against the remote
-    server - so the wheel is required even though nothing here ever launches
-    CARLA. If that remote server is a source build with a patched PythonAPI,
-    the version handshake is what catches the mismatch, not this."""
+    from, and it is OFFERED rather than required. That mode means only "no CARLA
+    on this machine"; it does not say a CARLA exists elsewhere. Driving a remote
+    one needs `import carla` here - it is what runs load_world, the readiness
+    check and the spectator against that server - but a traffic-only run
+    (run_cosim --sumo-only) never imports it, so refusing to finish setup without
+    it would block the one thing the mode is certainly for. If that remote server
+    is a source build with a patched PythonAPI, the version handshake is what
+    catches the mismatch, not this."""
     has_carla = _python_can_import(py_exe, ("carla",))
 
-    if mode in ("packaged", "client"):
+    if mode == "client":
+        if has_carla:
+            print(f"[setup] carla {_carla_version(py_exe)} already importable.")
+            return
+        # Declining is not fatal here, unlike 'packaged'. See the docstring: this
+        # mode means no CARLA on this machine, and the commonest thing to do from
+        # it - a traffic-only run - never imports the client.
+        print("[setup] the CARLA python client is not installed in this env.")
+        print("        It is needed only to drive a CARLA on ANOTHER host from here")
+        print("        (run_cosim --peer HOST). Traffic-only runs (--sumo-only) do not")
+        print("        use it.")
+        if not _confirm_install(py_exe, "carla==0.9.15 (PyPI wheel, with its deps)"):
+            print("[setup] skipped - traffic-only runs work without it. Re-run setup "
+                  "to add it when you need a remote CARLA.")
+            return None
+        if not _pip_install(py_exe, ["carla==0.9.15"]):
+            sys.exit("[setup] pip install carla==0.9.15 failed."
+                     + _carla_wheel_hint(py_exe))
+        return None
+
+    if mode == "packaged":
         if has_carla:
             print(f"[setup] carla {_carla_version(py_exe)} already importable.")
             return
@@ -796,7 +953,8 @@ def ensure_carla(py_exe, mode, carla_root=None):
             sys.exit("[setup] carla not installed; re-run and bind a dedicated env "
                      "(--update-python).")
         if not _pip_install(py_exe, ["carla==0.9.15"]):
-            sys.exit("[setup] pip install carla==0.9.15 failed.")
+            sys.exit("[setup] pip install carla==0.9.15 failed."
+                     + _carla_wheel_hint(py_exe))
         return None
 
     # source: client should match the custom server -> install the build's wheel
@@ -894,9 +1052,10 @@ def run_setup(allow_packaged_windows=False):
     if offer_packaged:
         print("  [1] Packaged CARLA  (a released build with CarlaUE4.exe / CarlaUE4.sh)")
     print("  [2] Source build    (run through the Unreal editor: UE4Editor -game)")
-    print("  [3] None on this machine - CARLA runs on another host")
-    print("      (SUMO + TrafficLayer + VirCarlaEnv run here; CARLA is reached over")
-    print("       the network at CarlaSetup.CarlaServerIP)")
+    print("  [3] No CARLA on this machine")
+    print("      (SUMO and TrafficLayer run here, which is all a traffic-only run")
+    print("       needs: run_cosim --sumo-only. To drive a CARLA on ANOTHER host")
+    print("       from here instead, name it at run time: run_cosim --peer HOST.)")
     if not offer_packaged:
         print("  (packaged is not offered on Windows: custom-map import is Linux+Docker")
         print("   only in CARLA. Only need stock maps? re-run with --allow-packaged-windows)")
@@ -952,10 +1111,11 @@ def run_setup(allow_packaged_windows=False):
         # something to half-succeed against. The server address is NOT stored
         # here either - it lives in the scenario yaml (CarlaSetup.CarlaServerIP),
         # which is already the one place every component reads it from.
-        print("[setup] client mode: no CARLA on this machine. run_cosim will not")
-        print("        launch or cook anything here; point CarlaSetup.CarlaServerIP")
-        print("        at the host running CARLA, which must already have the map")
-        print("        cooked with traffic lights and signs placed.")
+        print("[setup] no CARLA on this machine. Nothing is launched or cooked here.")
+        print("        Traffic-only runs need nothing further:  run_cosim --sumo-only")
+        print("        To drive a CARLA on ANOTHER host from here, name it at run time")
+        print("        - run_cosim --peer HOST - and that host must already have the")
+        print("        map cooked, with traffic lights and signs placed.")
         cfg = {"mode": "client"}
 
     # Resolve the interpreter (carla + SUMO) and match the carla client to the
@@ -968,8 +1128,14 @@ def run_setup(allow_packaged_windows=False):
         cfg["carla_wheel"] = wheel
 
     save_config(cfg)
-    where = cfg.get("carla_root") or "on another host (see CarlaSetup.CarlaServerIP)"
-    print(f"\n[setup] done: {cfg['mode']} CARLA @ {where}")
+    # Not "on another host": a remote CARLA is one of the things this answer
+    # allows, not something it states. A traffic-only machine has no host to name.
+    root = cfg.get("carla_root")
+    if root:
+        print(f"\n[setup] done: {cfg['mode']} CARLA @ {root}")
+    else:
+        print("\n[setup] done: no CARLA on this machine. --sumo-only runs as it "
+              "stands; --peer HOST drives one elsewhere.")
     print(f"[setup] python: {cfg['python']}")
     return cfg
 

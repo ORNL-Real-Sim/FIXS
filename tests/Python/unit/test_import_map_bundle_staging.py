@@ -1,0 +1,194 @@
+"""A bundle stages its CARLA half only, and a restage clears what it replaces.
+
+A Digital-Twin-Library map ships as `carla/` + `sumo/`. Extracted whole into
+CARLA's Import/, it leaves a second descriptor at Import/carla/<name>.json
+beside the one already there, CARLA's Import.py cooks every descriptor it
+finds, and the repeat pass crashes Unreal. Observed on mlk_notexture_uturn;
+mechanism in FIXS#358.
+
+    python -m pytest tests/Python/unit/test_import_map_bundle_staging.py
+"""
+from __future__ import annotations
+
+import json
+import os
+import sys
+import zipfile
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "scripts", "cosim"))
+import import_map  # noqa: E402
+
+
+MAP = "mlk_notexture_uturn"
+
+
+def _descriptorText():
+    return json.dumps({"maps": [{"name": MAP,
+                                 "xodr": f"{MAP}/{MAP}.xodr",
+                                 "source": f"{MAP}/{MAP}.fbx"}],
+                       "props": []})
+
+
+def _bundleZip(path):
+    """A release zip in the library's layout: a carla/ half and a sumo/ half."""
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr(f"carla/{MAP}.json", _descriptorText())
+        z.writestr(f"carla/{MAP}/{MAP}.fbx", "new-fbx")
+        z.writestr(f"carla/{MAP}/{MAP}.xodr", "new-xodr")
+        z.writestr(f"sumo/{MAP}.net.xml", "<net/>")
+        z.writestr(f"sumo/{MAP}.sumocfg", "<configuration/>")
+    return path
+
+
+def _stagedAlready(importDir):
+    """What a previous import left behind, as the real one had it."""
+    os.makedirs(os.path.join(importDir, MAP), exist_ok=True)
+    with open(os.path.join(importDir, MAP + ".json"), "w") as fh:
+        fh.write(_descriptorText())
+    for leaf in (f"{MAP}.fbx", f"{MAP}.xodr"):
+        with open(os.path.join(importDir, MAP, leaf), "w") as fh:
+            fh.write("old")
+
+
+def _carlaRoot(tmp_path):
+    root = tmp_path / "Carla"
+    (root / "Import").mkdir(parents=True)
+    return str(root)
+
+
+def _descriptorsUnder(importDir):
+    """Every CARLA map descriptor Import.py would find, at any depth."""
+    found = []
+    for base, _dirs, files in os.walk(importDir):
+        for f in files:
+            if f.lower().endswith(".json") and f.lower() != "roadpainter_decals.json":
+                found.append(os.path.relpath(os.path.join(base, f), importDir))
+    return sorted(found)
+
+
+def test_a_bundle_does_not_leave_two_descriptors(tmp_path, monkeypatch):
+    carlaRoot = _carlaRoot(tmp_path)
+    importDir = os.path.join(carlaRoot, "Import")
+    _stagedAlready(importDir)
+    zipPath = _bundleZip(str(tmp_path / "bundle.zip"))
+
+    monkeypatch.setenv("FIXS_MAP_CACHE", str(tmp_path / "cache"))
+    import_map.stage_package(carlaRoot, MAP, package_dir=zipPath)
+
+    found = _descriptorsUnder(importDir)
+    assert found == [MAP + ".json"], (
+        "Import.py cooks every descriptor it finds; a bundle must not add a "
+        "second one under carla/. Found: %s" % found)
+
+
+def test_the_staged_package_is_the_new_one(tmp_path, monkeypatch):
+    carlaRoot = _carlaRoot(tmp_path)
+    importDir = os.path.join(carlaRoot, "Import")
+    _stagedAlready(importDir)
+    zipPath = _bundleZip(str(tmp_path / "bundle.zip"))
+
+    monkeypatch.setenv("FIXS_MAP_CACHE", str(tmp_path / "cache"))
+    import_map.stage_package(carlaRoot, MAP, package_dir=zipPath)
+
+    with open(os.path.join(importDir, MAP, f"{MAP}.fbx")) as fh:
+        assert fh.read() == "new-fbx", "the old staging was cooked instead"
+
+
+def test_clear_staging_removes_descriptor_and_assets(tmp_path):
+    carlaRoot = _carlaRoot(tmp_path)
+    importDir = os.path.join(carlaRoot, "Import")
+    _stagedAlready(importDir)
+    assert import_map.staged_import_paths(carlaRoot, MAP)
+
+    import_map.clear_staging(carlaRoot, MAP)
+
+    assert import_map.staged_import_paths(carlaRoot, MAP) == []
+    assert not os.path.exists(os.path.join(importDir, MAP))
+    assert not os.path.exists(os.path.join(importDir, MAP + ".json"))
+
+
+def test_clear_staging_on_nothing_is_not_an_error(tmp_path):
+    carlaRoot = _carlaRoot(tmp_path)
+    import_map.clear_staging(carlaRoot, MAP)          # must not raise
+
+
+def test_a_flat_package_is_unchanged(tmp_path):
+    """The legacy layout has no carla/ half and must stage exactly as before."""
+    flat = tmp_path / "flat.zip"
+    with zipfile.ZipFile(flat, "w") as z:
+        z.writestr(f"{MAP}.json", _descriptorText())
+        z.writestr(f"{MAP}/{MAP}.fbx", "flat-fbx")
+        z.writestr(f"{MAP}/{MAP}.xodr", "flat-xodr")
+    assert import_map._carla_half(str(flat), MAP) == str(flat)
+
+def test_a_restage_clears_a_leftover_nested_duplicate(tmp_path):
+    """Recovery, not prevention.
+
+    The fixed code never creates Import/carla/<name>.json -- but every machine
+    that ran the broken version already has one, and CARLA cooks every
+    descriptor it finds, so the FIRST fixed import would still crash.
+    """
+    carlaRoot = _carlaRoot(tmp_path)
+    importDir = os.path.join(carlaRoot, 'Import')
+    _stagedAlready(importDir)
+    leftover = os.path.join(importDir, 'carla')
+    os.makedirs(os.path.join(leftover, MAP))
+    with open(os.path.join(leftover, MAP + '.json'), 'w') as fh:
+        fh.write(_descriptorText())
+
+    import_map.clear_staging(carlaRoot, MAP)
+
+    assert _descriptorsUnder(importDir) == [], (
+        'a restage must clear every copy, not just the canonical one')
+
+
+def _nested(importDir, rel):
+    """Plant a duplicate descriptor at `rel` under Import/, as a broken run left."""
+    d = os.path.join(importDir, rel)
+    os.makedirs(os.path.join(d, MAP), exist_ok=True)
+    with open(os.path.join(d, MAP + ".json"), "w") as fh:
+        fh.write(_descriptorText())
+    return d
+
+
+def test_isolation_hides_a_nested_duplicate_and_puts_it_back(tmp_path):
+    """The cook must see exactly one descriptor, whatever Import/ holds.
+
+    Non-destructive: the duplicate is only set aside, and restore() returns it
+    to the exact path it came from -- including its sub-directory.
+    """
+    carlaRoot = _carlaRoot(tmp_path)
+    importDir = os.path.join(carlaRoot, "Import")
+    _stagedAlready(importDir)
+    _nested(importDir, "carla")
+
+    assert len(_descriptorsUnder(importDir)) == 2
+    restore = import_map._isolate_import(importDir, MAP)
+    assert _descriptorsUnder(importDir) == [MAP + ".json"], "the cook still sees two"
+    restore()
+    assert sorted(_descriptorsUnder(importDir)) == sorted(
+        [MAP + ".json", os.path.join("carla", MAP + ".json")]), \
+        "the duplicate was not put back where it came from"
+
+
+def test_isolation_keeps_a_duplicate_buried_in_the_asset_folder_out_of_the_cook(tmp_path):
+    carlaRoot = _carlaRoot(tmp_path)
+    importDir = os.path.join(carlaRoot, "Import")
+    _stagedAlready(importDir)
+    _nested(importDir, os.path.join(MAP, MAP, "carla"))
+
+    restore = import_map._isolate_import(importDir, MAP)
+    assert _descriptorsUnder(importDir) == [MAP + ".json"]
+    assert os.path.isdir(os.path.join(importDir, MAP)), \
+        "the map's own asset folder must survive"
+    restore()
+
+
+def test_isolation_never_hides_the_only_copy(tmp_path):
+    """No canonical descriptor: the nested one is all there is, so it stays."""
+    carlaRoot = _carlaRoot(tmp_path)
+    importDir = os.path.join(carlaRoot, "Import")
+    _nested(importDir, "carla")
+
+    import_map._isolate_import(importDir, MAP)
+    assert _descriptorsUnder(importDir) == [os.path.join("carla", MAP + ".json")]
