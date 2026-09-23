@@ -15,7 +15,7 @@
 # NOT try to detect a FIXS-side wire-contract change - that's a separate concern
 # (a component's actual wire compatibility can only be proven by running the
 # licensed binaries, which no hosted runner can do). msg_contract_hash.ps1 is
-# kept in the tree for that future licensed-box / golden-vector work, but is not
+# recorded in the bundle manifest for diagnosis only (#204), but is not
 # part of the key or the guard. Writes ONLY the key to stdout.
 # ============================================================================
 param(

@@ -272,13 +272,13 @@ jobs:
       # the hosted runner cannot build, pulled from the Binaries-<key> release on
       # THIS repo (native token). The key = ProprietaryFiles SHA (bundle_key.ps1),
       # so the bundle is paired to the proprietary source it was built from. Then
-      # re-pack the complete zip.
-      # OPTIONAL for now: if no bundle is published for this key yet, ship
-      # public-core with a warning (bootstrap). Flip to a hard failure once the
-      # first bundle exists, so a "complete" release can never silently drop its
-      # binaries. The bundle-guard PR check makes the missing-bundle case
-      # unmergeable in the first place (#191).
-      - name: Overlay proprietary bundle (Binaries-<key>, if published)
+      # re-pack the complete zip, and check that every file the bundle's manifest
+      # lists made it in.
+      # A missing bundle fails a release build (#204): the first bundle exists,
+      # so the old public-core-only bootstrap would now only hide a dropped half.
+      # PR builds still pack public-core with a warning - bundle-guard already
+      # makes that PR unmergeable (#191).
+      - name: Overlay proprietary bundle (Binaries-<key>)
         if: needs.changes.outputs.should_build == 'true'
         shell: pwsh
         env:
@@ -296,14 +296,18 @@ jobs:
           gh release download $tag --repo $env:GITHUB_REPOSITORY --pattern 'fixs-binaries-*.zip' --dir $tmp --clobber 2>$null
           $bundle = Get-ChildItem $tmp -Filter 'fixs-binaries-*.zip' -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $bundle) {
-            Write-Warning "No $tag release - shipping public-core only. Publish it via scripts/dispatch/pack_binaries.ps1 -Publish on a licensed box."
+            if ($env:GITHUB_EVENT_NAME -ne 'pull_request') {
+              Write-Error "No $tag release - refusing to publish public-core only. Publish it via scripts/dispatch/pack_binaries.ps1 -Publish on a licensed box."
+              exit 1
+            }
+            Write-Warning "No $tag release - PR build packs public-core only."
             exit 0
           }
           $x = Join-Path $tmp 'unzipped'
           Expand-Archive -Path $bundle.FullName -DestinationPath $x -Force
           # Overlay into build/ (everything except the manifest), then re-pack.
-          # No wire-format check needed: the key encodes the contract hash, so a
-          # matching $tag is guaranteed compatible.
+          # The key pairs the bundle to the proprietary SOURCE only; nothing here
+          # checks the FIXS-side message definition (#204).
           Get-ChildItem $x -Exclude 'manifest.json' | ForEach-Object {
             Copy-Item $_.FullName -Destination build -Recurse -Force
           }
@@ -311,10 +315,49 @@ jobs:
           Write-Host "Overlaid $n proprietary files into build/; re-packing complete zip..."
           & powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dispatch/8_create_zip.ps1 -RunMode inline
 
+          # The packer renames on the way in (CarMaker/ -> carmaker/, DLLs ->
+          # vissim/), so match each manifest file on its last two path components.
+          # That still tells CM11 from CM13 and CarMaker/ from CommonLib/.
+          $manifest = Get-Content (Join-Path $x 'manifest.json') -Raw | ConvertFrom-Json
+          $zip = Get-ChildItem build -Filter 'fixs-build-*.zip' | Select-Object -First 1
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive = [System.IO.Compression.ZipFile]::OpenRead($zip.FullName)
+          $entries = $archive.Entries | ForEach-Object { '/' + ($_.FullName -replace '\\', '/').ToLower() }
+          $archive.Dispose()
+          $missing = @(foreach ($f in $manifest.files) {
+            $tail = '/' + ((($f -split '[\\/]') | Select-Object -Last 2) -join '/').ToLower()
+            if (-not ($entries | Where-Object { $_.EndsWith($tail) })) { $f }
+          })
+          if ($missing.Count) {
+            Write-Error "$($zip.Name) is missing $($missing.Count) of $($manifest.file_count) bundle files: $($missing -join ', ')"
+            exit 1
+          }
+          Write-Host "All $($manifest.file_count) bundle files present in $($zip.Name)."
+
       - name: Sanity-check the packaged zip
         if: needs.changes.outputs.should_build == 'true'
         shell: pwsh
+        env:
+          CHANNEL_TAG: ${{ steps.channel.outputs.tag }}
+          CHANNEL_SEMVER: ${{ steps.channel.outputs.semver }}
         run: |
+          # generate_version.ps1 falls back to 0.0.0 / UNKNOWN when it finds no
+          # version tag, and a wrong local tag once stamped the 0.9.0 train as
+          # 0.7.0. Neither may ship (#204).
+          $h = Get-Content CommonLib/RealSimVersion.h -Raw
+          $ver = (@('MAJOR', 'MINOR', 'PATCH') | ForEach-Object {
+            [regex]::Match($h, "#define\s+REALSIM_VERSION_$_\s+(\d+)").Groups[1].Value }) -join '.'
+          $commit = [regex]::Match($h, '#define\s+REALSIM_GIT_COMMIT\s+"([^"]*)"').Groups[1].Value
+          Write-Host "RealSimVersion.h: $ver ($commit)"
+          if ($ver -eq '0.0.0' -or $commit -eq 'UNKNOWN') {
+            Write-Error "RealSimVersion.h carries the fallback stamp ($ver, $commit) - no version tag was found."
+            exit 1
+          }
+          if ($env:CHANNEL_SEMVER -eq 'true' -and $env:CHANNEL_TAG -notmatch "^v$([regex]::Escape($ver))(-|$)") {
+            Write-Error "RealSimVersion.h says $ver but this build publishes to $env:CHANNEL_TAG."
+            exit 1
+          }
+
           $zip = Get-ChildItem build -Filter 'fixs-build-*.zip' -ErrorAction SilentlyContinue |
                  Select-Object -First 1
           if (-not $zip) { Write-Error "No fixs-build-*.zip produced (see build-logs)."; exit 1 }
@@ -502,7 +545,10 @@ jobs:
               echo "renaming $(basename "$zip") -> $(basename "$want")"
               mv "$zip" "$want"
           fi
+          # The sidecar update_fixs.{sh,ps1} verify the download against (#204).
+          (cd dist && sha256sum "$(basename "$want")" > "$(basename "$want").sha256")
+          cat "$want.sha256"
           echo "Uploading $(basename "$want") to $CHANNEL_TAG"
-          # --clobber replaces only this asset name; the Windows bundle on the
+          # --clobber replaces only these asset names; the Windows bundle on the
           # same rolling release is untouched.
-          gh release upload "$CHANNEL_TAG" "$want" --repo "$GITHUB_REPOSITORY" --clobber
+          gh release upload "$CHANNEL_TAG" "$want" "$want.sha256" --repo "$GITHUB_REPOSITORY" --clobber
