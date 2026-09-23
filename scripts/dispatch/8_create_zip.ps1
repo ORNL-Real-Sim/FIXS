@@ -130,10 +130,14 @@ try {
     # Include the conda env spec so the fetched FIXS/ folder carries the
     # canonical 'realsim' environment definition. carla is pulled from PyPI
     # (carla==0.9.15), so no wheel needs to be bundled here.
-    $EnvYml = Join-Path $RepoRoot 'environment.yml'
-    if (Test-Path $EnvYml) {
-        Copy-Item -Path $EnvYml -Destination $StagingDir -Force
-        Write-Host "  + environment.yml"
+    # pyproject.toml + uv.lock are the same env for uv (~/.fixs/env.json use_uv);
+    # env_setup looks for them beside environment.yml.
+    foreach ($spec in @('environment.yml', 'pyproject.toml', 'uv.lock')) {
+        $specPath = Join-Path $RepoRoot $spec
+        if (Test-Path $specPath) {
+            Copy-Item -Path $specPath -Destination $StagingDir -Force
+            Write-Host "  + $spec"
+        }
     }
 
     # Ship the CARLA component (sumo/ runtime + utils/ + the placers), minus the

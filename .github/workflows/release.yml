@@ -332,7 +332,7 @@ jobs:
           foreach ($must in @('cosim\run_cosim.py', 'cosim\app_catalog.py',
                               'cosim\env_setup.py', 'Carla\run_cosim.py',
                               'frontdoor\FIXS.bat', 'frontdoor\FIXS.sh',
-                              'environment.yml')) {
+                              'environment.yml', 'pyproject.toml', 'uv.lock')) {
             if (-not (Test-Path (Join-Path $zipTest $must))) {
               Write-Error "Packaged zip is missing $must - bundle layout is wrong."
               exit 1

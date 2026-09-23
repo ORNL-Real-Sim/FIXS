@@ -286,7 +286,7 @@ def _read_scenario_config(config_yaml):
             f"[cosim] cannot parse scenario yamls: {e}\n"
             f"        CommonLib/ConfigHelper.py needs PyYAML. Install it into the "
             f"interpreter run_cosim uses (the 'python' entry in {env.CONFIG_PATH}):\n"
-            f"            \"{sys.executable}\" -m pip install pyyaml\n"
+            f"            {env._pip_hint(sys.executable, ['pyyaml'])}\n"
             f"        Continuing without it would silently substitute defaults for "
             f"every setting in {os.path.basename(config_yaml)}.")
     except Exception as e:
