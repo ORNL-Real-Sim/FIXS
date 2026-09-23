@@ -331,6 +331,7 @@ jobs:
           Expand-Archive -Path $zip.FullName -DestinationPath $zipTest -Force
           foreach ($must in @('cosim\run_cosim.py', 'cosim\app_catalog.py',
                               'cosim\env_setup.py', 'Carla\run_cosim.py',
+                              'cosim\gui\app.py', 'cosim\gui\core.py',
                               'frontdoor\FIXS.bat', 'frontdoor\FIXS.sh',
                               'environment.yml')) {
             if (-not (Test-Path (Join-Path $zipTest $must))) {
