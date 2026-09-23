@@ -79,14 +79,13 @@ class MockVirEnvBackend(IVirEnvBackend):
         self._poolInit = True
 
     def spawnVehicle(self, vType, vClass, spawnPose, vehId=''):
-        # vehId is accepted and deliberately NOT recorded. The Python core passes
-        # it (Carla keys its blueprint on it, FIXS#358); the C++ interface has no
-        # such parameter, so recording it would change this digest and nothing on
-        # the C++ side would ever produce a matching one. Keeping it out is what
-        # lets the two cores still be compared on the sequence they DO share.
+        # vehId is recorded, not just accepted: a core that stops passing it then
+        # produces a different transcript, and test_core_parity fails on it. The
+        # C++ mock records it identically. (It used to be dropped here, and the C++
+        # core never passed it at all -- and no test could see the difference.)
         cls = self._classify(vClass)
         pool = self._poolFor(cls)
-        tag = '%s(%s/%s)' % (cls.name, vType, vClass)
+        tag = '%s(%s/%s) id=%s' % (cls.name, vType, vClass, vehId)
         if not pool:
             self._rec('spawnVehicle', tag + ' -> kNoHandle')
             return kNoHandle

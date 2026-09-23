@@ -194,7 +194,7 @@ int VirEnvCore::processStep(double simTime, bool onUpdate, int simStateRecv, flo
             Pose sp;
             sp.x = it.second.positionX; sp.y = it.second.positionY; sp.z = it.second.positionZ;
             sp.headingDeg = it.second.heading; sp.gradeRad = it.second.grade;
-            VehHandle h = backend_ ? backend_->spawnVehicle(it.second.type, it.second.vehicleClass, sp)
+            VehHandle h = backend_ ? backend_->spawnVehicle(it.second.type, it.second.vehicleClass, sp, idTs)
                                    : kNoHandle;
             if (h == kNoHandle) continue;                          // backend full -> skip
             id2handle_[idTs] = h;

@@ -106,8 +106,15 @@ public:
     // slots ignore it). Returns kNoHandle if it cannot place the vehicle (e.g.
     // CarMaker pool exhausted), and the core skips it this step exactly like the
     // full-queue `continue` today.
+    //
+    // vehId is the traffic simulator's id for the vehicle, and the core always
+    // passes it. Carla keys its blueprint on it, so what a vehicle looks like --
+    // and so where its pose anchor sits -- depends on WHICH vehicle it is, not on
+    // how many spawned before it (FIXS#358). CarMaker's slot pool ignores it. It
+    // is a required parameter, not a defaulted one: the Python core already passes
+    // it, and a backend that forgot it should fail to compile, not silently draw.
     virtual VehHandle spawnVehicle(const std::string& vType, const std::string& vClass,
-                                   const Pose& spawnPose) = 0;
+                                   const Pose& spawnPose, const std::string& vehId) = 0;
 
     // Release a handle whose vehicle left the sim (CarMaker parks the slot at
     // z=-5000 and returns it to the pool; Carla destroys the actor).

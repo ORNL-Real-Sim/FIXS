@@ -28,9 +28,15 @@ pose to three decimals, the light bits, the ego id.
 How it runs without MSVC
 ------------------------
 The C++ side is pinned as a committed golden transcript, so the Python test runs
-anywhere. When ``replay_core.exe`` has been built, a second test regenerates the
-golden from it and compares -- so the golden cannot silently go stale against a
-change to VirEnvCore.cpp. Build it with ``tests/VirEnvCore/build_and_run.bat``.
+anywhere. A second test compares that golden against ``replay_core.exe`` built
+from the C++ core as it is now -- building it first when it is missing or older
+than its sources (cpp_build.py). It used to SKIP when the exe was absent, which
+in a green run reads like a pass; it skipped in every run anyone looked at, and
+the two cores quietly disagreed about which vehicle they were spawning. It now
+skips only when there is no compiler to build with.
+
+The spawned vehicle's id is part of the transcript on both sides, so a core that
+stops passing it fails here. That was the divergence the old transcript hid.
 """
 
 import json
@@ -43,6 +49,8 @@ import pytest
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 sys.path.insert(0, REPO_ROOT)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import cpp_build                                                    # noqa: E402
 
 PY_REPLAY = os.path.join(REPO_ROOT, 'tests', 'VirEnv', 'replay_core.py')
 CPP_REPLAY_EXE = os.path.join(REPO_ROOT, 'tests', 'VirEnvCore', 'replay_core.exe')
@@ -146,15 +154,13 @@ def test_python_core_matches_cpp_golden():
                         'the C++ golden', 'the Python core')
 
 
-@pytest.mark.skipif(not os.path.isfile(CPP_REPLAY_EXE),
-                    reason='replay_core.exe not built '
-                           '(run tests/VirEnvCore/build_and_run.bat)')
 def test_cpp_golden_is_current():
     """The committed golden still matches what VirEnvCore.cpp actually does.
 
     Without this, a change to the C++ core would leave the golden -- and therefore
     the Python parity test -- asserting behaviour that no longer exists.
     """
+    cpp_build.ensureBuilt()
     assertSameDecisions(loadGolden(), runCppReplay(),
                         'the committed golden', 'replay_core.exe')
 
