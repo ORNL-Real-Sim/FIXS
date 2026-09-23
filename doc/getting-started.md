@@ -1,27 +1,51 @@
 # Getting Started
 
-Use this page as the on-ramp into the Real-Sim toolchain. It pulls together the minimum set of steps from the existing guides so you can validate your environment quickly before diving into any of the traffic-simulator-specific docs.
+The path from nothing to a first co-simulation, then on to the guide for your
+simulator.
 
-## 1. Clone and Initialize
+## 1. Get FIXS
 
-1. Clone the repository and update submodules (see `README.md` for any project-specific flags).
-2. Review `requirements.txt` together with `doc/setupGuide.md` so you know which external tools (SUMO, CarMaker, MATLAB, etc.) must already be on your workstation.
+Either use a published build or build from source.
 
-## 2. Verify Prerequisites
+- **Published build:** download `fixs-build-<channel>.zip` from
+  [GitHub Releases](https://github.com/ORNL-Real-Sim/FIXS/releases). The
+  [Releases](changelog.md) page explains the channels; `stable` is built from `main`.
+- **From source:** clone the repository and run `scripts\dispatch\dispatch.bat`. Its
+  first step initializes a fresh clone (submodules, native dependencies, yaml-cpp).
+  [BUILD.md](BUILD.md) covers prerequisites, what gets built, and building single
+  components.
 
-1. Run `env.check.py` from the repo root to check Conda, Python, and the required Python packages.  
-2. Install any missing traffic simulator binaries (CarMaker, VISSIM, SUMO) following the instructions in their respective docs under `doc/`.
+The supported versions of SUMO, CARLA, CarMaker, MATLAB and dSPACE are pinned in
+[`dependencies.yaml`](../dependencies.yaml).
 
-## 3. Configure Your First Scenario
+## 2. Set up Python
 
-1. Copy one of the provided configs, e.g., `tests\coordMerge\config_SUMO.yaml`.
-2. Update IP/port information to match your machine (both Real-Sim’s `TrafficLayer.exe` and the simulator it talks to).
-3. If you are targeting SUMO, walk through `doc/SUMOdoc.md`; for VISSIM or CarMaker, follow their corresponding guides.
+The Python helpers and example clients use the conda environment defined in
+[`environment.yml`](../environment.yml):
 
-## 4. Run a Smoke Test
+```batch
+conda env create -f environment.yml
+conda activate realsim
+```
 
-1. Launch `TrafficLayer.exe -f <your-config.yaml>`.
-2. Start the simulator specified in the config.
-3. For MATLAB/Simulink workflows, open the provided example model under `CarMaker` or `CommonLib` and confirm the interface connects.
+`python env.check.py` checks for conda, SUMO and the required Python packages. If
+conda is missing it offers to download and install Miniconda.
 
-Once you can send messages end-to-end, proceed to the Tutorial pages for deeper walkthroughs.
+## 3. Run a first example
+
+[`tests/Python/SimpleEchoClient`](../tests/Python/SimpleEchoClient/) is the smallest
+end-to-end setup: SUMO drives a vehicle around a loop, TrafficLayer relays its state,
+and a Python client receives it and echoes it back. `run_simple_echo_client.bat`
+starts all three in order: SUMO, then TrafficLayer, then the client. It expects
+TrafficLayer from a source build (`TrafficLayer\x64\Release`); with a published build,
+point it at your `TrafficLayer.exe`. The folder's README describes what you should
+see.
+
+## 4. Next steps
+
+- [Configuration reference](ConfigSetup.md): every `config.yaml` key.
+- Simulator guides: [VISSIM](VISSIMdoc.md), [SUMO](SUMOdoc.md),
+  [CarMaker](CarMakerDoc.md), [CARLA](CARLAdoc.md).
+- When something fails, TrafficLayer writes its errors to `TrafficLayer.err`, and
+  `EnableVerboseLog: true` in `SimulationSetup` logs the full message flow. See also
+  the [FAQ](faq.md).

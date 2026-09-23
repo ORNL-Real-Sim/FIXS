@@ -2,18 +2,17 @@
 Real-Sim Documentation
 ======================
 
-.. mdinclude:: README.md
-   :start-line: 1
+.. include:: ../README.md
+   :parser: myst_parser.sphinx_
+   :start-after: <!-- rtd-intro-start: doc/index.rst includes from here to rtd-intro-end -->
+   :end-before: <!-- rtd-intro-end -->
 
 .. toctree::
    :maxdepth: 2
    :caption: User Guide
 
    getting-started
-   installation
-   setupGuide
    ConfigSetup
-   usage
    faq
 
 .. toctree::
@@ -39,8 +38,6 @@ Real-Sim Documentation
    :caption: XIL Bench
 
    xil/AxleDynoCarMakerCoupling
-   xil/CarlaDynoCoupling
-   xil/DynoDataChecks
 
 .. toctree::
    :maxdepth: 3
@@ -63,8 +60,6 @@ Real-Sim Documentation
    DEVELOPER_GUIDE
    ContributionGuide
    FIXS_message_flow
-   gui-design/wireframes
-   156_drivingsim_dll_design_proposal
 
 .. toctree::
    :maxdepth: 2
