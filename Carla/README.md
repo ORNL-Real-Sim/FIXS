@@ -119,22 +119,22 @@ Setup asks **packaged** vs **source build**, then opens a native folder picker:
 
 **What a packaged build cannot do:** cook or place anything &mdash; that needs the
 Unreal editor, which a package does not ship. So it runs a Digital-Twin-Library map
-only if the library publishes it *precooked* (`<map>_cooked.tar.gz`), exactly as it
-was cooked; traffic lights and signs are whatever the asset already contains.
+only if the library publishes it *precooked* for your OS (`<map>_cooked.tar.gz` on
+Linux, `<map>_cooked_windows.tar.gz` on Windows), exactly as it was cooked; traffic
+lights and signs are whatever the asset already contains.
 `run_cosim` installs that asset for you, and names the missing asset up front for a
 map that has none. To cook a map yourself, use a source build. *Installing* a
 precooked asset works the same on Windows and Linux &mdash; it is a plain extract,
 done here in `tarfile` rather than through CARLA's bash-only `Util/ImportAssets.sh`.
 
-**Windows note:** the *assets* are not yet OS-neutral. Every `*_cooked.tar.gz` the
-library publishes today is a Linux cook &mdash; its materials carry SPIR-V and no
-Direct3D shaders &mdash; and a packaged build has no shader compiler, so on Windows
-those materials fall back to the default one: correct geometry and traffic lights,
-grey road surface. Setup therefore still offers **source build only** on Windows;
-pass `--allow-packaged-windows` if you only need stock maps (Town01, ...) from a
-package. `run_cosim` also warns before launching when the installed map has no
-shaders for the platform it is about to run on. Tracked in
-ORNL-Real-Sim/FIXS_Applications#29.
+**Windows: experimental.** A cook is per OS: a Linux cook's materials carry only
+Vulkan shaders, and a packaged build has no shader compiler, so on Windows it loads
+with correct geometry and traffic lights but a grey checkerboard road. On Windows
+FIXS therefore fetches `<map>_cooked_windows.tar.gz`, which few library maps publish
+yet (`mlk_notexture_uturn` does); for any other map use a source build. Launching
+with `-vulkan` is not a workaround &mdash; on 0.9.15 it crashed with a Linux cook
+loaded. `run_cosim` warns before launching when the installed map has no shaders for
+the platform it is about to run on. Tracked in ORNL-Real-Sim/FIXS_Applications#29.
 
 Setup also resolves the **python env** that runs the co-sim and stores it in the
 config, so the launcher works on any machine no matter what the env is named:
