@@ -62,8 +62,6 @@ Real-Sim Documentation
    DEVELOPER_GUIDE
    ContributionGuide
    FIXS_message_flow
-   gui-design/wireframes
-   156_drivingsim_dll_design_proposal
 
 .. toctree::
    :maxdepth: 2

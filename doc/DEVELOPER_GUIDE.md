@@ -122,6 +122,12 @@ are errors.
 Writing docs:
 - A page must be listed in a `toctree` in `doc/index.rst`, or it is built but
   unreachable.
+- One `#` title per page, `##` and below for sections. Every top-level heading becomes
+  its own entry in the left panel, so `doc/_ext/single_title.py` fails the build on a
+  second one.
+- Internal design documents (e.g. `156_drivingsim_dll_design_proposal.md`,
+  `gui-design/`) stay in the repo but are listed in `exclude_patterns` in `doc/conf.py`,
+  so they are not published.
 - Link repo files outside `doc/` relatively (`../tests/Vissim/Ipg/`), so the link
   also works on GitHub. On Read the Docs, `doc/_ext/repo_links.py` turns each one
   into a GitHub link at the commit being built. A link to a file that does not

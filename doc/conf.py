@@ -18,12 +18,15 @@ extensions = [
     "sphinx.ext.napoleon",  # Google/NumPy style docstrings
      "sphinx.ext.viewcode",
     "repo_links",           # links out of doc/ -> GitHub at the built commit
+    "single_title",         # one top-level heading per page (else: extra nav entries)
 ]
 
 repo_links_github = "https://github.com/ORNL-Real-Sim/FIXS"
 
 templates_path = ["_templates"]
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+# Internal design documents: kept in the repo, not published as reader docs.
+exclude_patterns = ["_build", "Thumbs.db", ".DS_Store",
+                    "156_drivingsim_dll_design_proposal.md", "gui-design/**"]
 
 # Recognize both .rst and .md files
 source_suffix = {
