@@ -24,6 +24,7 @@ Examples:
   python run_cosim.py --peer 192.168.140.56      # on the traffic machine
 """
 import argparse
+import atexit
 import csv
 import io
 import json
@@ -61,7 +62,7 @@ FIXS_ROOT = fixs_paths.fixs_root(HERE)     # the FIXS bundle root
 APP_ROOT = fixs_paths.app_root(HERE)       # the app dir that holds FIXS/
 # The CARLA component keeps its own folder in the bundle; reach into it from the
 # root rather than from HERE, which is no longer inside it.
-CARLA_DIR = os.path.join(FIXS_ROOT, "Carla")
+CARLA_DIR = fixs_paths.use_carla_modules(HERE)   # and place_tls & co. importable
 # CARLA's own standalone bridge. It lives OUTSIDE Carla/ (#330) because
 # 8_create_zip.ps1 packs Carla/ wholesale and this speaks no FIXS: it drives SUMO
 # over its own TraCI connection and takes no controller, XIL component or
@@ -180,16 +181,19 @@ def _run_initialize(tag):
     could only grow: since #272 the updater itself lives in FIXS and is fetched
     per release, so the ONE thing an app repo is guaranteed to expose is its
     documented entry point. Naming that instead means the engine no longer tracks
-    any downstream repo's internal layout."""
-    if platform.system() == "Windows":
-        front_door = os.path.join(APP_ROOT, "run_cosim.bat")
-        cmd = ["cmd", "/c", front_door]
-    else:
-        front_door = os.path.join(APP_ROOT, "run_cosim.sh")
-        cmd = ["bash", front_door]
-    if not os.path.isfile(front_door):
-        print(f"[cosim] cannot self-update: {front_door} not found.")
+    any downstream repo's internal layout.
+
+    FIXS.bat/.sh first - the front door FIXS ships (#313) - then the per-repo
+    run_cosim.bat/.sh it replaces. Looking only for the old name made every repo
+    that had switched report "cannot self-update"."""
+    windows = platform.system() == "Windows"
+    names = ("FIXS.bat", "run_cosim.bat") if windows else ("FIXS.sh", "run_cosim.sh")
+    front_door = next((os.path.join(APP_ROOT, n) for n in names
+                       if os.path.isfile(os.path.join(APP_ROOT, n))), None)
+    if front_door is None:
+        print(f"[cosim] cannot self-update: no {' or '.join(names)} in {APP_ROOT}.")
         return False
+    cmd = ["cmd", "/c", front_door] if windows else ["bash", front_door]
     print(f"[cosim] updating FIXS -> {tag} via {os.path.basename(front_door)} ...")
     # --update-fixs exits before the front door's bootstrap gate and never re-runs
     # python, so this cannot recurse back into run_cosim.py.
@@ -292,6 +296,49 @@ def _read_scenario_config(config_yaml):
     except Exception as e:
         print(f"[cosim] could not read {config_yaml} ({e}); using defaults.")
         return None
+
+
+def check_ego_controller(config_yaml, cwd=None):
+    """Refuse a run whose scenario names an ego Controller that is not there -
+    before anything is launched, rather than when the bridge imports it.
+
+    The bridge (mainVirCarla) loads EgoSetup.Controller only when
+    ActuationSource is 'user', resolving a path against ITS working directory,
+    which is this process's. Mirrored here - same gate, same split of the options
+    tail and the ':attribute' suffix, same base directory - so the two cannot
+    disagree about what "there" means. A module name (no .py, no separator) is
+    imported rather than opened, so there is nothing to stat and it is left to the
+    bridge.
+
+    Found the hard way: the check used to be the bridge's, reached after SUMO,
+    TrafficLayer, the app and CARLA were all up, whose exit the stack then blamed
+    on CARLA being unreachable. The case that hit it is ordinary, too - ~/.fixs is
+    shared by every checkout on a machine, so a yaml staged from one branch of an
+    app repo gets run from another that lacks the controller it names."""
+    ch = _read_scenario_config(config_yaml)
+    ego = getattr(ch, "Ego_setup", None) or {}
+    spec = (ego.get("Controller") or "").strip()
+    if ego.get("ActuationSource") != "user" or not spec:
+        return
+    target = spec.partition(" --")[0].strip()
+    head, sep, _attr = target.rpartition(":")
+    if sep and len(head) > 1:
+        target = head
+    if not (target.endswith(".py") or "/" in target or os.sep in target):
+        return
+    base = cwd or os.getcwd()
+    path = os.path.normpath(target if os.path.isabs(target)
+                            else os.path.join(base, target))
+    if os.path.isfile(path):
+        return
+    sys.exit(f"[cosim] the scenario's ego controller is not here:\n"
+             f"          {path}\n"
+             f"        named by EgoSetup.Controller in {config_yaml}\n"
+             f"        (relative paths resolve against {base}).\n"
+             f"        Nothing was launched. If that yaml was staged from another "
+             f"branch of this app repo -\n"
+             f"        ~/.fixs is shared by every checkout on this machine - run "
+             f"from that branch, or pick a scenario this checkout declares.")
 
 
 def read_backend(config_yaml):
@@ -2862,30 +2909,221 @@ def _peek_scenario(args, maps_root):
         return None
 
 
-def print_fingerprint(cfg, host, port):
-    """One block identifying what is installed here. The first thing to paste
-    into a bug report, and the quickest way to see two machines disagree."""
+def fingerprint(cfg, host, port):
+    """What is installed here, as data: the FIXS build, the configured python and
+    which co-sim modules it can import, SUMO, and the CARLA mode and endpoint.
+    print_fingerprint renders it; --version --json prints it as is."""
     py = (cfg or {}).get("python") or sys.executable
-    print(f"[cosim] run fingerprint - {socket.gethostname()} ({platform.system()})")
-    print(f"  FIXS       {_fixs_version()}")
+    commit = None
     build = os.path.join(FIXS_ROOT, "BUILD_INFO.txt")
     if os.path.isfile(build):
         with open(build, encoding="utf-8-sig", errors="replace") as f:
             for line in f:
                 if line.strip().startswith("Git Commit:"):
-                    print(f"  commit     {line.split(':', 1)[1].strip()}")
+                    commit = line.split(":", 1)[1].strip()
                     break
-    print(f"  python     {py}")
+    modules = {}
     for mod in ("carla", "traci", "yaml", "pandas", "shapely"):
         rc = subprocess.call([py, "-c", f"import {mod}"],
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        print(f"    {mod:<8} {'present' if rc == 0 else 'MISSING'}")
-    sumo = shutil.which("sumo") or shutil.which("sumo-gui")
-    print(f"  SUMO       {sumo or 'not on PATH'}")
-    print(f"  CARLA      mode {(cfg or {}).get('mode', 'not configured')}, "
+        modules[mod] = rc == 0
+    return {"host": socket.gethostname(), "system": platform.system(),
+            "fixs": _fixs_version(), "commit": commit, "fixs_root": FIXS_ROOT,
+            "app_root": APP_ROOT, "python": py, "modules": modules,
+            "sumo": shutil.which("sumo") or shutil.which("sumo-gui"),
+            "carla_mode": (cfg or {}).get("mode"),
+            "carla_root": (cfg or {}).get("carla_root"),
+            "ue4_root": (cfg or {}).get("ue4_root"),
+            "carla_host": host, "carla_port": port,
+            "carla_local": _is_local_host(host)}
+
+
+def print_fingerprint(cfg, host, port):
+    """One block identifying what is installed here. The first thing to paste
+    into a bug report, and the quickest way to see two machines disagree."""
+    fp = fingerprint(cfg, host, port)
+    print(f"[cosim] run fingerprint - {fp['host']} ({fp['system']})")
+    print(f"  FIXS       {fp['fixs']}")
+    if fp["commit"]:
+        print(f"  commit     {fp['commit']}")
+    print(f"  python     {fp['python']}")
+    for mod, present in fp["modules"].items():
+        print(f"    {mod:<8} {'present' if present else 'MISSING'}")
+    print(f"  SUMO       {fp['sumo'] or 'not on PATH'}")
+    print(f"  CARLA      mode {fp['carla_mode'] or 'not configured'}, "
           f"endpoint {host}:{port}"
-          f"{'  [this machine]' if _is_local_host(host) else '  [remote]'}")
+          f"{'  [this machine]' if fp['carla_local'] else '  [remote]'}")
     return 0
+
+
+# --------------------------------------------------------------------------- #
+# Front-end hooks (#78): answers as data, and a stop that needs no signal.
+# --------------------------------------------------------------------------- #
+_STOP = {"requested": False}
+
+
+def watch_stop_file(path, poll_s=0.5):
+    """Stop this run the way Ctrl+C would, once `path` exists.
+
+    A front end cannot deliver Ctrl+C to a child on Windows: CTRL_C_EVENT reaches
+    only a process sharing its console, and CTRL_BREAK_EVENT ends python without
+    running a single `finally` - and every teardown here (SUMO, TrafficLayer, the
+    bridge, the app, CARLA) lives in a `finally`. So the request arrives as a file,
+    which works the same everywhere, and becomes a KeyboardInterrupt in the main
+    thread, which unwinds through exactly the code a real Ctrl+C does.
+
+    The main loops poll (time.sleep(1.0) between health checks), so the interrupt
+    lands within a second there. A phase blocked inside one subprocess call - a
+    cook, the standalone bridge - takes it when that call returns; the front end
+    waits a while and then falls back to killing the tree.
+
+    A file that already exists when the watcher is armed counts: the request came
+    before this process was ready for it, not never."""
+    import _thread
+    import threading
+
+    def _watch():
+        while not os.path.exists(path):
+            time.sleep(poll_s)
+        _STOP["requested"] = True
+        print(f"\n[cosim] stop requested ({path}); shutting the stack down ...",
+              flush=True)
+        _thread.interrupt_main()
+
+    threading.Thread(target=_watch, name="fixs-stop-file", daemon=True).start()
+
+
+def _listing(what):
+    """The data behind --list: 'setups', 'apps' or 'maps'. Reads only - no staging,
+    no network, no re-exec - so a front end can ask as often as it redraws."""
+    if what == "setups":
+        doc = run_profile.load_doc()
+        return {"path": run_profile.profiles_path(), "last": doc.get("last"),
+                "setups": [dict({k: rec.get(k) for k in
+                                 ("app", "map", "map_origin", "config", "config_scope",
+                                  "sumo_gui", "engine", "updated", "partial")},
+                                name=name, summary=run_profile.summarize(rec))
+                           for name in run_profile.order(doc)
+                           for rec in [doc["setups"][name]]]}
+    if what == "apps":
+        out = []
+        for app in app_catalog.load_catalog():
+            home = app_catalog.apps_home(app["id"])
+            out.append({
+                "id": app["id"], "title": app["title"], "note": app.get("note"),
+                "path": app.get("path"), "maps": app.get("maps") or [],
+                "launch": app.get("launch"), "defaults": app.get("defaults") or {},
+                # `staged` is the path --config should name: the machine-local copy
+                # run_cosim stages the repo's yaml to and reads from (app_catalog.
+                # stage_configs). It may not exist yet - the run creates it.
+                "configs": [{"title": c.get("title") or os.path.basename(c["path"]),
+                             "engine": c.get("engine"), "source": c["path"],
+                             "staged": os.path.join(home, os.path.basename(c["path"]))}
+                            for c in app.get("configs") or []]})
+        return {"manifest": app_catalog.catalog_path(), "apps": out}
+    if what == "maps":
+        import import_map
+        cfg = env.load_config() or {}
+        mode = cfg.get("mode")
+        local = import_map.list_local_maps(
+            None if mode == "client" else cfg.get("carla_root"), mode)
+        by_name = {m["name"]: dict(m, library=False, title=None, location=None)
+                   for m in local}
+        # The library as last fetched (~/.fixs/catalog.json). Not re-fetched here: a
+        # listing must not stall on gh, and every run refreshes that file anyway.
+        cache = os.path.join(os.path.dirname(env.CONFIG_PATH), "catalog.json")
+        try:
+            with open(cache, encoding="utf-8") as f:
+                entries = json.load(f).get("maps", [])
+        except (OSError, ValueError):
+            entries = []
+        for ent in entries:
+            name = ent.get("map_name") or ent.get("location")
+            if not name:
+                continue
+            rec = by_name.setdefault(name, {"name": name, "cooked": False,
+                                            "cached": False, "location": None})
+            rec.update(library=True, title=ent.get("title"),
+                       location=ent.get("location"))
+        return {"carla_mode": mode,
+                "maps": [by_name[n] for n in sorted(by_name, key=str.lower)]}
+    raise ValueError(what)
+
+
+def print_listing(what, as_json=False):
+    """--list: one JSON document on stdout with --json, else a readable list.
+    Anything the readers print along the way (a manifest warning, a setup-store
+    upgrade note) goes to stderr under --json, so stdout stays parseable."""
+    if as_json:
+        import contextlib
+        with contextlib.redirect_stdout(sys.stderr):
+            data = _listing(what)
+        print(json.dumps(data, indent=2))
+        return 0
+    data = _listing(what)
+    if what == "setups":
+        for s in data["setups"]:
+            mark = "*" if s["name"] == data["last"] else " "
+            print(f"{mark} {s['name']:<28} {s['summary']}")
+    elif what == "apps":
+        for a in data["apps"]:
+            print(f"  {a['id']:<22} {a['title']}")
+            for c in a["configs"]:
+                print(f"      {os.path.basename(c['source']):<40} {c['title']}")
+    else:
+        for m in data["maps"]:
+            where = ", ".join(w for w, on in (("cooked", m["cooked"]),
+                                              ("cached", m["cached"]),
+                                              ("library", m["library"])) if on)
+            print(f"  {m['name']:<28} {where}")
+    return 0
+
+
+def launch_gui():
+    """--gui: open the FIXS window, installing its toolkit on first use.
+
+    The window is a front end over this script, so it can run under ANY python
+    that has PySide6 - each action it takes is a fresh run_cosim, which re-execs
+    under the configured env exactly as a terminal run does. In order:
+      1. this python has PySide6        -> open it here;
+      2. the configured env has it      -> open it there;
+      3. neither                        -> install PySide6-Essentials into the
+         configured env (this python if none is configured) and open it there.
+    Step 3 is what keeps the front door a double-click on a fresh machine. It
+    writes into a FIXS-private env without asking and asks before touching a
+    shared one - env_setup's rule for every install."""
+    def _open_here():
+        sys.path.insert(0, HERE)
+        from gui import app as gui_app
+        return gui_app.main(engine=os.path.abspath(__file__))
+
+    try:
+        import PySide6  # noqa: F401
+        return _open_here()
+    except ImportError:
+        pass
+    target = env.configured_python() or sys.executable
+    here = env._same_python(target, sys.executable)
+    if not here and env._python_can_import(target, ("PySide6",)):
+        return _gui_under(target)
+    print(f"[gui] the FIXS window needs PySide6 (Qt), which is not installed "
+          f"under {target}.")
+    if not env._confirm_install(target, "PySide6-Essentials (the Qt toolkit the FIXS "
+                                        "window is built on)"):
+        sys.exit(f"[gui] not installed. To install it yourself:\n"
+                 f"        \"{target}\" -m pip install PySide6-Essentials")
+    if not env._pip_install(target, ["PySide6-Essentials"]):
+        sys.exit("[gui] pip install PySide6-Essentials failed; its output is above.")
+    if here:
+        import importlib
+        importlib.invalidate_caches()
+        return _open_here()
+    return _gui_under(target)
+
+
+def _gui_under(py):
+    print(f"[gui] opening the FIXS window under {py}")
+    return subprocess.call([py, os.path.abspath(__file__), "--gui"])
 
 
 def _fixs_version():
@@ -3118,6 +3356,25 @@ _IN_PROGRESS = {}
 # name so main() can set it without a `global` declaration at the top of a very long
 # function.
 _CHECKPOINT = {}
+
+
+def _reap_if_running(proc, name):
+    """atexit: stop a process this run started if nothing else did. A no-op once a
+    stack runner's teardown has already stopped it, which is the normal case."""
+    if proc.poll() is None:
+        print(f"[cosim] stopping {name} (pid {proc.pid}): this run started it and "
+              f"is exiting before handing it to the stack.", flush=True)
+        if platform.system() == "Windows":
+            # A launch script is cmd.exe with the interpreter under it.
+            _kill_pid_tree(proc.pid)
+        else:
+            # Not _kill_pid_tree: that signals the process GROUP, and the app shares
+            # this process's group - it would signal the engine mid-exit.
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
 
 
 def _say_checkpoint_kept():
@@ -3707,6 +3964,42 @@ def main():
                          "Use after creating the env setup asked for, or to move off one "
                          "picked by mistake; every entry point follows carla.json, so "
                          "this changes them all at once")
+    # ------------------------------------------------------------------ #
+    # For a front end driving this engine - the FIXS window (--gui, #78) or a
+    # script. A person at a terminal never needs these: they are the same answers
+    # as data, setup without prompts, and a stop that works where Ctrl+C cannot be
+    # delivered (a parent process on Windows has no way to send one to a child).
+    # ------------------------------------------------------------------ #
+    ap.add_argument("--gui", action="store_true",
+                    help="open the FIXS window: pick a setup, run and stop it, watch "
+                         "its log, check this machine. Everything it does is one of "
+                         "these command-line flags.")
+    ap.add_argument("--list", dest="list_what", choices=["apps", "maps", "setups"],
+                    default=None,
+                    help="print the declared apps, the maps on this machine, or the "
+                         "saved run setups, and exit")
+    ap.add_argument("--json", action="store_true",
+                    help="with --list, --doctor or --version: print one JSON document "
+                         "on stdout instead of text")
+    ap.add_argument("--stop-file", default=os.environ.get("FIXS_STOP_FILE") or None,
+                    metavar="PATH",
+                    help="stop the run cleanly - exactly as Ctrl+C would - as soon as "
+                         "PATH exists (env: FIXS_STOP_FILE)")
+    ap.add_argument("--app-args", dest="app_args", default=None, metavar="ARGS",
+                    help="arguments for the application, handed to it as the "
+                         "COSIM_APP_ARGS environment variable; the engine never reads "
+                         "them")
+    ap.add_argument("--carla-mode", choices=list(env.SETUP_MODES), default=None,
+                    help="with --setup: configure without prompting - packaged, "
+                         "source (needs --carla-root and --ue4-root) or client (no "
+                         "CARLA on this machine)")
+    ap.add_argument("--carla-root", default=None, metavar="DIR",
+                    help="with --setup --carla-mode: the CARLA install or checkout")
+    ap.add_argument("--ue4-root", default=None, metavar="DIR",
+                    help="with --setup --carla-mode source: the Unreal Engine root")
+    ap.add_argument("--env-python", default=None, metavar="EXE",
+                    help="with --setup --carla-mode: the python to run co-sims under "
+                         "(default: the FIXS env if it exists, else this python)")
     ap.add_argument("--render-offscreen", action="store_true", help="headless CARLA")
     ap.add_argument("--no-spectator", action="store_true",
                     help="do not auto-frame the CARLA spectator on the scene")
@@ -3778,6 +4071,20 @@ def main():
     if args.log or args.log_file:
         start_log(args.log_file)
 
+    # The application reads its own arguments from the environment - the contract
+    # FIXS_Applications' run_cosim.bat/.sh established when they translated this
+    # flag themselves. Exported here, before any re-exec, so the child inherits it
+    # and start_app's copy of os.environ carries it to the app. An empty string is
+    # exported too: it is how a caller says "none", overriding an inherited value.
+    if args.app_args is not None:
+        os.environ["COSIM_APP_ARGS"] = args.app_args
+
+    # --gui opens the window and stays in it; everything the window does is a
+    # separate run of this script with flags. Before --update-python and --setup,
+    # because the window is also how those are reached by someone with no terminal.
+    if args.gui:
+        return launch_gui()
+
     # --update-python answers a question and stops, and it is the one flag that must
     # NOT re-exec first: re-execing runs it under the very interpreter it exists to
     # replace, so a config pointing at a broken env could never be repaired from the
@@ -3791,6 +4098,12 @@ def main():
     if args.cleanup:
         return run_cleanup(getattr(args, "app", None))
 
+    # --list reads what this machine and this repo already hold and prints it. Pure
+    # reads - no re-exec, no network, no staging - so it answers instantly and works
+    # before the env is set up, which is when a front end first asks.
+    if args.list_what:
+        return print_listing(args.list_what, as_json=args.json)
+
     # --setup and --import-map hand the rest of the work to the module that owns it
     # and stop. Dispatched in-process rather than by spawning `python <sibling>.py`:
     # where the sibling lives stops being something any caller has to know, which is
@@ -3800,6 +4113,11 @@ def main():
     # exists to BUILD the env, so running it under the env it is about to create is
     # backwards, and a config pointing at a broken interpreter could never be
     # repaired from the front door.
+    if args.carla_mode:
+        # Every answer given: no wizard, no dialog. --setup is implied rather than
+        # required alongside it, since --carla-mode means nothing else.
+        return env.setup_from_args(args.carla_mode, carla_root=args.carla_root,
+                                   ue4_root=args.ue4_root, python=args.env_python)
     if args.setup is not None:
         return env.run_setup()
     if args.add_app:
@@ -3830,6 +4148,9 @@ def main():
             host = host or peek_host or DEFAULT_CARLA_HOST
             port = port or peek_port or DEFAULT_CARLA_PORT
         if args.version:
+            if args.json:
+                print(json.dumps(fingerprint(cfg, host, port), indent=2))
+                return 0
             return print_fingerprint(cfg, host, port)
         import doctor
         import peer
@@ -3839,6 +4160,7 @@ def main():
                           peer_port=args.peer_port or peer.peer_port(port),
                           who_has_port=_who_has_port,
                           scenario=_peek_scenario(args, maps_root),
+                          as_json=args.json,
                           **_doctor_role(doctor, cfg, args))
 
     # --purge-map answers a question about this machine's disk and stops. Sits with
@@ -3922,6 +4244,14 @@ def main():
         print("[cosim] no CARLA env configured; running under the current python. "
               "If 'import carla' fails, run setup_carla first.")
 
+    # Only now: above, this process may still hand the run to the configured python
+    # and merely wait for it. The watcher belongs to the process whose `finally`
+    # blocks own the stack - interrupting a parent parked in subprocess.call would
+    # tear down nothing, and the child, which holds SUMO and TrafficLayer, would
+    # never hear of it. The child re-parses the same argv, so it arms its own.
+    if args.stop_file:
+        watch_stop_file(args.stop_file)
+
     # --sumo-only launches no CARLA, loads no world and connects no client, so
     # every CARLA-local preflight below - the source-build cook, the carla half of
     # a map bundle, TL and sign placement - has nothing to do for it. All of those
@@ -3979,6 +4309,8 @@ def main():
               + "). No CARLA is launched, loaded or dialled.")
         args.sumo_only = True
         args.no_launch = True
+    elif _chosen_yaml and not args.sumo_only:
+        check_ego_controller(_chosen_yaml)
 
     # The app is settled and we are already running under the configured interpreter
     # (reexec_under_configured above), so this is the first point where "what does THIS app
@@ -4258,6 +4590,13 @@ def main():
         app_proc, app_sumocfg = start_app(app, args.config or setup.get("config"),
                                           sumo_only=args.sumo_only,
                                           sumocfg=args.sumocfg or map_sumocfg)
+        # The app is only handed to a stack runner (whose `finally` stops it) a few
+        # hundred lines further down, after the bundle, the cook and the placers.
+        # Anything that fails in between used to leave it running, waiting for a
+        # TrafficLayer that never came - found by the next run's leftover sweep,
+        # and meanwhile holding the output pipe a front end reads to its end.
+        if app_proc is not None:
+            atexit.register(_reap_if_running, app_proc, app["id"])
 
     # Same condition as the preflight above, resumed. Split rather than moved so the
     # app can start between the two: everything above this line only DECIDES what the
@@ -5056,6 +5395,12 @@ if __name__ == "__main__":
         raise
     except KeyboardInterrupt:
         _say_checkpoint_kept()
+        if _STOP["requested"]:
+            # Asked for (--stop-file), so not an error to report: the teardown has
+            # already run on the way here. 130 is what a shell reports for Ctrl+C,
+            # which is the stop this stands in for.
+            print("[cosim] stopped.", flush=True)
+            sys.exit(130)
         raise
     if _rc:
         _say_checkpoint_kept()

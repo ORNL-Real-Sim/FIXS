@@ -68,6 +68,8 @@ import zipfile
 import env_setup as env
 import fixs_paths
 
+fixs_paths.use_carla_modules(os.path.dirname(os.path.abspath(__file__)))  # props
+
 
 def _mode(mode=None):
     """The CARLA flavour to resolve paths for: the caller's, else the saved
@@ -2800,6 +2802,37 @@ def purge_candidates(carla_root=None, mode=None):
                 cooked_map_path(carla_root, name, mode)),
         })
     return records
+
+
+def list_local_maps(carla_root=None, mode=None):
+    """The maps this machine can run without a download: one record per name,
+    sorted, as {"name", "cooked", "cached"}.
+
+    The read-only sibling of purge_candidates, for a caller that only needs NAMES -
+    the GUI's map list (run_cosim --list maps). Deliberately measures nothing:
+    purge_candidates walks every cooked map to size it, which is seconds of disk
+    I/O per map on a real Content/ tree and pointless for a drop-down.
+
+    `cooked` = a finished .umap in this CARLA's Content/. `cached` = a non-empty
+    ~/.fixs/maps/<name>/ (the bundle a traffic-only run reads its sumo/ from).
+    Staging alone never lists a name: a map that is only in Import/ cannot be run.
+    The cache root is spelled out rather than taken from _map_cache_dir(), which
+    creates the folder it names - a listing must not create what it reports on."""
+    found = {}
+    content = content_root(carla_root, mode) if carla_root else None
+    if content and os.path.isdir(content):
+        for name in os.listdir(content):
+            if name not in ENGINE_CONTENT and \
+                    os.path.isfile(cooked_map_path(carla_root, name, mode)):
+                found.setdefault(name, {"cooked": False, "cached": False})["cooked"] = True
+    cache_root = os.environ.get("FIXS_MAP_CACHE") or os.path.join(
+        os.path.dirname(env.CONFIG_PATH), "maps")
+    if os.path.isdir(cache_root):
+        for name in os.listdir(cache_root):
+            path = os.path.join(cache_root, name)
+            if os.path.isdir(path) and os.listdir(path):
+                found.setdefault(name, {"cooked": False, "cached": False})["cached"] = True
+    return [{"name": n, **flags} for n, flags in sorted(found.items())]
 
 
 def staged_import_paths(carla_root, name):

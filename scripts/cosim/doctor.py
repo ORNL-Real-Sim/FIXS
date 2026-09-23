@@ -50,6 +50,20 @@ class Report:
     def failed(self):
         return any(s == FAIL for _sec, _l, s, _d in self.rows)
 
+    @property
+    def worst(self):
+        if self.failed:
+            return FAIL
+        return WARN if any(s == WARN for _a, _b, s, _c in self.rows) else OK
+
+    def as_dict(self):
+        """The findings as data, for a caller that renders them itself (the GUI's
+        Doctor table, via run_cosim --doctor --json). Same rows show() prints."""
+        return {"worst": self.worst,
+                "rows": [{"section": sec, "label": label, "status": status,
+                          "detail": detail}
+                         for sec, label, status, detail in self.rows]}
+
     def show(self):
         width = max((len(l) for _s, l, _st, _d in self.rows), default=10)
         section = None
@@ -59,8 +73,7 @@ class Report:
                 section = sec
             mark = {OK: "OK  ", WARN: "WARN", FAIL: "FAIL"}[status]
             print(f"  {label:<{width}}  {mark}  {detail}")
-        worst = FAIL if self.failed else (
-            WARN if any(s == WARN for _a, _b, s, _c in self.rows) else OK)
+        worst = self.worst
         print(f"\n[doctor] {'problems found' if worst == FAIL else 'usable' if worst == OK else 'usable, with warnings'}.")
         return 1 if worst == FAIL else 0
 
@@ -318,6 +331,9 @@ def _check_scenario(rep, scenario):
         rep.add("Scenario", "net", WARN, "no .net.xml found for this scenario")
         return
     try:
+        # CARLA-side tooling, left in Carla/ when #313 moved this module to cosim/.
+        import fixs_paths
+        fixs_paths.use_carla_modules(os.path.dirname(os.path.abspath(__file__)))
         import check_ego_route
     except ImportError as exc:
         rep.add("Scenario", "ego route", WARN, f"checker unavailable: {exc}")
@@ -341,13 +357,34 @@ def _check_scenario(rep, scenario):
 
 
 def run(cfg, env_mod, fixs_root, maps_root, host, port, fixs_version,
-        peer_port=None, role=None, why=None, who_has_port=None, scenario=None):
-    """Run every applicable check. Returns a shell exit code."""
+        peer_port=None, role=None, why=None, who_has_port=None, scenario=None,
+        as_json=False):
+    """Run every applicable check. Returns a shell exit code.
+
+    as_json=True prints ONE json document on stdout instead of the table - the
+    header, the rows and the verdict - and routes everything the checks print along
+    the way to stderr, so stdout stays parseable. Same checks, same exit code."""
+    if as_json:
+        import contextlib
+        with contextlib.redirect_stdout(sys.stderr):
+            rep = _collect(cfg, env_mod, fixs_root, maps_root, host, port,
+                           fixs_version, peer_port, role, who_has_port, scenario)
+        doc = {"host": socket.gethostname(), "system": platform.system(),
+               "role": role, "why": why, **rep.as_dict()}
+        print(json.dumps(doc, indent=2))
+        return 1 if rep.failed else 0
     # Say WHY. A misread role quietly skews which checks run, so the inference has
     # to be visible rather than something to discover from a confusing report.
     print(f"[doctor] {socket.gethostname()} ({platform.system()}) - role: {role}"
           f"{'  (' + why + ')' if why else ''}"
           f"{'' if why is None else '  [--role to override]'}")
+    rep = _collect(cfg, env_mod, fixs_root, maps_root, host, port, fixs_version,
+                   peer_port, role, who_has_port, scenario)
+    return rep.show()
+
+
+def _collect(cfg, env_mod, fixs_root, maps_root, host, port, fixs_version,
+             peer_port, role, who_has_port, scenario):
     rep = Report()
     _check_fixs(rep, fixs_root, role)
     py = _check_python(rep, cfg, env_mod)
@@ -358,4 +395,4 @@ def run(cfg, env_mod, fixs_root, maps_root, host, port, fixs_version,
     _check_maps(rep, maps_root)
     _check_dtl(rep)
     _check_scenario(rep, scenario)
-    return rep.show()
+    return rep

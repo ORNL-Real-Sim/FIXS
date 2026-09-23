@@ -9,18 +9,25 @@
 #      curl -fsSLO https://github.com/ORNL-Real-Sim/FIXS/releases/latest/download/FIXS.sh
 #      chmod +x FIXS.sh && ./FIXS.sh
 #
-#  WHAT THIS FILE IS ALLOWED TO KNOW is deliberately almost nothing: where FIXS
-#  comes from, whether it is installed, and which python to hand over to. Every
-#  option, every menu and every error message belongs to the engine, and this
-#  forwards its whole command line untouched - so there is no flag list here to
-#  drift from the engine's, which is exactly how the old per-repo wrappers
-#  accumulated bugs (see FIXS#313).
+#  WHAT THIS FILE IS ALLOWED TO KNOW is deliberately little: where FIXS comes
+#  from, whether it is installed, which python to hand over to, and how to be
+#  pleasant to someone who started it with no arguments. Every option, every menu
+#  and every error message belongs to the engine, and this forwards its command
+#  line untouched - there is no flag translation here to drift from the engine's,
+#  which is exactly how the old per-repo wrappers accumulated bugs (see FIXS#313).
+#  The option list below is a short guide to engine names, not a second parser.
+#
+#  The no-arguments prompt and the python search come from FIXS_Applications'
+#  run_cosim.sh, where each one answered a real support question; they move here
+#  so that repo loses nothing by switching to this file.
 #
 #  It is authored in FIXS (scripts/frontdoor/) and published as a release asset.
 #  Do not edit your copy: an update will tell you when the contract version above
 #  has moved, and the answer is to re-download rather than to patch.
 #
-#      ./FIXS.sh --help              every option, from the engine
+#      ./FIXS.sh                     run (from a terminal: asks for options first)
+#      ./FIXS.sh --gui               the FIXS window
+#      ./FIXS.sh --help              the common options
 #      ./FIXS.sh --update-fixs       fetch or refresh the FIXS build
 # ============================================================================
 set -euo pipefail
@@ -30,15 +37,15 @@ FRONTDOOR_CONTRACT=1
 DEFAULT_REPO="ORNL-Real-Sim/FIXS"
 
 # ---------------------------------------------------------------------------
-# The two values needed before any engine code exists on disk: where to fetch
-# FIXS from, and which release this repo pins. They live in fixs.json, the same
-# file that declares the applications - one file per integration.
+# The values needed before any engine code exists on disk: where to fetch FIXS
+# from, which release this repo pins, and which env its apps run in. They live in
+# fixs.json, the same file that declares the applications.
 #
-# Read with grep, not a JSON parser, and ONLY these two keys. That is the whole
-# contract: no matter how the manifest schema grows, nothing here has to grow
-# with it, because everything else is read by app_catalog in python after the
-# engine is installed. fixs_sources.txt is still honoured for repos integrated
-# before fixs.json existed.
+# Read with grep, not a JSON parser, and ONLY these keys. That is the whole
+# contract: however the manifest schema grows, nothing here has to grow with it,
+# because everything else is read by app_catalog in python after the engine is
+# installed. fixs_sources.txt is still honoured for repos integrated before
+# fixs.json existed.
 # ---------------------------------------------------------------------------
 # An ABSENT key is a normal answer, not a failure - most of these are optional.
 # grep exits 1 when it matches nothing, and under `set -e` with pipefail that
@@ -66,15 +73,153 @@ MANIFEST="$ROOT/fixs.json"
 LEGACY="$ROOT/fixs_sources.txt"
 FIXS_REPO="$(json_field "$MANIFEST" fixs repo)"
 FIXS_VERSION="$(json_field "$MANIFEST" fixs version)"
+MANIFEST_ENV="$(json_field "$MANIFEST" fixs env)"
 [[ -n "$FIXS_REPO"    ]] || FIXS_REPO="$(txt_field "$LEGACY" fixs_repo)"
 [[ -n "$FIXS_VERSION" ]] || FIXS_VERSION="$(txt_field "$LEGACY" fixs_default_version)"
+[[ -n "$MANIFEST_ENV" ]] || MANIFEST_ENV="$(txt_field "$LEGACY" fixs_env)"
 FIXS_REPO="${FIXS_REPO:-$DEFAULT_REPO}"
 
 # The env applications run in. FIXS defaults to 'realsim', the name its own
 # environment.yml carries; a repo that wants its apps' extra packages kept out of
 # the engine's env names its own here. Already exported? that wins.
-MANIFEST_ENV="$(json_field "$MANIFEST" fixs env)"
 [[ -n "${FIXS_ENV_NAME:-}" ]] || [[ -z "$MANIFEST_ENV" ]] || export FIXS_ENV_NAME="$MANIFEST_ENV"
+
+# The option list, shared by --help and the no-arguments prompt: one list, so a
+# name cannot appear in one and not the other. Three groups, each one question:
+# what to do instead of a run, where CARLA is, what to run.
+print_options() {
+    cat <<'OPTIONS_TEXT'
+  --gui                         the FIXS window: pick, run, stop, watch the log
+  --setup [carla]               configure a simulator here (default: carla)
+  --update-python               rebind the python env, keeping the CARLA setup
+  --import-map [MAP]            install a map (no MAP: list the published ones)
+  --update-fixs [VERSION]       fetch or refresh the FIXS build
+                                (no VERSION: pick from a menu)
+  --version                     what is installed here
+  --doctor                      check this machine can run a co-sim
+  --cleanup                     stop what a crashed run left behind
+
+  --peer HOST[:PORT]            CARLA runs there; this machine runs the traffic half
+  --serve                       CARLA runs here; wait for the traffic machine to call
+  --sumo-only                   traffic only, no CARLA, nothing rendered
+
+  --map NAME                    the map, instead of the menu asking
+  --sumocfg PATH                the SUMO scenario, instead of the menu asking
+  --app-args "ARGS"             extra arguments for the app's own controller
+OPTIONS_TEXT
+}
+
+usage() {
+    cat <<'HELP_HEAD'
+FIXS - co-simulation
+
+USAGE
+  ./FIXS.sh                     run it. Asks what to run, remembers, replays.
+                                Everything is changed from that menu.
+
+HELP_HEAD
+    print_options
+    cat <<'HELP_TAIL'
+
+These are the engine's own option names; this file passes them through. The
+full list, for scripts and developers:
+  python3 FIXS/cosim/run_cosim.py --help
+HELP_TAIL
+}
+
+# ---------------------------------------------------------------------------
+# The python to hand over to. Any python 3 works as a bootstrap - run_cosim
+# re-execs under the one ~/.fixs/carla.json names - but it has to BE a python 3,
+# established by ASKING rather than by the name: `command -v python` answers on a
+# box whose python is still a 2.x, and that one met the engine's first f-string as
+# a SyntaxError citing PEP 263, naming a line that never mentions the interpreter.
+# ---------------------------------------------------------------------------
+# Echoes the candidate's own sys.executable if it is a python 3, nothing otherwise.
+# sys.executable, not the name probed: that is the path that survives a symlink
+# chain (conda ships bin/python -> python3 -> python3.N). </dev/null so a
+# candidate that wants to be interactive cannot block the launcher.
+_py3_exe() {
+    "$1" -c 'import sys; sys.stdout.write(sys.executable if sys.version_info[0] == 3 else "")' \
+        </dev/null 2>/dev/null || true
+}
+
+pyexe() {
+    local py="" cand cfg="$HOME/.fixs/carla.json"
+    # An explicit pin wins over everything: the escape hatch for a box whose system
+    # python must stay a 2.x, or with several python 3s where one is wanted. It
+    # names only the BOOTSTRAP interpreter. A pin that is not a python 3 is an
+    # error, not a reason to fall back - quietly using another python is how you
+    # end up debugging the wrong one.
+    if [[ -n "${FIXS_BOOTSTRAP_PYTHON:-}" ]]; then
+        py="$(_py3_exe "$FIXS_BOOTSTRAP_PYTHON")"
+        if [[ -z "$py" || ! -x "$py" ]]; then
+            {
+                echo "[FIXS] FIXS_BOOTSTRAP_PYTHON is set, but that is not a usable python 3:"
+                echo "         $FIXS_BOOTSTRAP_PYTHON"
+                echo "       Point it at a python 3.10 executable, or clear it to search PATH."
+            } >&2
+            return 1
+        fi
+        printf '%s' "$py"; return 0
+    fi
+    # The configured env first: it is the one the engine would re-exec into anyway.
+    if [[ -f "$cfg" ]]; then
+        cand="$(grep -o '"python"[[:space:]]*:[[:space:]]*"[^"]*"' "$cfg" \
+                | sed 's/.*"\([^"]*\)"$/\1/')" || cand=""
+        [[ -n "$cand" && -x "$cand" ]] && py="$(_py3_exe "$cand")"
+    fi
+    # python3.10 before python3: the stack supports 3.7-3.10, and on a box without
+    # conda, setup pip-installs into whatever interpreter it runs under - where
+    # there is no carla wheel for 3.11+.
+    if [[ -z "$py" ]]; then
+        for cand in python3.10 python3 python; do
+            command -v "$cand" >/dev/null 2>&1 || continue
+            py="$(_py3_exe "$cand")"
+            [[ -n "$py" && -x "$py" ]] && break
+            py=""
+        done
+    fi
+    # A conda install is the python 3 most likely to exist and NOT be on PATH: the
+    # Miniconda installer recommends against adding itself. conda's own registry
+    # first - it finds an install on another disk that no guessed root would - then
+    # the usual roots (the same as env_setup._conda_roots, kept in step by hand
+    # because this runs before any python does).
+    if [[ -z "$py" && -f "$HOME/.conda/environments.txt" ]]; then
+        while IFS= read -r cand; do
+            [[ -n "$cand" && -x "$cand/bin/python3" ]] || continue
+            py="$(_py3_exe "$cand/bin/python3")"
+            [[ -n "$py" && -x "$py" ]] && break
+            py=""
+        done < "$HOME/.conda/environments.txt"
+    fi
+    if [[ -z "$py" ]]; then
+        for cand in "${CONDA_PREFIX:-}" "$HOME/miniconda3" "$HOME/anaconda3" \
+                    "$HOME/miniforge3" "$HOME/mambaforge" /opt/conda; do
+            [[ -n "$cand" && -x "$cand/bin/python3" ]] || continue
+            py="$(_py3_exe "$cand/bin/python3")"
+            [[ -n "$py" && -x "$py" ]] && break
+            py=""
+        done
+    fi
+    if [[ -z "$py" ]]; then
+        cat >&2 <<'EOM'
+[FIXS] No Python 3 found.
+
+       Install Python 3.10, then run ./FIXS.sh again - it does the rest,
+       including building the FIXS python env.
+         Miniconda      https://www.anaconda.com/docs/getting-started/miniconda/install
+         or python.org  https://www.python.org/downloads/release/python-3109/
+
+       3.10 specifically: the CARLA client wheel is published only for CPython
+       3.7-3.10, so pip finds nothing to install on 3.11+.
+       Already have one somewhere unusual? export FIXS_BOOTSTRAP_PYTHON=/path/to/it
+EOM
+        # return, not exit: the caller reads this through $(...), and an exit there
+        # only ends the subshell.
+        return 1
+    fi
+    printf '%s' "$py"
+}
 
 # ---------------------------------------------------------------------------
 # Bootstrap. The updater lives in FIXS and is fetched from the release being
@@ -111,7 +256,7 @@ fetch_fixs() {   # fetch_fixs [VERSION]
     local args=(--root "$ROOT" --repo "$FIXS_REPO" --self-ref "$ref")
     [[ -n "$want"         ]] && args+=(--version "$want")
     [[ -n "$FIXS_VERSION" ]] && args+=(--default-version "$FIXS_VERSION")
-    bash "$tmp" "${args[@]}"; rc=$?
+    rc=0; bash "$tmp" "${args[@]}" || rc=$?
     rm -f "$tmp"
     return $rc
 }
@@ -136,15 +281,46 @@ JSON
     echo "[FIXS] Declare your applications in its \"apps\" list when you have some."
 }
 
-# --update-fixs is the ONE name this file answers, because it is the one action
-# that must work before there is an engine to answer it. Everything else falls
-# through to run_cosim, whose --help is the reference.
-if [[ "${1:-}" == "--update-fixs" ]]; then
-    shift
-    fetch_fixs "${1:-}" || exit $?
-    seed_manifest
-    exit 0
+# ---------------------------------------------------------------------------
+# Started with no arguments from a terminal: ask once, the way FIXS.bat asks a
+# double-click. The options would otherwise be reachable only by knowing them.
+# Whatever is typed is re-entered as an ordinary command line, so it means exactly
+# what the command line means and there is no second grammar here. 'gui' alone is
+# the one shorthand. No terminal on stdin (a file manager that opens none, a
+# script redirecting stdin) -> no prompt, and the run proceeds as before.
+# ---------------------------------------------------------------------------
+if [[ $# -eq 0 && -t 0 ]]; then
+    echo
+    echo "FIXS - co-simulation"
+    echo
+    print_options
+    echo
+    echo "Press Enter to run, type  gui  for the FIXS window, or type any options above."
+    read -r -p "  options: " OPTS || OPTS=""
+    # Empty -- or EOF -- falls straight through to the ordinary run.
+    if [[ -n "${OPTS// }" ]]; then
+        [[ "${OPTS// }" == "gui" ]] && OPTS="--gui"
+        # shellcheck disable=SC2086  # word-splitting IS the point: typed options
+        exec "$0" $OPTS
+    fi
 fi
+
+# The only names this file answers itself: help, because it must work before
+# there is an engine to ask; and --update-fixs, the one action that must work
+# before there is an engine at all. Everything else goes to run_cosim untouched.
+case "${1:-}" in
+    --help|-h) usage; exit 0 ;;
+    --update-fixs)
+        shift
+        fetch_fixs "${1:-}" || exit $?
+        seed_manifest
+        exit 0 ;;
+esac
+
+# Python BEFORE the fetch. Both are prerequisites, and this is the one answered in
+# a second - a box with no python 3 used to sit through the whole FIXS download
+# and only then be told to go and install python.
+PY="$(pyexe)" || exit 1
 
 # The gate is FIXS_VERSION.txt, not any .py: the updater writes that marker LAST
 # and only on a complete install, whereas the python ships inside the build zip
@@ -158,26 +334,19 @@ if [[ ! -f "$ROOT/FIXS/FIXS_VERSION.txt" ]]; then
     else
         echo "[FIXS] FIXS is not installed here - fetching it first ..."
     fi
-    # INSTALL THE DECLARED PIN, not "whatever the picker defaults to". A repo that
-    # says which engine it runs has already made the choice, and an automatic
-    # bootstrap is not the moment to reopen it - nobody asked to choose, they asked
-    # to run. Passing the pin as --version also makes this a single lookup of one
-    # release by tag, instead of listing every release to draw a menu whose default
-    # is the pin anyway: fewer calls, and it still works when the releases INDEX is
-    # unavailable but the release itself is fine (seen live, GitHub 504 on
-    # /releases?per_page=30 while /releases/tags/<tag> served normally).
-    #
-    # No pin -> empty -> the picker, which is correct there: the repo has expressed
-    # no preference, so the choice genuinely has to be made. `--update-fixs` with no
-    # argument also still opens it, because that IS someone asking to choose.
+    # INSTALL THE DECLARED PIN, not "whatever the picker defaults to": a repo that
+    # says which engine it runs has already made the choice. Passing the pin also
+    # makes this one lookup of one release by tag, which still works when the
+    # releases INDEX is down (seen live: GitHub 504 on the index while
+    # /releases/tags/<tag> served normally). No pin -> the picker, correctly.
     fetch_fixs "${FIXS_VERSION:-}" \
         || { echo "[FIXS] setup failed - see above. Not continuing." >&2; exit 1; }
 fi
 
 # Every run, not only after a fetch: a repo can arrive at an installed FIXS/ some
 # other way - migrating off run_cosim.sh, or a colleague's copy - and it should
-# still end up with its pin recorded. Returns immediately once a manifest (or a
-# legacy fixs_sources.txt) exists, so this costs one stat on every later run.
+# still end up with its pin recorded. Returns at once when a manifest (or a legacy
+# fixs_sources.txt) exists, so this costs one stat on every later run.
 seed_manifest
 
 # Say so when this file is older than the engine it just installed. It is never
@@ -190,14 +359,6 @@ if [[ -f "$SHIPPED" ]]; then
         echo "[FIXS] this FIXS.sh is contract v$FRONTDOOR_CONTRACT; the installed"
         echo "[FIXS] build expects v$want. Copy FIXS/frontdoor/FIXS.sh over it."
     fi
-fi
-
-# Any python 3 is enough: run_cosim re-execs under the interpreter carla.json
-# names, so conda never needs to be active and this need not know the env.
-PY="$(command -v python3 || command -v python || true)"
-if [[ -z "$PY" ]]; then
-    echo "[FIXS] No python 3 found on PATH. Install one, then run ./FIXS.sh --setup" >&2
-    exit 1
 fi
 
 exec "$PY" "$ROOT/FIXS/cosim/run_cosim.py" "$@"
