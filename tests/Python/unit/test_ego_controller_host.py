@@ -24,7 +24,8 @@ from __future__ import annotations
 import pytest
 
 from CommonLib import fixs
-from CommonLib.VirEnv.EgoControllerHost import loadController, runController
+from CommonLib.VirEnv.EgoControllerHost import (ControllerError, loadController,
+                                                runController)
 from CommonLib.VirEnv.IVirEnvBackend import EgoState
 
 # The three shapes loadController accepts. Normalising them is what the host is
@@ -373,3 +374,117 @@ def test_the_relayed_call_is_refused_outside_a_controller_step():
     import fixs.carla as fixscarla
     with pytest.raises(Exception):
         fixscarla.apply_control(fixscarla.VehicleControl(throttle=0.1))
+
+
+# -- the scenario's own options for its controller (#24) --------------------
+
+_CTRL = '''
+class Controller:
+    def __init__(self, config, egoId):
+        self.argv = config.get('EgoControllerArgs')
+    def control(self, ego, dt):
+        return None
+'''
+
+
+def _writeCtrl(tmp_path, name='ctrl.py'):
+    p = tmp_path / name
+    p.write_text(_CTRL)
+    return p
+
+
+def test_a_bare_path_is_unchanged_and_gets_no_arguments(tmp_path):
+    """The regression that would hurt: every scenario today names a bare path."""
+    p = _writeCtrl(tmp_path)
+    lc = loadController(str(p))
+    cfg = {}
+    lc.setup(cfg, 'ego')
+    assert lc.argv == []
+    assert cfg['EgoControllerArgs'] == []
+
+
+def test_options_after_the_path_reach_the_controller(tmp_path):
+    p = _writeCtrl(tmp_path)
+    lc = loadController(str(p) + ' --command-shape pedals')
+    cfg = {}
+    lc.setup(cfg, 'ego')
+    assert lc.argv == ['--command-shape', 'pedals']
+    assert lc._instance.argv == ['--command-shape', 'pedals']
+
+
+def test_a_path_with_a_space_still_resolves(tmp_path):
+    """Split on ' --', never on whitespace -- 'C:/My Apps/ctrl.py' is a path."""
+    d = tmp_path / 'My Apps'
+    d.mkdir()
+    p = _writeCtrl(d)
+    lc = loadController(str(p))
+    assert lc.argv == []
+    lc2 = loadController(str(p) + ' --command-shape speed')
+    assert lc2.argv == ['--command-shape', 'speed']
+
+
+def test_an_attribute_still_works_alongside_options(tmp_path):
+    p = _writeCtrl(tmp_path)
+    lc = loadController(str(p) + ':Controller --command-shape pedals')
+    cfg = {}
+    lc.setup(cfg, 'ego')
+    assert lc.argv == ['--command-shape', 'pedals']
+
+
+# -- the cell on a traffic-owned ego: no physics ego, no backend (#24) -------
+#
+# EgoSetup.Dynamics: traffic. The traffic simulator integrates the ego, so there
+# is no ego actor to read a state from or apply a command to, and runController
+# is handed no backend. The record is both the state and where the command goes;
+# the bridge forwards what was written.
+
+
+def test_no_backend_leaves_the_command_on_the_record(tmp_path):
+    ctl = speedController(tmp_path)
+    ego = makeEgo(speedDesired=8.0)
+
+    kind = runController(None, ctl, ego, 0.05, True, maxSteerRad=0.7)
+
+    assert kind == "speedsteer"
+    assert ego.speedDesired == pytest.approx(99.0)
+
+
+def test_no_backend_keeps_the_traffic_simulators_state(tmp_path):
+    """Nothing overwrites the record's pose and speed, because on this rung the
+    traffic simulator's view of the ego IS the ego's state."""
+    ctl = speedController(tmp_path)
+    ego = makeEgo(speedDesired=8.0, speed=6.25, positionX=140.0, positionY=950.0)
+
+    runController(None, ctl, ego, 0.05, True, maxSteerRad=0.7)
+
+    assert ego.speed == pytest.approx(6.25)
+    assert ego.positionX == pytest.approx(140.0)
+    assert ego.positionY == pytest.approx(950.0)
+
+
+def test_the_cell_reads_the_feed_not_its_own_output(tmp_path):
+    """The failure this rung is most exposed to. The cell's INPUT is the eco
+    controller's command, which arrives in the same field the cell writes its
+    answer to. Across the sub-steps of one feed it must keep reading the feed's
+    value -- a cell that reads back its own last output is closing the loop on
+    itself and will look like perfect tracking while testing nothing."""
+    ctl = speedController(tmp_path)
+    ego = makeEgo(speedDesired=8.0)
+
+    runController(None, ctl, ego, 0.05, True, maxSteerRad=0.7)    # the feed
+    runController(None, ctl, ego, 0.05, False, maxSteerRad=0.7)   # the sub-step
+
+    assert ctl._instance.seen == [pytest.approx(8.0), pytest.approx(8.0)]
+
+
+def test_no_backend_refuses_pedals(tmp_path):
+    """There is no plant here to turn a pedal into a speed. Dropping them would
+    leave the lower-port controller's command as the last write for the ego, so
+    the run would quietly be the one without a cell in it."""
+    p = tmp_path / "pedal_controller.py"
+    p.write_text(FUNC_BARE, encoding="utf-8")
+    ctl = loadController(str(p))
+    ctl.setup({}, "ego")
+
+    with pytest.raises(ControllerError, match="pedal"):
+        runController(None, ctl, makeEgo(), 0.05, True, maxSteerRad=0.7)

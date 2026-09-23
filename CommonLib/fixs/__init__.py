@@ -51,6 +51,12 @@ Three attributes are rebound on every ``recv()``:
     fixs.vehicle        every vehicle in this moment's feed
     fixs.trafficlight   this moment's signal states
 
+``fixs.launch`` is the one that is NOT rebound, and that is the whole difference:
+it answers about how this process was started rather than about a tick, so it
+works before connect() and never changes afterwards. It is where the variables
+run_cosim sets are read, so an application does not reach into os.environ for
+FIXS_SUMOCFG, FIXS_CONFIG_YAML, FIXS_HANDOFF or FIXS_SUMO_ONLY by hand.
+
 ``fixs.sim`` is a record for the same reason vehicles are: the header's values
 arrive together, so they come back together. Growth is a field on it rather than
 another module-level function, which is why there is no ``getTime()``.
@@ -86,11 +92,25 @@ from CommonLib.VehDataMsgDefs import VehData
 __all__ = [
     'connect', 'recv', 'send', 'close', 'running',
     'simulationEndTime',
-    'sim', 'vehicle', 'trafficlight',
+    'sim', 'vehicle', 'trafficlight', 'launch',
     'emit', 'transport', 'commandKind',
     'Vehicle', 'MAX_STEER_RAD',
     'Shutdown', 'FixsError', 'NotConnected', 'ProtocolError',
+    'driver',
 ]
+
+
+def driver(exchange=None, **options):
+    """A ready-made controller for the ego -- see :mod:`CommonLib.fixs._driver`.
+
+        Controller = fixs.driver()              # no cell
+        Controller = fixs.driver(exchange)      # yours: (vref, dt) -> mps
+
+    Imported lazily: the driver pulls in fixs.carla and CARLA's agents, which
+    a SUMO-only or CarMaker run has no reason to load.
+    """
+    from CommonLib.fixs._driver import driver as _driver
+    return _driver(exchange, **options)
 
 
 #: Full-lock front road-wheel angle [rad]. `steerAngleDesired` is an ANGLE on
@@ -386,6 +406,103 @@ class _Sim:
         if self._unavailable is not None:
             return f'<no sim data: {self._unavailable}>'
         return f'<sim t={self._time:.2f} state={self._state}>'
+
+
+class _Launch:
+    """How this process was started, as ``fixs.launch``.
+
+    run_cosim tells an application about the run it is part of through the
+    environment -- it has to, since the app is a separate process it starts. An
+    application should not be reading those variables by hand: the name, the
+    spelling and the meaning are FIXS's, and every app that reads
+    ``os.environ['FIXS_SUMOCFG']`` is a second place they are written down.
+
+    That was already half-fixed, which is what made it worth finishing.
+    ``connect()`` has always read FIXS_CONFIG_YAML itself and ``fixs.sumo`` has
+    always written FIXS_HANDOFF itself, so two of the five never leaked; the rest
+    did, and an application ended up mixing both styles::
+
+        # before
+        if not os.environ.get('FIXS_HANDOFF'):
+            raise SystemExit('run this through run_cosim')
+        src = os.environ.get('FIXS_SUMOCFG') or MY_DEFAULT
+        tag = pathlib.Path(os.environ['FIXS_CONFIG_YAML']).stem
+
+        # after
+        if not fixs.launch.supervised:
+            raise SystemExit('run this through run_cosim')
+        src = fixs.launch.sumocfg or MY_DEFAULT
+        tag = pathlib.Path(fixs.launch.configPath).stem
+
+    NOT ON ``fixs.sim``, which is the obvious place until you try it. Every _Sim
+    property calls _require(), and connect() builds it with _NO_TICK_YET, so
+    ``fixs.sim.x`` raises until the first recv() -- while the value most wanted
+    here, ``sumocfg``, is needed BEFORE connect(), when the application builds its
+    scenario and reports it into a stack that does not exist yet. ``fixs.sumo``
+    already sits on that side of the line for the same reason. The two also have
+    different lifetimes: ``fixs.sim`` is rebound every tick; these never change
+    once the process is running.
+
+    Every property answers from the environment on each access rather than
+    latching at import, so a test can set FIXS_SUMOCFG and be believed.
+
+    Unset means "nothing told us", not a default: ``sumocfg`` is None when the
+    user passed no --sumocfg, and the application supplies its own fallback
+    rather than FIXS inventing one it cannot know.
+    """
+
+    __slots__ = ()
+
+    @property
+    def supervised(self):
+        """bool -- did run_cosim start us, and therefore SUMO and TrafficLayer?
+
+        FIXS_HANDOFF is the signal because it is the one run_cosim sets for EVERY
+        app it launches, whether or not that app ever reports a scenario back.
+        """
+        return bool(os.environ.get('FIXS_HANDOFF'))
+
+    @property
+    def configPath(self):
+        """string | None -- the scenario yaml TrafficLayer was given.
+
+        The same file connect() defaults to, so a controller deriving anything
+        from it -- a run tag, an output name -- reads the yaml actually in play
+        rather than one it guessed.
+        """
+        return os.environ.get('FIXS_CONFIG_YAML') or None
+
+    @property
+    def sumocfg(self):
+        """string | None -- the scenario the user asked for with --sumocfg.
+
+        None when they asked for nothing, which is NOT the same as the map's own:
+        only the application knows what it falls back to.
+        """
+        return os.environ.get('FIXS_SUMOCFG') or None
+
+    @property
+    def carla(self):
+        """bool | None -- is CARLA in this run? None when nothing started us.
+
+        The yaml cannot answer this: every co-sim yaml has a CarlaSetup section,
+        which is what makes it one, so an app checking the yaml gets the same
+        answer either way. Only run_cosim knows, so run_cosim says.
+        """
+        if not self.supervised:
+            return None
+        return os.environ.get('FIXS_SUMO_ONLY') != '1'
+
+    def __repr__(self):
+        if not self.supervised:
+            return '<launch: not started by run_cosim>'
+        return (f'<launch config={self.configPath!r} sumocfg={self.sumocfg!r} '
+                f'carla={self.carla}>')
+
+
+#: This run's launch facts. A singleton rather than one module-level name per
+#: variable, so growth is a property here rather than another `fixs.something`.
+launch = _Launch()
 
 
 class _VehicleView(_View):

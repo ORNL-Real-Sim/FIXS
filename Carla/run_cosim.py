@@ -70,7 +70,9 @@ APP_ROOT = os.path.dirname(FIXS_ROOT)      # FIXS -> the app dir (holds initiali
 # SimulationSetup.TrafficSimulatorPort and CarlaSetup.CarlaClientPort, so editing
 # the yaml moves the ports for every component instead of just some of them.
 DEFAULT_TRACI_PORT = 1337    # SUMO TraCI server (TrafficLayer connects as its client)
-DEFAULT_BRIDGE_PORT = 440    # TrafficLayer serves VirCarlaEnv here
+DEFAULT_BRIDGE_PORT = 4440  # TrafficLayer serves VirCarlaEnv here. >= 1024: below that
+                            # needs root on Linux, and this default lands in every
+                            # config run_cosim generates (#65).
 DEFAULT_CARLA_HOST = "localhost"   # CARLA RPC; CarlaSetup.CarlaServerIP overrides
 DEFAULT_CARLA_PORT = 2000
 
@@ -311,16 +313,40 @@ def read_backend(config_yaml):
     return "py" if ch.Carla_setup["EnablePythonBackend"] else "cpp"
 
 
+def scenario_has_carla(config_yaml):
+    """Whether this scenario yaml declares a CARLA half at all.
+
+    The PRESENCE of the CarlaSetup block, not the truth of anything in it. Every key
+    inside has a default, so no key can carry the answer - an empty block reads back
+    as a complete, plausible CARLA. Writing the block at all is the affirmative act.
+    A yaml without one is a traffic-only scenario: a choice it makes, not a lesser
+    run.
+
+    Unreadable or not yet written counts as yes: generate_config_yaml always emits a
+    CarlaSetup, so answering no here would suppress CARLA for a yaml whose first run
+    creates it."""
+    ch = _read_scenario_config(config_yaml)
+    if ch is None:
+        return True
+    return "CarlaSetup" in ch.raw
+
+
 def read_stack_ports(config_yaml):
     """(traci_port, bridge_port) from the scenario yaml - SUMO's TraCI server
     (SimulationSetup.TrafficSimulatorPort) and the TrafficLayer<->VirCarlaEnv bridge
     (CarlaSetup.CarlaClientPort). Read rather than hard-coded so the yaml stays the
-    single source of truth: the exes get these values from the same file."""
+    single source of truth: the exes get these values from the same file.
+
+    bridge_port is None when the yaml declares no CarlaSetup. Defaulting it there
+    invented a bridge the file never mentions; None makes each caller say what it
+    does when there is no bridge."""
     ch = _read_scenario_config(config_yaml)
     if ch is None:
         return DEFAULT_TRACI_PORT, DEFAULT_BRIDGE_PORT
     try:
         traci_port = int(ch.simulation_setup["TrafficSimulatorPort"] or DEFAULT_TRACI_PORT)
+        if "CarlaSetup" not in ch.raw:
+            return traci_port, None
         bridge_port = int(ch.Carla_setup["CarlaClientPort"] or DEFAULT_BRIDGE_PORT)
         return traci_port, bridge_port
     except (TypeError, ValueError):
@@ -866,8 +892,21 @@ def run_native_stack(config_yaml, sumocfg, tl_table, cfg, args, app=None,
     print(cadence_banner(bridge, carla_tick, pose_refresh,
                          read_realtime_pacing(config_yaml)))
 
+    # The mirror of the --sumo-only warning in main(): a run WITH a bridge whose
+    # yaml subscribes nothing to it. TrafficLayer refuses the subscribe, but only
+    # after CARLA has loaded a map. Say it before that is paid for.
+    if not sumo_only and bridge_port is not None and os.path.isfile(config_yaml):
+        _txt = open(config_yaml, encoding="utf-8", errors="ignore").read()
+        if not re.search(rf"^\s*port:\s*\[\s*{bridge_port}\s*\]", _txt, re.MULTILINE):
+            print(f"[cosim]   WARN {os.path.basename(config_yaml)} sets "
+                  f"CarlaSetup.CarlaClientPort {bridge_port}, but no subscription in "
+                  f"it lists that port. TrafficLayer will refuse the bridge's "
+                  f"subscribe - add {bridge_port} to a VehicleSubscription.")
+
     for label, port in (("SUMO (TraCI)", traci_port),
                         ("TrafficLayer (bridge)", bridge_port)):
+        if port is None:
+            continue            # traffic-only scenario: no bridge port to free
         pid = _pid_on_port(port)
         if not pid:
             continue
@@ -942,16 +981,23 @@ def run_native_stack(config_yaml, sumocfg, tl_table, cfg, args, app=None,
         tl = subprocess.Popen([tl_exe, "-f", config_yaml])
         procs.append(("TrafficLayer", tl))
         # TrafficLayer serves the bridge port; wait for it before starting
-        # VirCarlaEnv, which connects to it.
-        for _ in range(30):
-            if _port_listening(bridge_port) or not _alive(tl):
-                break
-            time.sleep(0.5)
+        # VirCarlaEnv, which connects to it. A traffic-only scenario has no bridge
+        # port, so there is nothing to wait for and nothing to warn about.
+        if bridge_port is not None:
+            for _ in range(30):
+                if _port_listening(bridge_port) or not _alive(tl):
+                    break
+                time.sleep(0.5)
+        _ports_hint = (f"ports {bridge_port}/{traci_port}" if bridge_port is not None
+                       else f"port {traci_port}")
         if not _check("TrafficLayer", tl,
-                      f"check the config yaml (a bad key, or ports {bridge_port}/"
-                      f"{traci_port} already in use)."):
+                      f"check the config yaml (a bad key, or {_ports_hint} "
+                      f"already in use)."):
             return 1
-        if not _port_listening(bridge_port):
+        if bridge_port is None:
+            print("[cosim]   OK   TrafficLayer serving the yaml's subscriptions "
+                  "(no bridge: the scenario declares no CARLA half)")
+        elif not _port_listening(bridge_port):
             print(f"[cosim]   WARN TrafficLayer is running but port {bridge_port} is not "
                   + ("open yet." if sumo_only else
                      "open yet; VirCarlaEnv may fail to subscribe."))
@@ -2127,7 +2173,10 @@ def derived_from_yaml(config_yaml, staged, args=None):
                        or read_backend(config_yaml)),
             "carla_host": host, "carla_port": port,
             "carla_local": _is_local_host(host) if host else None,
-            "sumo_only": bool(getattr(args, "sumo_only", False)),
+            # A yaml with no CarlaSetup runs no CARLA, exactly as --sumo-only does,
+            # so the CARLA and engine rows have nothing to describe either way.
+            "sumo_only": (bool(getattr(args, "sumo_only", False))
+                          or not scenario_has_carla(config_yaml)),
             # The cadence and the pacing live here too, so the summary shows what
             # will actually run instead of a number the setup remembered.
             "carla_tick": _yaml_float(config_yaml, "CarlaSetup", "CarlaTimeStep", 0.0)
@@ -3801,6 +3850,20 @@ def main():
     finally:
         _IN_PROGRESS.clear()
 
+    # Does this run have a CARLA half? The scenario yaml answers it, and nothing
+    # asked before: every CarlaSetup read is defaulted, so no block read the same as
+    # one spelling out the defaults - and the defaults are a complete, plausible
+    # CARLA. Here rather than at the --sumo-only gate above, which runs before the
+    # yaml is chosen; still ahead of the cook, the app, the install and the connect.
+    _chosen_yaml = args.config or (setup or {}).get("config")
+    if _chosen_yaml and not scenario_has_carla(_chosen_yaml):
+        print(f"[cosim] {os.path.basename(_chosen_yaml)} declares no CarlaSetup: this "
+              f"is a traffic-only scenario (SUMO + TrafficLayer"
+              + (f" + {app['id']}" if app else "")
+              + "). No CARLA is launched, loaded or dialled.")
+        args.sumo_only = True
+        args.no_launch = True
+
     # The app is settled and we are already running under the configured interpreter
     # (reexec_under_configured above), so this is the first point where "what does THIS app
     # need" is answerable. Deliberately here rather than later: it is still before
@@ -4328,8 +4391,9 @@ def main():
     # --carla-tick / --fast are scenario settings, so they are written THROUGH to the
     # yaml instead of living for one process: both bridges then read the same file,
     # and the file stops disagreeing with what just ran. Same reasoning as the CARLA
-    # endpoint below.
-    if os.path.isfile(config_yaml):
+    # endpoint below. Every key here is a CarlaSetup key, so a yaml without that
+    # section has nothing for this block to correct.
+    if os.path.isfile(config_yaml) and scenario_has_carla(config_yaml):
         if args.carla_tick is not None:
             if set_yaml_scalar(config_yaml, "CarlaSetup", "CarlaTimeStep",
                                f"{args.carla_tick:g}",
@@ -4571,7 +4635,9 @@ def main():
         # subscriber. Say it up front, at the point where it is still cheap to fix.
         try:
             _, _bridge_port = read_stack_ports(config_yaml)
-            if os.path.isfile(config_yaml):
+            # None: the yaml declares no CarlaSetup, so it lists no bridge port to
+            # be subscribed to and there is nothing here to warn about.
+            if _bridge_port is not None and os.path.isfile(config_yaml):
                 _txt = open(config_yaml, encoding="utf-8", errors="ignore").read()
                 if re.search(rf"^\s*port:\s*\[\s*{_bridge_port}\s*\]", _txt, re.MULTILINE):
                     print(f"[cosim] WARN {os.path.basename(config_yaml)} lists the bridge "

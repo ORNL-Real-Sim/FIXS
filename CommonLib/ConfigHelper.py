@@ -89,6 +89,26 @@ class ConfigHelper:
         xil_node = config.get("XilSetup", {})
         self.Xil_setup["EnableXil"] = self.parserFlag(xil_node, "EnableXil", False)
         self.Xil_setup["VehicleSubscription"] = self.parseVehicleSubscription(xil_node, "VehicleSubscription", [])
+        # How the XIL plant is reached. 'inprocess' simulates it here (no
+        # hardware, and the same code path as a cell), 'udp' and 'tcp' put it on
+        # the wire at the VehicleSubscription's ip and port.
+        self.Xil_setup["Transport"] = self.parserString(xil_node, "Transport", "inprocess").strip().lower()
+        if self.Xil_setup["Transport"] not in ("inprocess", "udp", "tcp"):
+            raise SystemExit(
+                "ERROR: XilSetup.Transport must be one of inprocess|udp|tcp, got '%s'"
+                % self.Xil_setup["Transport"])
+        # The bench itself: what vehicle is on it, and what the dyno does. Both
+        # are passed to CommonLib.xil by name, so the yaml names the parameter
+        # rather than restating a list that would then have to be kept in step.
+        # An unknown one is refused there, not ignored.
+        self.Xil_setup["Vehicle"] = dict(xil_node.get("Vehicle") or {})
+        self.Xil_setup["Dyno"] = dict(xil_node.get("Dyno") or {})
+        # The ROBOT DRIVER on the bench. Its own block because it is not the
+        # vehicle and not the dyno: on a real cell it is the one of the three
+        # that is yours to set. Capping its pedal is how a bench is held to an
+        # acceleration envelope without pretending the vehicle has less torque
+        # than it has (#24).
+        self.Xil_setup["Driver"] = dict(xil_node.get("Driver") or {})
 
         # Carla Setup
         carla_node = config.get("CarlaSetup", {})
@@ -100,9 +120,19 @@ class ConfigHelper:
         self.Carla_setup["EnablePythonBackend"] = self.parserFlag(
             carla_node, "EnablePythonBackend", True)
         self.Carla_setup["CarlaServerIP"] = self.parserString(carla_node, "CarlaServerIP", "127.0.0.1")
-        self.Carla_setup["CarlaServerPort"] = self.parserInteger(carla_node, "CarlaServerPort", 420)
+        # 2000 is CARLA's own RPC default, and what ConfigHelper.cpp has always
+        # returned here. This half said 420 -- privileged on Linux AND not a port
+        # CARLA ever listens on, so a config without a CarlaSetup block made
+        # run_cosim launch the server with -carla-rpc-port=420, which exits 139
+        # before opening it. The two halves must agree: run_cosim is Python and
+        # VirCarlaEnv is C++, and they dial the same server.
+        self.Carla_setup["CarlaServerPort"] = self.parserInteger(carla_node, "CarlaServerPort", 2000)
         self.Carla_setup["CarlaClientIP"] = self.parserString(carla_node, "CarlaClientIP", "127.0.0.1")
-        self.Carla_setup["CarlaClientPort"] = self.parserInteger(carla_node, "CarlaClientPort", 430)
+        # NOT CARLA: this is TrafficLayer's bridge endpoint, which VirCarlaEnv
+        # dials. 430 was privileged; 4440 is what run_cosim writes into every
+        # config it generates (DEFAULT_BRIDGE_PORT), so a defaulted config and a
+        # generated one now name the same port instead of three different ones.
+        self.Carla_setup["CarlaClientPort"] = self.parserInteger(carla_node, "CarlaClientPort", 4440)
         self.Carla_setup["CarlaMapName"] = self.parserString(carla_node, "CarlaMapName", "Town01")
         # 0 == every Carla tick. This key is the pose RE-APPLY cadence and, absent,
         # must not impose one: the bridge resolves 0 to CarlaTimeStep. The old 0.1
@@ -123,6 +153,13 @@ class ConfigHelper:
         self.Carla_setup["RealtimePacing"] = self.parserFlag(carla_node, "RealtimePacing", False)
         # Carla render sub-step (interpolate the feed for smoother motion). 0 -> 1:1.
         self.Carla_setup["CarlaTimeStep"] = self.parserDouble(carla_node, "CarlaTimeStep", 0.0)
+
+        # Vehicles spawned UP FRONT and handed out when the traffic arrives,
+        # instead of spawning each one the first time its id is seen. 0 is off
+        # and is the old behaviour. Size it from the scenario's peak concurrent
+        # vehicle count; the bridge prints the peak it saw at shutdown. Python
+        # bridge only -- VirCarlaEnv.exe ignores it. Why: FIXS#373 / PR #374.
+        self.Carla_setup["SpareVehiclePool"] = self.parserInteger(carla_node, "SpareVehiclePool", 0)
 
         # Spectator BEV follow (rigid top-down snap). Default ON, 50 m up, north-up.
         self.Carla_setup["CenteredViewId"] = self.parserString(carla_node, "CenteredViewId", "ego")
@@ -179,9 +216,29 @@ class ConfigHelper:
             raise SystemExit(
                 "ERROR: EgoSetup.Dynamics must be one of traffic|virenv|xil, got '%s'" % dyn)
         self.Ego_setup["Dynamics"] = dyn
+        # A dynamometer in the controller's loop is not a plant that owns the
+        # ego: whoever integrates the ego still owns position, heading and
+        # everything lateral, and the bench supplies one longitudinal number the
+        # controller consults.
+        #
+        # This used to be refused unless Dynamics was virenv, on the reading
+        # that a cell only exists while the VIRTUAL ENVIRONMENT owns the ego.
+        # That was too narrow: the sentence holds for the traffic simulator
+        # word for word (#24). On Dynamics: traffic the driver runs passive --
+        # no agent, no steering, no obstacle sweep, because the traffic
+        # simulator owns all of that -- and the cell answers the one question
+        # that is left. Both rungs run the same controller file and the same
+        # cell, which is what makes them comparable; refusing one of them made
+        # the comparison impossible to set up.
 
         # ActuationSource -- WHO PRODUCES THE PEDALS AND STEER. "user" is ONE
         # value; the Controller key decides where it runs.
+        #
+        # "fixs" is still accepted and still works: it selects the geometric
+        # L0 fallback in CommonLib/VirEnv/EgoDriver.py, for a map CARLA cannot
+        # route. It is left out of the message on purpose -- reaching for it
+        # from a scenario that wants a controller gets pure pursuit and a
+        # constant-map pedal law, which drives, so it does not look wrong.
         src = self.parserString(ego_node, "ActuationSource", "").strip().lower()
         if not src:
             l0 = (self.parserString(carla_node, "EgoL0Driver", "") or "").strip().lower()
@@ -189,7 +246,7 @@ class ConfigHelper:
                    "egodriver": "fixs", "actuation": "user", "embedded": "user"}.get(l0, "")
         if src and src not in ("simulator", "fixs", "user"):
             raise SystemExit(
-                "ERROR: EgoSetup.ActuationSource must be one of simulator|fixs|user, "
+                "ERROR: EgoSetup.ActuationSource must be one of simulator|user, "
                 "got '%s'" % src)
         self.Ego_setup["ActuationSource"] = src
 

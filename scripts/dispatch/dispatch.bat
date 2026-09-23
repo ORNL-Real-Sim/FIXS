@@ -266,6 +266,20 @@ for /d %%d in ("%SOURCE_PATH%\CommonLib\*") do (
         xcopy /Y /E /I "%%d" "%RELEASE_PATH%\CommonLib\%%~nxd" >nul
     )
 )
+REM ...and templates\, which the loop above cannot see. It holds python a USER
+REM COPIES rather than python FIXS imports, so it has no __init__.py and is not a
+REM package - and the rule above is "is it a package", which is exactly right for
+REM the case it was written for and silently wrong for this one. Shipped by name
+REM because templates\ is one directory that is part of the product; the packages
+REM above appear often enough that only a structural rule keeps up with them, and
+REM this does not.
+REM Without this the template reaches the git repo and no user: the zip is built
+REM from %RELEASE_PATH%, so a directory that never lands there is absent from
+REM every FIXS/ anyone fetches, with nothing failing to say so.
+if exist "%SOURCE_PATH%\CommonLib\templates" (
+    echo   - CommonLib\templates
+    xcopy /Y /E /I "%SOURCE_PATH%\CommonLib\templates" "%RELEASE_PATH%\CommonLib\templates" >nul
+)
 REM Drop the compiled caches /E picked up. Swept once over CommonLib rather than
 REM inside the loop above: a `for /d /r` nested in a `for /d` does not fire, and
 REM it silently shipped the .pyc files when it was written that way.

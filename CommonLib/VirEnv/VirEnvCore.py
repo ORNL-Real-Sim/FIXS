@@ -340,7 +340,7 @@ class VirEnvCore:
                     continue                        # already mapped
                 sp = Pose(x=rec.positionX, y=rec.positionY, z=rec.positionZ,
                           headingDeg=rec.heading, gradeRad=rec.grade)
-                h = backend.spawnVehicle(rec.type, rec.vehicleClass, sp) \
+                h = backend.spawnVehicle(rec.type, rec.vehicleClass, sp, idTs) \
                     if backend is not None else kNoHandle
                 if h == kNoHandle:
                     continue                        # backend full -> skip

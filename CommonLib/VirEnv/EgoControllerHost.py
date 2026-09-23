@@ -11,8 +11,9 @@ it. There is no base class to inherit, no registry, and no socket::
                 steerAngleDesired=0.10)
 
     # scenario yaml
-    EgoActuationSource: embedded
-    EgoController:      apps/<app>/my_controller.py
+    EgoSetup:
+      ActuationSource: user
+      Controller:      apps/<app>/my_controller.py
 
 
 WHY THIS IS A HOOK AND NOT A CLIENT
@@ -32,8 +33,8 @@ function call.
 The rate is therefore not configurable and never has been: it is a consequence
 of where the controller lives.
 
-    EgoActuationSource: external   own process, over FIXS   -> feed rate
-    EgoActuationSource: embedded   in the bridge            -> CarlaTimeStep
+    ActuationSource: user, no Controller   own process, over FIXS -> feed rate
+    ActuationSource: user +  Controller    in the bridge          -> CarlaTimeStep
 
 Because both deployments write through ``ego.set``, the same file runs either
 way -- which makes "does the fast loop actually change the result?" a one-
@@ -141,8 +142,11 @@ class LoadedController:
     does not branch on how the user chose to write it.
     """
 
-    def __init__(self, spec, obj, setupFn=None, shutdownFn=None, isClass=False):
+    def __init__(self, spec, obj, setupFn=None, shutdownFn=None, isClass=False,
+                 argv=()):
         self.spec = spec
+        #: What the scenario wrote after the path. FIXS does not read it.
+        self.argv = list(argv)
         self._obj = obj
         self._setup = setupFn
         self._shutdown = shutdownFn
@@ -150,13 +154,18 @@ class LoadedController:
         self._state = None
         self._instance = None
 
-    def setup(self, config, egoId, backend=None, core=None):
+    def setup(self, config, egoId, backend=None, core=None, dynamics=None):
         # Registered before the controller is built, because a CARLA-shaped
         # agent asks its map road questions inside its own constructor. The
         # controller's own signature is unchanged: it does not take a backend,
         # it asks FIXS -- see currentBackend.
-        global _backend, _core, _config
+        global _backend, _core, _config, _dynamics
+        # The scenario's own words for its controller, verbatim. FIXS resolves
+        # the path and carries the rest; what the options MEAN is the
+        # controller's business, so no option of its ever reaches this schema.
+        config['EgoControllerArgs'] = self.argv
         _backend, _core, _config = backend, core, config
+        _dynamics = dynamics
         if self._isClass:
             self._instance = self._obj(config, egoId)
         elif self._setup is not None:
@@ -181,6 +190,33 @@ class LoadedController:
         return f'<LoadedController {self.spec}>'
 
 
+def _driverMark():
+    """Where fixs.driver()'s registry stands, or None if there is no driver.
+
+    Swallows everything: a FIXS build without the driver, or one whose import
+    failed for its own reasons, must still load a hand-written controller.
+    """
+    try:
+        from CommonLib.fixs import _driver
+        return _driver.mark()
+    except Exception:
+        return None
+
+
+def _driverBuilt(mark, where):
+    """What fixs.driver() built while `where` was importing."""
+    if mark is None:
+        return None
+    from CommonLib.fixs import _driver
+    made = _driver.builtSince(mark)
+    if len(made) > 1:
+        raise ControllerError(
+            f'EgoController: {where} calls fixs.driver() {len(made)} times. '
+            f'FIXS drives the ego with one thing -- name the one you mean '
+            f'(EgoController: {where}:TheOneIMeant).')
+    return made[0] if made else None
+
+
 def _importFromPath(path):
     name = os.path.splitext(os.path.basename(path))[0]
     spec = importlib.util.spec_from_file_location(name, path)
@@ -197,6 +233,7 @@ def _importFromPath(path):
 _backend = None
 _core = None
 _config = None
+_dynamics = None
 
 
 def currentConfig():
@@ -209,6 +246,18 @@ def currentCore():
     """The VirEnvCore this bridge is running, for a controller that must map a
     wire id to the CARLA actor mirroring it. None outside a run."""
     return _core
+
+
+def currentDynamics():
+    """EgoSetup.Dynamics for this run: 'virenv', 'traffic', or None outside one.
+
+    A controller asks this rather than whether a CARLA ego exists, because the
+    two are not the same question. On a virenv rung with a deferred spawn there
+    is no ego actor either, for the first few hundred ticks -- 'not yet' and
+    'never' would be indistinguishable. Dynamics is the declared, permanent
+    answer, so a driver can decide once what kind of run it is in.
+    """
+    return _dynamics
 
 
 def currentBackend():
@@ -254,8 +303,18 @@ def loadController(spec, appRoot=None):
     """(string) -> LoadedController -- resolve what the scenario named.
 
     ``spec`` is ``path/to/file.py``, ``path/to/file.py:attribute``, or
-    ``package.module:attribute``. The path form takes no sys.path arrangement,
-    which is the point: applications are not installed packages.
+    ``package.module:attribute``, each optionally followed by the controller's
+    own options::
+
+        apps/mlk_eco_driving/ego_agent_controller.py --command-shape pedals
+
+    Split on the first ``' --'``, never on whitespace: a path may contain
+    spaces, and one that did used to resolve. The tail arrives as
+    ``config['EgoControllerArgs']`` and is not interpreted here -- a controller
+    option must never need a key in this schema.
+
+    The path form takes no sys.path arrangement, which is the point:
+    applications are not installed packages.
 
     Nothing is discovered. The scenario names the controller the way it names
     the map, and if the name is wrong you find out here rather than 400 ticks in.
@@ -263,7 +322,11 @@ def loadController(spec, appRoot=None):
     if not spec or not spec.strip():
         raise ControllerError('EgoController is empty')
     spec = spec.strip()
+    spec, sep, rest = spec.partition(' --')
+    argv = ('--' + rest).split() if sep else []
+    spec = spec.strip()
     _letControllerImportFixs()
+    driverMark = _driverMark()      # before the module runs
 
     modPart, sep, attr = spec.rpartition(':')
     # A Windows drive letter is not a separator: 'C:/x/y.py' has no attribute.
@@ -294,20 +357,26 @@ def loadController(spec, appRoot=None):
             raise ControllerError(f'EgoController: {where} has no {attr!r}')
         found = attr
     else:
-        found = next((n for n in ENTRY_POINTS if hasattr(module, n)), None)
+        # A driver built by fixs.driver() says so itself, so the name the
+        # user gave it -- or did not give it -- is theirs. Asked before the
+        # name scan, which stays for controllers written from scratch.
+        obj = _driverBuilt(driverMark, where)
+        found = ('fixs.driver()' if obj is not None else
+                 next((n for n in ENTRY_POINTS if hasattr(module, n)), None))
+        if found is not None and obj is None:
+            obj = getattr(module, found)
         if found is None:
             raise ControllerError(
                 f'EgoController: {where} defines none of {", ".join(ENTRY_POINTS)}.\n'
                 f'  Define control(ego, dt), or a class Controller with '
                 f'__init__(config, egoId) and control(ego, dt).')
-        obj = getattr(module, found)
 
     isClass = isinstance(obj, type)
     if isClass:
         if not callable(getattr(obj, 'control', None)):
             raise ControllerError(
                 f'EgoController: {where}:{found} is a class with no control(ego, dt).')
-        return LoadedController(spec, obj, isClass=True)
+        return LoadedController(spec, obj, isClass=True, argv=argv)
 
     if not callable(obj):
         raise ControllerError(
@@ -317,7 +386,7 @@ def loadController(spec, appRoot=None):
     shutdownFn = getattr(module, 'shutdown', None)
     if setupFn is not None and not callable(setupFn):
         raise ControllerError(f'EgoController: {where}:setup is not callable')
-    return LoadedController(spec, obj, setupFn, shutdownFn)
+    return LoadedController(spec, obj, setupFn, shutdownFn, argv=argv)
 
 
 # ---------------------------------------------------------------------------
@@ -367,6 +436,15 @@ def resetFeedAge():
 def runController(backend, controller, ego, dt, onFeed, maxSteerRad):
     """One step: hand the controller state, apply whatever shape it commanded.
 
+    ``backend`` may be None. That is the case where the TRAFFIC SIMULATOR owns
+    the ego (EgoSetup.Dynamics: traffic) and the controller is a cell in the
+    speed loop rather than the driver of a physics actor: there is no ego actor
+    to read a state from or to apply a command to. The record IS the state --
+    it already carries the traffic simulator's pose and speed -- and the command
+    written onto it is forwarded to TrafficLayer by the caller instead of being
+    applied here. Everything between those two ends is identical, which is what
+    lets one controller file serve both.
+
     Backend-agnostic on purpose -- it touches only ``readEgoState``,
     ``applyEgoActuation`` and ``applyEgoSpeedSteer``, all IVirEnvBackend verbs.
     That is what lets tests/VirEnv drive a real controller against
@@ -389,9 +467,13 @@ def runController(backend, controller, ego, dt, onFeed, maxSteerRad):
 
     if ego is None:
         return None
-    es = EgoState()
-    if not backend.readEgoState(ego.id.strip(), es):
-        return None
+    # No backend -> no physics ego: the record already holds the traffic
+    # simulator's view of it, which is the only state there is on that rung.
+    es = None
+    if backend is not None:
+        es = EgoState()
+        if not backend.readEgoState(ego.id.strip(), es):
+            return None
 
     if onFeed:
         resetFeedAge()
@@ -412,11 +494,12 @@ def runController(backend, controller, ego, dt, onFeed, maxSteerRad):
     # EgoState is flat and already in the canonical FIXS wire frame -- the
     # backend removed its own anchor before returning, so nothing is converted
     # here (IVirEnvBackend.EgoState).
-    object.__setattr__(ego, 'positionX', es.x)
-    object.__setattr__(ego, 'positionY', es.y)
-    object.__setattr__(ego, 'positionZ', es.z)
-    object.__setattr__(ego, 'heading', es.heading)
-    object.__setattr__(ego, 'speed', es.speed)
+    if es is not None:
+        object.__setattr__(ego, 'positionX', es.x)
+        object.__setattr__(ego, 'positionY', es.y)
+        object.__setattr__(ego, 'positionZ', es.z)
+        object.__setattr__(ego, 'heading', es.heading)
+        object.__setattr__(ego, 'speed', es.speed)
     object.__setattr__(ego, 'feedAge', _feedAge[0])
 
     # Clear what the LAST step wrote before asking for this one. The record
@@ -433,6 +516,21 @@ def runController(backend, controller, ego, dt, onFeed, maxSteerRad):
         _egoRecord[0] = None
 
     kind = fixs.commandKind(ego)
+    if backend is None:
+        # Nothing to apply here: the caller forwards ego.speedDesired to
+        # TrafficLayer and the traffic simulator integrates it. Pedals cannot be
+        # forwarded -- there is no plant on this rung to turn one into a speed --
+        # so refuse rather than drop them, which would leave the LOWER-port
+        # controller's command as the last write and hand the run quietly back
+        # to it while this one looked like it was driving.
+        if kind == 'actuation':
+            raise ControllerError(
+                "the controller commanded pedals, but EgoSetup.Dynamics is "
+                "'traffic': the traffic simulator integrates the ego and there "
+                "is no plant to turn a pedal into a speed. Command a speed "
+                "instead -- ego.set(speedDesired=...), or --command-shape speed "
+                "if this is fixs.driver.")
+        return kind
     if kind == 'actuation':
         backend.applyEgoActuation(ego.acceleratorPedalDesired,
                                   ego.brakePedalDesired,

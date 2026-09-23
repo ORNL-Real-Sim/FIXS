@@ -159,6 +159,12 @@ def main(argv=None):
 
     config = ConfigHelper()
     config.getConfig(args.configPath)
+    # An in-process controller reads the scenario through fixs, which finds it
+    # by $FIXS_CONFIG_YAML -- run_cosim sets that for the app it launches, but
+    # this bridge is launched separately and inherits nothing. Say which yaml
+    # this process is running, so a controller loaded here cannot read a
+    # DIFFERENT one than the bridge hosting it.
+    os.environ['FIXS_CONFIG_YAML'] = os.path.abspath(args.configPath)
     cs = config.Carla_setup
     egoCfg = config.Ego_setup          # the ego, once (FIXS#305)
     verbose = cs['EnableVerboseLog']
@@ -182,6 +188,12 @@ def main(argv=None):
     # inherits the CARLA step rate and reads the plant, not the feed (#305).
     useEmbedded = egoCfg['ActuationSource'] == 'user' and bool(egoCfg['Controller'])
     useWireActuation = egoCfg['ActuationSource'] == 'user' and not egoCfg['Controller']
+    # The controller as a CELL IN THE SPEED LOOP rather than the driver of a
+    # physics ego: the traffic simulator still integrates the ego, and what the
+    # controller commands is forwarded to TrafficLayer as the ego's speed. This
+    # bridge is served after the application's controller, so that forward is
+    # the LAST write for the id and is the one the traffic simulator acts on.
+    cellOnTraffic = useEmbedded and not virEnvOwnsEgo
 
     # WHO CREATES THE EGO -- decided by whether EgoSpawnPose is configured, the
     # same predicate mainVirCarla.cpp:188 uses:
@@ -206,7 +218,8 @@ def main(argv=None):
     applySyncSettings(world, carlaStep, verbose)
     clearStaleActors(world, verbose)
 
-    backend = CarlaBackend(world, client, cs['UseVehicleTypeAsBlueprint'], verbose)
+    backend = CarlaBackend(world, client, cs['UseVehicleTypeAsBlueprint'], verbose,
+                           sparePoolSize=cs['SpareVehiclePool'])
     core = VirEnvCore()
     core.setBackend(backend)
     core.interpolateTraffic = (carlaStep < feed - 1e-9)   # sub-step -> interpolate
@@ -241,7 +254,7 @@ def main(argv=None):
     # Does this run's reply to TrafficLayer ever carry records? Only a bridge
     # that REPORTS state does. When it does not, answer BEFORE the CARLA tick so
     # SUMO and the controller are not held behind the render (#329).
-    replyCarriesNothing = not virEnvOwnsEgo
+    replyCarriesNothing = not (virEnvOwnsEgo or cellOnTraffic)
     if replyCarriesNothing:
         print("Reply carries no records (the traffic simulator owns the ego): "
               "answering TrafficLayer before the CARLA tick, so SUMO and the "
@@ -255,22 +268,22 @@ def main(argv=None):
     # its setup() and announced "called every CARLA step" -- while the call site
     # skipped it every tick, because ego physics are gated on Dynamics. The log
     # said an app's control law was driving when nothing ever read it.
-    if virEnvOwnsEgo and useEmbedded:
+    if useEmbedded:
         spec = egoCfg['Controller']
         if not spec:
             raise SystemExit("EgoSetup.ActuationSource: user needs a Controller: "
                              "<path to a .py defining control(ego, dt)>")
         embedded = loadController(spec, appRoot=os.getcwd())
-        embedded.setup(cs, egoId, backend, core)
+        embedded.setup(cs, egoId, backend, core, dynamics=egoCfg['Dynamics'])
         print("Ego controller: %s (called every CARLA step, not every feed)"
               % embedded.spec)
-    elif useEmbedded:
-        # Say so rather than going quiet. The scenario names a controller, and a
-        # reader who sees nothing cannot tell whether it was found or ignored.
-        print("Ego controller: %s NOT loaded -- EgoSetup.Dynamics is '%s', so the "
-              "traffic simulator moves the ego and no control law is called."
-              % (egoCfg['Controller'], egoCfg['Dynamics'] or 'traffic'))
+        if cellOnTraffic:
+            print("  ... as a cell in the speed loop: EgoSetup.Dynamics is "
+                  "'traffic', so what it commands is forwarded to TrafficLayer "
+                  "as ego.speedDesired and the traffic simulator integrates it. "
+                  "No physics ego is spawned.")
     lastAdvisory = cs['EgoTargetSpeed']
+    cellSpeed = None          # what the cell last commanded (cellOnTraffic only)
 
     try:
         # Checked here rather than inside the bring-up, so a missing route fails
@@ -297,6 +310,8 @@ def main(argv=None):
 
         stepCount = 0
         simTime = 0.0
+        #: 0 the pool is untouched, 1 the burst has drawn from it, 2 trimmed.
+        spareState = 0
         wallStart = time.monotonic()
         loopStart = time.monotonic()   # rate summary at the end
         feedCount = 0
@@ -336,6 +351,19 @@ def main(argv=None):
                                        useEmbedded, sp, False):
                         break
                     egoIsUp = True
+
+            # ---- spare pool: the burst gets its exchange, then the rest go ---
+            # State, not a countdown, because the burst is ONE exchange by
+            # construction: the warm-up boundary opens once and the whole network
+            # arrives together. Waiting a further exchange before trimming costs
+            # nothing and keeps the pool available if the burst spills over a
+            # second one; waiting longer would tax every tick for spares that the
+            # ~2 arrivals/s afterwards can afford to spawn for themselves.
+            if spareState == 0 and backend.spareTaken():
+                spareState = 1
+            elif spareState == 1 and onFeedBoundary(simTime, 1e-6):
+                backend.trimSpares()
+                spareState = 2
             # #266/#267: the batch is NOT flushed here. It is flushed just before
             # world.tick(), AFTER the spectator has been queued into it, so the
             # camera and the vehicles it follows are applied by ONE acknowledged
@@ -396,10 +424,17 @@ def main(argv=None):
             # Both needed: nothing to control before the ego exists, and
             # fixs.vehicle.get RAISES rather than answering empty with no tick
             # received -- and the core skips the recv at simTime 0.
-            if virEnvOwnsEgo and embedded is not None and egoIsUp and haveTick:
+            if embedded is not None and haveTick and (egoIsUp or cellOnTraffic):
                 from CommonLib import fixs as _fixs
-                runController(backend, embedded, _fixs.vehicle.get(egoId),
-                              carlaStep, onFeed, kMaxSteerRad)
+                _egoRec = _fixs.vehicle.get(egoId)
+                _kind = runController(None if cellOnTraffic else backend,
+                                      embedded, _egoRec,
+                                      carlaStep, onFeed, kMaxSteerRad)
+                # Hold what the cell last said. The controller runs every CARLA
+                # step and the feed is every Nth of them, so on a sub-stepped
+                # run this is the value at the tick that lands on the boundary.
+                if cellOnTraffic and _kind == 'speedsteer':
+                    cellSpeed = _egoRec.speedDesired
 
             if poseLog is not None:      # A/B: the applied Carla pose per SUMO id
                 for vid, h in core.mappedVehicles().items():
@@ -506,6 +541,22 @@ def main(argv=None):
                     if dataLog.isOpen() and logWanted(d.id):
                         dataLog.logVehicle(simTime, d)
 
+            # ---- the cell's speed -> FIXS: the last write for the ego id ----
+            # Built here, with the other records the reply carries, so the send
+            # below stays the one place this driver answers a tick.
+            if cellOnTraffic and onFeed and core.ENABLE_REALSIM and cellSpeed is not None:
+                d = VehData()
+                d.id = egoId
+                d.type = egoCfg['Type']
+                d.speedDesired = cellSpeed
+                core.Msg_c.VehDataSend_um.setdefault(0, []).append(d)
+                if dataLog.isOpen() and logWanted(d.id):
+                    dataLog.logVehicle(simTime, d)
+                if dataLog.isOpen():
+                    fromSumo = core.Msg_c.VehDataRecv_um.get(egoId)
+                    if fromSumo is not None:
+                        dataLog.logVehicle(simTime, fromSumo, idOverride='ego_sumo')
+
             # ---- the driver owns the send: once per feed, pairing with the recv
             if not replyCarriesNothing and onFeed and core.ENABLE_REALSIM:
                 rc, err = core.sendData(simTime)
@@ -563,6 +614,9 @@ def main(argv=None):
                       "p99 %.1f  max %.1f  sd %.1f ms  (%.1f exchanges/s)"
                       % (_mean, _s[_n // 2], _s[int(_n * 0.95)], _s[int(_n * 0.99)],
                          _s[-1], _sd, 1000.0 / _mean))
+        _spare = backend.spareReport()
+        if _spare:
+            print(_spare)
         if dataLog.isOpen():
             print('DataLogger closed: %s' % dataLog.path())
             dataLog.close()

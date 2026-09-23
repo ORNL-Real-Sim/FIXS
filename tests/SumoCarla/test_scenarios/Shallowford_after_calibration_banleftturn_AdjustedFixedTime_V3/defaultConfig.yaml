@@ -48,18 +48,18 @@ ApplicationSetup:
   - type: "ego"
     attribute: {id: ["ego"], radius: [50]}
     ip: ["127.0.0.1"]
-    port: [440]
+    port: [4440]
 
   - type: "ego"
     attribute: {id: ["ego"], radius: [0]}
     ip: ["127.0.0.1"]
-    port: [441]
+    port: [4441]
 
   SignalSubscription:
   - type: intersection
     attribute: {name: ['2', '9', '10', '8', '12', '3']}
     ip: ['127.0.0.1']
-    port: [440]
+    port: [4440]
     
 XilSetup:
     # enable/disable XIL
@@ -86,7 +86,7 @@ CarlaSetup:
 
     # Carla Client Ip and Port settings 
     CarlaClientIP: 127.0.0.1
-    CarlaClientPort: 440
+    CarlaClientPort: 4440
 
     # default Traffic Objects updates every 0.1 seconds
     TrafficRefreshRate: 0.1

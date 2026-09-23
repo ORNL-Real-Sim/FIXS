@@ -115,9 +115,12 @@ def test_detector_says_it_is_not_decoded():
 class _Cfg:
     """Minimal ConfigHelper stand-in for subscription-selection tests."""
 
-    def __init__(self, subscriptions):
+    def __init__(self, subscriptions, raw=None):
         self.simulation_setup = {'VehicleMessageField': ['id', 'speed']}
         self.application_setup = {'VehicleSubscription': subscriptions}
+        # _selectSubscription reads the document as written to tell the bridge's
+        # subscription from the caller's; ConfigHelper always sets it.
+        self.raw = dict(raw or {})
 
 
 def _sub(port, ids=('ego',)):

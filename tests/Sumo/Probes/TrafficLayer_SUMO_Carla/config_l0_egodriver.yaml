@@ -50,7 +50,7 @@ ApplicationSetup:
         # covers the whole SimpleLoop, so all bg vehicles reach Carla.
         attribute: { id: ['ego'], radius: [500] }
         ip: ['127.0.0.1']
-        port: [440]
+        port: [4440]
 
 XilSetup:
     EnableXil: false
@@ -88,7 +88,7 @@ CarlaSetup:
     CarlaServerPort: 2000
 
     CarlaClientIP: 127.0.0.1
-    CarlaClientPort: 440
+    CarlaClientPort: 4440
 
     TrafficRefreshRate: 0.1
 
