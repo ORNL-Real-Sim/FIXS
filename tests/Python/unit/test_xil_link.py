@@ -10,6 +10,7 @@ import os
 import socket
 import struct
 import sys
+import time
 
 import pytest
 
@@ -167,19 +168,59 @@ def test_both_transports_present_the_same_calls():
 
 # ---------------------------------------------------------------------- tcp
 
-def tcp_pair():
-    """dyno first: it listens, and the simulator end connects to it."""
+def tcp_pair(timeout=2.0):
+    """dyno first: it listens, the simulator end connects, and BOTH are up
+    before the caller sends anything.
+
+    The link is non-blocking at both ends on purpose: before the peer is there
+    `send` does nothing and `recv` answers None, which is what a real bench does
+    while the other end is still starting. That makes a send issued before the
+    handshake a SILENT no-op -- the packet is not queued, it is dropped -- so a
+    test that sends first is racing the connect, not testing the wire. The
+    simulator end gives connect 0.05 s; under a loaded machine that expires.
+    Measured: 2 of 20 full-suite runs lost their first sends exactly here.
+    """
     port = free_port()
     dyno = TcpLink('dyno', port=port)
-    return TcpLink('simulator', peer_ip='127.0.0.1', port=port), dyno, port
+    sim = TcpLink('simulator', peer_ip='127.0.0.1', port=port)
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if sim._connected() is not None and dyno._connected() is not None:
+            return sim, dyno, port
+        time.sleep(0.005)
+    sim.close()
+    dyno.close()
+    raise AssertionError('TcpLink pair did not connect within %.1f s' % timeout)
 
 
-def poll(fn):
-    for _ in range(200):
+def poll(fn, timeout=2.0):
+    """Wait for a non-None value, bounded by TIME rather than by a spin count.
+
+    A fixed iteration budget is a race against the OS: 200 non-blocking reads
+    can all complete before loopback has delivered anything, and the test then
+    fails for running fast on a busy machine.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
         got = fn()
         if got is not None:
             return got
-    return None
+        if time.monotonic() >= deadline:
+            return None
+        time.sleep(0.001)
+
+
+def poll_for(fn, want, timeout=2.0):
+    """Wait until `fn` reports `want`; returns what it last reported."""
+    deadline = time.monotonic() + timeout
+    got = None
+    while True:
+        got = fn()
+        if got is not None and got == want:
+            return got
+        if time.monotonic() >= deadline:
+            return got
+        time.sleep(0.001)
 
 
 def test_tcp_carries_a_value_each_way():
@@ -229,15 +270,20 @@ def test_tcp_waits_for_the_rest_of_a_split_packet():
 
 
 def test_tcp_keeps_only_the_newest_of_a_burst():
+    """Three references, one settled answer: the newest, and it stays.
+
+    Asserted as "wait for 12.0, then it does not change" rather than "read 51
+    times and the 51st is 12.0" -- how many reads it takes for all three to
+    land is the OS's business, not the contract's.
+    """
     sim, dyno, _ = tcp_pair()
     try:
         for v in (10.0, 11.0, 12.0):
             sim.send_reference(v)
-        got = poll(dyno.recv_reference)
+        newest = pytest.approx((12.0, 0.0))
+        assert poll_for(dyno.recv_reference, newest) == newest
         for _ in range(50):
-            dyno.recv_reference()
-        assert dyno.recv_reference() == pytest.approx((12.0, 0.0))
-        assert got is not None
+            assert dyno.recv_reference() == newest   # sticky, never rewinds
     finally:
         sim.close()
         dyno.close()

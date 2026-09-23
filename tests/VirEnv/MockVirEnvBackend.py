@@ -78,7 +78,12 @@ class MockVirEnvBackend(IVirEnvBackend):
         self._rec('initTrafficPool', '')
         self._poolInit = True
 
-    def spawnVehicle(self, vType, vClass, spawnPose):
+    def spawnVehicle(self, vType, vClass, spawnPose, vehId=''):
+        # vehId is accepted and deliberately NOT recorded. The Python core passes
+        # it (Carla keys its blueprint on it, FIXS#358); the C++ interface has no
+        # such parameter, so recording it would change this digest and nothing on
+        # the C++ side would ever produce a matching one. Keeping it out is what
+        # lets the two cores still be compared on the sequence they DO share.
         cls = self._classify(vClass)
         pool = self._poolFor(cls)
         tag = '%s(%s/%s)' % (cls.name, vType, vClass)

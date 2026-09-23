@@ -408,13 +408,24 @@ def test_stage_package_pick_uses_selector_not_gh(monkeypatch, tmp_path):
     assert (carla_root / "Import" / "RP_Ver0529.json").is_file()
 
 
-def test_stage_package_noop_when_already_staged(tmp_path, capsys):
-    """If the descriptor is already present and no source is given, it's a no-op."""
+def test_stage_package_noop_when_already_staged(tmp_path):
+    """Already staged and no source given: use that copy, write nothing.
+
+    Asserted on the directory, not on the message. The defect this guards is
+    FIXS#358's second descriptor -- CARLA cooks every descriptor in Import/, so
+    a repeat import cooked the map twice and crashed Unreal. A prose assertion
+    tracks the wording instead, and went red when the wording was rewritten
+    while the behaviour was correct throughout.
+    """
     carla_root = tmp_path / "carla"
-    (carla_root / "Import").mkdir(parents=True)
-    (carla_root / "Import" / "RP_Ver0529.json").write_text("{}", encoding="utf-8")
-    import_map.stage_package(str(carla_root), "RP_Ver0529")
-    assert "already staged" in capsys.readouterr().out
+    import_dir = carla_root / "Import"
+    import_dir.mkdir(parents=True)
+    descriptor = import_dir / "RP_Ver0529.json"
+    descriptor.write_text("{}", encoding="utf-8")
+
+    assert import_map.stage_package(str(carla_root), "RP_Ver0529") == str(import_dir)
+    assert descriptor.read_text(encoding="utf-8") == "{}"
+    assert sorted(q.name for q in import_dir.iterdir()) == ["RP_Ver0529.json"]
 
 
 def test_ensure_map_rejects_packaged(monkeypatch, tmp_path):
@@ -750,10 +761,10 @@ def test_record_bytes_excludes_the_cache_by_default(tmp_path, monkeypatch):
     ("1,", [0]),        # a trailing comma has one reading; do not re-ask over it
 ])
 def test_parse_selection_accepts(answer, expected):
-    assert import_map._parse_selection(answer, 5) == expected
+    assert import_map.parse_selection(answer, 5) == expected
 
 
 @pytest.mark.parametrize("answer", ["", "0", "6", "4-2", "1-9", "x", "1,x", "-"])
 def test_parse_selection_rejects(answer):
     """None means re-ask. Nothing here may be guessed at: the next step deletes."""
-    assert import_map._parse_selection(answer, 5) is None
+    assert import_map.parse_selection(answer, 5) is None
