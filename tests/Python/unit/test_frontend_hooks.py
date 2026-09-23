@@ -237,3 +237,41 @@ def test_app_args_reach_the_environment(home, monkeypatch, capsys):
     assert os.environ["COSIM_APP_ARGS"] == "--penetrationRate 0.2"
     json.loads(capsys.readouterr().out)
     monkeypatch.delenv("COSIM_APP_ARGS")
+
+
+# --------------------------------------------------------------------------- #
+# the ego controller preflight
+# --------------------------------------------------------------------------- #
+class _Parsed:
+    def __init__(self, **ego):
+        self.Ego_setup = ego
+
+
+@pytest.mark.parametrize("spec", [
+    "apps/app/ctrl.py",
+    "apps/app/ctrl.py --command-shape pedals",       # the options tail is not the path
+    "apps/app/ctrl.py:MyController",                 # nor is the attribute
+])
+def test_a_missing_controller_stops_the_run_before_anything_starts(
+        tmp_path, monkeypatch, spec):
+    """Reported from the window: a yaml staged from another branch of the app repo
+    named a controller this checkout does not have. The bridge found out only
+    after SUMO, TrafficLayer, the app and CARLA were up, and the stack blamed
+    CARLA. The engine now refuses first, resolving exactly as the bridge does."""
+    monkeypatch.setattr(run_cosim, "_read_scenario_config",
+                        lambda _y: _Parsed(ActuationSource="user", Controller=spec))
+    with pytest.raises(SystemExit, match="ego controller is not here"):
+        run_cosim.check_ego_controller("scen.yaml", cwd=str(tmp_path))
+    (tmp_path / "apps" / "app").mkdir(parents=True)
+    (tmp_path / "apps" / "app" / "ctrl.py").write_text("")
+    run_cosim.check_ego_controller("scen.yaml", cwd=str(tmp_path))       # present: fine
+
+
+@pytest.mark.parametrize("ego", [
+    {"ActuationSource": "simulator", "Controller": "apps/app/gone.py"},  # not loaded
+    {"ActuationSource": "user", "Controller": "mypkg.controllers:Eco"},  # imported, not opened
+    {"ActuationSource": "user", "Controller": ""},                       # wire actuation
+])
+def test_controllers_the_bridge_would_not_open_are_left_alone(tmp_path, monkeypatch, ego):
+    monkeypatch.setattr(run_cosim, "_read_scenario_config", lambda _y: _Parsed(**ego))
+    run_cosim.check_ego_controller("scen.yaml", cwd=str(tmp_path))

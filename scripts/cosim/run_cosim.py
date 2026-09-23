@@ -295,6 +295,49 @@ def _read_scenario_config(config_yaml):
         return None
 
 
+def check_ego_controller(config_yaml, cwd=None):
+    """Refuse a run whose scenario names an ego Controller that is not there -
+    before anything is launched, rather than when the bridge imports it.
+
+    The bridge (mainVirCarla) loads EgoSetup.Controller only when
+    ActuationSource is 'user', resolving a path against ITS working directory,
+    which is this process's. Mirrored here - same gate, same split of the options
+    tail and the ':attribute' suffix, same base directory - so the two cannot
+    disagree about what "there" means. A module name (no .py, no separator) is
+    imported rather than opened, so there is nothing to stat and it is left to the
+    bridge.
+
+    Found the hard way: the check used to be the bridge's, reached after SUMO,
+    TrafficLayer, the app and CARLA were all up, whose exit the stack then blamed
+    on CARLA being unreachable. The case that hit it is ordinary, too - ~/.fixs is
+    shared by every checkout on a machine, so a yaml staged from one branch of an
+    app repo gets run from another that lacks the controller it names."""
+    ch = _read_scenario_config(config_yaml)
+    ego = getattr(ch, "Ego_setup", None) or {}
+    spec = (ego.get("Controller") or "").strip()
+    if ego.get("ActuationSource") != "user" or not spec:
+        return
+    target = spec.partition(" --")[0].strip()
+    head, sep, _attr = target.rpartition(":")
+    if sep and len(head) > 1:
+        target = head
+    if not (target.endswith(".py") or "/" in target or os.sep in target):
+        return
+    base = cwd or os.getcwd()
+    path = os.path.normpath(target if os.path.isabs(target)
+                            else os.path.join(base, target))
+    if os.path.isfile(path):
+        return
+    sys.exit(f"[cosim] the scenario's ego controller is not here:\n"
+             f"          {path}\n"
+             f"        named by EgoSetup.Controller in {config_yaml}\n"
+             f"        (relative paths resolve against {base}).\n"
+             f"        Nothing was launched. If that yaml was staged from another "
+             f"branch of this app repo -\n"
+             f"        ~/.fixs is shared by every checkout on this machine - run "
+             f"from that branch, or pick a scenario this checkout declares.")
+
+
 def read_backend(config_yaml):
     """'py' or 'cpp' from CarlaSetup.EnablePythonBackend -- which VirEnvCore runs.
 
@@ -4263,6 +4306,8 @@ def main():
               + "). No CARLA is launched, loaded or dialled.")
         args.sumo_only = True
         args.no_launch = True
+    elif _chosen_yaml and not args.sumo_only:
+        check_ego_controller(_chosen_yaml)
 
     # The app is settled and we are already running under the configured interpreter
     # (reexec_under_configured above), so this is the first point where "what does THIS app
