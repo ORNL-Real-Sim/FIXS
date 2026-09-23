@@ -568,7 +568,7 @@ int main(int argc, char* argv[]) {
 	// ===========================================================================
 	printf("Reading Configuration file %s\n", configPath.c_str());
 	if (Config_c.getConfig(configPath) < 0) {
-		printf("Please check path and filename of the configuration yaml\n");
+		printf("Please check the configuration yaml (path, filename, and the error above)\n");
 		show_usage(argv[0]);
 		exit(-1);
 	}
