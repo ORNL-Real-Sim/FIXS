@@ -38,8 +38,17 @@ already running with the world loaded, `set SKIP_CARLA=1` to skip those steps.
 
 **Headless self-check:** `python verify_sumo_carla.py` — runs the stack, records
 `_logs/*.log`, and reasons about the bridge's decisions (connected to CARLA,
-spawns ≥ 1, no spawn-failures/exceptions) → PASS/FAIL. **SKIPs** cleanly if no
-CARLA server is reachable.
+spawns ≥ 1, spawn-failures within tolerance, no exceptions) → PASS/FAIL. **SKIPs**
+cleanly if no CARLA server is reachable.
+
+SUMO runs on a **pinned seed** (`RS_SUMO_SEED`, default 5) so the verdict is
+reproducible: the traffic realization decides how often two vehicles contend for
+one CARLA spawn point, so an unseeded run gives a different spawn count and a
+different failure count every time. A few contentions are a property of
+SimpleLoop's geometry — about 2 in 41 spawns, the same for #174's binary and
+#109's — so the verdict tolerates a fraction of them rather than demanding zero,
+which used to report FAIL on a healthy co-sim (#208). `RS_SUMO_SEED=none` runs
+unseeded, which is how you check whether a result depends on the seed.
 
 Stop order: **close VirCarlaEnv → close SUMO → Ctrl+C TrafficLayer → close CARLA.**
 

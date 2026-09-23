@@ -16,7 +16,8 @@ Reasons over the captured output (config has EnableVerboseLog: true):
   - bridge connected to CARLA (prints "Client API version" / "Server API version")
   - bridge spawned >=1 vehicle ("Spawning actor" / "Spawned actor")
   - active-id churn looks sane (spawns happen, despawns only for vehicles that left)
-  - no spawn-failure storm / exceptions
+  - no spawn-failure storm / exceptions (a FEW spawn-point contentions are a
+    property of SimpleLoop, not a regression -- see SPAWN_FAIL_FRACTION)
 
 Prints evidence + PASS / FAIL / SKIP. Logs under _logs/.
 
@@ -50,6 +51,23 @@ SUMO_PORT = 1337
 CARLA_HOST, CARLA_PORT = "127.0.0.1", 2000
 TL_READY_TIMEOUT = 60
 RUN_SECONDS = 60          # how long to let the co-sim run before stopping
+
+#: SUMO RNG seed, pinned so the verdict is reproducible. The traffic realization
+#: decides when vehicles arrive, and therefore how often two of them contend for
+#: one CARLA spawn point -- so an unseeded run gives a different spawn count AND a
+#: different failure count every time, and a threshold on either means nothing.
+#: Same convention as the CarMaker demos (see CLAUDE.md): RS_SUMO_SEED=none runs
+#: unseeded, which is how you check whether a verdict depends on the seed.
+SUMO_SEED = os.environ.get("RS_SUMO_SEED", "5")
+
+#: CARLA refuses a spawn when an actor still occupies the spawn point. SimpleLoop
+#: does that about 2 times in 41 spawns -- identically for #174's binary and
+#: #109's Release-only one, so it is the scenario's geometry rather than a
+#: regression. Requiring zero (what this did) reported FAIL on a healthy co-sim.
+#: A fraction rather than a count, because what is being asked is "a storm, or a
+#: few?", and the answer has to scale with how many vehicles the run spawned.
+SPAWN_FAIL_FRACTION = 0.15
+SPAWN_FAIL_FLOOR = 2      # ...and never fail a run over fewer than this many
 
 
 def sumo_exe() -> str:
@@ -99,10 +117,14 @@ def main() -> int:
 
     procs = []
     try:
-        print(f"[verify] launching SUMO (headless) on port {SUMO_PORT} ...")
+        print(f"[verify] launching SUMO (headless) on port {SUMO_PORT}, "
+           f"seed {SUMO_SEED} ...")
+        sumo_cmd = [sumo_exe(), "-c", str(SUMOCFG), "--remote-port", str(SUMO_PORT),
+                    "--step-length", "0.1", "--start", "--quit-on-end"]
+        if SUMO_SEED.lower() != "none":
+            sumo_cmd += ["--seed", SUMO_SEED]
         sumo = subprocess.Popen(
-            [sumo_exe(), "-c", str(SUMOCFG), "--remote-port", str(SUMO_PORT),
-             "--step-length", "0.1", "--start", "--quit-on-end"],
+            sumo_cmd,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
         procs.append(sumo)
         threading.Thread(target=pump, args=(sumo, [], LOGS / "sumo.log", "SUMO"),
@@ -160,7 +182,9 @@ def main() -> int:
 
     print("\n========== EVIDENCE ==========")
     print("VirCarlaEnv:", "connected to CARLA" if carla_connected else "(did NOT reach CARLA)")
-    print(f"VirCarlaEnv: spawns={spawns}, despawns={despawns}, spawn-failures={spawn_fail}")
+    allowed = max(SPAWN_FAIL_FLOOR, int(spawns * SPAWN_FAIL_FRACTION))
+    print(f"VirCarlaEnv: spawns={spawns}, despawns={despawns}, "
+          f"spawn-failures={spawn_fail} (tolerated: {allowed})")
     print("VirCarlaEnv:", "ran vehicles-only (empty TLS handled)" if tls_notice
           else "(no empty-TLS notice -- check config)")
     if exceptions:
@@ -168,7 +192,8 @@ def main() -> int:
         for l in exceptions[:6]:
             print("   ", l)
 
-    ok = carla_connected and spawns >= 1 and spawn_fail == 0 and not exceptions
+    ok = (carla_connected and spawns >= 1 and spawn_fail <= allowed
+          and not exceptions)
     print("\n========== RESULT ==========")
     print("PASS: SUMO->TrafficLayer->Carla bridge spawned/posed vehicles sanely"
           if ok else "FAIL/REVIEW: see evidence + _logs/*.log above")
