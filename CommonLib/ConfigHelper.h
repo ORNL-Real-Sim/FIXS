@@ -344,10 +344,13 @@ public:
 	// Flag to suppress "Will use X as default" messages during config parsing
 	bool SuppressDefaultMessages = true;
 
-	bool parserFlag(YAML::Node node, std::string name);
-	std::string parserString(YAML::Node node, std::string name);
-	double parserDouble(YAML::Node node, std::string name);
-	int parserInteger(YAML::Node node, std::string name);
+	// A missing key returns the default instead of throwing, as ConfigHelper.py's
+	// node.get(name, default) does. An unguarded call on an absent section
+	// (e.g. no XilSetup) used to kill TrafficLayer silently at startup (#214).
+	bool parserFlag(YAML::Node node, std::string name, bool defaultValue = false);
+	std::string parserString(YAML::Node node, std::string name, std::string defaultValue = "");
+	double parserDouble(YAML::Node node, std::string name, double defaultValue = 0.0);
+	int parserInteger(YAML::Node node, std::string name, int defaultValue = 0);
 	void parserIntegerVector(YAML::Node node, std::string name, std::vector<int>& outIntegerVector);
 	void parserStringVector(YAML::Node node, std::string name, std::vector<std::string>& outStringVector);
 
