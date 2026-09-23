@@ -32,12 +32,41 @@ class FakeClock(object):
         return self.t
 
 
-def free_port():
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+def free_port(kind=socket.SOCK_STREAM):
+    """A port the OS just handed out FOR THIS PROTOCOL.
+
+    The TCP and UDP port spaces are independent, so a number free for UDP says
+    nothing about TCP -- and this used to pick every port with a UDP socket,
+    including the ones a TcpLink then tried to bind. Windows refuses some of
+    those with WinError 10013, an access error rather than "in use", which
+    surfaces as a test dying in TcpLink.__init__ before any assertion runs.
+    Measured: 1 full-suite run in 25.
+    """
+    s = socket.socket(socket.AF_INET, kind)
     s.bind(('127.0.0.1', 0))
     port = s.getsockname()[1]
     s.close()
     return port
+
+
+def free_udp_port():
+    return free_port(socket.SOCK_DGRAM)
+
+
+def dyno_link(attempts=8):
+    """A listening TcpLink on a port that actually accepted the bind.
+
+    Naming a free port and binding it are two steps with a gap between them, and
+    nothing can close that gap from here. Retrying is the honest fix: the
+    alternative is a test that fails for a reason unrelated to what it asserts.
+    """
+    for i in range(attempts):
+        port = free_port()
+        try:
+            return TcpLink('dyno', port=port), port
+        except OSError:
+            if i == attempts - 1:
+                raise
 
 
 # -------------------------------------------------------------- wire format
@@ -99,7 +128,7 @@ def test_age_reports_how_stale_a_value_is():
 # ----------------------------------------------------------------------- udp
 
 def test_udp_carries_both_directions_on_loopback():
-    ref, meas = free_port(), free_port()
+    ref, meas = free_udp_port(), free_udp_port()
     sim = UdpLink('simulator', reference_port=ref, measurement_port=meas)
     dyno = UdpLink('dyno', reference_port=ref, measurement_port=meas)
     try:
@@ -124,8 +153,8 @@ def test_udp_carries_both_directions_on_loopback():
 
 
 def test_udp_never_blocks_when_nothing_has_arrived():
-    link = UdpLink('simulator', reference_port=free_port(),
-                   measurement_port=free_port())
+    link = UdpLink('simulator', reference_port=free_udp_port(),
+                   measurement_port=free_udp_port())
     try:
         assert link.recv() is None
         assert link.age() is None
@@ -134,7 +163,7 @@ def test_udp_never_blocks_when_nothing_has_arrived():
 
 
 def test_udp_keeps_only_the_newest_of_a_burst():
-    ref, meas = free_port(), free_port()
+    ref, meas = free_udp_port(), free_udp_port()
     sim = UdpLink('simulator', reference_port=ref, measurement_port=meas)
     dyno = UdpLink('dyno', reference_port=ref, measurement_port=meas)
     try:
@@ -180,8 +209,7 @@ def tcp_pair(timeout=2.0):
     simulator end gives connect 0.05 s; under a loaded machine that expires.
     Measured: 2 of 20 full-suite runs lost their first sends exactly here.
     """
-    port = free_port()
-    dyno = TcpLink('dyno', port=port)
+    dyno, port = dyno_link()
     sim = TcpLink('simulator', peer_ip='127.0.0.1', port=port)
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -253,8 +281,7 @@ def test_tcp_waits_for_the_rest_of_a_split_packet():
     Five bytes of an eight-byte packet is not three bytes lost, so they are held
     until the rest arrives rather than being decoded or discarded.
     """
-    port = free_port()
-    dyno = TcpLink('dyno', port=port)
+    dyno, port = dyno_link()
     raw = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         raw.connect(('127.0.0.1', port))
