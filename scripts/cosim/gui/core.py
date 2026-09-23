@@ -222,11 +222,58 @@ def stream_of(tag):
 # --------------------------------------------------------------------------- #
 # Running
 # --------------------------------------------------------------------------- #
-class Runner:
-    """One engine process, its output delivered a line at a time.
+class _Job:
+    """A Windows Job Object holding one run's whole process tree.
 
-    Callbacks run on the reader thread; a UI must hand them to its own thread
+    Needed because a tree kill by parent pid (taskkill /T) cannot reach processes
+    whose parent has already exited - and that is exactly the leftover worth
+    killing: an engine that died after starting the app leaves the app running,
+    parentless, holding the output pipe open. Every process the engine starts
+    joins its job automatically (nothing in FIXS asks to break away), so ending the
+    job ends all of them, whoever their parent was."""
+
+    def __init__(self, proc):
+        import ctypes
+        from ctypes import wintypes
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.CreateJobObjectW.restype = wintypes.HANDLE
+        k32.CreateJobObjectW.argtypes = (wintypes.LPVOID, wintypes.LPCWSTR)
+        k32.AssignProcessToJobObject.argtypes = (wintypes.HANDLE, wintypes.HANDLE)
+        k32.TerminateJobObject.argtypes = (wintypes.HANDLE, wintypes.UINT)
+        k32.CloseHandle.argtypes = (wintypes.HANDLE,)
+        self._k32 = k32
+        self.handle = k32.CreateJobObjectW(None, None)
+        if not self.handle or not k32.AssignProcessToJobObject(
+                self.handle, wintypes.HANDLE(int(proc._handle))):
+            err = ctypes.get_last_error()
+            self.close()
+            raise OSError(err, "could not put the run in a job")
+
+    def terminate(self):
+        if self.handle:
+            self._k32.TerminateJobObject(self.handle, 1)
+
+    def close(self):
+        if self.handle:
+            self._k32.CloseHandle(self.handle)
+            self.handle = None
+
+
+class Runner:
+    """One engine process and everything it starts, its output delivered a line at
+    a time.
+
+    The run is over when the ENGINE exits, not when its output pipe closes: the
+    pipe stays open as long as any descendant holds it, and a descendant the engine
+    failed to stop would otherwise leave the window waiting forever with nothing
+    left to stop. Anything still running a moment after the engine has exited is
+    such a leftover - the engine stops everything it starts, the CARLA it launched
+    included - and is ended with the rest of the tree.
+
+    Callbacks run on worker threads; a UI must hand them to its own thread
     (app.py does it with a queued Qt signal)."""
+
+    LEFTOVER_GRACE_S = 3.0
 
     def __init__(self, engine=ENGINE, python=None):
         self.engine = engine
@@ -236,6 +283,7 @@ class Runner:
         self.stop_file = None
         self.stop_requested_at = None
         self.started_at = None
+        self._job = None
 
     @property
     def running(self):
@@ -262,30 +310,56 @@ class Runner:
         self.stop_requested_at = None
         kwargs = {}
         if IS_WINDOWS:
-            # Own process group, for the tree kill; no console window of its own -
-            # its output comes here, and the children that have windows (sumo-gui,
-            # CARLA) still open them.
+            # Own process group; no console window of its own - its output comes
+            # here, and the children that have windows (sumo-gui, CARLA) still
+            # open them.
             kwargs["creationflags"] = (subprocess.CREATE_NEW_PROCESS_GROUP
                                        | subprocess.CREATE_NO_WINDOW)
         else:
+            # Own session: the group outlives its leader, so killpg still reaches
+            # what the engine left behind after the engine itself has gone.
             kwargs["start_new_session"] = True
         self.proc = subprocess.Popen(self.argv, stdin=subprocess.DEVNULL,
                                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                      cwd=engine_cwd(self.engine), env=child_env(),
                                      **kwargs)
+        self._job = None
+        if IS_WINDOWS:
+            try:
+                self._job = _Job(self.proc)
+            except OSError as exc:
+                on_line(f"[gui] note: could not group this run's processes ({exc}); "
+                        f"leftovers from a crash may need Machine > Clean up.")
         self.started_at = time.monotonic()
-        proc = self.proc
-        threading.Thread(target=self._pump, args=(proc, on_line, on_exit),
+        proc, read_done = self.proc, threading.Event()
+        threading.Thread(target=self._read, args=(proc, on_line, read_done),
                          name="fixs-run-reader", daemon=True).start()
+        threading.Thread(target=self._wait, args=(proc, on_line, on_exit, read_done),
+                         name="fixs-run-waiter", daemon=True).start()
         return self.argv
 
-    def _pump(self, proc, on_line, on_exit):
-        for raw in iter(proc.stdout.readline, b""):
-            text = raw.decode("utf-8", errors="replace").rstrip("\r\n")
-            # A progress bar redraws with \r; show where it ended up.
-            on_line(text.rsplit("\r", 1)[-1])
-        proc.stdout.close()
+    @staticmethod
+    def _read(proc, on_line, done):
+        try:
+            for raw in iter(proc.stdout.readline, b""):
+                text = raw.decode("utf-8", errors="replace").rstrip("\r\n")
+                # A progress bar redraws with \r; show where it ended up.
+                on_line(text.rsplit("\r", 1)[-1])
+        except (OSError, ValueError):
+            pass
+        done.set()
+
+    def _wait(self, proc, on_line, on_exit, read_done):
         rc = proc.wait()
+        if not read_done.wait(self.LEFTOVER_GRACE_S):
+            on_line("[gui] the run has ended, but processes it started are still "
+                    "running; stopping them.")
+            self._end_tree(proc)
+            if not read_done.wait(10):
+                on_line("[gui] some of them did not stop; use Machine > Clean up.")
+        if self._job is not None:
+            self._job.close()
+            self._job = None
         if self.stop_file and os.path.exists(self.stop_file):
             try:
                 os.remove(self.stop_file)
@@ -306,20 +380,23 @@ class Runner:
 
     def kill(self):
         """Last resort: end the whole process tree now. Nothing gets to clean up,
-        so leftovers are possible - run_cosim --cleanup sweeps them."""
-        if not self.running:
-            return
-        pid = self.proc.pid
-        if IS_WINDOWS:
-            subprocess.call(["taskkill", "/T", "/F", "/PID", str(pid)],
+        so anything outside the tree may be left - run_cosim --cleanup sweeps it."""
+        if self.proc is not None:
+            self._end_tree(self.proc)
+
+    def _end_tree(self, proc):
+        if self._job is not None:
+            self._job.terminate()
+        elif IS_WINDOWS:
+            subprocess.call(["taskkill", "/T", "/F", "/PID", str(proc.pid)],
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                             creationflags=subprocess.CREATE_NO_WINDOW)
         else:
             try:
-                os.killpg(pid, signal.SIGKILL)
+                os.killpg(proc.pid, signal.SIGKILL)
             except (ProcessLookupError, PermissionError):
                 pass
         try:
-            self.proc.kill()
+            proc.kill()
         except OSError:
             pass

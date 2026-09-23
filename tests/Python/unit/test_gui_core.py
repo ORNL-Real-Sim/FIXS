@@ -214,3 +214,28 @@ def test_child_env_drops_the_reexec_guard(monkeypatch):
     monkeypatch.setenv("FIXS_REEXEC", "1")
     env = core.child_env()
     assert "FIXS_REEXEC" not in env and env["PYTHONUNBUFFERED"] == "1"
+
+
+def test_an_engine_crash_does_not_leave_the_window_waiting(tmp_path):
+    """The reported hang: run_cosim started the app, then died (an ImportError
+    minutes in). The app kept running, parentless, holding the output pipe open -
+    so a reader waiting for EOF never finished, the window stayed 'running', and
+    Stop had nothing to stop. The run must end when the ENGINE ends, and what it
+    left behind must be ended with it."""
+    child = tmp_path / "crashing_engine.py"
+    child.write_text(textwrap.dedent("""
+        import subprocess, sys
+        app = subprocess.Popen([sys.executable, "-c",
+                                "import time; print('[fixs] waiting for TrafficLayer', flush=True); time.sleep(120)"])
+        print(f"app {app.pid}", flush=True)
+        import time; time.sleep(1.0)
+        raise ModuleNotFoundError("No module named 'place_tls'")
+    """))
+    r = core.Runner(engine=str(child))
+    lines, done, rc = _collect(r, [])
+    assert done.wait(30), "the window never saw the run end"
+    assert rc["rc"] == 1
+    assert any("ModuleNotFoundError" in l for l in lines)
+    assert any("still running; stopping them" in l for l in lines)
+    app_pid = int(next(l for l in lines if l.startswith("app ")).split()[1])
+    assert _wait_for(lambda: not _alive(app_pid), timeout=10), "the orphaned app survived"
