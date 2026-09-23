@@ -98,7 +98,7 @@ echo.
 echo ==============================
 if defined FAILED_BUILDS (
     echo Core build completed with failures!
-    echo Failed builds: %FAILED_BUILDS%
+    echo Failed builds: !FAILED_BUILDS!
 ) else (
     echo All core components built successfully!
 )

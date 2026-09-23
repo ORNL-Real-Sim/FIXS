@@ -99,7 +99,7 @@ echo.
 echo ==============================
 if defined FAILED_BUILDS (
     echo VISSIM build completed with failures!
-    echo Failed builds: %FAILED_BUILDS%
+    echo Failed builds: !FAILED_BUILDS!
 ) else (
     echo All VISSIM components built successfully!
 )
