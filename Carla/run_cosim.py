@@ -30,6 +30,7 @@ import json
 import re
 import os
 import platform
+import shlex
 import shutil
 import signal
 import socket
@@ -1917,42 +1918,105 @@ class _Parser(argparse.ArgumentParser):
         sys.exit(2)
 
 
+# Tried on a Linux desktop when neither $VISUAL/$EDITOR nor the text/plain default
+# gets an editor up. Each of these edits any text file whatever its extension -
+# which is the point: none of them is chosen by the yaml's MIME type.
+_TEXT_EDITORS = ("gnome-text-editor", "gedit", "kate", "mousepad", "xed", "pluma", "code")
+
+
+def _announce_editor(name):
+    print(f"        editor: {name}  (set VISUAL to use a different one)")
+
+
+def _launch_text_plain_default(path):
+    """The desktop's text/plain default, launched on `path`. Its name, or None.
+
+    Linux has no 'default text editor' setting, only a default per MIME type, and
+    text/plain is the one every desktop maps to an editor. gtk-launch may hand off
+    and exit or may stay up with the app, so a quick non-zero exit is the only
+    failure it can report."""
+    if not shutil.which("xdg-mime") or not shutil.which("gtk-launch"):
+        return None
+    try:
+        out = subprocess.run(["xdg-mime", "query", "default", "text/plain"],
+                             capture_output=True, text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    app = out.strip().split(";")[0]
+    if not app:
+        return None
+    name = app[:-len(".desktop")] if app.endswith(".desktop") else app
+    try:
+        proc = subprocess.Popen(["gtk-launch", app, path])
+    except OSError:
+        return None
+    try:
+        if proc.wait(timeout=5) != 0:
+            return None
+    except subprocess.TimeoutExpired:
+        pass                                    # still up with the app: it launched
+    return name
+
+
 def _open_in_editor(path):
-    """Open `path` in whatever editor this machine has. True if something started.
+    """Open `path` in a text editor. (name, waited), or None if nothing started.
 
     Order matters. $VISUAL / $EDITOR first: they are set deliberately and they
     work with no display - which is the render host over SSH, exactly where
-    someone is most likely to be poking at a config with no GUI. Then the
-    platform default, and a terminal editor last so a headless box is never left
-    with nothing."""
+    someone is most likely to be poking at a config with no GUI. They are waited
+    on, as git and crontab do: that is the contract for those variables, and a
+    terminal editor left running in the background reads the same keystrokes as
+    the Enter prompt. Then the platform default, and a terminal editor last so a
+    headless box is never left with nothing.
+
+    On Linux the platform default is NOT xdg-open. It picks the handler by the
+    file's MIME type, and nothing ties application/yaml to an editor: one user's
+    desktop had it mapped to GNOME's autorun helper for removable media, which
+    exited at once and left the prompt waiting for a window that never came
+    (#405). xdg-open is kept only as the very last resort."""
     env_editor = os.environ.get("VISUAL") or os.environ.get("EDITOR")
     if env_editor:
+        # `code -w` is a command line, not a program name. Windows paths are
+        # left whole: POSIX splitting would eat their backslashes.
+        argv = ([env_editor] if platform.system() == "Windows"
+                else shlex.split(env_editor))
         try:
-            subprocess.Popen([env_editor, path])
-            return True
+            name = os.path.basename(argv[0])
+            _announce_editor(name)
+            subprocess.call(argv + [path])
+            return name, True
         except Exception:
             pass
     try:
         if platform.system() == "Windows":
             try:
                 os.startfile(path)                  # the file association
-                return True
+                return "the .yaml file association", False
             except Exception:
                 subprocess.Popen(["notepad", path])
-                return True
+                return "notepad", False
         if platform.system() == "Darwin":
             subprocess.Popen(["open", path])
-            return True
+            return "open", False
         if os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"):
-            subprocess.Popen(["xdg-open", path])
-            return True
+            name = _launch_text_plain_default(path)
+            if name:
+                return name, False
+            for gui in _TEXT_EDITORS:
+                if shutil.which(gui):
+                    subprocess.Popen([gui, path])
+                    return gui, False
         for term in ("nano", "vi"):
             if shutil.which(term):
+                _announce_editor(term)
                 subprocess.call([term, path])       # blocks, and should
-                return True
+                return term, True
+        if os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"):
+            subprocess.Popen(["xdg-open", path])
+            return "xdg-open", False
     except Exception:
         pass
-    return False
+    return None
 
 
 def _yaml_snapshot(path):
@@ -1997,9 +2061,11 @@ def _yaml_problems(path):
 def edit_yaml_in_editor(path):
     """Open the scenario yaml, wait for the user, then re-read and report.
 
-    Do NOT wait on the editor process: notepad blocks, `code` returns instantly,
-    vi blocks in the terminal. The Enter prompt covers all three, and it is also
-    what lets someone keep the editor open while fixing a validation failure.
+    A GUI editor is not waited on: notepad blocks, `code` returns instantly. The
+    Enter prompt covers both, and it is also what lets someone keep the editor
+    open while fixing a validation failure. An editor that WAS waited on - a
+    terminal one - has closed by the time the file is re-read, so a validation
+    failure reopens it instead.
 
     The yaml is written to be READ - every block carries comments saying what a
     key means and what breaks if it is wrong - so handing the whole file to an
@@ -2009,10 +2075,15 @@ def edit_yaml_in_editor(path):
     print(f"\n[cosim] opening {os.path.basename(path)} in your editor ...\n"
           f"        {path}\n"
           f"        View it, change it, save it. You can leave the editor open.")
-    if not _open_in_editor(path):
+    opened = _open_in_editor(path)
+    if opened is None:
         print("[cosim] could not launch an editor - open the path above yourself.")
+    elif not opened[1]:
+        _announce_editor(opened[0])
+    waited = bool(opened and opened[1])
     while True:
-        ans = _ask("[cosim] Press Enter when you have saved  (Q = leave it): ").lower()
+        ans = _ask("[cosim] Press Enter to re-read it  (Q = leave it): " if waited else
+                   "[cosim] Press Enter when you have saved  (Q = leave it): ").lower()
         if ans.startswith("q"):
             return
         after = _yaml_snapshot(path)
@@ -2039,7 +2110,13 @@ def edit_yaml_in_editor(path):
             return
         for msg in bad:
             print(f"[cosim] FAIL {msg}")
-        print("[cosim] Fix it and press Enter to re-check, or Q to leave it as is.")
+        if not waited:
+            print("[cosim] Fix it and press Enter to re-check, or Q to leave it as is.")
+            continue
+        if _ask("[cosim] Enter = reopen the editor to fix it, Q = leave it as is: "
+                ).lower().startswith("q"):
+            return
+        _open_in_editor(path)
 
 
 def _menu(title, options, current=None):
