@@ -76,6 +76,13 @@ public:
                      const char** errorMsg);
     void shutdown();
 
+    // Seconds the last runStep spent BLOCKED in the FIXS exchange, as opposed to
+    // orchestrating. A host that wants to know whether it is slow or merely waiting
+    // for the rest of the co-simulation reads this; without it the two are
+    // indistinguishable in a tick total and have opposite fixes. Mirrors
+    // VirEnvCore.py's lastRecvSeconds so the two bridges report the same span.
+    double lastRecvSeconds = 0.0;
+
     // Public so the host can reach the socket/msg layer (mirrors old VirEnvHelper).
     SocketHelper Sock_c;
     MsgHelper    Msg_c;

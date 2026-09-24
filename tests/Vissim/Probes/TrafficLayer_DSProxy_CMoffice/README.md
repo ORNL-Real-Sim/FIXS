@@ -259,8 +259,8 @@ ego-skip logic works unchanged.
 
 - No traffic signals (SimpleEcho has none; signal sync deferred to #156).
 - No Simulink, no CM4SL, no dSPACE — office IPGDriver only.
-- Single ego. Lockstep start only (deferred-connect / `SimulationMode` wait —
-  already a SUMO-path feature — is future work for the DSProxy loop).
+- Single ego. Lockstep start only (deferred-connect / warm-up wait — `WarmUpUntilEgoEntry`
+  / `WarmUpTime`, a SUMO-path feature since #86 — is future work for the DSProxy loop).
 
 ## Known issue: loop corners are too sharp for the ego (geometry redesign)
 

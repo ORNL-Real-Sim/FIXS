@@ -2,6 +2,15 @@
 
 This document provides a practical guide for building CARLA 0.9.15 on Windows.
 
+> **This guide is for 0.9.15, which FIXS currently targets.** For 0.9.16 see
+> [`Carla_0916_Windows_building.md`](./Carla_0916_Windows_building.md) — it requires Visual
+> Studio 2022 rather than 2019, and most of the workarounds below do not carry over. For
+> Linux see [`Carla_Linux_building.md`](./Carla_Linux_building.md).
+>
+> One correction that applies to **both** versions: the installer scripts live in
+> `Util/InstallersWin` (with the `s`), not `Util/InstallerWin` as written in Part Two §3
+> below.
+
 For the official and complete build procedure, please refer to the 
 [CARLA 0.9.15 Windows Build Documentation](https://carla.readthedocs.io/en/0.9.15/build_windows/).
 

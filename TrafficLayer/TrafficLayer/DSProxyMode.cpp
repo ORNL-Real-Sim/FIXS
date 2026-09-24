@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <unordered_set>
 #include <vector>
 #include <fstream>
 #include <chrono>
@@ -116,38 +117,88 @@ Simulator_Veh_Data egoFromMsg(const VehFullData_t& v) {
     return ego;
 }
 
-// Honor ApplicationSetup.VehicleSubscription[0].port[0] as the canonical
-// Stage B publish port. Full multi-subscription / multi-port routing comes
-// in a follow-up; one port covers the CarMaker dyno + Python probe case.
+// One app socket per (subscription, port) tuple. ConfigHelper's
+// ApplicationSetup.VehicleSubscription is a list of tuples
+//   (type, attr-map, ips, ports)
+// and each port within a tuple becomes its own AppSocketConfig — so a
+// single subscription listing 3 ports expands to 3 entries here. The
+// legacy single-client path (CarMaker dyno alone) is just the N=1 case.
+//
+// The egoId field (set when subType == "ego") is used on the RECV path:
+// an inbound VehFullData_t whose id matches is the ego pose inject for
+// DSProxy's SetDriverVehicles. It is also used on the SEND path to
+// re-stamp the ego's VISSIM-assigned numeric id back to the client-side
+// name so the consumer recognizes and skips its own ego.
 struct AppSocketConfig {
-    bool enabled = false;
     std::string ip;
     int port = 0;
-    std::string egoId;   // first subscribed vehicle id, used as ego match key
+    std::string subType;
+    std::unordered_set<std::string> subscribedIds;
+    std::string egoId;          // set iff subType == "ego" (first id)
+
+    // Populated during listener setup / accept; -1 means "not yet".
+    int listener = -1;
+    int clientSock = -1;
 };
 
-AppSocketConfig resolveAppSocket(const ConfigHelper& config) {
-    AppSocketConfig out;
-    const auto& subs = config.ApplicationSetup.VehicleSubscription;
-    if (!config.ApplicationSetup.EnableApplicationLayer || subs.empty()) {
-        return out;
-    }
-    const auto& ips = std::get<2>(subs[0]);
-    const auto& ports = std::get<3>(subs[0]);
-    if (ips.empty() || ports.empty()) {
-        return out;
-    }
-    out.enabled = true;
-    out.ip = ips[0];
-    out.port = ports[0];
+std::vector<AppSocketConfig> resolveAppSockets(const ConfigHelper& config) {
+    std::vector<AppSocketConfig> out;
+    if (!config.ApplicationSetup.EnableApplicationLayer) return out;
 
-    // SubAttMap_t -> {attribute: [values]}. Pick the first 'id' if present.
-    const auto& attMap = std::get<1>(subs[0]);
-    auto it = attMap.find("id");
-    if (it != attMap.end() && !it->second.empty()) {
-        out.egoId = it->second[0];
+    for (const auto& sub : config.ApplicationSetup.VehicleSubscription) {
+        const std::string& subType = std::get<0>(sub);
+        const auto& attMap = std::get<1>(sub);   // SubAttMap_t -> {attribute: [values]}
+        const auto& ips    = std::get<2>(sub);
+        const auto& ports  = std::get<3>(sub);
+        if (ips.empty() || ports.empty()) continue;
+
+        std::unordered_set<std::string> subscribedIds;
+        std::string firstId;
+        auto idIt = attMap.find("id");
+        if (idIt != attMap.end()) {
+            for (const auto& id : idIt->second) {
+                subscribedIds.insert(id);
+                if (firstId.empty()) firstId = id;
+            }
+        }
+
+        for (size_t i = 0; i < ports.size(); ++i) {
+            AppSocketConfig cfg;
+            cfg.port = ports[i];
+            cfg.ip = (i < ips.size()) ? ips[i] : ips[0];
+            cfg.subType = subType;
+            cfg.subscribedIds = subscribedIds;
+            if (subType == "ego") cfg.egoId = firstId;
+            out.push_back(cfg);
+        }
     }
     return out;
+}
+
+// Per-port outbound filter — the PHASE 3 routing rule. The default is to
+// publish every vehicle to every subscribed client, which matches
+// mainTrafficLayer's existing non-CarMaker behavior
+// (`ENABLE_VEH_SIMULATOR == false`): there, subscription tuples are used
+// only to know which (ip, port) pairs to serve.
+//
+// Only `type: vehicleType` is a real per-vehicle filter, because the YAML
+// attribute `id: [...]` then literally lists the vehicle TYPE numbers
+// (e.g. `id: ['100']` -> Cars only) and that is a deliberate subset.
+//
+// `type: ego` is deliberately NOT a publish filter. The ego's VISSIM
+// VehicleID is assigned at run time (e.g. "7"), so it would never match
+// `id: ['ego']`, and every existing FIXS scenario expects the full
+// vehicle list on the ego subscription port. The ego id is used on the
+// recv path (and for the outbound re-stamp) instead.
+//
+// When the XIL orchestrator (#117) lands, this (subscription, message) ->
+// publish-or-skip decision becomes a row in its routing table; the body
+// stays as-is.
+bool publishesVehicle(const AppSocketConfig& sock, const VehFullData_t& v) {
+    if (sock.subType == "vehicleType" && !sock.subscribedIds.empty()) {
+        return sock.subscribedIds.count(v.type) > 0;
+    }
+    return true;
 }
 
 } // namespace
@@ -179,25 +230,36 @@ int runDSProxyMode(const ConfigHelper& config) {
         return 3;
     }
 
-    // Resolve the (optional) application socket. When absent we fall back
-    // to Stage A behavior (pump VISSIM without publishing). Configured app
-    // socket triggers the Stage B publish/receive loop.
-    const AppSocketConfig appSock = resolveAppSocket(config);
-    if (appSock.enabled) {
-        printf("App socket:         server on port %d (egoId=%s)\n",
-               appSock.port, appSock.egoId.empty() ? "(none)" : appSock.egoId.c_str());
+    // Resolve the (optional) application sockets — one per (subscription,
+    // port) tuple. When the list is empty we fall back to Stage A behavior
+    // (pump VISSIM without publishing); any configured app socket triggers
+    // the Stage B publish/receive loop.
+    std::vector<AppSocketConfig> appSocks = resolveAppSockets(config);
+    const bool appEnabled = !appSocks.empty();
+    if (appEnabled) {
+        printf("App sockets:        %zu subscription port(s)\n", appSocks.size());
+        for (const auto& s : appSocks) {
+            printf("  - port %d  type=%-12s  subscribed_ids=%zu  egoId=%s\n",
+                   s.port, s.subType.c_str(), s.subscribedIds.size(),
+                   s.egoId.empty() ? "(none)" : s.egoId.c_str());
+        }
     } else {
-        printf("App socket:         disabled — pump mode only\n");
+        printf("App sockets:        disabled — pump mode only\n");
+    }
+
+    // The canonical ego id: the first non-empty egoId across all
+    // subscriptions. One ego per DSProxy run; multi-ego is a refinement.
+    std::string canonicalEgoId;
+    for (const auto& s : appSocks) {
+        if (!s.egoId.empty()) { canonicalEgoId = s.egoId; break; }
     }
 
     SocketHelper sockHelper;
     MsgHelper msgHelper;
-    int clientSock = -1;
 
     const bool relayDM = cfg.EnableDriverModelRelay;
     int dmSock = -1;
     int dmListener = -1;
-    int appListener = -1;
 
     // Plan A (#172): when SynchronizeTrafficSignal is on, CarMaker's
     // VirtualEnvironment.lib opens a SECOND client socket to TrafficSignalPort
@@ -206,8 +268,8 @@ int runDSProxyMode(const ConfigHelper& config) {
     // relay VISSIM signal states on it; the redundant ego is drained. Signals are
     // sent on this socket INSTEAD of the app/vehicle socket so each socket carries
     // exactly what the .lib's per-socket recv expects. TrafficSignalPort must
-    // differ from the app/CarMaker port.
-    const bool syncSignals = appSock.enabled && config.CarMakerSetup.SynchronizeTrafficSignal;
+    // differ from every app/CarMaker port.
+    const bool syncSignals = appEnabled && config.CarMakerSetup.SynchronizeTrafficSignal;
     const int signalPort = config.CarMakerSetup.TrafficSignalPort;
     int signalSock = -1;
     int signalListener = -1;
@@ -242,33 +304,45 @@ int runDSProxyMode(const ConfigHelper& config) {
     // TrafficSimulatorPort during VISSIM_Connect's own handshake. The
     // listener has to be up by then or DM's connect fails and VISSIM
     // aborts the DSProxy handshake.
-    if (appSock.enabled) {
+    // Closes every listener opened so far. Used on each early-return path
+    // below; the listener count is now data-driven, so the cleanup is too.
+    auto closeListeners = [&]() {
+        if (dmListener >= 0) { closesocket(dmListener); dmListener = -1; }
+        if (signalListener >= 0) { closesocket(signalListener); signalListener = -1; }
+        for (auto& s : appSocks) {
+            if (s.listener >= 0) { closesocket(s.listener); s.listener = -1; }
+        }
+    };
+
+    if (appEnabled) {
         if (relayDM) {
             dmListener = bindListener(config.SimulationSetup.TrafficSimulatorPort);
             if (dmListener < 0) { return 6; }
             printf("DriverModel listener bound on port %d\n",
                    config.SimulationSetup.TrafficSimulatorPort);
         }
-        appListener = bindListener(appSock.port);
-        if (appListener < 0) {
-            if (dmListener >= 0) closesocket(dmListener);
-            return 6;
+        for (auto& s : appSocks) {
+            s.listener = bindListener(s.port);
+            if (s.listener < 0) {
+                closeListeners();
+                return 6;
+            }
+            printf("app listener bound on port %d\n", s.port);
         }
-        printf("app listener bound on port %d\n", appSock.port);
 
         if (syncSignals) {
-            if (signalPort == appSock.port) {
-                fprintf(stderr,
-                        "ERROR: TrafficSignalPort (%d) must differ from the app/CarMaker port (%d)\n",
-                        signalPort, appSock.port);
-                if (dmListener >= 0) closesocket(dmListener);
-                closesocket(appListener);
-                return 6;
+            for (const auto& s : appSocks) {
+                if (signalPort == s.port) {
+                    fprintf(stderr,
+                            "ERROR: TrafficSignalPort (%d) must differ from every app/CarMaker port (%d)\n",
+                            signalPort, s.port);
+                    closeListeners();
+                    return 6;
+                }
             }
             signalListener = bindListener(signalPort);
             if (signalListener < 0) {
-                if (dmListener >= 0) closesocket(dmListener);
-                closesocket(appListener);
+                closeListeners();
                 return 6;
             }
             printf("signal listener bound on port %d\n", signalPort);
@@ -292,16 +366,14 @@ int runDSProxyMode(const ConfigHelper& config) {
         std::wstring err = proxy.lastError();
         fwprintf(stderr, L"ERROR: VISSIM_Connect failed: %ls\n",
                  err.empty() ? L"(no detail)" : err.c_str());
-        if (dmListener >= 0) closesocket(dmListener);
-        if (appListener >= 0) closesocket(appListener);
-        if (signalListener >= 0) closesocket(signalListener);
+        closeListeners();
         return 4;
     }
     printf("VISSIM_Connect OK\n");
 
     // Accept clients. DM (if relayDM) is likely already queued from its
-    // connect during VISSIM_Connect. The app client connects after
-    // VISSIM_Connect when the run_*.bat launches it.
+    // connect during VISSIM_Connect. The app clients connect after
+    // VISSIM_Connect when the run_*.bat launches them.
     if (relayDM && dmListener >= 0) {
         sockaddr_in dmAddr{};
         int dmAddrLen = sizeof(dmAddr);
@@ -319,15 +391,23 @@ int runDSProxyMode(const ConfigHelper& config) {
         // any "ready" bytes. The first per-tick recvData on dmSock will
         // get the DM's state from its first VISSIM callback.
     }
-    if (appSock.enabled && appListener >= 0) {
-        sockaddr_in appAddr{};
-        int appAddrLen = sizeof(appAddr);
-        clientSock = static_cast<int>(accept(appListener, (sockaddr*)&appAddr, &appAddrLen));
-        if (clientSock < 0) {
-            fprintf(stderr, "ERROR: accept app client failed: %d\n", WSAGetLastError());
-            return 6;
+    // One accept per subscription port. Each listener is bound to its own
+    // port, so clients may connect in any order; we simply walk the
+    // configured order and wait for all of them before the tick loop.
+    if (appEnabled) {
+        printf("waiting for %zu app client(s) ...\n", appSocks.size());
+        for (auto& s : appSocks) {
+            if (s.listener < 0) continue;
+            sockaddr_in appAddr{};
+            int appAddrLen = sizeof(appAddr);
+            s.clientSock = static_cast<int>(accept(s.listener, (sockaddr*)&appAddr, &appAddrLen));
+            if (s.clientSock < 0) {
+                fprintf(stderr, "ERROR: accept app client on port %d failed: %d\n",
+                        s.port, WSAGetLastError());
+                return 6;
+            }
+            printf("app client connected on port %d (sock=%d)\n", s.port, s.clientSock);
         }
-        printf("app client connected (sock=%d)\n", clientSock);
         msgHelper.getConfig(const_cast<ConfigHelper&>(config));
     }
     if (syncSignals && signalListener >= 0) {
@@ -453,25 +533,14 @@ int runDSProxyMode(const ConfigHelper& config) {
             }
         }
 
-        // PHASE 3 — Distribute to app client. Today the routing is "publish
-        // every vehicle + every signal to the one configured client";
-        // multi-port routing on the parallel #165 branch shows where this
-        // becomes per-subscription filtering.
-        // PHASE 4 — Publish to app client via SocketHelper::sendData.
-        if (appSock.enabled && clientSock > 0) {
-            // Where signals are published: on the dedicated signal socket when
-            // SynchronizeTrafficSignal is on (the .lib recvs signals there), else
-            // multiplexed onto the app/vehicle socket (legacy single-socket path).
-            const int sigPubSock = syncSignals ? signalSock : clientSock;
-            msgHelper.VehDataSend_um[clientSock].clear();
-            msgHelper.TlsDataSend_um[clientSock].clear();
-            msgHelper.DetDataSend_um[clientSock].clear();
-            if (syncSignals && signalSock > 0) {
-                msgHelper.VehDataSend_um[signalSock].clear();
-                msgHelper.TlsDataSend_um[signalSock].clear();
-                msgHelper.DetDataSend_um[signalSock].clear();
-            }
-
+        // PHASE 3 — Distribute. Translate the VISSIM state to the FIXS
+        // protocol ONCE, then let each subscription port select from it via
+        // publishesVehicle(). That per-port select is the routing table the
+        // XIL orchestrator (#117) will own; with one subscribed port it
+        // degenerates to "publish everything to the one client".
+        if (appEnabled) {
+            std::vector<VehFullData_t> vehFull;
+            vehFull.reserve(vehicles.size());
             for (const auto& v : vehicles) {
                 VehFullData_t vf = toVehFull(v);
                 // Re-stamp the ego with its client-side id ("egoCm") so the .lib
@@ -483,26 +552,62 @@ int runDSProxyMode(const ConfigHelper& config) {
                 // we map it back to the original "egoCm" here; wire-identical to
                 // the SUMO path, whose ego already carries that id.
                 if (egoVissimId != 0 && v.VehicleID == egoVissimId &&
-                    !appSock.egoId.empty()) {
-                    vf.id = appSock.egoId;
+                    !canonicalEgoId.empty()) {
+                    vf.id = canonicalEgoId;
                 }
-                msgHelper.VehDataSend_um[clientSock].push_back(vf);
-            }
-            for (const auto& s : signals) {
-                msgHelper.TlsDataSend_um[sigPubSock].push_back(toTlsData(s));
+                vehFull.push_back(vf);
             }
 
-            const float simTime = static_cast<float>(tick) / cfg.SimulatorFrequency;
+            std::vector<TrafficLightData_t> tlsAll;
+            tlsAll.reserve(signals.size());
+            for (const auto& s : signals) tlsAll.push_back(toTlsData(s));
+
             const uint8_t simState = 1;
-            if (sockHelper.sendData(clientSock, 0, simTime, simState, msgHelper) < 0) {
-                fprintf(stderr, "ERROR tick %d: sendData failed\n", tick);
-                rc = 7;
-                break;
+
+            // PHASE 4 — Publish to every subscribed client via
+            // SocketHelper::sendData. Same call shape as the legacy
+            // mainTrafficLayer per-client send; we iterate appSocks instead
+            // of actualClientSock.
+            for (const auto& asock : appSocks) {
+                if (asock.clientSock <= 0) continue;
+                msgHelper.VehDataSend_um[asock.clientSock].clear();
+                msgHelper.TlsDataSend_um[asock.clientSock].clear();
+                msgHelper.DetDataSend_um[asock.clientSock].clear();
+
+                for (const auto& vf : vehFull) {
+                    if (publishesVehicle(asock, vf)) {
+                        msgHelper.VehDataSend_um[asock.clientSock].push_back(vf);
+                    }
+                }
+                // Where signals are published: on the dedicated signal socket when
+                // SynchronizeTrafficSignal is on (the .lib recvs signals there), else
+                // multiplexed onto the app/vehicle sockets (legacy single-socket
+                // path). Signals are global — no per-port signal filter yet, so every
+                // subscribed client sees the full table.
+                if (!syncSignals) {
+                    for (const auto& s : tlsAll) {
+                        msgHelper.TlsDataSend_um[asock.clientSock].push_back(s);
+                    }
+                }
+
+                if (sockHelper.sendData(asock.clientSock, 0, simTime, simState, msgHelper) < 0) {
+                    fprintf(stderr, "ERROR tick %d: sendData(port %d) failed\n", tick, asock.port);
+                    rc = 7;
+                    break;
+                }
             }
+            if (rc != 0) break;
+
             // Plan A: relay signals on the dedicated socket the .lib opened. The
             // .lib BLOCKS on a recv from this socket every tick, so we send even
             // with zero signals -- an empty batch keeps the lockstep round-trip.
             if (syncSignals && signalSock > 0) {
+                msgHelper.VehDataSend_um[signalSock].clear();
+                msgHelper.TlsDataSend_um[signalSock].clear();
+                msgHelper.DetDataSend_um[signalSock].clear();
+                for (const auto& s : tlsAll) {
+                    msgHelper.TlsDataSend_um[signalSock].push_back(s);
+                }
                 if (sockHelper.sendData(signalSock, 0, simTime, simState, msgHelper) < 0) {
                     fprintf(stderr, "ERROR tick %d: signal sendData failed\n", tick);
                     rc = 7;
@@ -510,29 +615,8 @@ int runDSProxyMode(const ConfigHelper& config) {
                 }
             }
 
-            // PHASE 5 — Receive from app client (one round-trip per tick).
-            // #117 Stage C will add per-recv deadline policy here.
-            msgHelper.VehDataRecv_um.clear();
-            int recvSimState = 0;
-            float recvSimTime = 0.0f;
-            if (sockHelper.recvData(clientSock, &recvSimState, &recvSimTime, msgHelper) < 0) {
-                fprintf(stderr, "ERROR tick %d: recvData failed\n", tick);
-                rc = 8;
-                break;
-            }
-            // Plan A: the .lib echoes its ego on the signal socket too; drain it so
-            // that socket's lockstep round-trip completes. recvData routes by message
-            // type, so this just re-writes VehDataRecv_um[egoCm] with identical data.
-            if (syncSignals && signalSock > 0) {
-                int sigState = 0;
-                float sigTime = 0.0f;
-                if (sockHelper.recvData(signalSock, &sigState, &sigTime, msgHelper) < 0) {
-                    fprintf(stderr, "ERROR tick %d: signal recvData failed\n", tick);
-                    rc = 8;
-                    break;
-                }
-            }
-
+            // PHASE 5 — Receive from every app client (one round-trip per
+            // client per tick).
             // PHASE 6 — Merge: split client-received vehicles by ownership.
             //   - ego → stored for next tick's PHASE 1 (DSProxy egos)
             //   - non-ego → queued for next tick's DM PHASE 4 send as
@@ -541,42 +625,76 @@ int runDSProxyMode(const ConfigHelper& config) {
             // orchestrator will formalize: ego.Pose is owned by DSProxy
             // (so we forward to it); non-ego.Intent is owned by the CAV
             // controller (so we forward to DriverModel which integrates).
+            // #117 Stage C will add per-recv deadline policy here.
             egos.clear();
             if (relayDM && dmSock > 0) {
                 msgHelper.VehDataSend_um[dmSock].clear();
                 msgHelper.TlsDataSend_um[dmSock].clear();
                 msgHelper.DetDataSend_um[dmSock].clear();
             }
-            for (const auto& kv : msgHelper.VehDataRecv_um) {
-                const VehFullData_t& v = kv.second;
-                const bool isEgo = (!appSock.egoId.empty() && v.id == appSock.egoId);
-                if (isEgo) {
-                    Simulator_Veh_Data ego = egoFromMsg(v);
-                    if (egoVissimId == 0) {
-                        // Create the ego in VISSIM exactly ONCE. Resolving
-                        // egoVissimId needs the CreateID round-trip (~2 ticks); if
-                        // we re-sent Create every tick until then, VISSIM would
-                        // spawn a DUPLICATE ego each tick -- the extras come back as
-                        // traffic, never match egoVissimId, and get placed as RS_C
-                        // objects overlapping the real ego (the "double ego"). After
-                        // the first Create we wait (submit nothing) until resolved.
-                        if (!egoPending) {
-                            ego.Create = true;
-                            ego.CreateID = egoCreateId;
-                            egoPending = true;
+            bool egoTaken = false;   // one ego inject per tick, whichever client sends it first
+            for (const auto& asock : appSocks) {
+                if (asock.clientSock <= 0) continue;
+                msgHelper.VehDataRecv_um.clear();
+                int recvSimState = 0;
+                float recvSimTime = 0.0f;
+                if (sockHelper.recvData(asock.clientSock, &recvSimState, &recvSimTime, msgHelper) < 0) {
+                    fprintf(stderr, "ERROR tick %d: recvData(port %d) failed\n", tick, asock.port);
+                    rc = 8;
+                    break;
+                }
+                for (const auto& kv : msgHelper.VehDataRecv_um) {
+                    const VehFullData_t& v = kv.second;
+                    const bool isEgo = (!canonicalEgoId.empty() && v.id == canonicalEgoId);
+                    if (isEgo) {
+                        // Several clients may echo the same ego (e.g. an
+                        // observer port mirroring what it received); only the
+                        // first one this tick becomes the DSProxy inject.
+                        if (egoTaken) continue;
+                        Simulator_Veh_Data ego = egoFromMsg(v);
+                        if (egoVissimId == 0) {
+                            // Create the ego in VISSIM exactly ONCE. Resolving
+                            // egoVissimId needs the CreateID round-trip (~2 ticks); if
+                            // we re-sent Create every tick until then, VISSIM would
+                            // spawn a DUPLICATE ego each tick -- the extras come back as
+                            // traffic, never match egoVissimId, and get placed as RS_C
+                            // objects overlapping the real ego (the "double ego"). After
+                            // the first Create we wait (submit nothing) until resolved.
+                            if (!egoPending) {
+                                ego.Create = true;
+                                ego.CreateID = egoCreateId;
+                                egoPending = true;
+                                egos.push_back(ego);
+                                egoTaken = true;
+                            }
+                        } else {
+                            ego.VehicleID = egoVissimId;
+                            ego.Create = false;
                             egos.push_back(ego);
+                            egoTaken = true;
                         }
-                    } else {
-                        ego.VehicleID = egoVissimId;
-                        ego.Create = false;
-                        egos.push_back(ego);
+                    } else if (relayDM && dmSock > 0) {
+                        // CAV behavior command: relay to DriverModel as-is.
+                        // DriverModel parses VehFullData_t and applies
+                        // speedDesired / accelerationDesired in its next
+                        // DRIVER_DATA_DESIRED_VELOCITY / _ACCELERATION callback.
+                        msgHelper.VehDataSend_um[dmSock].push_back(v);
                     }
-                } else if (relayDM && dmSock > 0) {
-                    // CAV behavior command: relay to DriverModel as-is.
-                    // DriverModel parses VehFullData_t and applies
-                    // speedDesired / accelerationDesired in its next
-                    // DRIVER_DATA_DESIRED_VELOCITY / _ACCELERATION callback.
-                    msgHelper.VehDataSend_um[dmSock].push_back(v);
+                }
+            }
+            if (rc != 0) break;
+
+            // Plan A: the .lib echoes its ego on the signal socket too; drain it so
+            // that socket's lockstep round-trip completes. The echo is a duplicate
+            // of what the vehicle socket already delivered, so it is not merged.
+            if (syncSignals && signalSock > 0) {
+                msgHelper.VehDataRecv_um.clear();
+                int sigState = 0;
+                float sigTime = 0.0f;
+                if (sockHelper.recvData(signalSock, &sigState, &sigTime, msgHelper) < 0) {
+                    fprintf(stderr, "ERROR tick %d: signal recvData failed\n", tick);
+                    rc = 8;
+                    break;
                 }
             }
 
@@ -592,13 +710,16 @@ int runDSProxyMode(const ConfigHelper& config) {
         }
     }
 
-    // Shutdown
-    if (appSock.enabled && clientSock > 0) {
-        printf("sending shutdown signal to clients ...\n");
-        msgHelper.VehDataSend_um[clientSock].clear();
-        msgHelper.TlsDataSend_um[clientSock].clear();
-        msgHelper.DetDataSend_um[clientSock].clear();
-        sockHelper.sendData(clientSock, 0, 0.0f, /*simState=*/0, msgHelper);
+    // Shutdown — simState=0 to every connected client.
+    if (appEnabled) {
+        printf("sending shutdown signal to %zu app client(s) ...\n", appSocks.size());
+        for (const auto& asock : appSocks) {
+            if (asock.clientSock <= 0) continue;
+            msgHelper.VehDataSend_um[asock.clientSock].clear();
+            msgHelper.TlsDataSend_um[asock.clientSock].clear();
+            msgHelper.DetDataSend_um[asock.clientSock].clear();
+            sockHelper.sendData(asock.clientSock, 0, 0.0f, /*simState=*/0, msgHelper);
+        }
         if (syncSignals && signalSock > 0) {
             msgHelper.VehDataSend_um[signalSock].clear();
             msgHelper.TlsDataSend_um[signalSock].clear();

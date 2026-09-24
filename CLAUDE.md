@@ -50,12 +50,20 @@ Real-Sim FIXS uses a modular script-based build system with automated tool detec
 - **dependencies.yaml** - Central configuration file defining tool versions and paths
 - Optional: MATLAB 2024a, CarMaker 13.1.3/11.1.2, dSPACE ConfigurationDesk 2024-A
 
-The external library (yaml-cpp) is automatically built by the dispatch system or can be built manually:
+### First-run setup
+
+After cloning, initialize the checkout. `dispatch.bat` also runs this as its step 1, so a fresh clone can go straight to `dispatch.bat`:
+```
+powershell -ExecutionPolicy Bypass -File scripts\initialize_fixs.ps1
+```
+It is idempotent and does: ProprietaryFiles submodule (optional) -> native deps -> yaml-cpp, then prints a per-step summary. Not to be confused with `scripts/update_fixs.ps1` / `scripts/update_fixs.sh`, which are consumer-side (install a published release zip into an application checkout; see #272).
+
+**Native deps are not in git** (#109, #238). `CommonLib/libsumo` and `CommonLib/libcarla` are gitignored and fetched as SHA-256-verified, version-named zips from the public rolling release `fixs-native-deps`. libsumo is **required** (TrafficLayer links `libsumocpp.lib` directly, so a missing fetch is a hard error); libcarla is optional (VirCarlaEnv only). Bumping the SUMO version in `dependencies.yaml` requires publishing a matching asset first — `scripts\dispatch\pack_native_deps.ps1 -Component sumo -Publish` — or every clone breaks. Both fetch and pack load-test `libsumo/bin` (`libsumo_verify.ps1`) because the old vendored copy silently lacked `geos_c.dll`/`geos.dll` for months (#70).
+
+yaml-cpp can also be built alone; it uses CMake with the Visual Studio 17 2022 generator and builds both Release and Debug:
 ```
 scripts\dispatch\1_external_libraries.bat
 ```
-
-yaml-cpp uses CMake with Visual Studio 17 2022 generator and builds both Release and Debug configurations.
 
 ### Building Components
 
@@ -65,7 +73,7 @@ dispatch.bat
 ```
 
 Automatically builds all components and copies to `build/` directory:
-1. External libraries (yaml-cpp)
+1. Clone initialization (submodules, native deps, yaml-cpp) via `scripts/initialize_fixs.ps1`
 2. TrafficLayer.exe, CoordMerge.exe, VirtualEnvironment.lib
 3. DriverModel_RealSim.dll (default, int API, VISSIM 2021+) and DriverModel_RealSim_legacy.dll (frozen, long API, VISSIM ≤ 2020)
 4. CarMaker executables for all versions in dependencies.yaml (CM11, CM13)
@@ -117,14 +125,34 @@ Key configuration parameters:
 - `SelectedTrafficSimulator`: 'VISSIM' or 'SUMO'
 - `EnableExternalDynamics`: Allow external control of vehicle dynamics (SUMO)
 - `VehicleMessageField`: Array of fields to exchange (see [README.md](README.md) Appendix for full field list)
-- `SimulationMode`: Bitfield controlling sync behavior (0=sync at start, 1=wait for ego entry, 4=wait for specified time)
+- `WarmUpUntilEgoEntry` / `WarmUpTime`: warm-up triggers (see below)
 
-### Simulation Modes
+### Warm-up (#86, replaced SimulationMode)
 
-SimulationMode is a bitfield:
-- 0 (binary 000): Sync from simulation start
-- 1 (binary 001): Wait mode until ego vehicle enters network, then sync
-- 4 (binary 100): Wait mode until SimulationModeParameter seconds, then sync
+`SimulationMode` / `SimulationModeParameter` were removed in 0.9.0. They were documented
+as a bitfield but never were one — the code tested `4||5` and `1||2` as identical
+branches, and 3/6/7 silently meant 0. No config in FIXS or FIXS_Applications set them, so
+they were dropped outright with no compatibility shim.
+
+Two mutually exclusive keys in `SimulationSetup`, both SUMO-only:
+
+- `WarmUpUntilEgoEntry: true` — tick until the first subscribed ego is in the network.
+  The watched ids are the **union** of the by-id vehicle subscriptions in
+  `ApplicationSetup` and `XilSetup` (`ConfigHelper::WarmUpEgoIds`), deliberately not
+  `vehicleSubscribeId_v`, which is either/or and also drives message routing.
+- `WarmUpTime: <absolute sim time>` — one batch `Simulation::step(T)`.
+
+While the warm-up runs, the main loop returns to the top before any client I/O **and the
+clients are not accepted yet** (`SocketHelper::DeferAcceptClients` / `acceptClients()`),
+so client start-up overlaps the warm-up. Measured on MLK's 185 s warm-up: batch step
+2.70 s, tick loop + ego poll 3.29 s — both against minutes for a fully synced warm-up,
+because what dominates is client I/O, not stepping. A batch `step(T)` from TrafficLayer
+was verified to coexist with a second TraCI client stepping 1:1 (both land exactly on
+the target time), though SUMO then advances only as fast as that other client steps.
+
+VISSIM parity is not implemented: TrafficLayer does not own the VISSIM clock, and the
+DriverModel DLL still has its own hardcoded `ENABLE_WARMUP`. A VISSIM config that sets
+either key is rejected at startup.
 
 ## Running Tests
 
@@ -342,6 +370,31 @@ off-road — regen VISSIM from the xodr, **never edit the CM side to match**. `p
 + `build_demand.py` must read the PROBE-LOCAL `simple_traffic_light.net.xml`, not the
 stale `tests/Python/SimpleTrafficLight/` copy.
 
+**The turnaround geometry is shared, and lives in
+[`Carla/utils/sumo_uturn.py`](Carla/utils/sumo_uturn.py) (#327).** `gen_loop_net.py`
+imports `curved_uturn()` from it rather than carrying its own copy of the curvature
+integration. Do NOT re-inline that math here: the regression that keeps it honest is
+that `gen_loop_net.py` still regenerates the committed `nodes.nod.xml`/`edges.edg.xml`
+byte-for-byte, and two copies would drift silently.
+
+Why a curved loop and not SUMO's own turnaround: SUMO's point turnaround is a short
+internal link that pivots the vehicle 180° on the spot (on MLK, 4.97 m at 3.73 m/s —
+about a 1.6 m turning radius). That is fine for queue statistics and undrivable for
+anything tracking the OpenDRIVE export, so a CM/CARLA ego stalls at the terminus or
+leaves the road. The teardrop replaces it with a tangent-continuous path at a 45 m
+radius.
+
+`sumo_uturn.py` also runs standalone, to put that same loop on a network that ALREADY
+exists — a real digital twin (MLK and the rest of the Digital-Twin-Library) has no
+plain-XML sources to regenerate from. It adds edges and never renames or removes any,
+so route files stay valid; it emits node/edge/connection patches for `netconvert -s`
+instead of hand-editing the net; and it attaches to the LANE CENTRELINES that carry the
+traffic, not to the junction centroid. That last point is not cosmetic — at MLK's west
+end the arriving lane is 8.5 m to one side of the junction centre, and anchoring on the
+centre makes netconvert bridge the gap with a connector that crabs the vehicle sideways
+(measured: a ±37° S-jog at an 11 m radius), reintroducing exactly the geometry the loop
+exists to remove.
+
 **Signal identity is faithful SUMO → xodr → CM (1:1).** netconvert emits one
 `<signal id="<tls_id>_<linkIndex>">` per SUMO controlled connection, with the turn
 direction in `subtype` (10=left, 20=right, 30=straight). osc2cm stamps that id on each
@@ -396,6 +449,30 @@ the VISSIM launch to open already framed on the ego vehicle and follow it, so ma
 (the spike trigger) isn't needed — investigate VISSIM's COM camera/viewpoint API at startup, or
 bake the follow-viewpoint into the saved `.layx`. To re-measure: build TL with `-p:RS_DEBUG=1` to an isolated
 `OutDir`/`IntDir` (e.g. `x64\Release_dbg`, gitignored) so the shipped exe is untouched.
+
+## Carla / XIL ego co-simulation design notes
+
+Forward-looking decisions for unifying the virtual-environment bridges (CarMaker
+`VirEnvHelper`/`VirtualEnvironment.lib` and the standalone Carla `mainVirCarla`):
+
+- **Road surface fidelity is deliberately kept simple (near-term).** Carla cannot
+  supply the road properties a tire model actually needs — it exposes macro
+  geometry (grade/bank/elevation via OpenDRIVE waypoints) but **no queryable
+  friction (μ) map and no road-roughness profile** (friction is author-only via
+  wheel `tire_friction` + `static.trigger.friction` patches, never readable at a
+  point). So for any external-dynamics (Simulink/XIL) ego, **assume a simple road
+  in the dynamics model** (constant μ ≈ dry asphalt, smooth surface). If spatial
+  surface variation is ever needed, it comes from a **scenario dataset**
+  (μ/roughness keyed to road position) or CarMaker's native IPGRoad — **never**
+  from a Carla→Simulink contact query. Carla stays out of the dynamics ground loop
+  entirely; it is perception + visualization only.
+
+- **Ego dynamics ownership is a per-ego mode**, mirroring the two CarMaker
+  diagrams: mode A "backend owns ego" (CarMaker office / Carla-PhysX → bridge
+  *reads* ego pose back and sends out) vs mode B "external owns ego" (Simulink/
+  dSPACE → ego arrives on a 2nd FIXS connection and is *teleported in*). L2/L4 are
+  both mode A; they differ only in who controls (TM desired-speed vs external CAV
+  client + sensors). This switch belongs in `config.yaml` `CarlaSetup`.
 
 ## Documentation
 

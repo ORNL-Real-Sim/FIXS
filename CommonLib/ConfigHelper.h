@@ -63,9 +63,13 @@ struct SimulationSetup_t {
 
 	int TrafficSimulatorPort;
 
-	int SimulationMode;
+	// Warm-up (#86): advance the traffic simulator with the FIXS boundary CLOSED.
+	bool WarmUpUntilEgoEntry;
 
-	double SimulationModeParameter;
+	double WarmUpTime;
+
+	// Client ports served THROUGH the warm-up rather than joining at its end (#86).
+	std::vector<int> WarmUpServePorts;
 
 	std::string TrafficLayerIP;
 
@@ -102,6 +106,29 @@ struct XilSetup_t {
 };
 
 
+// The ego, described once, for every backend. See ORNL-Real-Sim/FIXS#305 for why,
+// and for the per-backend keys this replaces (still parsed as fallbacks).
+struct EgoSetup_t {
+
+	std::string Id;         // FIXS id of the ego
+	std::string Type;       // vehicle type the TRAFFIC simulator knows it by
+	                        // (the rendered model is CarlaSetup.EgoBlueprint)
+
+	// What computes the ego's motion. Canonical, lower case.
+	//   traffic | virenv (the virtual environment's physics) | xil
+	std::string Dynamics;
+
+	// Who produces the pedals and steer. Canonical, lower case.
+	//   simulator (Carla TM, IPGDriver) | fixs (EgoDriver) | user
+	// "user" runs in-process when Controller names a file, else off the FIXS
+	// record at the feed -- not equivalent; see #305.
+	std::string ActuationSource;
+
+	std::string Controller;   // user control law (.py); Python backend only
+
+};
+
+
 struct CarMakerSetup_t {
 	bool EnableCosimulation;
 
@@ -112,10 +139,6 @@ struct CarMakerSetup_t {
 	int CarMakerPort;
 
 	double TrafficRefreshRate;
-
-	std::string EgoId;
-
-	std::string EgoType;
 
 	bool SynchronizeTrafficSignal;
 
@@ -134,8 +157,6 @@ struct CarlaSetup_t {
 	// so a typo cannot silently select the wrong engine. Mirrored in
 	// ConfigHelper.py; parsed here for schema parity. Default true.
 	bool EnablePythonBackend;
-
-	bool EnableExternalControl;
 
 	bool UseVehicleTypeAsBlueprint;
 
@@ -175,31 +196,6 @@ struct CarlaSetup_t {
 
 	std::vector<std::string> InterestedIds;
 
-	// #174 ego dynamics ownership + control (per-ego mode, config-driven).
-	//  EgoDynamicsOwner: "Carla" (PhysX, mode A -- bridge reads ego back) |
-	//                    "Simulink" (external owns ego, mode B -- teleport in).
-	//  EgoControl:       "TM_Advisory" (L2 TM set_desired_speed) | "External"
-	//                    (CAV client) | "None".
-	//  EnableEgoSimulink: back-compat alias; true => EgoDynamicsOwner = "Simulink".
-	std::string EgoDynamicsOwner;
-	std::string EgoControl;
-	bool        EnableEgoSimulink;
-
-	// #174 ego driving-mode ladder (integer -- modular, GUI-mappable):
-	//   0 = SumoDriver  : SUMO drives the ego; Carla teleports it (default, today)
-	//   1 = CarlaDriver : L0 -- Carla TM drives the ego (physics ON + autopilot);
-	//                     its state is read back and injected into SUMO each feed
-	//   2 = Advisory    : L2 -- as 1, plus external desired-speed advisory
-	//                     through FIXS (TM keeps steering)          [reserved]
-	//   3 = Control     : L4 -- external throttle/brake/steer through FIXS
-	//                     (full PhysX dynamics, external steers)    [reserved]
-	int EgoMode;
-	// Which L0 driver actuates the ego when EgoMode >= 1:
-	//   "TM"      -> native Carla Traffic Manager autopilot (needs a routable map)
-	//   "Pursuit" -> the SDK-free EgoDriver module (map-agnostic fallback)
-	std::string EgoL0Driver;
-	std::string EgoId;                 // FIXS id of the Carla-driven ego (mode >= 1)
-	std::string EgoSumoType;           // SUMO vType used when TL injects the ego
 	std::string EgoBlueprint;          // Carla blueprint for the ego actor
 	std::vector<double> EgoSpawnPose;  // [x, y, z, headingDeg] FIXS frame (mode >= 1)
 	int TrafficManagerPort;            // Carla TM port (client-side instance)
@@ -233,6 +229,16 @@ struct WorldModelSetup_t {
 struct SumoSetup_t {
 
 	int SpeedMode;
+
+	// SUMO's lane-change mode for the vehicles FIXS drives, as
+	// Vehicle::setLaneChangeMode takes it. -1 leaves SUMO's own default (597,
+	// every motive on) untouched, which is what every scenario got before this
+	// existed. 512 is strategic changes only: the vehicle still reaches the lane
+	// its next turn needs, but never changes lane by choice -- the setting for
+	// comparing against a driver that holds one lane, such as a CARLA agent
+	// steering a fixed route polyline.
+	int LaneChangeMode;
+
 	int ExecutionOrder;
 
 	// How far ahead (metres) to look for a preceding vehicle when filling the
@@ -241,6 +247,10 @@ struct SumoSetup_t {
 	// too long and it may react to one that turns off before it matters. Default
 	// 1000 preserves the previously hard-coded behaviour.
 	double PrecedingVehicleLookahead;
+
+	// keepRoute bitmask for the mirror's moveToXY, for every ego owner (#305).
+	// https://sumo.dlr.de/docs/TraCI/Change_Vehicle_State.html#move_to_xy
+	int EgoKeepRoute;
 
 	// Auto-launch SUMO configuration
 	bool EnableAutoLaunch;
@@ -286,7 +296,7 @@ struct VissimSetup_t {
 	bool EnableDriverModelRelay;
 };
 
-typedef struct SubscriptionVehicleList_t {
+struct SubscriptionVehicleList_t {
 	std::unordered_set <std::string> edgeSubscribeId_v;
 
 	// vehicle id -> radius
@@ -302,7 +312,7 @@ typedef struct SubscriptionVehicleList_t {
 	std::unordered_map <std::string, double> vehicleTypeSubscribedId_v;
 };
 
-typedef struct SubscriptionSignalList_t {
+struct SubscriptionSignalList_t {
 	std::unordered_set <std::string> signalId_v;
 
 	// Default-initialised: this was previously an indeterminate value until the
@@ -311,11 +321,11 @@ typedef struct SubscriptionSignalList_t {
 	bool subAllSignalFlag = false;
 };
 
-typedef struct SubscriptionDetectorList_t {
+struct SubscriptionDetectorList_t {
 	std::unordered_set <std::string> pattern_v;;
 };
 
-typedef struct SubscriptionAllList_t {
+struct SubscriptionAllList_t {
 	SubscriptionVehicleList_t VehicleList;
 	SubscriptionSignalList_t SignalList = { {}, false };
 	SubscriptionDetectorList_t DetectorList;
@@ -342,10 +352,13 @@ public:
 	// Flag to suppress "Will use X as default" messages during config parsing
 	bool SuppressDefaultMessages = true;
 
-	bool parserFlag(YAML::Node node, std::string name);
-	std::string parserString(YAML::Node node, std::string name);
-	double parserDouble(YAML::Node node, std::string name);
-	int parserInteger(YAML::Node node, std::string name);
+	// A missing key returns the default instead of throwing, as ConfigHelper.py's
+	// node.get(name, default) does. An unguarded call on an absent section
+	// (e.g. no XilSetup) used to kill TrafficLayer silently at startup (#214).
+	bool parserFlag(YAML::Node node, std::string name, bool defaultValue = false);
+	std::string parserString(YAML::Node node, std::string name, std::string defaultValue = "");
+	double parserDouble(YAML::Node node, std::string name, double defaultValue = 0.0);
+	int parserInteger(YAML::Node node, std::string name, int defaultValue = 0);
 	void parserIntegerVector(YAML::Node node, std::string name, std::vector<int>& outIntegerVector);
 	void parserStringVector(YAML::Node node, std::string name, std::vector<std::string>& outStringVector);
 
@@ -357,11 +370,22 @@ public:
 	void getSigSubscriptionList(Subscription_t SigSub);
 	void getDetSubscriptionList(Subscription_t DetSub);
 
+	// Ids the warm-up watches for when WarmUpUntilEgoEntry is set (#86): the UNION
+	// of the by-id vehicle subscriptions in ApplicationSetup and XilSetup.
+	//
+	// Deliberately NOT SubscriptionVehicleList.vehicleSubscribeId_v, which is
+	// either/or (XIL only when the application layer is off) and also drives what
+	// TrafficLayer subscribes to in SUMO and forwards downstream. Widening that
+	// would change the data path; this list only decides when the warm-up ends,
+	// so it can see both layers' egos without touching message routing.
+	std::unordered_set <std::string> WarmUpEgoIds;
+
 	// subscription abstraction, these variables are raw configuration specs
 	// users can use these raw specs to create their own subscription containers for different usages
 	SimulationSetup_t SimulationSetup;
 	ApplicationSetup_t ApplicationSetup;
 	XilSetup_t XilSetup;
+	EgoSetup_t EgoSetup;
 	CarMakerSetup_t CarMakerSetup;
 	SumoSetup_t SumoSetup;
 	CarlaSetup_t CarlaSetup;

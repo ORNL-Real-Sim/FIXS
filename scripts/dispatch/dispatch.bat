@@ -88,19 +88,20 @@ if %ERRORLEVEL% neq 0 (
 )
 echo.
 
-REM ====================================
-REM Step 1: Compile External Libraries
-REM ====================================
-echo [1/9] Checking external libraries...
-if not exist "%SOURCE_PATH%\CommonLib\yaml-cpp\build" (
-    echo External libraries not found. Compiling...
-    call "%~dp0\1_external_libraries.bat"
-    if %ERRORLEVEL% neq 0 (
-        echo ERROR: Failed to compile external libraries!
-        goto :failed
-    )
-) else (
-    echo External libraries already compiled.
+REM ============================================================
+REM Step 1: Initialize the clone (submodules, native deps, yaml-cpp)
+REM   Idempotent - each sub-step short-circuits when already done.
+REM   This is what makes `dispatch.bat` work on a FRESH CLONE: since
+REM   #238 CommonLib\libsumo is no longer committed to git, and
+REM   TrafficLayer links libsumocpp.lib directly, so step 2 cannot
+REM   build until it has been fetched. Required deps failing here is
+REM   fatal; optional ones (ProprietaryFiles, libcarla) only warn.
+REM ============================================================
+echo [1/9] Initializing clone (submodules, native deps, yaml-cpp)...
+call powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%..\initialize_fixs.ps1" -RepoRoot "%SOURCE_PATH%"
+if %ERRORLEVEL% neq 0 (
+    echo ERROR: Clone initialization failed - a required dependency is missing!
+    goto :failed
 )
 echo.
 
@@ -243,6 +244,47 @@ REM Release CommonLib - Python TrafficLayer protocol package
 echo Copying Python CommonLib files...
 for %%f in ("%SOURCE_PATH%\CommonLib\*.py") do (
     copy /Y "%%f" "%RELEASE_PATH%\CommonLib\" >nul 2>&1
+)
+
+REM ...and the Python PACKAGES under CommonLib. The loop above matches FILES in
+REM one directory, so every subpackage was silently dropped from the release the
+REM moment it appeared: CommonLib\VirEnv with #335, CommonLib\fixs with #355,
+REM CommonLib\xil with the dyno work. Such a bundle extracts cleanly and reports a
+REM healthy build, then mainVirCarla dies on
+REM   ModuleNotFoundError: No module named 'CommonLib.VirEnv'
+REM the first time anyone runs the Python bridge from a release.
+REM
+REM A directory with an __init__.py is a Python package and ships; anything else
+REM under CommonLib is vendored C++/MATLAB (yaml-cpp, YAMLMatlab) whose own .py
+REM files must NOT ship - yaml-cpp\test alone carries ~50 googletest scripts.
+REM Structural rather than a hand-kept list, because a list is what failed here:
+REM it is only ever updated by whoever remembers, and twice nobody did.
+echo Copying Python CommonLib packages...
+for /d %%d in ("%SOURCE_PATH%\CommonLib\*") do (
+    if exist "%%d\__init__.py" (
+        echo   - CommonLib\%%~nxd
+        xcopy /Y /E /I "%%d" "%RELEASE_PATH%\CommonLib\%%~nxd" >nul
+    )
+)
+REM ...and templates\, which the loop above cannot see. It holds python a USER
+REM COPIES rather than python FIXS imports, so it has no __init__.py and is not a
+REM package - and the rule above is "is it a package", which is exactly right for
+REM the case it was written for and silently wrong for this one. Shipped by name
+REM because templates\ is one directory that is part of the product; the packages
+REM above appear often enough that only a structural rule keeps up with them, and
+REM this does not.
+REM Without this the template reaches the git repo and no user: the zip is built
+REM from %RELEASE_PATH%, so a directory that never lands there is absent from
+REM every FIXS/ anyone fetches, with nothing failing to say so.
+if exist "%SOURCE_PATH%\CommonLib\templates" (
+    echo   - CommonLib\templates
+    xcopy /Y /E /I "%SOURCE_PATH%\CommonLib\templates" "%RELEASE_PATH%\CommonLib\templates" >nul
+)
+REM Drop the compiled caches /E picked up. Swept once over CommonLib rather than
+REM inside the loop above: a `for /d /r` nested in a `for /d` does not fire, and
+REM it silently shipped the .pyc files when it was written that way.
+for /d /r "%RELEASE_PATH%\CommonLib" %%c in (__pycache__) do (
+    if exist "%%c" rd /s /q "%%c"
 )
 
 REM Release CarMaker files

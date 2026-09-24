@@ -43,11 +43,21 @@ public:
 	int sendToTrafficSimulator(double simTime, MsgHelper Msg_c);
 	void runOneStepSimulation();
 	int runSimulation(double endTime);
+	// Ids the warm-up watches for (#86) -- the union of both layers' by-id vehicle
+	// subscriptions, copied from ConfigHelper::WarmUpEgoIds in getConfig().
+	std::unordered_set <std::string> warmupEgoId_v;
 	int recvFromTrafficSimulator(double* simTime, MsgHelper& Msg_c);
 
 	int addEgoVehicle(double simTime);
 	int addEgoVehicleFromXY(double simTime, std::string vehicleId, std::string vehicleType, double positionX, double positionY);
-	int checkIfEgoExist(double* simTime);
+
+	// Which layer owns this vehicle's motion, if the traffic simulator does not?
+	// CarMaker/XIL and the virtual environment are the same case, so one test
+	// answers it and one body in sendToSUMO mirrors either answer. VirEnv is
+	// checked first because it is the more specific claim (FIXS#305).
+	enum class ExternalEgoOwner { None, VehSimulator, VirEnv };
+	ExternalEgoOwner externalEgoOwnerOf(const std::string& vehId) const;
+	bool isWarmUpEgoInNetwork(double* simTime);
 
 	int getSimulationTime(double* simTime);
 
@@ -141,12 +151,13 @@ public:
 
 	bool ENABLE_CARLA = false;
 	bool ENABLE_CARLA_EXTERNAL_CONTROL = false;
-	// Carla external-control ids already added to the traffic simulator (add ONCE,
-	// then wait for insertion; see the Carla inject branch in sendToSUMO).
-	std::set<std::string> carlaInjectedIds_;
-	// #174: last (x,y) fed to moveToXY per Carla-owned id -- lets the off-map guard
-	// compare SUMO's placement (getPosition, n-1) to what we asked for last tick.
-	std::unordered_map<std::string, std::pair<double, double>> carlaLastFed_;
+	// Externally-driven ego ids already added to the traffic simulator (add ONCE,
+	// then wait for insertion; see the mirror block in sendToSUMO).
+	std::set<std::string> externalEgoInjected_;
+	// #174: last (x,y) fed to moveToXY per externally-driven ego -- lets the
+	// off-map guard compare SUMO's placement (getPosition, n-1) to what we asked
+	// for last tick.
+	std::unordered_map<std::string, std::pair<double, double>> externalEgoLastFedXY_;
 
 	// #177: skip per-vehicle TraCI getters whose output is never sent. Derived
 	// once from VehicleMessageField_set in connectionSetup -- getNextTLS is only
@@ -161,6 +172,21 @@ public:
 	// setSpeed holds indefinitely, so an id the WM stops sending (handback) must
 	// be released with setSpeed(-1) or it crawls forever at its last command.
 	std::set<std::string> WorldModelHeldIds;
+
+#ifdef RS_DEBUG
+	// #86: how many vehicles per reporting window still needed a DIRECT TraCI
+	// query for their leader instead of reading it out of the subscription.
+	// A direct query is Vehicle::getLeader / getSpeed -- the same call every
+	// vehicle made before #86, so the answer is identical; only the transport
+	// differs. Counts, hence the n prefix and a 0 start.
+	//
+	// Reported every 3000 steps: a config that quietly queries every vehicle is
+	// paying the pre-#86 cost, which is invisible otherwise -- the output is
+	// still correct, only slower. Build with -p:RS_DEBUG=1 to see it.
+	long nLeaderIdQueried = 0;
+	long nLeaderSpeedQueried = 0;
+	long nStepsSinceLeaderReport = 0;
+#endif
 
 	double tSimuEnd = 90000;
 
@@ -202,6 +228,13 @@ public:
 	// vehicle id->edge list
 	std::unordered_map<std::string, std::vector<std::string>> VehicleId2EdgeList_um;
 
+	// Last speed limit / free-flow speed SUMO actually reported for a vehicle.
+	// The subscription does not always carry VAR_ALLOWED_SPEED -- and reading it
+	// through map::operator[] when it is absent inserts a NULL pointer and
+	// dereferences it, which published -815417536 on the wire. A limit does not
+	// vanish between two ticks of the same road, so the last real one stands.
+	std::unordered_map<std::string, std::pair<double, double>> VehicleId2LastSpeedLimit_um;
+
 	// #177 Phase 2: cache the upcoming-TLS list so getNextTLS (O(remaining route
 	// length)) runs ONCE PER VEHICLE instead of every step. A vehicle's getNextTLS
 	// captures every TLS from its current position to route end; it only ever PASSES
@@ -242,7 +275,10 @@ public:
 private:
 	void parserSumoSubscription(libsumo::TraCIResults VehDataSubscribeTraciResults, std::string vehId, VehFullData_t& CurVehData);
 
-	const double M_PI = 3.14159265358979323846;
+	// #65: NOT named M_PI. MSVC leaves M_PI undefined unless _USE_MATH_DEFINES,
+	// so a member of that name is legal there; glibc's <math.h> defines M_PI
+	// unconditionally, which turns this declaration into a syntax error on gcc.
+	const double kPi = 3.14159265358979323846;
 
 	struct SignalSubscriptionFlags_t {
 		bool idHasSubscribed = false;

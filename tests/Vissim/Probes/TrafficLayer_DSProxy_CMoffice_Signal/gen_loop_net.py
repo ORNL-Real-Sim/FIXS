@@ -15,11 +15,20 @@ The ramp angle T1 is solved numerically so the path lands back on y=0.
 
 The main corridor (between the 3 signals) stays dead straight; the loop is past
 the last signal. Writes nodes.nod.xml + edges.edg.xml; run netconvert afterwards.
+
+The turnaround geometry itself now lives in Carla/utils/sumo_uturn.py (#327),
+which also puts the same loop on a network that ALREADY exists (MLK and other
+real corridors, where there are no plain-XML sources to regenerate from). This
+script keeps only what is specific to the synthetic SimpleTrafficLight corridor;
+importing the shared core is what stops the two copies of the curvature
+integration from drifting apart.
 """
 from __future__ import annotations
-import math, pathlib
+import pathlib, sys
 
 HERE = pathlib.Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parents[3] / "Carla" / "utils"))
+from sumo_uturn import curved_uturn  # noqa: E402
 STRAIGHT_PAST = 150.0   # straight corridor past the last intersection before the loop (m)
 RAMP_R = 45.0           # curved-ramp radius (m)
 LOOP_R = 45.0           # loop radius (m)
@@ -50,52 +59,6 @@ BASE_EDGES = [
 ]
 
 
-def arc(x, y, h, radius, turn_sign, total_ang, ds=DS):
-    """Integrate a constant-curvature arc. turn_sign +1 = left/CCW, -1 = right/CW.
-    Returns (points, x, y, h_end). Heading h in radians."""
-    n = max(2, int(round(radius * total_ang / ds)))
-    dphi = turn_sign * total_ang / n
-    pts = []
-    for _ in range(n):
-        h += dphi / 2.0
-        x += ds_step(radius, dphi) * math.cos(h)
-        y += ds_step(radius, dphi) * math.sin(h)
-        h += dphi / 2.0
-        pts.append((x, y))
-    return pts, x, y, h
-
-
-def ds_step(radius, dphi):
-    return radius * abs(dphi)
-
-
-def turnaround(x0, y0, h0, t1_deg):
-    """3 phases from (x0,y0,h0): entry ramp +t1, loop -(2*t1+180), exit ramp +t1.
-    Returns (ramp_in_pts, loop_pts, ramp_out_pts, end_x, end_y, end_h)."""
-    t1 = math.radians(t1_deg)
-    t2 = 2 * t1 + math.pi                      # loop sweep so net = 180 deg (a U-turn)
-    p1, x, y, h = arc(x0, y0, h0, RAMP_R, RAMP_TURN, t1)        # ramp peels off
-    p2, x, y, h = arc(x, y, h, LOOP_R, -RAMP_TURN, t2)         # loop (opposite turn = the big loop)
-    p3, x, y, h = arc(x, y, h, RAMP_R, RAMP_TURN, t1)          # ramp back to corridor
-    return p1, p2, p3, x, y, h
-
-
-def solve_t1(x0, y0, h0):
-    """Find ramp angle t1 (deg) so the turnaround lands back on the corridor (end y == y0)."""
-    def endy(t1d):
-        return turnaround(x0, y0, h0, t1d)[4] - y0
-    lo, hi = 20.0, 89.0
-    flo, fhi = endy(lo), endy(hi)
-    for _ in range(60):
-        mid = (lo + hi) / 2
-        fm = endy(mid)
-        if (flo < 0) == (fm < 0):
-            lo, flo = mid, fm
-        else:
-            hi, fhi = mid, fm
-    return (lo + hi) / 2
-
-
 def shp(pts):
     return " ".join(f"{x:.2f},{y:.2f}" for x, y in pts)
 
@@ -104,10 +67,19 @@ def loop_at(prefix, sign):
     """Build a curved turnaround past the intersection at x = sign*400.
     sign +1 = east end (car arrives heading +x), -1 = west end (heading -x)."""
     x0 = sign * (400 + STRAIGHT_PAST)
-    h0 = 0.0 if sign > 0 else math.pi          # heading into the loop
-    t1 = solve_t1(x0, 0.0, h0)
-    p1, p2, p3, ex, ey, eh = turnaround(x0, 0.0, h0, t1)
-    # entry A and exit B coincide (solver closes the loop) -> one shared "neck" junction
+    # curved_uturn works in a local frame whose +x points away from the network and
+    # whose origin is where the corridor meets the loop. Here the corridor edge already
+    # runs all the way to the neck, so there is no stub (straight_past=0) and no lane
+    # offset to blend out; mirror the local frame for the west end.
+    g = curved_uturn(RAMP_R, LOOP_R, straight_past=0.0,
+                     side=("right" if RAMP_TURN < 0 else "left"), ds=DS)
+    to_world = lambda pts: [(x0 + sign * x, sign * y) for x, y in pts]
+    p1, p2, p3 = (to_world(g["in_pts"][1:]), to_world(g["loop_pts"][1:]),
+                  to_world(g["out_pts"][1:]))
+    t1 = g["ramp_angle_deg"]
+    # local end heading is 180 deg; rotate it back into world for the west end
+    eh_deg = (g["end_heading_deg"] + (0.0 if sign > 0 else 180.0) + 180.0) % 360.0 - 180.0
+    # entry A and exit B coincide (the solver closes the loop) -> one shared "neck" junction
     A = (x0, 0.0); T1 = p1[-1]; T2 = p2[-1]
     neck = f"{prefix}_neck"
     nodes = [
@@ -120,7 +92,7 @@ def loop_at(prefix, sign):
         (f"{prefix}_loop", f"{prefix}_t1", f"{prefix}_t2", LOOP_LANES, shp(p2)),
         (f"{prefix}_ramp_out", f"{prefix}_t2", neck, LOOP_LANES, shp(p3 + [A])),
     ]
-    return nodes, edges, neck, neck, t1, math.degrees(eh)
+    return nodes, edges, neck, neck, t1, eh_deg
 
 
 def main():

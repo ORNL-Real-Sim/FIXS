@@ -4,6 +4,7 @@ This document describes how to build Real-Sim FIXS from source. For general proj
 
 ## Table of Contents
 * [Quick Start](#quick-start)
+* [First-Run Setup (fresh clone)](#first-run-setup-fresh-clone)
 * [Build System Overview](#build-system-overview)
 * [Prerequisites](#prerequisites)
 * [Release Builds](#release-builds)
@@ -23,7 +24,7 @@ dispatch.bat
 
 This single command will:
 - Generate the version header (RealSimVersion.h) from git tags
-- Build external libraries (yaml-cpp)
+- Initialize the clone: submodules, native deps (libsumo, libcarla), yaml-cpp
 - Build core components (TrafficLayer, VirtualEnvironment)
 - Build VISSIM driver model DLLs
 - Build CarMaker executables for all detected versions
@@ -31,6 +32,70 @@ This single command will:
 - Build MEX files for MATLAB/Simulink
 - Generate BUILD_INFO.txt
 - Copy all artifacts to `build/` directory
+
+## First-Run Setup (fresh clone)
+
+`dispatch.bat` initializes the clone itself (step 1), so on a fresh checkout **`dispatch.bat` alone is enough**. If you want to do the setup separately — or you build individual components rather than running the full dispatch — run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\initialize_fixs.ps1
+```
+
+It is idempotent: every step short-circuits when its output is already present, so re-running it is cheap and safe.
+
+| Step | What it does | Required? |
+|------|--------------|-----------|
+| ProprietaryFiles submodule | `git submodule update --init --recursive` | Optional — private repo. External contributors have no access; the public core still builds. |
+| Native deps | Downloads checksum-verified zips from the rolling `fixs-native-deps` release | **libsumo: required.** libcarla: optional (Carla only). |
+| yaml-cpp | CMake build of the vendored source (Release + Debug) | **Required** |
+
+Useful flags: `-Force` re-acquires the native deps, `-CarlaMode prebuilt|source` picks the libcarla path, and `-SkipSubmodules` / `-SkipNativeDeps` / `-SkipYamlCpp` opt out of individual steps.
+
+> Not to be confused with `scripts/update_fixs.ps1` / `scripts/update_fixs.sh`, which are the **consumer-side** installers for a published FIXS release zip. `initialize_fixs.ps1` is for a developer checkout.
+
+### Native dependencies are not in git
+
+`CommonLib/libsumo` and `CommonLib/libcarla` are **gitignored** and acquired at setup time from per-component, version- and platform-named assets on the public rolling release `fixs-native-deps` (`libsumo-<ver>-windows-x86_64.zip`, `libcarla-<ver>-windows-x86_64.zip`), each verified against its `.sha256` sidecar. Versions come from `dependencies.yaml`. One release carries every platform, so the name states which one an asset is for — read the suffix before downloading by hand.
+
+libsumo used to be committed — 105 binary files, ~430 MB in the working tree. It was dropped in #238 because binaries in git get no verification, and the vendored copy proved it: it was silently missing `geos_c.dll` and `geos.dll` for months (#70). `libsumocpp.dll` could not load at all, and because TrafficLayer *delay-loads* it, the breakage surfaced only at the first libsumo call, as a Win32 loader exception no `catch` block can see. Both the packer and the fetcher now **load-test** `libsumo/bin` rather than trusting a file count, so that class of gap cannot ship again.
+
+Because libsumo is required to link `TrafficLayer` (`TrafficLayer.vcxproj` references `..\..\CommonLib\libsumo\bin\libsumocpp.lib` directly), the fetch must happen before any core build — which is precisely why `dispatch.bat` runs initialization as step 1.
+
+**Bumping the SUMO version** in `dependencies.yaml` requires publishing the matching asset first, otherwise every clone breaks:
+
+```powershell
+powershell -File scripts\build_libsumo.ps1                                  # rebuild from SUMO source
+powershell -File scripts\dispatch\pack_native_deps.ps1 -Component sumo -Publish
+```
+
+**Offline / air-gapped:** the fetch needs network access to GitHub Releases. Without it, obtain `libsumo-<ver>-windows-x86_64.zip` out of band — the `-linux-x86_64` asset next to it on the same release contains a `.so` and will not link — and extract it into `CommonLib/` so that `CommonLib/libsumo/bin/libsumocpp.lib` exists, then run `initialize_fixs.ps1` — it detects the sentinel and skips the download. Same for `libcarla`.
+
+> Removing libsumo from git only shrinks **shallow** clones. The blobs remain in repo history, so a full `git clone` still transfers them.
+
+### Recommended clone: skip the history blobs
+
+A plain `git clone` of this repo transfers roughly **1 GB packed**, because git sends every version of every file ever committed. Only a small fraction of that is content any build reads — the bulk is historical binaries that were committed and later deleted (`CM9_proj`/`CM10_proj`/`CM11_proj`, a committed `.venv/`, old `build/` outputs). Deleting a file from HEAD does not remove it from history, so the download cost stays (#255).
+
+Clone with a **blob filter** instead:
+
+```bash
+git clone --filter=blob:none https://github.com/ORNL-Real-Sim/FIXS.git
+```
+
+This is a *partial clone*: git fetches the full commit graph and directory trees, but no file contents up front. It then downloads each blob lazily, the first time something actually reads it. You get a complete, fully functional repository — `git log`, `git describe`, `git blame`, branch switching and `dispatch.bat` all behave normally — you just never pay for the ~2.5 GiB of file versions no build opens. The one tradeoff is that operations reaching into old history (checking out an ancient commit, `git log -p` over the whole repo) fetch on demand and so need network access.
+
+If you also do not need the test networks and docs locally, add a sparse checkout — `tests/` (197 MiB) and `doc/` (21 MiB) are 218 MiB of the 231 MiB present at HEAD, and neither is read by `scripts/dispatch/dispatch.bat`. Measured, this takes the working tree from 231 MiB to **13 MiB**:
+
+```powershell
+git clone --filter=blob:none --no-checkout https://github.com/ORNL-Real-Sim/FIXS.git
+cd FIXS
+git sparse-checkout set --no-cone '/*' '!/tests/' '!/doc/'
+git checkout
+```
+
+> **Run this in PowerShell or cmd, not Git Bash.** MSYS path conversion rewrites any argument starting with `/`, so in Git Bash `!/tests/` silently becomes `!C:/Program Files/Git/tests/` — the pattern then matches nothing and the exclusion appears to do nothing at all. If you must use Git Bash, prefix the command with `MSYS_NO_PATHCONV=1`.
+
+Verify it worked with `git sparse-checkout list` — the three patterns must come back exactly as typed. Undo the narrowing at any time with `git sparse-checkout disable`. The release CI uses this same pair of flags in [`.github/workflows/release.yml`](../.github/workflows/release.yml), where `actions/checkout` writes the patterns to a file directly and no shell mangling applies.
 
 ## Build System Overview
 
@@ -374,27 +439,41 @@ When building components in Debug mode, make sure to link against the Debug libr
 
 ```
 scripts/
+├── initialize_fixs.ps1              # Fresh-clone setup (submodules, native deps, yaml-cpp)
 ├── generate_version.ps1             # Generate RealSimVersion.h from git tags
+├── update_fixs.ps1                  # CONSUMER-side: install a published release (Windows)
+├── update_fixs.sh                   # CONSUMER-side: install a published release (POSIX)
 ├── build_libsumo.ps1                # STANDALONE: Build libsumo DLLs from SUMO source
 ├── build_sumo_executables.ps1       # STANDALONE: Build SUMO executables from source
 └── dispatch/
     ├── dispatch.bat                 # Main orchestrator
     ├── detect_tool_paths.ps1        # Auto-detection of tools
     ├── yaml_helper.ps1              # Parse dependencies.yaml
+    ├── fetch_native_deps.ps1        # Acquire libsumo (required) + libcarla (optional)
+    ├── pack_native_deps.ps1         # Pack/publish the native-deps release assets
+    ├── libsumo_verify.ps1           # Shared libsumo bin/ load test (used by both)
     ├── 1_external_libraries.bat     # Build yaml-cpp
-    ├── 2_core_components.bat        # Build TrafficLayer, VirtualEnvironment
+    ├── 2_core_components.bat        # Build TrafficLayer
     ├── 3_vissim_components.bat      # Build VISSIM DLLs
-    ├── 4a_carmaker_components.ps1   # Build CarMaker executables
-    ├── 4b_carmaker_dspace.ps1       # Build dSPACE libraries
-    ├── 5_mex_realsim_socket.ps1     # Build MATLAB MEX file
-    └── 6_build_info.ps1             # Generate BUILD_INFO.txt
+    ├── 4_virtual_environment.bat    # Build VirtualEnvironment.lib
+    ├── 4c_carla_virenv.ps1          # Build VirCarlaEnv.exe (needs libcarla)
+    ├── 5a_carmaker_components.ps1   # Build CarMaker executables
+    ├── 5b_carmaker_dspace.ps1       # Build dSPACE libraries
+    ├── 6_mex_realsim_socket.ps1     # Build MATLAB MEX file
+    ├── 7_build_info.ps1             # Generate BUILD_INFO.txt
+    └── 8_create_zip.ps1             # Pack the release zip
 ```
+
+### Setup vs. build scripts
+
+- **`initialize_fixs.ps1`** (in `scripts/`) prepares a checkout — submodules, native deps, yaml-cpp. Called by `dispatch.bat` as step 1; idempotent, so running it directly is fine too. See [First-Run Setup](#first-run-setup-fresh-clone).
+- **`fetch_native_deps.ps1`** / **`pack_native_deps.ps1`** are the two halves of the native-deps channel: `fetch` pulls checksum-verified `libsumo-<ver>-windows-x86_64.zip` / `libcarla-<ver>-windows-x86_64.zip` from the rolling `fixs-native-deps` release (which also carries the `-linux-x86_64` assets, hence the suffix); `pack` builds and publishes those assets. Both call `libsumo_verify.ps1`, which **loads** every libsumo probe DLL rather than just checking that files exist — an incomplete `bin/` is otherwise invisible until runtime (#70).
 
 ### Standalone Utility Scripts
 
 Two scripts in `scripts/` are standalone utilities not called by `dispatch.bat`:
 
-- **`build_libsumo.ps1`**: Builds libsumo DLLs from SUMO source. Use this when the SUMO version in `dependencies.yaml` changes and you need to rebuild the vendored libsumo binaries in `CommonLib/libsumo/`.
+- **`build_libsumo.ps1`**: Builds libsumo DLLs from SUMO source into `CommonLib/libsumo/`. Use this when the SUMO version in `dependencies.yaml` changes. Since #238 that directory is gitignored, so a rebuild is **not** the end of the job — publish the result so every other clone can fetch it: `pack_native_deps.ps1 -Component sumo -Publish`.
 - **`build_sumo_executables.ps1`**: Builds the full SUMO application suite (sumo.exe, sumo-gui.exe, etc.) from source. Most users should download a pre-built SUMO release instead.
 
 ### Tool Auto-Detection

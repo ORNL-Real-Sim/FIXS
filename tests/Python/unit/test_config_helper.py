@@ -68,10 +68,26 @@ def test_config_defaults_for_missing_fields():
     ch = ConfigHelper()
     ch.getConfig(SIMPLE_ECHO_CONFIG)
 
-    # SimulationMode not in config — should default to 0
-    assert ch.simulation_setup['SimulationMode'] == 0
+    # Warm-up keys not in config — no warm-up (#86)
+    assert ch.simulation_setup['WarmUpUntilEgoEntry'] is False
+    assert ch.simulation_setup['WarmUpTime'] == 0
     # SimulationEndTime not in config — should default to 90000
     assert ch.simulation_setup['SimulationEndTime'] == 90000.0
+
+
+def test_warmup_keys_are_parsed(tmp_path):
+    """Both warm-up triggers round-trip through the parser (#86)."""
+    cfg = tmp_path / "warmup.yaml"
+    cfg.write_text(
+        "SimulationSetup:\n"
+        "  SelectedTrafficSimulator: \"SUMO\"\n"
+        "  WarmUpUntilEgoEntry: true\n"
+        "  WarmUpTime: 28985\n"
+    )
+    ch = ConfigHelper()
+    ch.getConfig(str(cfg))
+    assert ch.simulation_setup['WarmUpUntilEgoEntry'] is True
+    assert ch.simulation_setup['WarmUpTime'] == 28985
 
 
 def test_reset_config():

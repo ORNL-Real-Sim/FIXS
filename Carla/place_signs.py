@@ -70,7 +70,8 @@ def place_signs(name, carla_root=None, ue4_root=None, force=False):
     umap = import_map.cooked_map_path(carla_root, name)
     before = os.path.getmtime(umap) if os.path.isfile(umap) else None
 
-    cmd = [editor, uproject, content_map_path(name), f"-ExecutePythonScript={PLACER}"]
+    cmd = [editor, uproject, content_map_path(name), f"-ExecutePythonScript={PLACER}",
+           *env.EDITOR_LAUNCH_FLAGS]
     print("[signs] placing road signs via the editor (a window opens briefly, "
           "no clicking needed) ...")
     print(f"[signs] {' '.join(cmd)}")
@@ -93,6 +94,11 @@ def place_signs(name, carla_root=None, ue4_root=None, force=False):
 
 
 def main():
+    # Run under the interpreter carla.json names, whatever python this script was
+    # started with. run_cosim imports this module rather than spawning it, so that
+    # path is already on the right interpreter and this is a no-op there.
+    env.reexec_under_configured(__file__, tag="signs")
+
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--map", default=None, help="cooked map name (e.g. Roosevelt_07142026)")

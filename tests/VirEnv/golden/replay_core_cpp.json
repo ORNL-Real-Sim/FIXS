@@ -1,0 +1,36 @@
+{
+ "scenario1": [
+  "== step t=0.00 onUpdate=0",
+  "initTrafficPool",
+  "== step t=0.10 onUpdate=1",
+  "spawnVehicle Car(car/passenger) -> 0",
+  "readEgoState __none__",
+  "setVehiclePose 0 (10.000,0.000,0.100) hdg=90.000 grade=0.000",
+  "setVehicleLights 0 brake=0 L=0 R=0",
+  "== step t=0.20 onUpdate=1",
+  "spawnVehicle Truck(car/truck) -> 100000",
+  "readEgoState __none__",
+  "setVehiclePose 0 (20.000,0.000,0.100) hdg=90.000 grade=0.000",
+  "setVehicleLights 0 brake=0 L=0 R=0",
+  "setVehiclePose 100000 (5.000,5.000,0.100) hdg=0.000 grade=0.000",
+  "setVehicleLights 100000 brake=0 L=0 R=0",
+  "== step t=0.30 onUpdate=1",
+  "despawnVehicle 0",
+  "readEgoState __none__",
+  "setVehiclePose 100000 (6.000,5.000,0.100) hdg=0.000 grade=0.000",
+  "setVehicleLights 100000 brake=0 L=0 R=0"
+ ],
+ "scenario2": [
+  "== step t=0.00 onUpdate=0",
+  "initTrafficPool",
+  "== step t=0.10 onUpdate=1",
+  "spawnVehicle Car(car/passenger) -> 0",
+  "readEgoState __none__",
+  "setVehiclePose 0 (10.000,0.000,0.100) hdg=90.000 grade=0.000",
+  "== step t=0.20 onUpdate=1",
+  "readEgoState __none__",
+  "setVehiclePose 0 (10.000,0.000,0.100) hdg=90.000 grade=0.000",
+  "== step t=0.25 onUpdate=0",
+  "setVehiclePose 0 (15.000,0.000,0.100) hdg=90.000 grade=0.000"
+ ]
+}

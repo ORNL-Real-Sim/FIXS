@@ -16,7 +16,10 @@ $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 Write-Host "=== Carla virtual environment (libcarla + VirCarlaEnv) ==="
 
 # --- 1. acquire libcarla (source copy or prebuilt fetch) --------------------
-& (Join-Path $PSScriptRoot 'fetch_native_deps.ps1') -RepoRoot $RepoRoot
+# -Component carla: libsumo is a REQUIRED dep acquired far earlier (dispatch
+# step 0 / initialize_fixs.ps1), and its failure must not be reported here as an
+# optional-Carla skip.
+& (Join-Path $PSScriptRoot 'fetch_native_deps.ps1') -RepoRoot $RepoRoot -Component carla
 if ($LASTEXITCODE -ne 0) { Write-Warning "libcarla acquisition failed - skipping VirCarlaEnv."; exit 0 }
 
 $sentinel = Join-Path $RepoRoot 'CommonLib\libcarla\lib\carla_client.lib'

@@ -10,10 +10,10 @@
 #
 # Client ORDER matters: the advisor MUST be on a LOWER port than VirCarlaEnv so
 # TrafficLayer processes it first (ascending-port order) -- its advisory is then in
-# bucket B before VirCarlaEnv is published. Advisor = 400, VirCarlaEnv = 440.
+# bucket B before VirCarlaEnv is published. Advisor = 4400, VirCarlaEnv = 4440.
 #
 # Run: run_sumo_carla_l2.bat (one click): CARLA + SUMO + TrafficLayer +
-# py_ego_speed_advisor.py (client 400) + VirCarlaEnv (client 440).
+# py_ego_speed_advisor.py (client 4400) + VirCarlaEnv (client 4440).
 # =============================================================================
 
 SimulationSetup:
@@ -40,11 +40,11 @@ ApplicationSetup:
     -   type: ego
         attribute: { id: ['ego'], radius: [500] }
         ip: ['127.0.0.1']
-        port: [400]     # py_ego_speed_advisor.py (external L2 controller)
+        port: [4400]     # py_ego_speed_advisor.py (external L2 controller)
     -   type: ego
         attribute: { id: ['ego'], radius: [500] }
         ip: ['127.0.0.1']
-        port: [440]     # VirCarlaEnv (the Carla bridge / ego owner)
+        port: [4440]     # VirCarlaEnv (the Carla bridge / ego owner)
 
 XilSetup:
     EnableXil: false
@@ -80,7 +80,7 @@ CarlaSetup:
     CarlaServerPort: 2000
 
     CarlaClientIP: 127.0.0.1
-    CarlaClientPort: 440           # VirCarlaEnv connects here (matches subscription[1])
+    CarlaClientPort: 4440           # VirCarlaEnv connects here (matches subscription[1])
 
     TrafficRefreshRate: 0.1
     CarlaTimeStep: 0.05

@@ -7,7 +7,12 @@
 #include <cstring>
 
 #include "TrafficHelper.h"
+#include "PlatformCompat.h"
+#ifdef _WIN32
 #include "DSProxyMode.h"
+#else
+#include <csignal>   // #65: POSIX replacement for SetConsoleCtrlHandler
+#endif
 
 #include "RealSimVersion.h"
 
@@ -147,12 +152,9 @@ void ConfigureSumoLibraryPath(const ConfigHelper& config) {
 
 const bool ENABLE_TIMING = false;
 
-typedef struct Timer_t {
-	LARGE_INTEGER StartingTime;
-	LARGE_INTEGER EndingTime;
-	LARGE_INTEGER ElapsedMicroseconds;
-	LARGE_INTEGER Frequency;
-};
+// #65: the Timer_t struct that stood here was dead -- one instance was declared
+// and its Frequency queried, then never read. Removed rather than ported; the
+// live timing path below uses std::chrono::steady_clock.
 
 ConfigHelper Config_c;
 SocketHelper Sock_c;
@@ -193,7 +195,7 @@ void performCleanup(bool emergencyShutdown) {
 			printf("Client notification complete.\n");
 
 			// Give clients time to receive and process shutdown notification
-			Sleep(100);
+			FIXS::Platform::sleepMs(100);
 		}
 		catch (const std::exception& e) {
 			printf("Warning: Error notifying clients: %s\n", e.what());
@@ -239,6 +241,7 @@ void performCleanup(bool emergencyShutdown) {
 	printf("Shutdown complete.\n");
 }
 
+#ifdef _WIN32
 BOOL WINAPI CtrlHandler(DWORD fdwCtrlType)
 {
 	switch (fdwCtrlType)
@@ -277,6 +280,27 @@ BOOL WINAPI CtrlHandler(DWORD fdwCtrlType)
 		return FALSE;
 	}
 }
+#else
+// #65: POSIX counterpart of the console control handler above.
+//
+// Deliberately narrower than the Windows version: it only raises the graceful
+// shutdown flag and lets the main loop do the cleanup on its next iteration.
+// Windows CTRL_CLOSE_EVENT / CTRL_LOGOFF_EVENT run performCleanup() straight
+// from the handler because the OS kills the process ~5 s later and there is no
+// loop iteration left to rely on. POSIX imposes no such deadline, so calling
+// the (not async-signal-safe) cleanup path from inside a handler would buy
+// nothing and risk deadlocking on a lock the interrupted code already held.
+extern "C" void CtrlHandler(int signum)
+{
+	switch (signum) {
+	case SIGINT:  printf("SIGINT caught\n\n");  break;
+	case SIGTERM: printf("SIGTERM caught\n\n"); break;
+	case SIGHUP:  printf("SIGHUP caught\n\n");  break;
+	default:      break;
+	}
+	g_shutdown.shutdownRequested = true;
+}
+#endif
 
 static void show_usage(std::string name)
 {
@@ -378,6 +402,7 @@ int main(int argc, char* argv[]) {
 	printf("==================================================\n");
 
 	// control-c handles
+#ifdef _WIN32
 	if (SetConsoleCtrlHandler(CtrlHandler, TRUE))
 	{
 		//printf("\nThe control-c handler is set.\n");
@@ -387,26 +412,54 @@ int main(int argc, char* argv[]) {
 		printf("\nERROR: Could not set control-c handler");
 		exit(-1);
 	}
+#else
+	// #65: sigaction WITHOUT SA_RESTART, deliberately -- signal() would be a
+	// one-liner but is wrong here.
+	//
+	// glibc's signal() installs handlers with SA_RESTART, which RESTARTS a
+	// blocking call that a signal interrupts. The handler below only raises
+	// g_shutdown.shutdownRequested; the flag is read by the main loop. So with
+	// SA_RESTART, a TrafficLayer parked in select()/accept() waiting for a
+	// client never returns to the loop, never reads the flag, and ignores
+	// SIGTERM forever -- observed for real: a `timeout 15` run survived for
+	// days holding its port, which then blocked every later run with
+	// EADDRINUSE.
+	//
+	// Clearing SA_RESTART makes the blocking call return EINTR instead, which
+	// is exactly what the recv/select paths already check for
+	// (kSocketErrInterrupted), so the loop reaches the flag and exits.
+	{
+		struct sigaction sa;
+		memset(&sa, 0, sizeof(sa));
+		sa.sa_handler = CtrlHandler;
+		sigemptyset(&sa.sa_mask);
+		sa.sa_flags = 0;               // NOT SA_RESTART
+		if (sigaction(SIGINT,  &sa, nullptr) != 0 ||
+			sigaction(SIGTERM, &sa, nullptr) != 0 ||
+			sigaction(SIGHUP,  &sa, nullptr) != 0)
+		{
+			printf("\nERROR: Could not set control-c handler");
+			exit(-1);
+		}
+	}
+#endif
 
 
 	string TrafficLayerErrorFile = "TrafficLayer.err";
 
 	auto simStartTimestamp = chrono::system_clock::to_time_t(chrono::system_clock::now());
-	char simStartTimestampChar[100];
-	ctime_s(simStartTimestampChar, sizeof simStartTimestampChar, &simStartTimestamp);
+	string simStartTimestampChar = FIXS::Platform::formatCTime(simStartTimestamp);
 	fstream f(TrafficLayerErrorFile, std::fstream::in | std::fstream::out | std::fstream::app);
 	f << endl << "=============================================" << endl;
 	f << "Traffic Layer Starts at  " << simStartTimestampChar << endl;
 	f.close();
 
 	
-	string LogPath = ".\\RealSim_tmp";
-	if (CreateDirectoryA(LogPath.c_str(), NULL) ||
-		ERROR_ALREADY_EXISTS == GetLastError())
-	{
-		// CopyFile(...)
-	}
-	else
+	// #65: forward slashes throughout -- Win32 accepts them everywhere a
+	// backslash works, whereas a literal ".\\RealSim_tmp" on Linux would create
+	// a single directory whose NAME contains a backslash.
+	string LogPath = "./RealSim_tmp";
+	if (!FIXS::Platform::createDirectory(LogPath))
 	{
 		// Failed to create directory.
 		printf("cannot create RealSim_tmp folder, exiting...");
@@ -420,21 +473,19 @@ int main(int argc, char* argv[]) {
 	time(&rawtime);
 	timeinfo = localtime(&rawtime);
 
-	char formatTimeBuffer[100];
-	strftime(formatTimeBuffer, 100, "%Y%m%d_%H%M%S", timeinfo);
-	snprintf(MasterLogNameChar, sizeof(char) * 100, ".\\RealSim_tmp\\TrafficLayer_%s.log", formatTimeBuffer);
-	DWORD dwAttrib = GetFileAttributesA(MasterLogNameChar);
+	// 15 chars + NUL for "%Y%m%d_%H%M%S". Sized to the actual format so the
+	// compiler can prove the snprintf below cannot truncate.
+	char formatTimeBuffer[32];
+	strftime(formatTimeBuffer, sizeof formatTimeBuffer, "%Y%m%d_%H%M%S", timeinfo);
+	snprintf(MasterLogNameChar, sizeof(char) * 100, "./RealSim_tmp/TrafficLayer_%s.log", formatTimeBuffer);
 
-	bool logNameExist = (dwAttrib != INVALID_FILE_ATTRIBUTES &&
-		!(dwAttrib & FILE_ATTRIBUTE_DIRECTORY));
+	bool logNameExist = FIXS::Platform::fileExists(MasterLogNameChar);
 
 	int iFile = 1;
 	while (logNameExist) {
-		snprintf(MasterLogNameChar, sizeof(char) * 100, ".\\RealSim_tmp\\TrafficLayer_%s_%d.log", formatTimeBuffer,iFile);
-		DWORD dwAttrib = GetFileAttributesA(MasterLogNameChar);
+		snprintf(MasterLogNameChar, sizeof(char) * 100, "./RealSim_tmp/TrafficLayer_%s_%d.log", formatTimeBuffer,iFile);
 		iFile++;
-		logNameExist = (dwAttrib != INVALID_FILE_ATTRIBUTES &&
-			!(dwAttrib & FILE_ATTRIBUTE_DIRECTORY));	
+		logNameExist = FIXS::Platform::fileExists(MasterLogNameChar);
 	}
 	
 	string MasterLogName(MasterLogNameChar);
@@ -539,9 +590,15 @@ int main(int argc, char* argv[]) {
 	// is bypassed and we return its exit code. The bypass is intentional for
 	// 0.9.0 to avoid risking SUMO/legacy regressions; absorption into a
 	// unified loop is tracked by issue #117 (XIL orchestrator).
+	// #65: DSProxyMode/VissimDSProxyHelper LoadLibrary() PTV's proprietary
+	// DrivingSimulatorProxy.dll, so both TUs are Windows-only and are excluded
+	// from the Linux target's source list. Reaching this branch on Linux is
+	// impossible anyway -- ConfigHelper rejects a VISSIM config at parse time.
+#ifdef _WIN32
 	if (Config_c.VissimSetup.EnableDSProxy) {
 		return FIXS::DSProxy::runDSProxyMode(Config_c);
 	}
+#endif
 
 	// initialize Traffic Layer setup variables
 	bool ENABLE_REALSIM = true;
@@ -565,7 +622,12 @@ int main(int argc, char* argv[]) {
 	vector <int> selfServerPortUserInput = {};
 
 	vector <int> vissimSock;
+	// Index-stable: actualClientSock[iC] pairs with selfServerPortUserInput[iC]
+	// for every declared client, whether or not it is connected yet. activeIdx
+	// lists the ones currently being served, ascending -- which is also the
+	// sequential-overlay order a later client depends on.
 	vector <int> actualClientSock;
+	vector <int> activeIdx;
 
 	// config Traffic Layer setup variables
 	if (Config_c.SimulationSetup.EnableRealSim) {
@@ -612,7 +674,7 @@ int main(int argc, char* argv[]) {
 
 	ENABLE_VEH_SIMULATOR = Config_c.CarMakerSetup.EnableCosimulation;
 	ENABLE_CARLA = Config_c.CarlaSetup.EnableCosimulation;
-	ENABLE_CARLA_EXTERNAL_CONTROL = Config_c.CarlaSetup.EnableExternalControl;
+	ENABLE_CARLA_EXTERNAL_CONTROL = (Config_c.EgoSetup.Dynamics == "virenv");
 	if (ENABLE_VERBOSE) {
 		//FILE* f = fopen(MasterLogName.c_str(), "a");
 		//fprintf(f, "\n============================================");
@@ -751,10 +813,11 @@ int main(int argc, char* argv[]) {
 	/********************************************
 	* Timing Analysis
 	*********************************************/
-	LARGE_INTEGER StartingTime, EndingTime, ElapsedMicroseconds;
-	LARGE_INTEGER Frequency;
-
-	QueryPerformanceFrequency(&Frequency);
+	// #65: was QueryPerformanceCounter/LARGE_INTEGER. steady_clock is the
+	// portable equivalent and already carries its own tick frequency, so the
+	// separate QueryPerformanceFrequency call is no longer needed.
+	std::chrono::steady_clock::time_point StartingTime, EndingTime;
+	long long ElapsedMicroseconds = 0;
 
 	/********************************************
 	* Connection Setups
@@ -836,13 +899,56 @@ int main(int argc, char* argv[]) {
 		Sock_c.disableWaitClientTrigger();
 
 		if (!ENABLE_VEH_SIMULATOR) {
-			if (Sock_c.initConnection(TrafficLayerErrorFile) > 0) {
+			// #86: with a warm-up configured, bind and listen now but do not block
+			// waiting for the clients -- the main loop accepts them when the
+			// warm-up ends. Their connect() still succeeds immediately (the socket
+			// is listening), so nothing on the client side changes; TrafficLayer
+			// just stops waiting for them before it can start warming up.
+			Sock_c.DeferAcceptClients = Config_c.SimulationSetup.WarmUpUntilEgoEntry ||
+				Config_c.SimulationSetup.WarmUpTime > 0;
+
+			// `< 0`, not `> 0`. initConnection returns -1 for every failure and 0
+			// for success, so the old test could never fire: a failed socket
+			// setup fell through as though it had worked, and TrafficLayer went
+			// on to send on descriptors it never got -- "send() failed: Socket
+			// operation on non-socket", then a GRACEFUL shutdown and exit 0. A
+			// supervisor cannot tell that from a clean run. The VISSIM branch
+			// above has always tested `< 0`; this one did not.
+			if (Sock_c.initConnection(TrafficLayerErrorFile) < 0) {
 				printf("Connect to SUMO failed! Make sure start Traffic Simulator first and start one instance of VISSIM/SUMO \n");
 				exit(-1);
 			}
 
-			for (int i = 0; i < Sock_c.clientSock.size(); i++) {
-				actualClientSock.push_back(Sock_c.clientSock[i]);
+			actualClientSock.assign(Sock_c.clientSock.size(), 0);
+			if (!Sock_c.DeferAcceptClients) {
+				for (int i = 0; i < (int)Sock_c.clientSock.size(); i++) {
+					actualClientSock[i] = Sock_c.clientSock[i];
+					activeIdx.push_back(i);
+				}
+			}
+			else if (!Config_c.SimulationSetup.WarmUpServePorts.empty()) {
+				// These clients have to OBSERVE the warm-up (see WarmUpServePorts):
+				// accept them now, blocking as TrafficLayer did before warm-ups
+				// existed, and serve them from the first step. Everyone else is
+				// accepted when the warm-up ends.
+				vector<int> servedIdx;
+				for (int i = 0; i < (int)selfServerPortUserInput.size() &&
+				                i < (int)Sock_c.clientSock.size(); i++) {
+					for (int p : Config_c.SimulationSetup.WarmUpServePorts) {
+						if (selfServerPortUserInput[i] == p) { servedIdx.push_back(i); break; }
+					}
+				}
+				if (!servedIdx.empty()) {
+					if (Sock_c.acceptClients(TrafficLayerErrorFile, &servedIdx) < 0) {
+						printf("Accepting the warm-up clients failed\n");
+						exit(-1);
+					}
+					for (int i : servedIdx) {
+						actualClientSock[i] = Sock_c.clientSock[i];
+						activeIdx.push_back(i);
+						printf("Serving port %d through the warm-up.\n", selfServerPortUserInput[i]);
+					}
+				}
 			}
 		}
 
@@ -898,9 +1004,6 @@ int main(int argc, char* argv[]) {
 	MsgServer_c.getConfig(Config_c);
 	MsgClient_c.getConfig(Config_c);
 
-	Timer_t TimerDelay = { 0 };
-	QueryPerformanceFrequency(&TimerDelay.Frequency);
-
 	///********************************************
 	//* Start connection
 	//*********************************************/
@@ -919,10 +1022,18 @@ int main(int argc, char* argv[]) {
 
 	PERF_INIT("TrafficLayerPerf.log");
 
-	bool isVeryFirstStep = true; 
+	bool isVeryFirstStep = true;
 
-	bool isEgoExist = false;
-	bool isInitialTimeFinished = false;
+	// Warm-up state (#86). One flag for both triggers: while it is false the FIXS
+	// boundary is closed -- the loop returns to the top before any client I/O, and
+	// the clients have not even been accepted yet.
+	const bool WARMUP_CONFIGURED = Config_c.SimulationSetup.WarmUpUntilEgoEntry ||
+		Config_c.SimulationSetup.WarmUpTime > 0;
+	bool warmUpFinished = !WARMUP_CONFIGURED;
+
+	// Clients are accepted once, after the warm-up. Already true here when
+	// initConnection() accepted them before the loop (no warm-up, no CarMaker).
+	bool clientsAccepted = !ENABLE_VEH_SIMULATOR && !WARMUP_CONFIGURED;
 
 	//while (simTime <= tSimuEnd && ii < nT) {
 	while (!g_shutdown.shutdownRequested) {
@@ -965,17 +1076,6 @@ int main(int argc, char* argv[]) {
 		PERF_LOG("t=%.2f vehicles_in_network=%d\n", simTime, (int)MsgServer_c.VehDataRecv_um.size());
 #endif
 
-		if (ENABLE_VEH_SIMULATOR && isVeryFirstStep) {
-			if (Sock_c.initConnection(TrafficLayerErrorFile) > 0) {
-				printf("Connect to SUMO failed! Make sure start Traffic Simulator first and start one instance of VISSIM/SUMO \n");
-				exit(-1);
-			}
-
-			for (int i = 0; i < Sock_c.clientSock.size(); i++) {
-				actualClientSock.push_back(Sock_c.clientSock[i]);
-			}
-		}
-
 		if (ENABLE_VERBOSE) {
 			printf("\n===========New time step==============\n");
 			printf("===========SimTime %f==============\n", simTime);
@@ -990,19 +1090,92 @@ int main(int argc, char* argv[]) {
 			printf("===========SimTime %f==============\n", simTime);
 		}
 
-		// run sumo unitial initial time finished
-		if ((Config_c.SimulationSetup.SimulationMode == 4 || Config_c.SimulationSetup.SimulationMode == 5) && !isInitialTimeFinished) {
-			Traffic_c.runSimulation(Config_c.SimulationSetup.SimulationModeParameter);
-			isInitialTimeFinished = true;
+		// ===================================================================
+		// 			Warm-up gate (#86)
+		// ===================================================================
+		// While the warm-up runs the FIXS boundary is CLOSED: this block returns
+		// to the top of the loop before every client send/recv below, and no
+		// client has been accepted yet, so CARLA's map load and CarMaker's start-up
+		// overlap the warm-up instead of queueing ahead of it.
+		//
+		// The two triggers are exclusive (ConfigHelper enforces it) because they
+		// are different loops: WarmUpTime is a single batch step that observes
+		// nothing on the way, WarmUpUntilEgoEntry has to look between steps.
+		if (!warmUpFinished) {
+			if (Config_c.SimulationSetup.WarmUpTime > 0) {
+				printf("Warm-up: advancing the traffic simulator to t=%.2f with the FIXS boundary closed...\n",
+					Config_c.SimulationSetup.WarmUpTime);
+				Traffic_c.runSimulation(Config_c.SimulationSetup.WarmUpTime);
+				Traffic_c.getSimulationTime(&simTime);
+				printf("Warm-up complete at t=%.2f\n", simTime);
+				warmUpFinished = true;
+			}
+			else if (Traffic_c.isWarmUpEgoInNetwork(&simTime)) {
+				warmUpFinished = true;
+			}
+			else if (activeIdx.empty()) {
+				// Tick again; nothing downstream sees this step.
+				continue;
+			}
+			// else: some clients must OBSERVE the warm-up (WarmUpServePorts), so
+			// fall through and run the ordinary exchange for them. What they see
+			// is a feed identical to a run with no warm-up at all -- which is the
+			// point: a controller that learns the road by watching it cannot be
+			// handed the road already in motion and be expected to agree with a
+			// run that watched it from the start.
 		}
 
-		if ((Config_c.SimulationSetup.SimulationMode == 1 || Config_c.SimulationSetup.SimulationMode == 2) && !isEgoExist) {
-			if (Traffic_c.checkIfEgoExist(&simTime)) {
-				// continue the code to sync VISSIM/SUMO with clients
-				isEgoExist = true;
-			}else{
-				// otherwise just continue running the simulation
-				continue;
+		// ===================================================================
+		// 			Accept the clients (once, after the warm-up)
+		// ===================================================================
+		// Without a warm-up this is a no-op: initConnection() already accepted
+		// before the loop (or, on the CarMaker path, does so here on the first
+		// step exactly as it always has). With one, it waits until the warm-up is
+		// actually over -- otherwise the clients that were meant to sit it out
+		// would be pulled in on its first step.
+		if (!clientsAccepted && warmUpFinished) {
+			clientsAccepted = true;
+
+			if (ENABLE_VEH_SIMULATOR) {
+				if (Sock_c.initConnection(TrafficLayerErrorFile) > 0) {
+					printf("Connect to SUMO failed! Make sure start Traffic Simulator first and start one instance of VISSIM/SUMO \n");
+					exit(-1);
+				}
+				// Index-stable, and ascending: actualClientSock[iC] must keep pairing
+				// with selfServerPortUserInput[iC], and the sequential overlay depends
+				// on the order. Anyone served through the warm-up is already in here.
+				actualClientSock.assign(Sock_c.clientSock.size(), 0);
+				activeIdx.clear();
+				for (int i = 0; i < (int)Sock_c.clientSock.size(); i++) {
+					actualClientSock[i] = Sock_c.clientSock[i];
+					activeIdx.push_back(i);
+				}
+			}
+			else if (WARMUP_CONFIGURED) {
+				// Bound and listening since before the loop; only the blocking
+				// accept was held back until now -- and only for the clients that
+				// sat the warm-up out. Asking for the ones already served would
+				// block in select() on a listening socket no one is going to
+				// connect to again, which hangs the handover at ego entry.
+				vector<int> pending;
+				for (int i = 0; i < (int)Sock_c.clientSock.size(); i++) {
+					if (find(activeIdx.begin(), activeIdx.end(), i) == activeIdx.end())
+						pending.push_back(i);
+				}
+				if (!pending.empty() &&
+				    Sock_c.acceptClients(TrafficLayerErrorFile, &pending) < 0) {
+					printf("Accepting clients after the warm-up failed\n");
+					exit(-1);
+				}
+				// Index-stable, and ascending: actualClientSock[iC] must keep pairing
+				// with selfServerPortUserInput[iC], and the sequential overlay depends
+				// on the order. Anyone served through the warm-up is already in here.
+				actualClientSock.assign(Sock_c.clientSock.size(), 0);
+				activeIdx.clear();
+				for (int i = 0; i < (int)Sock_c.clientSock.size(); i++) {
+					actualClientSock[i] = Sock_c.clientSock[i];
+					activeIdx.push_back(i);
+				}
 			}
 		}
 
@@ -1020,7 +1193,7 @@ int main(int argc, char* argv[]) {
 
 			if (ENABLE_REALSIM && !g_shutdown.trafficSimulatorClosed) {
 				if (Traffic_c.recvFromTrafficSimulator(&simTime, MsgServer_c) < 0) {
-					if (WSAGetLastError() != WSAEINTR) {
+					if (FIXS::Platform::socketErrorCode() != FIXS::Platform::kSocketErrInterrupted) {
 
 						printf("WARNING: receive from traffic simulator fails\n");
 
@@ -1065,14 +1238,13 @@ int main(int argc, char* argv[]) {
 		///****************************************************
 		if (ENABLE_TIMING) {
 
-			QueryPerformanceCounter(&EndingTime);
-			ElapsedMicroseconds.QuadPart = EndingTime.QuadPart - StartingTime.QuadPart;
-			ElapsedMicroseconds.QuadPart *= 1000000;
-			ElapsedMicroseconds.QuadPart /= Frequency.QuadPart;
+			EndingTime = std::chrono::steady_clock::now();
+			ElapsedMicroseconds = std::chrono::duration_cast<std::chrono::microseconds>(
+				EndingTime - StartingTime).count();
 
 			fstream debugLog;
 			debugLog.open("timing_sumo.txt", fstream::in | fstream::out | fstream::app);
-			debugLog << simTime << ";" << ElapsedMicroseconds.QuadPart / 1000000.0 << endl;
+			debugLog << simTime << ";" << ElapsedMicroseconds / 1000000.0 << endl;
 			debugLog.close();
 		}
 
@@ -1086,7 +1258,7 @@ int main(int argc, char* argv[]) {
 				MsgClient_c.clearSendStorage();
 				MsgClient_c.clearRecvStorage();   // #174 sequential: B (client-return bucket) starts empty this tick
 
-				for (unsigned int iC = 0; iC < actualClientSock.size(); iC++) {
+				for (int iC : activeIdx) {
 				//for (unsigned int iC = actualClientSock.size()-1; iC > 0; iC--) {
 					//!!!! NEED TO DISTRIBUTE MsgServer_c data to MsgClient_c
 					//!!!! MsgServer_c VehDataRecv_um TlsDataRecvAll_v DetDataRecvAll_v ==>>> MsgClient_c VehDataSend_v[iclient]  VehIdSend_v[iclient] DetDataSend_v[iclient] TlsDataSend_v[iclient]
@@ -1109,7 +1281,7 @@ int main(int argc, char* argv[]) {
 					for (auto it : pubSrc) {
 						if (ENABLE_VEH_SIMULATOR) {
 							// if id is ego, and is the first socket (XIL), send it 
-							if (it.second.id.compare(Config_c.CarMakerSetup.EgoId) == 0 && selfServerPortUserInput[iC] != Config_c.CarMakerSetup.CarMakerPort && Config_c.CarMakerSetup.EnableEgoSimulink) {
+							if (it.second.id.compare(Config_c.EgoSetup.Id) == 0 && selfServerPortUserInput[iC] != Config_c.CarMakerSetup.CarMakerPort && Config_c.CarMakerSetup.EnableEgoSimulink) {
 								MsgClient_c.VehDataSend_um[actualClientSock[iC]].push_back(it.second);
 							}
 							// if is the CarMakerPort or only have one socket (both vehicle simualtor and XIL), send it
@@ -1231,7 +1403,8 @@ int main(int argc, char* argv[]) {
 					// (last-writer-wins per id; feeds the NEXT client's overlaid publish).
 					int simStateRecvC; float simTimeRecvC;
 					if (Sock_c.recvData(actualClientSock[iC], &simStateRecvC, &simTimeRecvC, MsgClient_c) < 0) {
-						if (WSAGetLastError() != WSAEINTR && WSAGetLastError() != WSAEFAULT)
+						if (FIXS::Platform::socketErrorCode() != FIXS::Platform::kSocketErrInterrupted &&
+						FIXS::Platform::socketErrorCode() != FIXS::Platform::kSocketErrFault)
 							printf("ERROR: receive from client fails\n");
 						g_shutdown.shutdownRequested = true;
 						break;
@@ -1281,7 +1454,7 @@ int main(int argc, char* argv[]) {
 		}
 
 		if (ENABLE_TIMING) {
-			QueryPerformanceCounter(&StartingTime);
+			StartingTime = std::chrono::steady_clock::now();
 		}
 
 		///****************************************************

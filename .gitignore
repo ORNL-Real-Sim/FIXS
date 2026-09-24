@@ -36,6 +36,14 @@
 
 **/__pycache__/*
 
+# Python virtualenvs - never commit one. 158 MiB of a committed .venv/ is already
+# stranded in this repo's history (#255) and cannot be removed without a rewrite;
+# this entry is what stops it happening again.
+.venv/
+**/.venv/
+venv/
+**/venv/
+
 **/x64/*
 **/.vs/*
 
@@ -51,11 +59,15 @@ CommonLib/*.a
 # Single-header amalgamation - not used in any source file
 CommonLib/ryml_all.hpp
 
-CommonLib/libevent/build/*
-CommonLib/libevent/out/build/*
 CommonLib/yaml-cpp/build/*
 CommonLib/yaml-cpp/out/build/*
-CommonLib/libsumo/out/build/*
+# Native C++ deps - NOT committed (#109, #238). Acquired at setup time by
+# scripts/initialize_fixs.ps1 -> scripts/dispatch/fetch_native_deps.ps1, which
+# downloads checksum-verified zips from the rolling 'fixs-native-deps' release.
+# libsumo was ~430 MB of unverified binaries in git and was silently missing
+# geos_c.dll/geos.dll for months (#70) - a fetched, checksum-verified zip
+# produced by one reproducible path replaces it.
+CommonLib/libsumo/
 CommonLib/libcarla/*
 CommonLib/slprj/*
 
@@ -232,6 +244,9 @@ tests/WorldModels/Demo/fcd_*.xml
 tests/WorldModels/Demo/bev_dump.jsonl
 tests/WorldModels/Demo/wm_*.csv
 tests/WorldModels/Demo/*.csv
+
+# Ignore large SUMO output files
+fcd.xml
 
 # #177 regression harness: generated derived configs
 tests/Python/*/_regress_config.yaml

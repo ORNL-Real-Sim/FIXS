@@ -1,46 +1,36 @@
 <!--
-TITLE FORMAT: Use the convention #<issue_number>/<short_description>
-For multiple issues: #<issue1> #<issue2>/<short_description>
-Examples:
-  - #27/carla lights placement
-  - #55 #56/migrate to libtraci libsumo
+TITLE FORMAT: #<issue_number>/<short_description>
+  multiple issues:  #55 #56/migrate to libtraci libsumo
+  sibling repo:     FIXS_Applications#13/--doctor, --version, --log
+                    (write the repo name in full -- a bare #13 resolves to FIXS
+                     issue 13, which is a different piece of work)
+  no issue:         file one first; if the change genuinely has no tracker
+                    (release line syncs, merge plumbing), leave the title plain
 -->
 
 ## Summary
-Describe what this PR does.
-e.g., Implements lane merging logic in `TrafficLayer`, fixes YAML parsing issue in config loader.
+What this PR does and why. Use your own sub-headings -- narrative structure is
+fine, and usually better than a checklist for anything non-trivial.
 
-## Related Issues / Tasks
-Closes #123 or relates to a maintenance task, bug report, feature request, or documentation update.
-List IDs or links here if applicable.
+## Related Issues
+Closes #___
 
-## Type of Change  
-- [ ] Bug fix  
-- [ ] New feature  
-- [ ] Maintenance / Refactor  
-- [ ] Documentation  
-- [ ] Test case / scenario update
+Sibling repos, if applicable: `FIXS_Applications#__`, `Digital-Twin-Library#__`,
+`ProprietaryFiles#__`.
 
-## Affected Modules / Components  
-List the modules, files, or subsystems this PR touches.  
-
-## Test Cases  
-What test cases were run? Add command-line examples, test IDs, or links to simulation configs.  
-
-## Environment  
-Only fill in the tools used for testing this PR:  
+## Environment
+Only the tools you actually tested against -- leave the rest blank:
 - Python version:
 - MATLAB/Simulink/dSPACE version:
 - SUMO version:
 - VISSIM version:
 - IPG CarMaker version:
 
-## Checklist  
-- [ ] Code compiles/runs as expected  
-- [ ] Tests pass locally  
-- [ ] Documentation is updated (if applicable)  
-- [ ] Relevant issues are linked  
-- [ ] Version-specific changes are noted (if any)
+## Checklist
+- [ ] Code compiles/runs as expected
+- [ ] Tests pass locally
+- [ ] Documentation is updated (if applicable)
+- [ ] Issue linked above
 
-## Additional Notes (optional)  
-Add screenshots, logs, known issues, or design decisions if needed.
+## Additional Notes (optional)
+Screenshots, logs, known issues, or design decisions.

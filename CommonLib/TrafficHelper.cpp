@@ -1,5 +1,6 @@
 #include "TrafficHelper.h"
 #include "FixsProtocol.h"   // fixs::kFeedPeriodS - one FIXS exchange == one traffic step
+
 #include <stdexcept>
 
 
@@ -32,6 +33,31 @@ static int tlsStateToColor(char tlsState) {
 	default:  return 0;
 	}
 }
+
+#ifdef ENABLE_LIBSUMO
+// #70: libsumocpp.dll is delay-loaded (TrafficLayer.vcxproj <DelayLoadDLLs>), so a
+// missing runtime dependency does not surface at startup - it surfaces on the first
+// libsumo call, which is Simulation::start(). That failure arrives as a Win32 loader
+// exception (0xC06D007E), NOT a C++ exception, so the try/catch around start() cannot
+// catch it and TrafficLayer dies with no message in the console or TrafficLayer.err.
+// Loading the DLL explicitly first turns that into a normal, catchable error.
+static void libsumoPreflight() {
+#ifdef WIN32
+#ifdef _DEBUG
+	const char* dllName = "libsumocppD.dll";
+#else
+	const char* dllName = "libsumocpp.dll";
+#endif
+	if (LoadLibraryA(dllName) == NULL) {
+		printf("ERROR: cannot load %s (GetLastError=%lu).\n", dllName, GetLastError());
+		printf("       A runtime dependency is missing from CommonLib/libsumo/bin.\n");
+		printf("       Re-fetch the native deps: scripts\\dispatch\\fetch_native_deps.ps1\n");
+		throw std::runtime_error(std::string("failed to load ") + dllName +
+			" - missing runtime dependency in CommonLib/libsumo/bin");
+	}
+#endif
+}
+#endif
 
 //CentralCtrl CentralCtrl_g;
 
@@ -71,17 +97,52 @@ void TrafficHelper::connectionSetup(string trafficIp, int trafficPort, int nClie
 #ifdef ENABLE_LIBSUMO
 		// -----------------------------------------------------------------------
 		// OPTION A: Direct launch via libsumo (headless only, no GUI)
-		// This is the active implementation
+		// OPT-IN, not the default: enabled by #define ENABLE_LIBSUMO in
+		// TrafficHelper.h, which is commented out. Stock builds take OPTION B.
+		// libsumo on Windows cannot drive sumo-gui - SUMO silently falls back to
+		// headless ("Libsumo on Windows does not work with GUI"), so use OPTION B
+		// whenever a visible network is wanted.
 		// -----------------------------------------------------------------------
+		// #70: libsumo runs SUMO *inside this process*. There is no TraCI server and
+		// no second client, so the multi-client options below are not just useless
+		// here, they are actively harmful:
+		//   --num-clients : meaningless without a TraCI server.
+		//   --remote-port : DO NOT ADD. It makes SUMO open a real TraCI server and
+		//                   block inside start() until a separate client connects,
+		//                   which never happens in-process -> TrafficLayer hangs.
+		// Ordering (setOrder) is likewise a multi-client concept and is rejected by
+		// libsumo at runtime - see the guard below.
+		//
+		// Those two settings are user-facing YAML keys (SumoSetup.NumClients,
+		// SumoSetup.ExecutionOrder). Dropping them silently would let a config ask
+		// for something the build cannot do and still appear to run, so report it.
+		if (Config_c->SumoSetup.NumClients != 1) {
+			printf("ERROR: SumoSetup.NumClients = %d, but this build embeds SUMO via libsumo.\n",
+				Config_c->SumoSetup.NumClients);
+			printf("       libsumo runs SUMO in-process with no TraCI server, so there is exactly\n");
+			printf("       one client and additional clients could never connect.\n");
+			printf("       Use a libtraci build (comment out ENABLE_LIBSUMO) for multi-client runs,\n");
+			printf("       or set NumClients: 1.\n");
+			throw std::runtime_error("SumoSetup.NumClients > 1 is not supported by a libsumo build "
+				"(no TraCI server; use libtraci or set NumClients: 1)");
+		}
+		if (order != 1) {
+			// Not fatal: with a single in-process client the ordering is simply moot.
+			printf("WARNING: SumoSetup.ExecutionOrder = %d is ignored in libsumo mode.\n", order);
+			printf("         Client ordering is a multi-client TraCI concept and libsumo rejects\n");
+			printf("         setOrder(). The in-process simulation is the only client.\n");
+		}
+		libsumoPreflight();
 		try {
 			std::vector<std::string> cmd = {"sumo", "-c", Config_c->SumoSetup.SumoConfigFile, "--start",
-				"--step-length", kTrafficStepArg,
-				"--num-clients", std::to_string(Config_c->SumoSetup.NumClients)};
+				"--step-length", kTrafficStepArg};
 
 			printf("Launching SUMO via libsumo::Simulation::start()...\n");
 			libsumo::Simulation::start(cmd);
-			libsumo::Simulation::setOrder(order);
-			printf("SUMO launched successfully via libsumo\n");
+			// NOTE: no setOrder() here. libsumo throws "Multi client support
+			// (including connection switching) is not implemented in libsumo."
+			// A non-default ExecutionOrder was already reported above.
+			printf("SUMO launched successfully via libsumo (in-process, headless)\n");
 		}
 		catch (const std::exception& e) {
 			printf("ERROR: Failed to start SUMO via libsumo: %s\n", e.what());
@@ -137,6 +198,17 @@ void TrafficHelper::connectionSetup(string trafficIp, int trafficPort, int nClie
 	}
 	else {
 		// Original behavior: connect to existing SUMO instance
+#ifdef ENABLE_LIBSUMO
+		// #70: libsumo embeds the simulation in this process; it cannot attach to a
+		// SUMO that is already running elsewhere. Both calls below are libtraci-only
+		// and throw at runtime under libsumo, so fail loudly with an actionable
+		// message instead of dying inside the library.
+		printf("ERROR: EnableAutoLaunch is false, but this build embeds SUMO via libsumo.\n");
+		printf("       libsumo cannot attach to an externally running SUMO instance.\n");
+		printf("       Set EnableAutoLaunch: true, or build without ENABLE_LIBSUMO to use libtraci.\n");
+		throw std::runtime_error("libsumo build cannot connect to an external SUMO instance "
+			"(set EnableAutoLaunch: true, or build with libtraci)");
+#else
 		try {
 			SUMO_TRACI_NAMESPACE::Simulation::init(trafficPort, libsumo::DEFAULT_NUM_RETRIES, trafficIp);
 			SUMO_TRACI_NAMESPACE::Simulation::setOrder(order);
@@ -145,6 +217,7 @@ void TrafficHelper::connectionSetup(string trafficIp, int trafficPort, int nClie
 			printf("ERROR: Failed to connect to SUMO at %s:%d - %s\n", trafficIp.c_str(), trafficPort, e.what());
 			throw;
 		}
+#endif
 	}
 
 	/********************************************
@@ -185,7 +258,12 @@ void TrafficHelper::connectionSetup(string trafficIp, int trafficPort, int nClie
 	VehDataSubscribeList.push_back(libsumo::VAR_SPEED_FACTOR);
 	// get next speed limit
 	// handle it at beginning when this vehicle enters
-	VehDataSubscribeList.push_back(libsumo::VAR_VIA);
+	// #86: subscribed but never read -- parserSumoSubscription has no
+	// VehDataSubscribeTraciResults[VAR_VIA] anywhere, so SUMO serialises a string
+	// list per vehicle per step that is then discarded. Commented rather than
+	// deleted: it is one of the few upcoming-route variables, and whoever wants
+	// it back should see that it used to be here.
+	//VehDataSubscribeList.push_back(libsumo::VAR_VIA);
 	// next link
 	// retrieved as part of the speed limit information
 	
@@ -462,6 +540,11 @@ void TrafficHelper::getConfig() {
 		Config_c->getVehSubscriptionList(Config_c->ApplicationSetup.VehicleSubscription, edgeSubscribeId_v, vehicleSubscribeId_v, subscribeAllVehicle, pointSubscribeId_v, vehicleTypeSubscribedId_v);
 	}
 
+	// #86: the warm-up watches BOTH layers' by-id subscriptions, not the either/or
+	// list above -- ConfigHelper builds that union so the trigger sees the XIL ego
+	// even when the application layer is the one TrafficLayer talks to.
+	warmupEgoId_v = Config_c->WarmUpEgoIds;
+
 	// #176: the `all` subscription means every vehicle in the network, unbounded.
 	// If a radius was also configured alongside `all`, it is ignored — warn so the
 	// config author is not surprised.
@@ -493,13 +576,34 @@ int TrafficHelper::sendToTrafficSimulator(double simTime, MsgHelper Msg_c) {
 }
 
 
+// Which layer owns this vehicle's motion, if the traffic simulator does not?
+// One test for what used to be two conditions at two call sites (FIXS#305).
+TrafficHelper::ExternalEgoOwner TrafficHelper::externalEgoOwnerOf(const std::string& vehId) const {
+
+	// VirEnv FIRST: the two id sets can coincide when EgoSetup.Id was inferred,
+	// and testing CarMaker first would moveToXY a vehicle nobody added.
+	if (ENABLE_CARLA && ENABLE_CARLA_EXTERNAL_CONTROL &&
+		find(Config_c->CarlaSetup.InterestedIds.begin(), Config_c->CarlaSetup.InterestedIds.end(), vehId)
+			!= Config_c->CarlaSetup.InterestedIds.end()) {
+		return ExternalEgoOwner::VirEnv;
+	}
+
+	if (ENABLE_VEH_SIMULATOR && !Config_c->EgoSetup.Id.empty() &&
+		vehId == Config_c->EgoSetup.Id) {
+		return ExternalEgoOwner::VehSimulator;
+	}
+
+	return ExternalEgoOwner::None;
+}
+
+
 int TrafficHelper::addEgoVehicle(double simTime) {
 
 	if (SUMO_OR_VISSIM.compare("SUMO") == 0) {
 		if (ENABLE_VEH_SIMULATOR) {
 			// !!!!check if what received is ego vehicle
 			// use default type if not specified!!
-			string idStr = Config_c->CarMakerSetup.EgoId;
+			string idStr = Config_c->EgoSetup.Id;
 
 			// Get all vehicle IDs from SUMO
 			vector<string> vehicleIds = SUMO_TRACI_NAMESPACE::Vehicle::getIDList();
@@ -509,7 +613,7 @@ int TrafficHelper::addEgoVehicle(double simTime) {
 
 			// if ego not exist yet, add it
 			if (!vehicleExist) {
-				string typeStr = Config_c->CarMakerSetup.EgoType;
+				string typeStr = Config_c->EgoSetup.Type;
 
 				// if is empty
 				if (typeStr.size() == 0) {
@@ -569,32 +673,48 @@ int TrafficHelper::addEgoVehicleFromXY(double simTime, std::string vehicleId, st
 }
 
 
-int TrafficHelper::checkIfEgoExist(double* simTime) {
+// Is any warm-up ego in the network yet? (#86)
+//
+// "Any", not "all": if egos A and B enter at 100 s and 150 s and the warm-up
+// waited for both, then from 100-150 s A is on the road being driven by SUMO's
+// car-following model while its XIL is still held behind a closed boundary --
+// its entry would be simulated by the wrong thing. Stopping at the first arrival
+// has no such failure: B simply is not in the network yet, which is the ordinary
+// no-warm-up situation.
+//
+// Replaces checkIfEgoExist, which returned from inside the first loop iteration
+// on BOTH branches (so only one id was ever checked) and fell off the end with
+// no return value at all when the subscription list was empty.
+bool TrafficHelper::isWarmUpEgoInNetwork(double* simTime) {
 
-	if (SUMO_OR_VISSIM.compare("SUMO") == 0) {
-		*simTime = SUMO_TRACI_NAMESPACE::Simulation::getTime();
-		vector <string> VehIdInSimulator = SUMO_TRACI_NAMESPACE::Vehicle::getIDList();
-
-		// check if subscribed vheicle is in the network
-		for (auto& iter : vehicleSubscribeId_v) {
-			string idStr = iter.first;
-
-			// if any one of vehicle has not been subscribed yet
-			if (find(VehIdInSimulator.begin(), VehIdInSimulator.end(), idStr) != VehIdInSimulator.end()) {
-				return 1;
-			}
-			else {
-				return 0;
-			}
-
-			// only check the first vehicle, which considered as the ego vehicle
-			// break;
-		}
+	if (SUMO_OR_VISSIM.compare("SUMO") != 0) {
+		// Unreachable: ConfigHelper rejects a warm-up on VISSIM, because
+		// TrafficLayer does not own the VISSIM clock. Kept explicit so this can
+		// never silently answer "no" forever the way it used to.
+		return false;
 	}
-	else {
+
+	*simTime = SUMO_TRACI_NAMESPACE::Simulation::getTime();
+	vector <string> VehIdInSimulator = SUMO_TRACI_NAMESPACE::Vehicle::getIDList();
+
+	for (auto& idStr : warmupEgoId_v) {
+		if (find(VehIdInSimulator.begin(), VehIdInSimulator.end(), idStr) != VehIdInSimulator.end()) {
+			printf("Warm-up complete: ego '%s' entered the network at t=%.2f\n",
+				idStr.c_str(), *simTime);
+			return true;
+		}
+
+		// #65: reached when vehicleSubscribeId_v is empty, i.e. nothing is
+		// subscribed yet, so no ego is present. Previously control fell off the
+		// end of this non-void function and returned garbage -- undefined
+		// behaviour that MSVC never diagnosed and gcc's -Wreturn-type caught.
+		// It matters because this gates SimulationMode 1 ("wait until the ego
+		// enters the network"): a garbage non-zero would declare the ego
+		// present before it exists.
 		return 0;
 	}
 
+	return false;
 }
 
 int TrafficHelper::getSimulationTime(double* simTime) {
@@ -607,14 +727,25 @@ int TrafficHelper::getSimulationTime(double* simTime) {
 	}
 }
 
+// Advance the traffic simulator to an absolute time in ONE call -- the WarmUpTime
+// path (#86). SUMO runs to endTime internally, so there is no per-step TraCI round
+// trip and no opportunity for anything else to be observed on the way; that is why
+// WarmUpTime and WarmUpUntilEgoEntry are mutually exclusive.
+//
+// Verified to work with a second TraCI client attached (the topology where an
+// application-layer controller holds order 2): both clients land exactly on
+// endTime. SUMO only advances as fast as the OTHER client steps, so a controller
+// that keeps doing per-step socket I/O during its own warm-up bounds this.
 int TrafficHelper::runSimulation(double endTime) {
 	if (SUMO_OR_VISSIM.compare("SUMO") == 0) {
 		SUMO_TRACI_NAMESPACE::Simulation::step(endTime);
 		return 1;
 	}
-	else {
-		return 0;
-	}
+	// VISSIM drives its own clock through the DriverModel DLL; there is nothing to
+	// batch-step here. ConfigHelper rejects a warm-up on VISSIM so this cannot be
+	// reached -- it used to return 0 while the caller marked the warm-up done,
+	// which is how mode 4 became a silent no-op on VISSIM.
+	return -1;
 }
 
 
@@ -714,95 +845,39 @@ int TrafficHelper::sendToSUMO(double simTime, MsgHelper Msg_c) {
 				}
 			}
 
-			// Does Carla external control own this id? Must be checked FIRST: when
-			// the CarMakerSetup section is absent, CarMakerSetup.EgoId is inferred
-			// from the lone subscription and can equal the Carla ego id -- the CM
-			// branch below would then shadow the Carla injection (and moveToXY a
-			// vehicle that was never added). Carla ownership is the more specific
-			// condition (requires EnableExternalControl + id in InterestedIds).
-			const bool carlaOwnsId = ENABLE_CARLA && ENABLE_CARLA_EXTERNAL_CONTROL &&
-				find(Config_c->CarlaSetup.InterestedIds.begin(), Config_c->CarlaSetup.InterestedIds.end(), idStr) != Config_c->CarlaSetup.InterestedIds.end();
+			// ONE mirror for an externally-driven ego, whichever layer owns it.
+			// The two places it still branches on the owner are marked below;
+			// neither is a difference in mechanism (FIXS#305).
+			const ExternalEgoOwner egoOwner = externalEgoOwnerOf(idStr);
 
-			// if vehicle simulator and is ego
-			if (!carlaOwnsId && ENABLE_VEH_SIMULATOR && idStr.compare(Config_c->CarMakerSetup.EgoId) == 0) {
-				// !!!!check if what received is ego vehicle 
-				// use default type if not specified!!
-				
-				//// if ego not exist yet, add it
-				//if (find(VehIdInSimulator.begin(), VehIdInSimulator.end(), idStr) == VehIdInSimulator.end()) {
-				//	string typeStr = Msg_c.VehDataSend_um[0][iV].type;
+			if (egoOwner != ExternalEgoOwner::None) {
 
-				//	// if is empty
-				//	if (typeStr.size() == 0) {
-				//		traci.vehicle.add(idStr, "");
-				//	}
-				//	else {
-				//		traci.vehicle.add(idStr, "", typeStr);
-				//	}
-				//	traci.vehicle.setColor(idStr, libsumo::TraCIColor(255, 0, 0));
-				//}
-				// otherwise, move it
-				{
-					if (ENABLE_EXT_DYN) {
-						SUMO_TRACI_NAMESPACE::Vehicle::setPreviousSpeed(idStr, speed); // setting speed at (k) will be reflected at (k) "immediately", i.e., be considered in the next integration
-					}
-					else {
+				const double positionX = (double)Msg_c.VehDataSend_um[0][iV].positionX;
+				const double positionY = (double)Msg_c.VehDataSend_um[0][iV].positionY;
+				const double heading   = (double)Msg_c.VehDataSend_um[0][iV].heading;
+				const std::string vehicleType = Msg_c.VehDataSend_um[0][iV].type;
+				const bool vehicleExist =
+					find(VehIdInSimulator.begin(), VehIdInSimulator.end(), idStr) != VehIdInSimulator.end();
 
-						double positionX = (double)Msg_c.VehDataSend_um[0][iV].positionX;
-						double positionY = (double)Msg_c.VehDataSend_um[0][iV].positionY;
-						double positionZ = (double)Msg_c.VehDataSend_um[0][iV].positionZ;
-						double heading = (double)Msg_c.VehDataSend_um[0][iV].heading;
-
-						SUMO_TRACI_NAMESPACE::Vehicle::moveToXY(idStr, "", -1, positionX, positionY, heading, 6); // keepRoute 110 => 6
-						//bit0(keepRoute = 1 when only this bit is set)
-							//1: The vehicle is mapped to the closest edge within it's existing route. If no suitable position is found within 100m mapping fails with an error.
-							//0 : The vehicle is mapped to the closest edge within the network.If that edge does not belong to the original route, the current route is replaced by a new route which consists of that edge only.If no suitable position is found within 100m mapping fails with an error.When using the sublane model the best lateral position that is fully within the lane will be used.Otherwise, the vehicle will drive in the center of the closest lane.
-						//bit1(keepRoute = 2 when only this bit is set)
-							//1 : The vehicle is mapped to the exact position in the network(including the exact lateral position).If that position lies outside the road network, the vehicle stops moving on it's own accord until it is placed back into the network with another TraCI command. (if keeproute = 3, the position must still be within 100m of the vehicle route)
-							//0 : The vehicle is always on a road
-						//bit2(keepRoute = 4 when only this bit is set)
-							//1 : lane permissions are ignored when mapping
-							//0 : The vehicle is mapped only to lanes that allow it's vehicle class
-
-					}
-
-					if (VehicleMessageField_set.find("lightIndicators") != VehicleMessageField_set.end()) {
-						SUMO_TRACI_NAMESPACE::Vehicle::setSignals(idStr, (int)Msg_c.VehDataSend_um[0][iV].lightIndicators);
-					}
-
-				}
-			}
-			// if carla is enabled and the reveiced id is within the interested ids
-			else if (carlaOwnsId) {
-
-				double positionX = (double)Msg_c.VehDataSend_um[0][iV].positionX;
-				double positionY = (double)Msg_c.VehDataSend_um[0][iV].positionY;
-				double positionZ = (double)Msg_c.VehDataSend_um[0][iV].positionZ;
-				double heading = (double)Msg_c.VehDataSend_um[0][iV].heading;
-				string vehicleType = Msg_c.VehDataSend_um[0][iV].type;
-				// If the Intertested Vehicle is not in sumo
-				bool vehicleExist = false;
-				for (const std::string& vehId : VehIdInSimulator) {
-					if (vehId == idStr) {
-						vehicleExist = true;
-					}
-				}
 				try {
-					// Add ONCE (re-adding every step resets the pending vehicle so it
-					// never departs), then moveToXY EVERY step: per SUMO semantics
-					// moveToXY also works on not-yet-departed vehicles -- it INSERTS
-					// them at the given position (default departPos would otherwise
-					// stay blocked behind bg traffic entering the same edge).
-					if (carlaInjectedIds_.find(idStr) == carlaInjectedIds_.end()) {
+					// --- 1. inject once, if the scenario did not declare the ego ---
+					// OWNER-SPECIFIC, and about timing: CarMaker's ego is added at
+					// the first step by addEgoVehicle(), and a pending vehicle is
+					// absent from getIDList, so adding here too would throw. Add
+					// ONCE, then moveToXY every step (it inserts a pending vehicle).
+					// An ego the scenario declared is adopted, not recreated.
+					if (egoOwner == ExternalEgoOwner::VirEnv &&
+						!vehicleExist && externalEgoInjected_.find(idStr) == externalEgoInjected_.end()) {
 						addEgoVehicleFromXY(simTime, idStr, vehicleType, positionX, positionY);
-						carlaInjectedIds_.insert(idStr);
+						externalEgoInjected_.insert(idStr);
 					}
-					// #174 off-map guard: getPosition (n-1) is where SUMO placed the ego on
-					// the PREVIOUS moveToXY. If that's far from what we fed then, SUMO could
-					// not keep the ego on the drivable network (snapped/failed) -> the ego
-					// left the road. Isolated try so a getPosition hiccup can't skip the move.
-					auto itLast = carlaLastFed_.find(idStr);
-					if (itLast != carlaLastFed_.end()) {
+
+					// --- 2. off-map guard (#174), warn-only ------------------------
+					// SUMO's placement on the PREVIOUS moveToXY vs what we fed it:
+					// far apart means the ego left the drivable network. Isolated
+					// try so a getPosition hiccup cannot skip the move below.
+					auto itLast = externalEgoLastFedXY_.find(idStr);
+					if (itLast != externalEgoLastFedXY_.end()) {
 						try {
 							auto sp = SUMO_TRACI_NAMESPACE::Vehicle::getPosition(idStr);
 							double ex = sp.x - itLast->second.first, ey = sp.y - itLast->second.second;
@@ -810,16 +885,35 @@ int TrafficHelper::sendToSUMO(double simTime, MsgHelper Msg_c) {
 						}
 						catch (...) {}
 					}
-					SUMO_TRACI_NAMESPACE::Vehicle::moveToXY(idStr, "", -1, positionX, positionY, heading, 6);
-					carlaLastFed_[idStr] = std::make_pair(positionX, positionY);
-					// #174: setSpeed with the ACTUAL Carla speed -- the `.speed` field, NOT
-					// `speedDesired` (the L2 command). This makes SUMO's getSpeed the true ego
-					// speed so it is safe to read from the SUMO side and background car-following
-					// sees the real speed. (The old bug used speedDesired -> a "shadow speed".)
-					SUMO_TRACI_NAMESPACE::Vehicle::setSpeed(idStr, (double)Msg_c.VehDataSend_um[0][iV].speed);
+
+					// --- 3. write the externally-computed motion in ----------------
+					if (ENABLE_EXT_DYN) {
+						// the plant integrates the ego; speed at (k) applies at (k)
+						SUMO_TRACI_NAMESPACE::Vehicle::setPreviousSpeed(idStr, speed);
+					}
+					else {
+						// SumoSetup.EgoKeepRoute for BOTH owners now; CarMaker used
+						// to hardcode 6. See ConfigHelper.h for what the bits cost.
+						SUMO_TRACI_NAMESPACE::Vehicle::moveToXY(idStr, "", -1, positionX, positionY, heading,
+							Config_c->SumoSetup.EgoKeepRoute);
+						externalEgoLastFedXY_[idStr] = std::make_pair(positionX, positionY);
+
+						// OWNER-SPECIFIC. Makes SUMO's getSpeed the ego's ACTUAL speed
+						// (never speedDesired, which under L2 is the command), because
+						// background car-following reads it. Not yet applied to the
+						// CarMaker ego -- untested there, not inapplicable (FIXS#305).
+						if (egoOwner == ExternalEgoOwner::VirEnv) {
+							SUMO_TRACI_NAMESPACE::Vehicle::setSpeed(idStr, (double)Msg_c.VehDataSend_um[0][iV].speed);
+						}
+					}
+
+					// --- 4. indicators, when the application publishes them ---------
+					if (VehicleMessageField_set.find("lightIndicators") != VehicleMessageField_set.end()) {
+						SUMO_TRACI_NAMESPACE::Vehicle::setSignals(idStr, (int)Msg_c.VehDataSend_um[0][iV].lightIndicators);
+					}
 				}
 				catch (const std::exception& e) {
-					printf("Carla external-control inject '%s' failed: %s\n", idStr.c_str(), e.what());
+					printf("Externally-driven ego '%s' mirror failed: %s\n", idStr.c_str(), e.what());
 				}
 
 			}
@@ -867,6 +961,24 @@ int TrafficHelper::sendToSUMO(double simTime, MsgHelper Msg_c) {
 						*/
 
 						SUMO_TRACI_NAMESPACE::Vehicle::setSpeedMode(idStr, Config_c->SumoSetup.SpeedMode); // 000000 most checks off
+
+						/*
+						Lane changing, by the same route: SUMO owns the vehicle,
+						so the mode is set here and not by an application. A
+						client has no TraCI connection of its own -- it holds a
+						FIXS port, and reaching for traci from one fails with
+						"Not connected".
+
+						bit0/1: strategic   (reach the lane the route needs)
+						bit2/3: cooperative (make room for others)
+						bit4/5: speed gain  (change lane to go faster)
+						bit6/7: keep right
+						597 is SUMO's default, every motive on. 512 leaves only
+						strategic: follows its route, never changes lane by choice.
+						*/
+						if (Config_c->SumoSetup.LaneChangeMode >= 0) {
+							SUMO_TRACI_NAMESPACE::Vehicle::setLaneChangeMode(idStr, Config_c->SumoSetup.LaneChangeMode);
+						}
 						//SUMO_TRACI_NAMESPACE::Vehicle::setSpeedMode(idStr, 0); // 000000 most checks off
 						//SUMO_TRACI_NAMESPACE::Vehicle::setSpeedMode(idStr, 24); // 011000
 						//SUMO_TRACI_NAMESPACE::Vehicle::setSpeedMode(idStr, 8); // 001000
@@ -1222,6 +1334,15 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 			vector <string> vehDepartedAll_v = SUMO_TRACI_NAMESPACE::Simulation::getDepartedIDList();
 			for (const string& vid : vehDepartedAll_v) {
 				SUMO_TRACI_NAMESPACE::Vehicle::subscribe(vid, VehDataSubscribeList, 0, tSimuEnd);
+				// #86: subscribe the leader too, so it arrives in the same batch as
+				// everything else. Without this, parserSumoSubscription pays a
+				// getLeader round-trip PER VEHICLE PER STEP - measured at 161/step on
+				// the MLK corridor, 34.7 us each. Only when a precedingVehicle* field
+				// is actually forwarded; the subscription is issued once, on entry.
+				if (NEED_PRECEDING_VEH) {
+					SUMO_TRACI_NAMESPACE::Vehicle::subscribeLeader(
+						vid, Config_c->SumoSetup.PrecedingVehicleLookahead, 0, tSimuEnd);
+				}
 			}
 		}
 
@@ -1454,10 +1575,61 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 		}
 
 
+		// #86 pass 2: the leader's SPEED. Deliberately not done in
+		// parserSumoSubscription: the leader may be parsed after the vehicle that
+		// needs it, so a lookup there would depend on hash iteration order - the
+		// same vehicle could get a real speed on one run and a fallback on the
+		// next. Here every vehicle is parsed, so the map is complete.
+		//
+		// The leader is itself a subscribed vehicle in the ordinary case, so its
+		// speed is already in hand and costs nothing. Only a leader outside the
+		// subscribed set (context-mode configs, or one beyond the subscribed
+		// region) needs asking, and that is counted so a config paying the old
+		// cost is visible in the log instead of only under a profiler.
+		if (NEED_PRECEDING_VEH) {
+			for (auto& it : VehDataRecv_um_tmp) {
+				VehFullData_t& veh = it.second;
+				if (veh.hasPrecedingVehicle == 0) {
+					continue;
+				}
+				auto leadIt = VehDataRecv_um_tmp.find(veh.precedingVehicleId);
+				if (leadIt != VehDataRecv_um_tmp.end()) {
+					veh.precedingVehicleSpeed = leadIt->second.speed;
+				}
+				else {
+					// Leader is not itself subscribed -- usually one that
+					// entered this step, so it has no results yet. Ask SUMO,
+					// exactly as every vehicle did before #86.
+#ifdef RS_DEBUG
+					nLeaderSpeedQueried++;
+#endif
+					veh.precedingVehicleSpeed = SUMO_TRACI_NAMESPACE::Vehicle::getSpeed(
+						veh.precedingVehicleId);
+				}
+			}
+#ifdef RS_DEBUG
+			// Reported as a periodic total, never per step. A step-by-step print
+			// is both noise (6481 lines in one run) and a syscall in the hot loop
+			// -- it would show up as the very cost this change removes.
+			nStepsSinceLeaderReport++;
+			if (nStepsSinceLeaderReport >= 3000) {
+				if (nLeaderIdQueried > 0 || nLeaderSpeedQueried > 0) {
+					printf("leader lookups: %ld id and %ld speed fallbacks over the "
+						"last %ld steps (a leader that is not itself subscribed -- "
+						"usually one that entered this step -- still needs asking)\n",
+						nLeaderIdQueried, nLeaderSpeedQueried, nStepsSinceLeaderReport);
+				}
+				nLeaderIdQueried = 0;
+				nLeaderSpeedQueried = 0;
+				nStepsSinceLeaderReport = 0;
+			}
+#endif
+		}
+
 		// !!!temporary fix
 		// if doing vehicle simulator, e.g., CarMaker, only send limited number of vehicles
 		if (ENABLE_VEH_SIMULATOR) {
-			libsumo::TraCIPosition posEgo = SUMO_TRACI_NAMESPACE::Vehicle::getPosition(Config_c->CarMakerSetup.EgoId);
+			libsumo::TraCIPosition posEgo = SUMO_TRACI_NAMESPACE::Vehicle::getPosition(Config_c->EgoSetup.Id);
 
 			// sort distance, pair distance to ego, vehId
 			vector <pair <double, string>> dist2ego_v;
@@ -1625,7 +1797,7 @@ int TrafficHelper::shouldSendVehicle(std::string vehicleId, double simTime) {
 		shouldSendFlag = 1;
 	}
 	else if (ENABLE_VEH_SIMULATOR){
-		if (vehicleId.compare(Config_c->CarMakerSetup.EgoId) == 0) {
+		if (vehicleId.compare(Config_c->EgoSetup.Id) == 0) {
 			shouldSendFlag = 1;
 		}
 		else {
@@ -1729,13 +1901,40 @@ void TrafficHelper::parserSumoSubscription(libsumo::TraCIResults VehDataSubscrib
 	CurVehData.hasPrecedingVehicle = 0;
 	CurVehData.precedingVehicleSpeed = -1.0;
 	if (NEED_PRECEDING_VEH) {
-		pair<string, double> leaderIdNSpeed = SUMO_TRACI_NAMESPACE::Vehicle::getLeader(
-			vehId, Config_c->SumoSetup.PrecedingVehicleLookahead);
-		CurVehData.precedingVehicleId = get<0>(leaderIdNSpeed);
-		CurVehData.precedingVehicleDistance = get<1>(leaderIdNSpeed);
+		// The leader rides in this vehicle's own subscription (subscribeLeader), so
+		// the common path costs no round-trip. Unpacking needs care: libtraci has no
+		// VAR_LEADER case, so a (string, double) compound falls through to a generic
+		// rule and arrives as TraCIRoadPosition{edgeID = id, pos = gap}.
+		bool gotSubscribedLeader = false;
+		auto leaderIt = VehDataSubscribeTraciResults.find(libsumo::VAR_LEADER);
+		if (leaderIt != VehDataSubscribeTraciResults.end() && leaderIt->second) {
+			if (auto rp = std::dynamic_pointer_cast<libsumo::TraCIRoadPosition>(leaderIt->second)) {
+				CurVehData.precedingVehicleId = rp->edgeID;
+				CurVehData.precedingVehicleDistance = rp->pos;
+				gotSubscribedLeader = true;
+			}
+		}
+		if (!gotSubscribedLeader) {
+			// The value was ABSENT or an unexpected type -- not "no leader".
+			// Ask SUMO directly: same call as before #86, same answer, just a
+			// round-trip instead of free.
+			// Absent means this vehicle came from a CONTEXT subscription (the
+			// container is subscribed, not the vehicle, so it carries no
+			// VAR_LEADER); unexpected type means a future SUMO returns the pair
+			// differently.
+#ifdef RS_DEBUG
+			nLeaderIdQueried++;
+#endif
+			pair<string, double> leaderIdNGap = SUMO_TRACI_NAMESPACE::Vehicle::getLeader(
+				vehId, Config_c->SumoSetup.PrecedingVehicleLookahead);
+			CurVehData.precedingVehicleId = get<0>(leaderIdNGap);
+			CurVehData.precedingVehicleDistance = get<1>(leaderIdNGap);
+		}
 		if (CurVehData.precedingVehicleId.compare("") != 0) {
 			CurVehData.hasPrecedingVehicle = 1;
-			CurVehData.precedingVehicleSpeed = SUMO_TRACI_NAMESPACE::Vehicle::getSpeed(CurVehData.precedingVehicleId);
+			// precedingVehicleSpeed is filled by fillPrecedingVehicleSpeed() once
+			// every vehicle has been parsed: the leader may be parsed AFTER this
+			// one, so resolving it here would depend on hash iteration order.
 		}
 	}
 
@@ -1760,10 +1959,39 @@ void TrafficHelper::parserSumoSubscription(libsumo::TraCIResults VehDataSubscrib
 		double odo = static_pointer_cast<libsumo::TraCIDouble>(
 			VehDataSubscribeTraciResults[libsumo::VAR_DISTANCE])->value;
 
+		// Externally driven? Its route is then the one thing SUMO still decides for
+		// it, which is what the two guards below protect.
+		// Same test the mirror uses, so the CarMaker ego -- also moveToXY-placed --
+		// gets the per-tick reseed it has always needed (#305).
+		const bool externallyDriven = (externalEgoOwnerOf(vehId) != ExternalEgoOwner::None);
+
 		// seed once per vehicle (or when the route changed): one getNextTLS walk
 		// captures every TLS ahead of this vehicle for the rest of its route.
 		auto cacheIt = VehicleId2Tls_um.find(vehId);
-		if (cacheIt == VehicleId2Tls_um.end() || cacheIt->second.routeId != routeId) {
+		// An externally-driven ego reseeds EVERY tick. The cache is a #177 cost fix:
+		// seed the signals-ahead list once, then locate the nearest by arithmetic
+		// (cumDist - odo). That assumes the odometer only advances with distance
+		// travelled -- false for a moveToXY-placed vehicle, whose odometer freezes
+		// and regresses. Costs one getNextTLS per tick for ONE vehicle; the #177
+		// saving across the other ~180 is untouched. Measurements in FIXS#305.
+		const bool tlsCacheReseeded =
+			(cacheIt == VehicleId2Tls_um.end() || cacheIt->second.routeId != routeId
+			 || externallyDriven);
+		if (tlsCacheReseeded) {
+			// Refresh the cached edge list -- it is read below to reconstruct the
+			// signal head, and a reroute leaves it describing the old route.
+			if (cacheIt != VehicleId2Tls_um.end()) {
+				vector<string> newEdges = SUMO_TRACI_NAMESPACE::Vehicle::getRoute(vehId);
+
+				// GUARD: a route REPLACED BY THE MIRROR, which is not the same event
+				// as a route change -- rerouting is a normal CAV function. SUMO's
+				// replacement consists of that one edge only, which no deliberate
+				// reroute produces. See FIXS#305.
+				if (externallyDriven && newEdges.size() <= 1) {
+					fixs::RS_XIL_GUARD("ego_sumo_route_replaced", 1.0, 0.0);
+				}
+				VehicleId2EdgeList_um[vehId] = std::move(newEdges);
+			}
 			VehTlsCache entry;
 			entry.routeId = routeId;
 			vector<libsumo::TraCINextTLSData> seed = SUMO_TRACI_NAMESPACE::Vehicle::getNextTLS(vehId);
@@ -1807,13 +2035,19 @@ void TrafficHelper::parserSumoSubscription(libsumo::TraCIResults VehDataSubscrib
 					}
 				}
 				if (headIdx < 0) {
-					// Slow path (rare): the vehicle is mid-junction on an internal lane,
-					// or the signal is several edges ahead so its incoming lane is a
-					// best-lane projection rather than the current lane. Get the exact
-					// head straight from getNextTLS for just this step.
+					// Fallback: mid-junction on an internal lane, or the signal is
+					// several edges ahead. Ask getNextTLS -- and MATCH ON THE SIGNAL ID.
+					// Taking nt[0].tlIndex outright staples one light's head onto
+					// another whenever this cache's odometer bookkeeping has drifted
+					// from SUMO's live position, which is what a moveToXY ego does.
+					// No match means SUMO no longer considers t.id upcoming; the seeded
+					// index beats another signal's head. Measurements in FIXS#305.
 					vector<libsumo::TraCINextTLSData> nt =
 						SUMO_TRACI_NAMESPACE::Vehicle::getNextTLS(vehId);
-					headIdx = nt.empty() ? t.index : nt[0].tlIndex;
+					headIdx = t.index;
+					for (const libsumo::TraCINextTLSData& cand : nt) {
+						if (cand.id == t.id) { headIdx = cand.tlIndex; break; }
+					}
 				}
 				CurVehData.signalLightHeadId = headIdx;
 
@@ -1830,20 +2064,57 @@ void TrafficHelper::parserSumoSubscription(libsumo::TraCIResults VehDataSubscrib
 				break;
 			}
 		}
+
+		// (An opt-in RS_EGO_ROUTE_LOG probe lived here while the next-signal loss
+		// was being diagnosed. Removed once the cause was found -- see FIXS#305.)
+
+		// "had a next signal, now has none" is deliberately NOT guarded: the guard
+		// above already covers the interesting half, and the other half is a vehicle
+		// passing its last signal, which is ordinary. See FIXS#305.
 	}
 
 	//=================
 	// get speed limit
 	//=================
 	// retrieve current speed limit
-	tempDoublePtr = static_pointer_cast<libsumo::TraCIDouble> (VehDataSubscribeTraciResults[libsumo::VAR_ALLOWED_SPEED]);
-	tempDoublePtr2 = static_pointer_cast<libsumo::TraCIDouble> (VehDataSubscribeTraciResults[libsumo::VAR_SPEED_FACTOR]);
-	CurVehData.speedLimit = tempDoublePtr->value / tempDoublePtr2->value;
+	// Looked up, not indexed. map::operator[] INSERTS a null shared_ptr when the
+	// subscription did not carry the variable this tick, and the dereference that
+	// follows reads uninitialised memory: measured, this published a speed limit
+	// of -815417536 on the wire for 160 consecutive seconds. The eco controller
+	// consuming it had its allowed speed go garbage at the same instant and its
+	// command collapsed from 10 m/s to 0.1, stopping the ego 240 m short of a red
+	// light it could have crossed.
+	//
 	// VAR_ALLOWED_SPEED is "max speed on the current lane AND speed factor", i.e.
 	// what this particular vehicle will cruise at. Reported as-is so consumers do
 	// not have to reconstruct it (a speedLimit * speedFactor product would also
 	// miss the vType maxSpeed cap that SUMO already applies here).
-	CurVehData.speedFreeFlow = tempDoublePtr->value;
+	auto itAllowed = VehDataSubscribeTraciResults.find(libsumo::VAR_ALLOWED_SPEED);
+	auto itFactor = VehDataSubscribeTraciResults.find(libsumo::VAR_SPEED_FACTOR);
+	bool haveSpeedLimit = false;
+	if (itAllowed != VehDataSubscribeTraciResults.end() && itAllowed->second
+		&& itFactor != VehDataSubscribeTraciResults.end() && itFactor->second) {
+		double allowed = static_pointer_cast<libsumo::TraCIDouble>(itAllowed->second)->value;
+		double factor = static_pointer_cast<libsumo::TraCIDouble>(itFactor->second)->value;
+		if (allowed > 0.0 && factor > 0.0) {
+			CurVehData.speedLimit = allowed / factor;
+			CurVehData.speedFreeFlow = allowed;
+			VehicleId2LastSpeedLimit_um[vehId] = make_pair(CurVehData.speedLimit, allowed);
+			haveSpeedLimit = true;
+		}
+	}
+	if (!haveSpeedLimit) {
+		// A limit does not vanish between two ticks of the same road.
+		auto itLast = VehicleId2LastSpeedLimit_um.find(vehId);
+		if (itLast != VehicleId2LastSpeedLimit_um.end()) {
+			CurVehData.speedLimit = itLast->second.first;
+			CurVehData.speedFreeFlow = itLast->second.second;
+		}
+		else {
+			CurVehData.speedLimit = -1;      // unknown, as speedLimitNext uses
+			CurVehData.speedFreeFlow = -1;
+		}
+	}
 
 	// retrieve next speed limit
 	vector <string> edgeRouteList = VehicleId2EdgeList_um[vehId];
@@ -1874,7 +2145,7 @@ void TrafficHelper::parserSumoSubscription(libsumo::TraCIResults VehDataSubscrib
 	// grade
 	//=================
 	tempDoublePtr = static_pointer_cast<libsumo::TraCIDouble> (VehDataSubscribeTraciResults[libsumo::VAR_SLOPE]);
-	CurVehData.grade = tempDoublePtr->value * M_PI/180;
+	CurVehData.grade = tempDoublePtr->value * kPi/180;
 
 	//=================
 	// get lane change

@@ -7,6 +7,7 @@
 //#include <event2/util.h>
 //#include <event2/event.h>
 
+#include <cstdint>   // #65: uint8_t in sendData(); don't rely on a transitive include
 #include "MsgHelper.h"
 
 #ifndef WIN32
@@ -129,6 +130,47 @@ public:
 
 	int initConnection(std::string errorLogName="");
 
+	// Warm-up support (#86). When set before initConnection(), the sockets are
+	// still created, bound and listen()ed -- so a client's connect() succeeds
+	// exactly as before and lands in the backlog -- but the blocking accept loop
+	// is NOT run. The host calls acceptClients() later, when its warm-up ends.
+	//
+	// The point is not the accept itself (a client that connects early simply
+	// blocks on its first recv either way); it is that TrafficLayer no longer
+	// waits for every client to exist before it starts warming up, so CarMaker's
+	// and CARLA's start-up overlaps the warm-up instead of queueing ahead of it.
+	//
+	// SCOPE: this defers the INBOUND half only -- accepting the clients that
+	// connect to us. It does NOT defer the OUTBOUND half, the ENABLE_SERVER block
+	// that connects to other servers, which still runs inside initConnection
+	// before this returns.
+	//
+	// That is enough today because TrafficLayer is only ever a listener: both of
+	// its socketSetup calls use the selfServerPort-only overload, which sets
+	// NSERVER = 0 / ENABLE_SERVER = 0, and every peer (application layer, XIL /
+	// CarMaker lib, VirCarlaEnv, VISSIM DriverModel) connects in to it. The
+	// outbound path is what those other components use to reach TrafficLayer, and
+	// none of them runs a warm-up.
+	//
+	// If a host ever needs BOTH roles and a warm-up, the outbound connects have to
+	// be deferred too -- otherwise it still blocks waiting for its own server to
+	// exist and the warm-up gains nothing on that half of its peers.
+	bool DeferAcceptClients = false;
+
+	// The blocking "wait for all clients" accept loop. Run automatically by
+	// initConnection() unless DeferAcceptClients is set; call it directly when it
+	// was deferred. Returns 0 on success, -1 on a socket error.
+	// requiredIdx: the client indices this call must see connected before it
+	// returns. nullptr = all of them (the original behaviour). A subset lets a
+	// host accept the clients that have to observe its warm-up now and the rest
+	// when the warm-up ends; ClientConnected[] persists, so the second call only
+	// waits for whoever is still missing. Only the subset's own listening
+	// sockets are watched: taking a connection on a port this call is NOT
+	// waiting for would mark a client connected that nobody is going to serve
+	// -- a readiness probe, say -- and leave the real client stuck unaccepted
+	// in the backlog for the whole warm-up.
+	int acceptClients(std::string errorLogName="", const std::vector<int>* requiredIdx = nullptr);
+
 	// RS_DEBUG master-log target. The host assigns it (TrafficLayer sets it to its
 	// RealSim_tmp/TrafficLayer_<timestamp>.log). When empty -- e.g. the VirtualEnvironment
 	// .lib running inside CarMaker -- RS_DEBUG breadcrumbs fall back to
@@ -204,12 +246,14 @@ public:
 
 	std::vector <struct sockaddr_in> selfServerAddr; /* Local a ddress */
 	std::vector <struct sockaddr_in> clientAddr; /* Client address */
-#ifdef RS_DSPACE
-	std::vector <socklen_t> clientAddrLen;            /* Length of client address data structure */
-#elif WIN32
-	std::vector <int> clientAddrLen;            /* Length of client address data structure */
+#ifdef WIN32
+	std::vector <int> clientAddrLen;                  /* Length of client address data structure */
 #else
-	std::vector <size_t> clientAddrLen;            /* Length of client address data structure */
+	// #65: every POSIX target -- dSPACE/RT and plain Linux alike -- must use
+	// socklen_t here, because that is what accept()'s third parameter points to.
+	// The plain-POSIX branch previously said size_t, which no compiler had ever
+	// checked: it is 64-bit where socklen_t is 32-bit, so it could not compile.
+	std::vector <socklen_t> clientAddrLen;            /* Length of client address data structure */
 #endif
 	std::vector <int> sendClientByte;
 	std::vector <int> recvClientMsgSize;                    /* Size of received message */

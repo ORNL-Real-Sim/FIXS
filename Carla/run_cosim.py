@@ -8,8 +8,8 @@ Windows and Linux.
 
 The very first time this runs on a fresh clone there is no saved config, so it
 auto-invokes carla_env_setup.run_setup() to ask which CARLA to use and remember
-it; every run afterwards is seamless. To switch CARLA later, run carla_env_setup.py
-(or setup_carla.bat / setup_carla.sh), or pass --reconfigure here.
+it; every run afterwards is seamless. To switch CARLA later, run
+`python carla_env_setup.py`, or pass --reconfigure here.
 
 Examples:
   # first run prompts for CARLA, then launches and runs; later runs are seamless:
@@ -18,9 +18,16 @@ Examples:
   # CARLA already running (e.g. an editor in Play, or a RoadRunner map):
   python run_cosim.py --no-launch --no-net-offset \
       --map RP_Ver0529 --sumocfg <cfg> --tl-table <csv> --sumo-gui
+
+  # two machines: CARLA on one, SUMO + the bridge on the other. Either order.
+  python run_cosim.py --serve                    # on the CARLA machine
+  python run_cosim.py --peer 192.168.140.56      # on the traffic machine
 """
 import argparse
+import csv
+import io
 import json
+import re
 import os
 import platform
 import shutil
@@ -29,6 +36,7 @@ import socket
 import subprocess
 import sys
 import time
+import traceback
 import urllib.request
 
 import app_catalog
@@ -46,7 +54,13 @@ except AttributeError:                               # pragma: no cover - old py
     pass
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SYNC = os.path.join(HERE, "sumo", "run_synchronization", "run_synchronization.py")
+# CARLA's own standalone bridge. It lives OUTSIDE Carla/ (#330) because
+# 8_create_zip.ps1 packs Carla/ wholesale and this speaks no FIXS: it drives SUMO
+# over its own TraCI connection and takes no controller, XIL component or
+# TrafficLayer subscription. Reachable only via --standalone-bridge.
+SYNC = os.path.join(os.path.dirname(HERE), "standalone", "run_synchronization",
+                    "run_synchronization.py")
+PY_BRIDGE = os.path.join(HERE, "VirEnv", "mainVirCarla.py")
 FIXS_ROOT = os.path.dirname(HERE)          # FIXS/Carla -> FIXS (the fetched bundle root)
 APP_ROOT = os.path.dirname(FIXS_ROOT)      # FIXS -> the app dir (holds initialize.{sh,ps1})
 
@@ -56,9 +70,17 @@ APP_ROOT = os.path.dirname(FIXS_ROOT)      # FIXS -> the app dir (holds initiali
 # SimulationSetup.TrafficSimulatorPort and CarlaSetup.CarlaClientPort, so editing
 # the yaml moves the ports for every component instead of just some of them.
 DEFAULT_TRACI_PORT = 1337    # SUMO TraCI server (TrafficLayer connects as its client)
-DEFAULT_BRIDGE_PORT = 440    # TrafficLayer serves VirCarlaEnv here
+DEFAULT_BRIDGE_PORT = 4440  # TrafficLayer serves VirCarlaEnv here. >= 1024: below that
+                            # needs root on Linux, and this default lands in every
+                            # config run_cosim generates (#65).
 DEFAULT_CARLA_HOST = "localhost"   # CARLA RPC; CarlaSetup.CarlaServerIP overrides
 DEFAULT_CARLA_PORT = 2000
+
+# How many runs may fail back-to-back before --serve gives up and stops listening.
+# Not unlimited: a host whose CARLA cannot start would otherwise accept peer after
+# peer and fail each one, which on the traffic side is indistinguishable from a
+# service that is simply busy. Any success resets it.
+SERVE_MAX_CONSECUTIVE_FAILURES = 5
 
 # The FIXS exchange period, in seconds - the python mirror of fixs::kFeedPeriodS
 # (CommonLib/FixsProtocol.h). This is a property of the protocol, NOT a knob:
@@ -86,7 +108,10 @@ CARLA_TICK_CHOICES = (0.1, 0.05, 0.025, 0.02, 0.01)
 def _first_group(path, pattern):
     import re
     try:
-        with open(path, encoding="utf-8", errors="ignore") as f:
+        # utf-8-sig: these are the same PowerShell-written files as above. A leading
+        # BOM would not break the searches used here, but reading one member of a
+        # pair BOM-tolerantly and the other not is exactly how that bug survived.
+        with open(path, encoding="utf-8-sig", errors="ignore") as f:
             m = re.search(pattern, f.read())
         return m.group(1) if m else None
     except OSError:
@@ -102,13 +127,20 @@ def _fixs_tag_repo():
     """(tag, repo) from FIXS_VERSION.txt: line 1 is the tag; a 'Source:' line the repo."""
     tag, repo = None, "ORNL-Real-Sim/FIXS"
     try:
-        with open(os.path.join(FIXS_ROOT, "FIXS_VERSION.txt"), encoding="utf-8") as f:
+        # utf-8-SIG: this file is written by scripts/update_fixs.ps1, and under
+        # PowerShell 5.1 `Out-File -Encoding UTF8` means UTF-8 *with* a BOM. Read as
+        # plain utf-8 the BOM survives on line 1 as U+FEFF (bytes EF BB BF) - and
+        # str.strip() does not remove it, because it is not whitespace - so the tag
+        # came out as '<U+FEFF>v0.9.0-alpha', the releases API call built from it
+        # failed, and the freshness check below disabled itself silently on every
+        # Windows install.
+        with open(os.path.join(FIXS_ROOT, "FIXS_VERSION.txt"), encoding="utf-8-sig") as f:
             lines = [ln.strip() for ln in f if ln.strip()]
         if lines:
-            # Line 1 is the tag, but initialize.sh stamps the rolling versions as
-            # "<tag> (<published_at>)" while fetch_fixs.ps1 writes the bare tag. Take
+            # Line 1 is the tag, but a rolling release is stamped as
+            # "<tag> (<published_at>)" while a pinned one writes the bare tag. Take
             # the first field so either form resolves; passing the stamped form to the
-            # releases API 404s and silently disables this check on Linux.
+            # releases API 404s and silently disables this check.
             tag = lines[0].split()[0]
         for ln in lines:
             if ln.lower().startswith("source:"):
@@ -131,37 +163,50 @@ def _remote_fixs_commit(repo, tag, timeout=4.0):
 
 
 def _run_initialize(tag):
-    """Re-fetch the FIXS bundle for <tag> via the app's fetch script (the tag is
-    passed as its argument, so it runs non-interactively). True on success.
+    """Re-fetch the FIXS bundle for <tag> through the app's front door (the tag is
+    passed as an argument, so it runs non-interactively). True on success.
 
-    Two locations, newest first: the app repo moved this out of the root and into
-    scripts/ when run_cosim absorbed it (FIXS_Applications#13), and the engine is
-    fetched from a release rather than pinned to an app checkout - so a bundle
-    this new can sit in a clone laid out either way. Looking for only one of them
-    is how a self-update came to report "initialize.sh not found" on a repo that
-    had simply renamed it."""
+    Goes through run_cosim.bat/.sh rather than reaching for an update script by
+    name. This used to probe a list of filenames per platform, because the app
+    repo had renamed the script once (FIXS_Applications#13) and a bundle this new
+    can sit in a clone laid out either way - so a self-update reported
+    "initialize.sh not found" on a repo that had simply renamed it. That list
+    could only grow: since #272 the updater itself lives in FIXS and is fetched
+    per release, so the ONE thing an app repo is guaranteed to expose is its
+    documented entry point. Naming that instead means the engine no longer tracks
+    any downstream repo's internal layout."""
     if platform.system() == "Windows":
-        names = [os.path.join(APP_ROOT, "scripts", "update_fixs.ps1"),
-                 os.path.join(APP_ROOT, "initialize.ps1")]
-        runner = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]
+        front_door = os.path.join(APP_ROOT, "run_cosim.bat")
+        cmd = ["cmd", "/c", front_door]
     else:
-        names = [os.path.join(APP_ROOT, "scripts", "update_fixs.sh"),
-                 os.path.join(APP_ROOT, "initialize.sh")]
-        runner = ["bash"]
-    script = next((p for p in names if os.path.isfile(p)), None)
-    if script is None:
-        print(f"[cosim] cannot self-update: none of these exist -\n        "
-              + "\n        ".join(names))
+        front_door = os.path.join(APP_ROOT, "run_cosim.sh")
+        cmd = ["bash", front_door]
+    if not os.path.isfile(front_door):
+        print(f"[cosim] cannot self-update: {front_door} not found.")
         return False
-    print(f"[cosim] updating FIXS -> {tag} via {os.path.basename(script)} ...")
-    return subprocess.call(runner + [script, tag]) == 0
+    print(f"[cosim] updating FIXS -> {tag} via {os.path.basename(front_door)} ...")
+    # --update-fixs exits before the front door's bootstrap gate and never re-runs
+    # python, so this cannot recurse back into run_cosim.py.
+    return subprocess.call(cmd + ["--update-fixs", tag]) == 0
 
 
-def maybe_update_fixs(no_check=False):
+def maybe_update_fixs(no_check=False, interactive=None):
     """Detect a local FIXS bundle that diverges from the published rolling release
     and, when interactive, offer to update + relaunch. Advisory only: every failure
-    is swallowed so a run is never blocked by the check."""
-    if no_check or os.environ.get("FIXS_NO_FRESHNESS"):
+    is swallowed so a run is never blocked by the check.
+
+    `interactive` is the caller's answer, not this function's guess. serve_forever
+    re-enters main() for every run, so on a --serve host this is asked again
+    between runs - with the operator long gone and the peer port not yet
+    listening. An advisory prompt must never be what stops a service serving."""
+    # FIXS_REEXEC: env.reexec_under_configured() relaunches us under the configured
+    # interpreter, and this runs before that - so without the guard the child asked the
+    # same question
+    # the parent had just answered, and a wrapper that starts a different python (any
+    # of them: run_cosim.bat finds its own) prompted twice on every run. One bundle,
+    # one question.
+    if (no_check or os.environ.get("FIXS_NO_FRESHNESS")
+            or os.environ.get("FIXS_REEXEC") == "1"):
         return
     try:
         local = _local_fixs_commit()
@@ -176,7 +221,7 @@ def maybe_update_fixs(no_check=False):
             return  # up to date
         print(f"[cosim] local FIXS bundle {local[:8]} diverges from the published "
               f"{tag} ({remote[:8]}).")
-        if not sys.stdin.isatty():
+        if not (sys.stdin.isatty() if interactive is None else interactive):
             print("[cosim] non-interactive; run initialize to update. Continuing.")
             return
         ans = input("[cosim] update the local FIXS bundle now? [y/N]: ").strip().lower()
@@ -186,8 +231,16 @@ def maybe_update_fixs(no_check=False):
         if _run_initialize(tag):
             print("[cosim] FIXS updated; relaunching run_cosim ...")
             os.environ["FIXS_NO_FRESHNESS"] = "1"   # the relaunch is already current
-            os.execv(sys.executable,
-                     [sys.executable, os.path.join(HERE, "run_cosim.py")] + sys.argv[1:])
+            # subprocess, not os.execv. Windows has no exec, so the CRT emulates it
+            # by joining argv into ONE command line WITHOUT quoting - so an
+            # interpreter at 'C:\Program Files\Python39\python.exe' relaunched as
+            #   C:\Program: can't open file '...\main\Files\Python39\python.exe'
+            # CreateProcess still found the .exe by its space-fallback search, but
+            # argv was already split, so python took the tail of its own path as the
+            # script to run. subprocess quotes the vector properly on both OSes, and
+            # is what env.reexec_under_configured already uses for the same reason.
+            cmd = [sys.executable, os.path.join(HERE, "run_cosim.py")] + sys.argv[1:]
+            sys.exit(subprocess.call(cmd))
         print("[cosim] update did not complete; continuing with the current bundle.")
     except Exception as e:
         if os.environ.get("FIXS_DEBUG"):
@@ -236,25 +289,64 @@ def _read_scenario_config(config_yaml):
 
 
 def read_backend(config_yaml):
-    """'py' or 'cpp' from CarlaSetup.EnablePythonBackend. A bool rather than a
-    free-text engine name, so a typo cannot silently pick the wrong bridge.
-    'py' on absence or any parse problem."""
+    """'py' or 'cpp' from CarlaSetup.EnablePythonBackend -- which VirEnvCore runs.
+
+    BOTH are the FIXS-native stack (SUMO + TrafficLayer + a VirEnvCore bridge) and
+    both read the scenario yaml in full; they differ only in the implementation of
+    the bridge:
+
+      'py'  -> Carla/VirEnv/mainVirCarla.py  (CommonLib/VirEnv, #325)
+      'cpp' -> VirCarlaEnv.exe               (CommonLib/VirEnvCore.cpp, #174)
+
+    That is what makes a py run and a cpp run of one scenario directly comparable,
+    which is the point of having two (tests/VirEnv/test_core_parity.py).
+
+    A bool rather than a free-text engine name, so a typo cannot silently pick the
+    wrong bridge. 'py' on absence or any parse problem.
+
+    The standalone run_synchronization.py bridge is NOT one of these: it speaks no
+    FIXS, drives SUMO over its own TraCI connection, and is selected explicitly with
+    --standalone-bridge rather than by a scenario key."""
     ch = _read_scenario_config(config_yaml)
     if ch is None:
         return "py"
     return "py" if ch.Carla_setup["EnablePythonBackend"] else "cpp"
 
 
+def scenario_has_carla(config_yaml):
+    """Whether this scenario yaml declares a CARLA half at all.
+
+    The PRESENCE of the CarlaSetup block, not the truth of anything in it. Every key
+    inside has a default, so no key can carry the answer - an empty block reads back
+    as a complete, plausible CARLA. Writing the block at all is the affirmative act.
+    A yaml without one is a traffic-only scenario: a choice it makes, not a lesser
+    run.
+
+    Unreadable or not yet written counts as yes: generate_config_yaml always emits a
+    CarlaSetup, so answering no here would suppress CARLA for a yaml whose first run
+    creates it."""
+    ch = _read_scenario_config(config_yaml)
+    if ch is None:
+        return True
+    return "CarlaSetup" in ch.raw
+
+
 def read_stack_ports(config_yaml):
     """(traci_port, bridge_port) from the scenario yaml - SUMO's TraCI server
     (SimulationSetup.TrafficSimulatorPort) and the TrafficLayer<->VirCarlaEnv bridge
     (CarlaSetup.CarlaClientPort). Read rather than hard-coded so the yaml stays the
-    single source of truth: the exes get these values from the same file."""
+    single source of truth: the exes get these values from the same file.
+
+    bridge_port is None when the yaml declares no CarlaSetup. Defaulting it there
+    invented a bridge the file never mentions; None makes each caller say what it
+    does when there is no bridge."""
     ch = _read_scenario_config(config_yaml)
     if ch is None:
         return DEFAULT_TRACI_PORT, DEFAULT_BRIDGE_PORT
     try:
         traci_port = int(ch.simulation_setup["TrafficSimulatorPort"] or DEFAULT_TRACI_PORT)
+        if "CarlaSetup" not in ch.raw:
+            return traci_port, None
         bridge_port = int(ch.Carla_setup["CarlaClientPort"] or DEFAULT_BRIDGE_PORT)
         return traci_port, bridge_port
     except (TypeError, ValueError):
@@ -443,16 +535,25 @@ SUMO_CONVENTION = {
 }
 
 
-def resolve_sumo_args(app):
+def resolve_sumo_args(app, app_owns_scenario=False):
     """[(flag, value, origin)] for this run: contract over app over convention.
 
     An app deviates through apps.json `sumo_args` - tracked, reviewed next to the app
     declaration, and valid on every map that app runs against. A null value drops a
     convention flag. A contract flag cannot be overridden: an app that tries is told
-    so rather than silently getting a broken clock."""
+    so rather than silently getting a broken clock.
+
+    `app_owns_scenario` drops the CONVENTION entirely. The convention exists because a
+    Digital-Twin-Library .sumocfg is a SHARED artifact that must not carry one
+    consumer's co-sim requirement - so run_cosim adds it on the command line instead.
+    An app running its own declared sumocfg has no shared artifact and no such
+    problem, and injecting sublane lane-changing into a scenario its author
+    calibrated without it changes results silently. The CONTRACT still applies:
+    --step-length is the FIXS feed, and a scenario cannot opt out of the protocol."""
     args = {}
-    for flag, (value, why) in SUMO_CONVENTION.items():
-        args[flag] = (value, f"convention: {why}")
+    if not app_owns_scenario:
+        for flag, (value, why) in SUMO_CONVENTION.items():
+            args[flag] = (value, f"convention: {why}")
     for flag, value in ((app or {}).get("sumo_args") or {}).items():
         if flag in SUMO_CONTRACT:
             print(f"[cosim] app '{app.get('id')}' sets {flag} in sumo_args; ignoring "
@@ -474,7 +575,8 @@ def print_sumo_args(origins):
         print(f"[cosim]   ->   {flag} {value}".ljust(52) + f"[{origin}]")
 
 
-def sumo_launch_cmd(sumocfg, traci_port, num_clients, gui, autostart, app=None):
+def sumo_launch_cmd(sumocfg, traci_port, num_clients, gui, autostart, app=None,
+                    app_owns_scenario=False):
     """The SUMO command line - ONE builder, used by BOTH bridges.
 
     Three kinds of argument, and that is the whole story:
@@ -494,7 +596,7 @@ def sumo_launch_cmd(sumocfg, traci_port, num_clients, gui, autostart, app=None):
            "--remote-port", str(traci_port),
            "--num-clients", str(num_clients)]
     origins = []
-    for flag, value, origin in resolve_sumo_args(app):
+    for flag, value, origin in resolve_sumo_args(app, app_owns_scenario):
         cmd += [flag, value]
         origins.append((flag, value, origin))
     if gui:
@@ -505,7 +607,10 @@ def sumo_launch_cmd(sumocfg, traci_port, num_clients, gui, autostart, app=None):
 
 
 def cadence_banner(engine, carla_tick, pose_refresh, realtime):
-    """One line stating the whole resolved cadence, printed by both engines.
+    """One line stating the whole resolved cadence, printed by every bridge.
+
+    `engine` is which one is about to run -- "py", "cpp" or "standalone" -- so the
+    banner and the engine line above it always agree.
 
     So that a run never again has to be reverse engineered from three keys and a
     hardcoded grid: it names the feed, the tick, the interpolation factor and the
@@ -534,7 +639,7 @@ def _tl_junction_ids(tl_table):
 
 
 def generate_config_yaml(path, tl_table, carla_host, carla_port, realtime=True,
-                         carla_tick=FIXS_FEED_S, backend="py",
+                         carla_tick=FIXS_FEED_S, backend="cpp",
                          traci_port=DEFAULT_TRACI_PORT, bridge_port=DEFAULT_BRIDGE_PORT):
     """Write a probe-shaped VirCarlaEnv scenario config: mirror EVERY SUMO vehicle
     (#176 all:['true']) into CARLA and sync the tl_table's junctions. Visualization-
@@ -567,10 +672,13 @@ def generate_config_yaml(path, tl_table, carla_host, carla_port, realtime=True,
 # Auto-generated by run_cosim: the per-map co-sim scenario config.
 # Visualization-only: CARLA mirrors every SUMO vehicle; SUMO owns the traffic.
 #
-# CarlaSetup.EnablePythonBackend selects the bridge on the next run:
-#   true  -> the standalone run_synchronization.py bridge
-#   false -> the FIXS-native stack (TrafficLayer + VirCarlaEnv)
-# Edit it here, or override per run with: run_cosim --engine cpp
+# CarlaSetup.EnablePythonBackend selects WHICH VirEnvCore drives the stack:
+#   true  -> Carla/VirEnv/mainVirCarla.py  (the Python core, #325)
+#   false -> VirCarlaEnv.exe               (the C++ core, #174)
+# Both run SUMO + TrafficLayer + a bridge and read this whole file; they exist to
+# be compared. Edit it here, or override per run with: run_cosim --engine cpp
+# CARLA's own run_synchronization.py is not selectable here - it speaks no FIXS;
+# ask for it explicitly with: run_cosim --standalone-bridge
 # Regenerate from scratch with --reimport.
 #
 # What is NOT in this file, on purpose:
@@ -606,8 +714,8 @@ ApplicationSetup:
 {sig}XilSetup:
   EnableXil: false
 CarlaSetup:
-  # true  -> the standalone Python bridge (run_synchronization.py); ignores the rest
-  # false -> the FIXS-native stack (TrafficLayer + VirCarlaEnv), which reads it fully
+  # Which VirEnvCore drives the FIXS-native stack. Both read this file in full.
+  # true  -> Carla/VirEnv/mainVirCarla.py (Python)   false -> VirCarlaEnv.exe (C++)
   EnablePythonBackend: {use_py}
   EnableVerboseLog: true
   EnableCosimulation: true
@@ -641,22 +749,126 @@ CarlaSetup:
     return path
 
 
+HANDOFF_TIMEOUT_S = 60
+
+
+def start_app(app, config_yaml=None, timeout=HANDOFF_TIMEOUT_S, sumo_only=False,
+              sumocfg=None):
+    """Start the app's `launch` command and collect the scenario it reports.
+
+    Returns (proc, sumocfg-or-None). ONE process spans both moments a controller
+    cares about: it builds its scenario before SUMO exists, and it subscribes to
+    TrafficLayer once that exists. So this starts it, waits for its answer, and hands
+    the still-running process back to be supervised with the rest of the stack.
+
+    It answers by writing json to FIXS_HANDOFF - a file, not stdout, because attaching
+    a pipe means having to drain it for the whole run or the child blocks on a full
+    buffer. Polling for the file is why the app must write it atomically (tmp +
+    os.replace); at 4 Hz a non-atomic write WILL eventually be read half-finished.
+
+    Not answering is allowed: an app happy with the bundle's scenario reports {} (or
+    nothing at all, and waits out the timeout), so `launch` is usable by an app that
+    never learns this protocol exists. Dying before answering is not - that is a crash,
+    and continuing would run a stack whose controller is already gone."""
+    argv, cwd = app_catalog.launch_command(app)
+    if not argv:
+        sys.exit(f"[cosim] '{app['id']}' declares launch '{app['launch']}' but it is "
+                 f"not there; not running the stack without its controller.")
+    # RealSim_tmp, not %TEMP%: it is gitignored, and it is already where the
+    # TrafficLayer logs go, so a run that goes wrong has everything in one place.
+    handoff_dir = os.path.join(app_catalog.app_root(), "RealSim_tmp")
+    os.makedirs(handoff_dir, exist_ok=True)
+    handoff = os.path.join(handoff_dir, f"handoff_{app['id']}_{os.getpid()}.json")
+    if os.path.isfile(handoff):
+        os.remove(handoff)      # a crashed run's leftover is not this run's answer
+    # Three variables, and only three. FIXS_PYTHON because a launch command is a
+    # script and a script cannot pick an interpreter - while THIS one is the one we
+    # re-exec'd into and applied the app's requirements.txt to, so an app that went
+    # looking for its own could find a different env that never received them.
+    # FIXS_CONFIG_YAML because the app must read the same yaml TrafficLayer gets -
+    # the wire format is SimulationSetup.VehicleMessageField, so two yamls that
+    # disagree decode the same bytes differently - and which one it is depends on
+    # what was chosen from the config menu, so it cannot be a hardcoded basename.
+    env = dict(os.environ, FIXS_HANDOFF=handoff, FIXS_PYTHON=sys.executable)
+    if config_yaml:
+        env["FIXS_CONFIG_YAML"] = config_yaml
+    # FIXS_SUMO_ONLY because the yaml cannot answer "is CARLA in this run". Every
+    # co-sim yaml has a CarlaSetup section - that is what makes it a co-sim yaml -
+    # so an app checking the yaml to decide whether its geometry will be rendered
+    # gets the same answer either way, and one that refuses to run a scenario CARLA
+    # cannot render would refuse the very run that exists to do it without CARLA.
+    # Only run_cosim knows, so run_cosim says.
+    if sumo_only:
+        env["FIXS_SUMO_ONLY"] = "1"
+    # FIXS_SUMOCFG because --sumocfg names the scenario THE USER chose, and an app
+    # that generates its own can only honour that by building FROM it. Without this
+    # the flag reaches SUMO but never the app, so the only thing it could do to a
+    # generating app was bypass it - which for a controller means SUMO running a
+    # scenario with no ego in it while the controller waits for one. Apps are free
+    # to ignore it, and one that does is bypassed exactly as before.
+    if sumocfg:
+        env["FIXS_SUMOCFG"] = sumocfg
+    print(f"[APP]  {app['launch']}")
+    proc = subprocess.Popen(argv, cwd=cwd, env=env)
+    deadline = time.time() + timeout
+    while not os.path.isfile(handoff):
+        if proc.poll() is not None:
+            sys.exit(f"[cosim] '{app['id']}' exited ({proc.returncode}) before "
+                     f"reporting its scenario; not starting the stack.")
+        if time.time() > deadline:
+            print(f"[cosim]   ->   '{app['id']}' reported no scenario within "
+                  f"{timeout}s; using the map's own.")
+            return proc, None
+        time.sleep(0.25)
+    try:
+        with open(handoff, encoding="utf-8") as f:
+            reported = (json.load(f) or {}).get("sumocfg")
+    except (OSError, ValueError) as exc:
+        _kill_pid_tree(proc.pid)
+        sys.exit(f"[cosim] '{app['id']}' wrote an unreadable handoff ({exc}); "
+                 f"see {handoff}.")
+    os.remove(handoff)
+    if reported and not os.path.isfile(reported):
+        _kill_pid_tree(proc.pid)
+        sys.exit(f"[cosim] '{app['id']}' reported a scenario that is not there: "
+                 f"{reported}")
+    if reported:
+        print(f"[cosim] SUMO scenario: '{app['id']}' generated {reported}")
+    return proc, reported
+
+
 def run_native_stack(config_yaml, sumocfg, tl_table, cfg, args, app=None,
-                     ctl_sock=None):
+                     ctl_sock=None, app_owns_scenario=False, app_proc=None,
+                     sumo_only=False, bridge="cpp"):
     """FIXS-native bridge: launch SUMO (TraCI server) + TrafficLayer (-f config) +
-    VirCarlaEnv (-f config -t tl_table). CARLA is already up and the map loaded by
-    run_cosim's preflight. Ports mirror tests/Sumo/Probes/TrafficLayer_SUMO_Carla:
-    both ports come from the yaml (SimulationSetup.TrafficSimulatorPort and
-    CarlaSetup.CarlaClientPort). TrafficLayer is the sole TraCI client,
-    so it steps SUMO (no external controller needed). Blocks on VirCarlaEnv - the
-    co-sim front-end - and tears the others down on exit."""
+    VirCarlaEnv (-f config -t tl_table), plus the app's own `launch` command if it
+    declares one. CARLA is already up and the map loaded by run_cosim's preflight.
+    Ports mirror tests/Sumo/Probes/TrafficLayer_SUMO_Carla: both ports come from the
+    yaml (SimulationSetup.TrafficSimulatorPort and CarlaSetup.CarlaClientPort).
+    TrafficLayer is the sole TraCI client, so it steps SUMO (an app controller
+    subscribes to TrafficLayer on the application port, it does not drive SUMO).
+    Blocks on VirCarlaEnv - the co-sim front-end - and tears the others down on
+    exit.
+
+    sumo_only drops VirCarlaEnv and changes nothing else: same SUMO, same
+    TrafficLayer, same app controller, same ports. It is for driving a scenario
+    CARLA cannot render - a network edited on the SUMO side, or a controller
+    change worth checking before anyone cooks a map for it. With no CARLA
+    front-end there is nothing to block on, so it blocks on the app's controller
+    where there is one and on TrafficLayer where there is not."""
     import shutil
     tl_exe, vce_exe = _native_binaries()
-    missing = [p for p in (tl_exe, vce_exe) if not os.path.isfile(p)]
+    # Only require what this run will actually start: the bridge it selected, and no
+    # bridge at all when there is no CARLA half. The C++ VirCarlaEnv is built only
+    # when the libcarla dep is available, so demanding it for a Python-bridge run -
+    # or for a SUMO-only one - would refuse a stack that has everything it needs.
+    needed = [tl_exe] if sumo_only else [tl_exe, vce_exe if bridge == "cpp" else PY_BRIDGE]
+    missing = [q for q in needed if not os.path.isfile(q)]
     if missing:
-        sys.exit("[cosim] engine 'cpp' needs the FIXS-native binaries, not found:\n  "
-                 + "\n  ".join(missing) + "\nRe-run initialize to fetch the bundle "
-                 "(VirCarlaEnv is built only when the libcarla dep is available).")
+        sys.exit(f"[cosim] engine {bridge!r} needs these, not found:" + "\n  "
+                 + "\n  ".join(missing)
+                 + "\nRe-run initialize to fetch the bundle (VirCarlaEnv is built "
+                   "only when the libcarla dep is available).")
     sumo_bin = "sumo-gui" if args.sumo_gui else "sumo"
     if not shutil.which(sumo_bin):
         sys.exit(f"[cosim] {sumo_bin} not on PATH (install SUMO / add %SUMO_HOME%/bin).")
@@ -674,11 +886,27 @@ def run_native_stack(config_yaml, sumocfg, tl_table, cfg, args, app=None,
     sumo_autostart = read_sumo_autostart(config_yaml) and not args.sumo_no_start
     num_clients = read_sumo_num_clients(config_yaml)
     carla_tick, pose_refresh = read_cadence(config_yaml)
-    print(cadence_banner("cpp", carla_tick, pose_refresh,
+    # `bridge`, not a literal: this function serves BOTH VirEnvCores now, and a
+    # banner that always said "cpp" contradicted the engine line printed two lines
+    # earlier on every Python run.
+    print(cadence_banner(bridge, carla_tick, pose_refresh,
                          read_realtime_pacing(config_yaml)))
+
+    # The mirror of the --sumo-only warning in main(): a run WITH a bridge whose
+    # yaml subscribes nothing to it. TrafficLayer refuses the subscribe, but only
+    # after CARLA has loaded a map. Say it before that is paid for.
+    if not sumo_only and bridge_port is not None and os.path.isfile(config_yaml):
+        _txt = open(config_yaml, encoding="utf-8", errors="ignore").read()
+        if not re.search(rf"^\s*port:\s*\[\s*{bridge_port}\s*\]", _txt, re.MULTILINE):
+            print(f"[cosim]   WARN {os.path.basename(config_yaml)} sets "
+                  f"CarlaSetup.CarlaClientPort {bridge_port}, but no subscription in "
+                  f"it lists that port. TrafficLayer will refuse the bridge's "
+                  f"subscribe - add {bridge_port} to a VehicleSubscription.")
 
     for label, port in (("SUMO (TraCI)", traci_port),
                         ("TrafficLayer (bridge)", bridge_port)):
+        if port is None:
+            continue            # traffic-only scenario: no bridge port to free
         pid = _pid_on_port(port)
         if not pid:
             continue
@@ -695,6 +923,12 @@ def run_native_stack(config_yaml, sumocfg, tl_table, cfg, args, app=None,
                      f"{name} window and re-run.")
 
     procs = []          # [(label, Popen)] in start order
+    if app_proc is not None:
+        # Already running: start_app launched it before SUMO so it could report
+        # its scenario, and it is now waiting for TrafficLayer. Adopting it here
+        # is the whole integration - supervision and teardown are the ones every
+        # other component gets.
+        procs.append((app["id"], app_proc))
 
     def _alive(p):
         return p.poll() is None
@@ -712,7 +946,8 @@ def run_native_stack(config_yaml, sumocfg, tl_table, cfg, args, app=None,
         # Same builder the python bridge's SUMO gets, so the two engines cannot
         # drift apart in what they hand SUMO (they did: see sumo_launch_cmd).
         sumo_cmd, sumo_origins = sumo_launch_cmd(sumocfg, traci_port, num_clients,
-                                                 args.sumo_gui, sumo_autostart, app)
+                                                 args.sumo_gui, sumo_autostart, app,
+                                                 app_owns_scenario)
         # SUMO blocks until ALL num_clients TraCI clients have connected and called
         # setOrder. TrafficLayer is one of them; anything above 1 means you are
         # attaching your own second client, so say so rather than looking hung.
@@ -746,40 +981,77 @@ def run_native_stack(config_yaml, sumocfg, tl_table, cfg, args, app=None,
         tl = subprocess.Popen([tl_exe, "-f", config_yaml])
         procs.append(("TrafficLayer", tl))
         # TrafficLayer serves the bridge port; wait for it before starting
-        # VirCarlaEnv, which connects to it.
-        for _ in range(30):
-            if _port_listening(bridge_port) or not _alive(tl):
-                break
-            time.sleep(0.5)
+        # VirCarlaEnv, which connects to it. A traffic-only scenario has no bridge
+        # port, so there is nothing to wait for and nothing to warn about.
+        if bridge_port is not None:
+            for _ in range(30):
+                if _port_listening(bridge_port) or not _alive(tl):
+                    break
+                time.sleep(0.5)
+        _ports_hint = (f"ports {bridge_port}/{traci_port}" if bridge_port is not None
+                       else f"port {traci_port}")
         if not _check("TrafficLayer", tl,
-                      f"check the config yaml (a bad key, or ports {bridge_port}/"
-                      f"{traci_port} already in use)."):
+                      f"check the config yaml (a bad key, or {_ports_hint} "
+                      f"already in use)."):
             return 1
-        if not _port_listening(bridge_port):
+        if bridge_port is None:
+            print("[cosim]   OK   TrafficLayer serving the yaml's subscriptions "
+                  "(no bridge: the scenario declares no CARLA half)")
+        elif not _port_listening(bridge_port):
             print(f"[cosim]   WARN TrafficLayer is running but port {bridge_port} is not "
-                  f"open yet; VirCarlaEnv may fail to subscribe.")
+                  + ("open yet." if sumo_only else
+                     "open yet; VirCarlaEnv may fail to subscribe."))
         else:
             print(f"[cosim]   OK   TrafficLayer serving the bridge on {bridge_port}")
 
-        vce_cmd = [vce_exe, "-f", config_yaml] + (["-t", tl_table] if tl_table else [])
-        print(f"[VCE]  {os.path.basename(vce_exe)} -f {config_yaml}"
-              + (f" -t {tl_table}" if tl_table else ""))
-        vce = subprocess.Popen(vce_cmd)
-        procs.append(("VirCarlaEnv", vce))
-        time.sleep(3)   # long enough for a config/CARLA-connection failure to surface
-        if not _check("VirCarlaEnv", vce,
-                      f"check CARLA is reachable at {args.carla_host}:{args.carla_port} "
-                      f"and see CarlaClient.log in {os.getcwd()}."):
-            return 1
+        # What the run blocks on. Normally the CARLA bridge: it is the co-sim
+        # front-end, and closing its window is how a run is ended. Without it the
+        # longest-lived thing is the app's controller, and with no app either,
+        # TrafficLayer.
+        if sumo_only:
+            front_name, front = (("TrafficLayer", tl) if app_proc is None
+                                 else (app["id"], app_proc))
+        else:
+            # The two bridges take the same two arguments, so nothing downstream --
+            # supervision, teardown, the "which component died" report -- has to know
+            # which one is running.
+            if bridge == "cpp":
+                bridge_name = "VirCarlaEnv"
+                vce_cmd = [vce_exe, "-f", config_yaml]
+            else:
+                bridge_name = "mainVirCarla"
+                # sys.executable, not a bare "python": run_cosim already re-launched
+                # itself under the interpreter that has the carla wheel, and that is
+                # the only one the bridge can import carla from.
+                vce_cmd = [sys.executable, PY_BRIDGE, "-f", config_yaml]
+            if tl_table:
+                vce_cmd += ["-t", tl_table]
+            print(f"[VCE]  {bridge_name} -f {config_yaml}"
+                  + (f" -t {tl_table}" if tl_table else ""))
+            vce = subprocess.Popen(vce_cmd)
+            procs.append((bridge_name, vce))
+            time.sleep(3)   # long enough for a config/CARLA-connection failure to surface
+            if not _check(bridge_name, vce,
+                          f"check CARLA is reachable at {args.carla_host}:{args.carla_port} "
+                          f"and see CarlaClient.log in {os.getcwd()}."):
+                return 1
+            front_name, front = bridge_name, vce
 
-        print("\n[cosim] native stack up: SUMO + TrafficLayer + VirCarlaEnv.\n"
-              "[cosim] vehicles should now appear in the CARLA window. Ctrl+C here, or "
-              "close VirCarlaEnv, to stop.\n")
+        if sumo_only:
+            print("\n[cosim] SUMO-only stack up: SUMO + TrafficLayer"
+                  + (f" + {app['id']}" if app_proc is not None else "") + ", no CARLA.\n"
+                  f"[cosim] nothing is rendered - watch it in sumo-gui. Ctrl+C here, or "
+                  f"let {front_name} finish, to stop.\n")
+        else:
+            print(f"\n[cosim] native stack up: SUMO + TrafficLayer + {front_name}"
+                  + (f" + {app['id']}" if app_proc is not None else "") + ".\n"
+                  "[cosim] vehicles should now appear in the CARLA window. Ctrl+C here, or "
+                  f"close {front_name}, to stop.\n")
 
-        # Supervise: block on VirCarlaEnv (the front-end) but surface it if any other
+        # Supervise: block on the front process but surface it if any other
         # component dies first - otherwise a dead TrafficLayer just looks like a freeze.
         import peer
-        while _alive(vce):
+        while _alive(front):
             # The control socket is a component like any other: if the CARLA host
             # hangs up - its Ctrl+C, its CARLA dying, the network going - the feed
             # is over. Without this the first symptom is VirCarlaEnv dying seconds
@@ -788,17 +1060,26 @@ def run_native_stack(config_yaml, sumocfg, tl_table, cfg, args, app=None,
                 print("[cosim] the CARLA host disconnected; the feed has stopped. "
                       "Shutting the stack down.")
                 break
-            dead = [n for n, p in procs if n != "VirCarlaEnv" and not _alive(p)]
+            dead = [(n, p.returncode) for n, p in procs
+                    if n != front_name and not _alive(p)]
             if dead:
-                print(f"[cosim] {', '.join(dead)} exited while the co-sim was running; "
-                      f"the feed has stopped. Shutting the stack down.")
+                # An app component that ran to its own end is a FINISHED run, not a
+                # failure - saying "the feed has stopped" for a clean exit sends
+                # people looking for a crash that did not happen.
+                if all(rc == 0 for _n, rc in dead):
+                    print(f"[cosim] {', '.join(n for n, _ in dead)} finished; "
+                          f"stopping the stack.")
+                else:
+                    broke = ", ".join(f"{n} ({rc})" for n, rc in dead if rc != 0)
+                    print(f"[cosim] {broke} exited while the co-sim was running; "
+                          f"the feed has stopped. Shutting the stack down.")
                 break
             time.sleep(1.0)
-        rc = vce.poll()
+        rc = front.poll()
         if rc is None:
             rc = 0
         else:
-            print(f"[cosim] VirCarlaEnv exited ({rc}); stopping the native stack.")
+            print(f"[cosim] {front_name} exited ({rc}); stopping the stack.")
         return rc
     finally:
         for name, p in reversed(procs):
@@ -808,10 +1089,19 @@ def run_native_stack(config_yaml, sumocfg, tl_table, cfg, args, app=None,
                     p.terminate()
                 except Exception:
                     pass
-        for _name, p in reversed(procs):
+        for name, p in reversed(procs):
             try:
                 p.wait(timeout=5)
             except Exception:
+                # The app's launch command is a SCRIPT: on Windows terminate()/kill()
+                # reach cmd.exe and leave the interpreter it started running, holding
+                # the application port against the next run. Everything else here is
+                # an exe with no children, so the tree kill is only needed for this
+                # one - but for this one a plain kill is not a teardown.
+                try:
+                    _kill_pid_tree(p.pid)
+                except Exception:
+                    pass
                 try:
                     p.kill()
                 except Exception:
@@ -819,7 +1109,7 @@ def run_native_stack(config_yaml, sumocfg, tl_table, cfg, args, app=None,
 
 
 def run_python_bridge(config_yaml, sumocfg, tl_table, tls_manager, no_net_offset,
-                      args, app=None):
+                      args, app=None, app_owns_scenario=False, app_proc=None):
     """Standalone bridge: launch SUMO (TraCI server) + run_synchronization.py.
 
     run_cosim launches SUMO here rather than letting the bridge start its own, for
@@ -833,6 +1123,16 @@ def run_python_bridge(config_yaml, sumocfg, tl_table, tls_manager, no_net_offset
 
     Cadence and pacing come from the scenario yaml, the same file the native stack
     reads, so switching --engine changes the bridge and nothing else."""
+    # A release bundle has no standalone/ -- that is the point of #330 -- so say
+    # so plainly instead of failing on a missing file.
+    if not os.path.isfile(SYNC):
+        sys.exit(os.linesep.join([
+            f"[cosim] --standalone-bridge needs {SYNC}, which is not here.",
+            "        It ships only in a source checkout: it speaks no FIXS, so it",
+            "        is deliberately not part of the release bundle (#330). Drop",
+            "        the flag to run the FIXS stack, which is what this is for.",
+        ]))
+
     import shutil
     sumo_bin = "sumo-gui" if args.sumo_gui else "sumo"
     if not shutil.which(sumo_bin):
@@ -843,7 +1143,9 @@ def run_python_bridge(config_yaml, sumocfg, tl_table, tls_manager, no_net_offset
     num_clients = read_sumo_num_clients(config_yaml)
     carla_tick, pose_refresh = read_cadence(config_yaml)
     realtime = read_realtime_pacing(config_yaml)
-    print(cadence_banner("py", carla_tick, pose_refresh, realtime))
+    # "standalone", not "py": py now means the Python VirEnvCore, which is the
+    # FIXS-native stack above. This is CARLA's own bridge (#330).
+    print(cadence_banner("standalone", carla_tick, pose_refresh, realtime))
 
     # A leftover SUMO from a killed run still holds the TraCI port, and the new one
     # then cannot bind - same failure the native stack guards against.
@@ -859,7 +1161,8 @@ def run_python_bridge(config_yaml, sumocfg, tl_table, tls_manager, no_net_offset
             time.sleep(0.5)
 
     sumo_cmd, sumo_origins = sumo_launch_cmd(sumocfg, traci_port, num_clients,
-                                             args.sumo_gui, sumo_autostart, app)
+                                             args.sumo_gui, sumo_autostart, app,
+                                             app_owns_scenario)
     print(f"[SUMO] {' '.join(sumo_cmd)}")
     print_sumo_args(sumo_origins)
     sumo = subprocess.Popen(sumo_cmd)
@@ -919,40 +1222,13 @@ def resolve_carla_env(reconfigure=False):
     return cfg
 
 
-def ensure_runtime(cfg):
-    """Repair a config that lacks a usable python env (e.g. written by an older
-    setup before env resolution existed): resolve the interpreter + matching
-    carla and save it, WITHOUT re-asking the CARLA / UE4 paths."""
-    py = cfg.get("python")
-    if py and os.path.isfile(py) and env._python_can_import(py, ("carla",)):
-        return cfg
-    print("[cosim] saved config has no usable python env (carla not importable); "
-          "resolving it now (CARLA paths kept) ...")
-    cfg["python"] = env.resolve_python()
-    # .get: 'client' mode has no carla_root by design (CARLA is on another host).
-    wheel = env.ensure_carla(cfg["python"], cfg["mode"], cfg.get("carla_root"))
-    if wheel:
-        cfg["carla_wheel"] = wheel
-    env.save_config(cfg)
-    return cfg
-
-
-def maybe_reexec(cfg):
-    """Re-run this script under the configured python (the env that actually has
-    the carla + SUMO clients) if we are not already running under it. Lets the
-    .bat/.sh stay trivial and work on any machine, whatever the env is named."""
-    target = cfg.get("python")
-    if not target or not os.path.isfile(target):
-        return
-    same = os.path.normcase(os.path.normpath(target)) == \
-        os.path.normcase(os.path.normpath(sys.executable))
-    if same or os.environ.get("FIXS_REEXEC") == "1":
-        return
-    child_args = [a for a in sys.argv[1:] if a != "--reconfigure"]
-    cmd = [target, os.path.abspath(__file__), *child_args]
-    print(f"[cosim] switching to configured python env:\n        {target}")
-    osenv = dict(os.environ, FIXS_REEXEC="1")
-    sys.exit(subprocess.call(cmd, env=osenv))
+# ensure_runtime and maybe_reexec used to live here, as run_cosim's private copies.
+# Both now belong to carla_env_setup, the module that owns carla.json:
+# env.ensure_runtime because --update-python needs the same work on demand and a
+# second copy is how a repair path and an update path drift apart, and
+# env.reexec_under_configured because every entry point - import_map, place_tls,
+# place_signs, the world/spectator helpers - has to obey the same rule, and the
+# rule was enforced only by whichever script you happened to start with.
 
 
 def confirm_world_ready(client, expected_map, timeout):
@@ -975,13 +1251,63 @@ def confirm_world_ready(client, expected_map, timeout):
     return None
 
 
-def wait_for_port(host, port, timeout=180):
+def _unreal_log_dir(cfg):
+    """Where the editor writes CarlaUE4.log for this build, or None."""
+    root = (cfg or {}).get("carla_root")
+    if not root:
+        return None
+    d = os.path.join(root, "Unreal", "CarlaUE4", "Saved", "Logs")
+    return d if os.path.isdir(d) else None
+
+
+def report_unreal_crash(cfg):
+    """Print the newest Unreal log's fatal lines, and its path.
+
+    A CARLA that dies during LoadMap leaves everything needed to diagnose it in
+    that file - the map it was loading and the exception - while the console says
+    only that a port did not open. Reading three greps out of it here is the
+    difference between a one-line answer and an afternoon.
+    """
+    d = _unreal_log_dir(cfg)
+    if not d:
+        return
+    logs = [os.path.join(d, f) for f in os.listdir(d) if f.lower().endswith(".log")]
+    if not logs:
+        return
+    newest = max(logs, key=os.path.getmtime)
+    print(f"[cosim]   its log: {newest}")
+    try:
+        with open(newest, encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
+    except OSError:
+        return
+    keep = [ln.rstrip() for ln in lines
+            if ("LoadMap:" in ln
+                or "Critical error" in ln
+                or "Fatal error" in ln
+                or "Unhandled Exception" in ln)]
+    for ln in keep[-6:]:
+        print(f"[cosim]   | {ln.strip()}")
+
+
+def wait_for_port(host, port, timeout=180, proc=None, cfg=None):
+    """True once `port` accepts. False on timeout, or as soon as `proc` is gone.
+
+    Watching the process matters: a server that crashed at second 13 and one still
+    compiling shaders at second 179 are the same to a socket poll, and reporting
+    both as a timeout sends you to wait longer for something that is not running.
+    """
     deadline = time.time() + timeout
     while time.time() < deadline:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.settimeout(2)
             if s.connect_ex((host, port)) == 0:
                 return True
+        if proc is not None and proc.poll() is not None:
+            print(f"[cosim] the CARLA server exited ({proc.returncode}) before "
+                  f"opening port {port} - it did not time out, it stopped.")
+            report_unreal_crash(cfg)
+            return False
         time.sleep(2)
     return False
 
@@ -1008,7 +1334,7 @@ def _carla_command(cfg, port, render_offscreen, quality_level=None, level=None):
         # with "Failed to enter <map>: Can't find file" before the RPC port opens.
         if level:
             cmd.append(level)
-        cmd += ["-game", f"-carla-rpc-port={port}"]
+        cmd += ["-game", f"-carla-rpc-port={port}", *env.EDITOR_LAUNCH_FLAGS]
     if quality_level:
         cmd.append(f"-quality-level={quality_level}")  # Low is much cheaper to render
     if render_offscreen:
@@ -1083,6 +1409,27 @@ def _frame_from_actors(world):
         return None
     xs = [l.x for l in locs]; ys = [l.y for l in locs]; zs = [l.z for l in locs]
     return _frame_stats(xs, ys, zs, f"{len(locs)} traffic lights")
+
+
+def _frame_from_map(world):
+    """Centroid + span (m) of the map's spawn points - the last-resort anchor for a
+    map with no signals at all (a RoadRunner export without them, or a bare
+    generate_opendrive_world road). Spawn points sit on the drivable network and
+    span it, so this frames the whole map rather than any one place in it.
+
+    Without this the no-signal case left the spectator wherever the server put it,
+    which in -game mode is the world origin - so the map rendered as a distant
+    speck and looked like a failed load."""
+    try:
+        spawns = world.get_map().get_spawn_points()
+    except RuntimeError:
+        return None          # map not queryable yet; the caller just skips framing
+    if not spawns:
+        return None
+    xs = [s.location.x for s in spawns]
+    ys = [s.location.y for s in spawns]
+    zs = [s.location.z for s in spawns]
+    return _frame_stats(xs, ys, zs, f"map centre ({len(spawns)} spawn points)")
 
 
 def _table_junctions(tl_table, no_net_offset):
@@ -1240,6 +1587,120 @@ def _is_carla_process(name):
     return "ue4editor" in n or "carlaue4" in n
 
 
+# ---------------------------------------------------------------------------
+# leftovers from an earlier run
+# ---------------------------------------------------------------------------
+#
+# The port sweep further down catches SUMO and TrafficLayer, which hold ports
+# this launcher knows. Nothing catches the APPLICATION: it listens on nothing,
+# so a run closed by its window X leaves it alive and the next run sits at
+# "0 exchanges" while TrafficLayer answers the ghost.
+#
+# Matched by command line rather than by name, and the pattern comes from the
+# catalog: an app's process is an interpreter whose command line names a file
+# under apps/<id>/. True for every app, hardcodes none.
+
+_INTERPRETERS = ("python", "pythonw", "python3", "py")
+_STACK_NAMES = ("trafficlayer", "vircarlaenv", "sumo", "sumo-gui")
+_STACK_CMDS = ("virenv/mainvircarla.py", "virenv\mainvircarla.py",
+               "run_synchronization.py")
+
+
+def _running_processes():
+    """[(pid, name, cmdline)]. Command lines need CIM on Windows, ps on POSIX;
+    tasklist and `ps -o comm` cannot give them."""
+    out = []
+    try:
+        if platform.system() == "Windows":
+            raw = subprocess.check_output(
+                ["powershell", "-NoProfile", "-Command",
+                 "Get-CimInstance Win32_Process | Select-Object ProcessId,Name,"
+                 "CommandLine | ConvertTo-Csv -NoTypeInformation"],
+                text=True, stderr=subprocess.DEVNULL)
+            for row in csv.DictReader(io.StringIO(raw)):
+                try:
+                    out.append((int(row["ProcessId"]), row.get("Name") or "",
+                                row.get("CommandLine") or ""))
+                except (TypeError, ValueError):
+                    continue
+        else:
+            raw = subprocess.check_output(["ps", "-eo", "pid=,comm=,args="],
+                                          text=True, stderr=subprocess.DEVNULL)
+            for line in raw.splitlines():
+                f = line.strip().split(None, 2)
+                if len(f) >= 2:
+                    out.append((int(f[0]), f[1], f[2] if len(f) > 2 else ""))
+    except Exception:                                        # noqa: BLE001
+        pass
+    return out
+
+
+def _cosim_leftovers(app_id=None, include_carla=False):
+    """[(pid, name, cmdline)] from an earlier co-sim. Never us or our parent."""
+    if app_id:
+        marks = (f"apps/{app_id}/", f"apps\{app_id}\\")
+    else:
+        try:
+            root = os.path.join(app_catalog.app_root(), "apps").lower()
+            marks = (root.replace("\\", "/") + "/", root.replace("/", "\\") + "\\")
+        except Exception:                                    # noqa: BLE001
+            marks = ()
+    mine = {os.getpid()}
+    try:
+        mine.add(os.getppid())
+    except Exception:                                        # noqa: BLE001
+        pass
+    out = []
+    for pid, name, cmd in _running_processes():
+        if pid in mine:
+            continue
+        n, c = name.lower(), cmd.lower()
+        stem = n[:-4] if n.endswith(".exe") else n
+        # A COMMAND-LINE match counts only on an interpreter. Otherwise any
+        # process that merely mentions the path -- the shell you launched from,
+        # a grep, an editor -- looks like the application. An earlier cut of
+        # this, without the guard, killed its own caller's shell.
+        by_cmd = stem in _INTERPRETERS and (
+            any(s in c for s in _STACK_CMDS) or any(m in c for m in marks))
+        if stem in _STACK_NAMES or by_cmd or (include_carla and _is_carla_process(n)):
+            out.append((pid, name, cmd))
+    return out
+
+
+def run_cleanup(app_id=None):
+    """--cleanup: stop what a co-sim leaves behind, then exit.
+
+    CARLA is included, unlike the pre-launch sweep that leaves it alone: someone
+    asking for a cleanup wants the machine back.
+    """
+    victims = _cosim_leftovers(app_id, include_carla=True)
+    if not victims:
+        print("[cosim] nothing left running.")
+        return 0
+    for pid, name, cmd in victims:
+        detail = (cmd or name).strip()
+        print(f"[cosim] stopping {name} (pid {pid}): "
+              f"{detail if len(detail) <= 96 else detail[:93] + '...'}")
+        _kill_pid_tree(pid)
+    time.sleep(2.0)
+    still = _cosim_leftovers(app_id, include_carla=True)
+    if still:
+        print(f"[cosim] {len(still)} did not stop: "
+              + ", ".join(f"{n} ({p})" for p, n, _ in still))
+        return 1
+    print(f"[cosim] stopped {len(victims)}; the machine is clear.")
+    return 0
+
+
+
+def _carla_pid_on(port):
+    """PID of a CARLA holding `port`, or None. The two questions - who is on the
+    port, and is that a CARLA - are always asked together, and callers that only
+    want the second should not have to know about the first."""
+    pid = _pid_on_port(port)
+    return pid if pid and _is_carla_process(_process_name(pid)) else None
+
+
 def _kill_pid_tree(pid):
     """Kill a PID and its whole process tree (CARLA spawns shader workers / a game
     child / CrashReportClient that a plain kill leaves holding the RPC port)."""
@@ -1305,17 +1766,21 @@ def _net_from_sumocfg(sumocfg):
 
 
 def resolve_tl_table(sumocfg, force=False, cache_name=None):
-    """Find this scenario's traffic-light table: a traffic_light_table.csv committed
-    next to the sumocfg, else one generated from the SUMO net. It is cached in the
-    map's per-map folder ~/.fixs/maps/<cache_name>/tl_table.csv (cache_name = the
+    """Generate this scenario's traffic-light table from the SUMO net. It is cached in
+    the map's per-map folder ~/.fixs/maps/<cache_name>/tl_table.csv (cache_name = the
     cooked map name), else the shared ~/.fixs/tables/<net>_tls.csv. `force`
     regenerates even if a cache exists (used on --reimport). Returns a path, or None
-    if neither is possible. Generation needs pandas/shapely but not SUMO installed."""
-    scen = os.path.dirname(os.path.abspath(sumocfg))
-    committed = os.path.join(scen, "traffic_light_table.csv")
-    if os.path.isfile(committed):
-        print(f"[cosim] TL table: committed {committed}")
-        return committed
+    if there is no net to generate from. Generation needs pandas/shapely but not SUMO
+    installed.
+
+    A traffic_light_table.csv sitting beside the sumocfg is deliberately NOT read. It
+    used to win over generation, which tied head positions to whichever file happened
+    to be next to the scenario rather than to the net: an app-owned scenario folder
+    copied into the map cache brought its own table along, and mlk_untextured was
+    baked from that stale copy - heads fanned across the full lane width - while the
+    generator was producing the current layout into tl_table.csv, unused. The table is
+    derived from the net, so the net is the only thing it should depend on.
+    """
     net = _net_from_sumocfg(sumocfg)
     if not net or not os.path.isfile(net):
         print("[cosim] no TL table and no net to generate one from; TL sync off.")
@@ -1355,27 +1820,36 @@ def resolve_tl_table(sumocfg, force=False, cache_name=None):
 # The CLI wins outright so `run_cosim --map atlanta` changes that one thing and
 # prompts for nothing.
 # --------------------------------------------------------------------------- #
-# Slot -> the args attributes it owns. Kept as data so the summary, the change
-# menu and the apply step cannot drift apart.
-#
 # The setup deliberately owns no timestep. It used to carry step_length, which was
 # handed to SUMO *and* written into the scenario yaml - two owners for one number,
 # so they silently disagreed (a 0.05 s setup against the 0.1 s FIXS feed ran SUMO at
 # half the CARLA clock). The feed is now a protocol constant and the CARLA tick lives
 # in the yaml beside the rest of the cadence; the setup keeps only the choice of
-# artifacts, plus whether SUMO gets a window.
-PROFILE_SLOTS = {
-    "app": ("app",),
-    "map": ("map",),
-    "config": ("config",),
-    "engine": ("engine",),
-    "carla": ("carla_host", "carla_port"),
-    "sumo": ("sumo_gui",),
-}
+# artifacts, plus whether SUMO gets a window. The CARLA ENDPOINT left for the same
+# reason - the yaml is what VirCarlaEnv dials - which is why there is no slot -> args
+# table here any more: run_profile.SLOTS names the rows, and each editor writes to
+# whichever file actually owns its setting.
+#
 # The three with no sensible default: they must be answered before a first run.
 # engine / carla / sumo always have one (the yaml, carla.json, the built-ins), so
 # they start filled in and are edited only if you ask for them.
 MUST_ANSWER = ("app", "map", "config")
+
+
+def _interactive(args):
+    """Whether THIS run is allowed to stop and ask a human. Asked once, here.
+
+    A terminal is necessary but not sufficient. --serve has one and must still not
+    prompt: the traffic machine already chose, and the person who could answer is
+    sitting at the OTHER keyboard. Helpers that re-derive this from
+    sys.stdin.isatty() are answering a different question - "is anyone reachable?"
+    instead of "is anyone expected?" - and prompt anyway. That is how a serving
+    host came to sit on the scenario menu while its peer printed "still waiting -
+    it is launching CARLA and loading the map". It was not. Nobody was there.
+
+    So: pass this value down. isatty() is the DEFAULT for `interactive`, never the
+    authority."""
+    return sys.stdin.isatty() and not getattr(args, "serve", False)
 
 
 def _ask(prompt, default=None):
@@ -1386,22 +1860,32 @@ def _ask(prompt, default=None):
         return default or ""
 
 
-def _config_menu(who, options, app_paths):
+def _config_menu(who, options, current=None, interactive=None):
     """The scenario row: pick a yaml, or edit the current one in place.
 
     Picking a file was the only thing this offered, and with a single generated
     yaml - the normal case - that meant selecting the row did nothing visible at
     all. What people want here is usually to change a value, not to switch files,
-    so 'e' is on the same list as the files."""
-    current = options[0][0]
+    so 'e' is on the same list as the files.
+
+    `current` is the yaml the SETUP is running, and it has to be passed in: taking
+    the first row instead put "(current)" on a file the setup was not using, so
+    Enter ("keep") silently switched the scenario, and 'e' opened the wrong file.
+    The caller has already matched it against the list, so a plain `in` holds."""
+    paths = [p for p, _ in options]
+    # A new setup, or one whose scenario was just invalidated, is running nothing
+    # yet. The first row is still what Enter takes, but calling that "(current)"
+    # would be inventing a state the setup does not have.
+    known = current in paths
+    current = current if known else options[0][0]
     while True:
         print(f"\n[cosim] Scenario config for {who}:")
         for i, (path, label) in enumerate(options, 1):
-            mark = "  (current)" if path == current else ""
+            mark = ("  (current)" if known else "  (default)") if path == current else ""
             print(f"   {i}) {label}{mark}")
         print("   ---")
         print("   e) edit the current one in your editor")
-        if not sys.stdin.isatty():
+        if not (sys.stdin.isatty() if interactive is None else interactive):
             return current
         ans = _ask(f"[cosim] Which? [1-{len(options)} / e], Enter = keep "
                    f"{os.path.basename(current)}: ").strip().lower()
@@ -1664,19 +2148,35 @@ def derived_from_yaml(config_yaml, staged, args=None):
         # change look like it had been ignored - you set engine=cpp, the write was
         # skipped because the file did not exist, and the summary redrew "py".
         return {"engine": (getattr(args, "engine", None)
-                           or declared_engine(staged, config_yaml) or "py"),
+                           or declared_engine(staged, config_yaml) or "cpp"),
                 "carla_host": getattr(args, "carla_host", None),
                 "carla_port": getattr(args, "carla_port", None),
                 # None (not False) when there is no endpoint yet: an unset host is not
                 # "this machine", and saying so would be a third wrong answer.
                 "carla_local": (_is_local_host(getattr(args, "carla_host", None))
                                 if getattr(args, "carla_host", None) else None),
+                # Not a yaml setting: what THIS run will do with what the yaml
+                # says. --sumo-only starts no bridge and no CARLA, so the rows
+                # describing them have nothing to describe.
+                "sumo_only": bool(getattr(args, "sumo_only", False)),
                 "carla_tick": getattr(args, "carla_tick", None),
                 "realtime": None}
     host, port = read_carla_endpoint(config_yaml)
-    return {"engine": declared_engine(staged, config_yaml) or read_backend(config_yaml),
+    # An EXPLICIT EnablePythonBackend wins over the app's declaration: the
+    # declaration exists because a hand-written yaml usually omits the key and
+    # ConfigHelper then defaults it to py, but once the key is in the file it is
+    # the answer - edit_engine writes it there, and the row is labelled "from the
+    # yaml". Reporting the declaration regardless made a menu change that HAD been
+    # written look like it was ignored.
+    return {"engine": (read_backend(config_yaml) if _declares_backend(config_yaml)
+                       else declared_engine(staged, config_yaml)
+                       or read_backend(config_yaml)),
             "carla_host": host, "carla_port": port,
             "carla_local": _is_local_host(host) if host else None,
+            # A yaml with no CarlaSetup runs no CARLA, exactly as --sumo-only does,
+            # so the CARLA and engine rows have nothing to describe either way.
+            "sumo_only": (bool(getattr(args, "sumo_only", False))
+                          or not scenario_has_carla(config_yaml)),
             # The cadence and the pacing live here too, so the summary shows what
             # will actually run instead of a number the setup remembered.
             "carla_tick": _yaml_float(config_yaml, "CarlaSetup", "CarlaTimeStep", 0.0)
@@ -1687,8 +2187,8 @@ def derived_from_yaml(config_yaml, staged, args=None):
 def edit_engine(config_yaml, current):
     """Which bridge runs the co-sim. Written into the yaml (see the note above)."""
     picked = _menu("Co-sim engine:",
-                   [("py", "py    standalone run_synchronization.py bridge"),
-                    ("cpp", "cpp   FIXS-native stack (TrafficLayer + VirCarlaEnv)")],
+                   [("py", "py    Python VirEnvCore (TrafficLayer + mainVirCarla.py)"),
+                    ("cpp", "cpp   C++ VirEnvCore    (TrafficLayer + VirCarlaEnv.exe)")],
                    current)
     if picked != current:
         if config_yaml and os.path.isfile(config_yaml):
@@ -1756,11 +2256,8 @@ def edit_carla(cfg, config_yaml, host, port):
                 port = int(ans)
                 break
             print("[cosim] enter a port number.")
-    # The C++ side takes a literal address, not a resolvable hostname.
-    wire = "127.0.0.1" if host in ("localhost", "") else host
-    if config_yaml and os.path.isfile(config_yaml):
-        set_yaml_scalar(config_yaml, "CarlaSetup", "CarlaServerIP", wire)
-        set_yaml_scalar(config_yaml, "CarlaSetup", "CarlaServerPort", port)
+    if _yaml_exists(config_yaml):
+        wire = write_carla_endpoint(config_yaml, host, port)
         print(f"[cosim] {os.path.basename(config_yaml)}: CARLA -> {wire}:{port}")
     else:
         # Same as the engine editor: no file yet, so this is pending until the
@@ -1781,7 +2278,25 @@ def _bind_app(rec, apps, ctx):
               f"{app_catalog.catalog_path()}; continuing without it.")
     ctx["app"] = app
     ctx["staged"] = app_catalog.stage_configs(app) if app else []
+    _scope_config(rec, ctx)
     return app
+
+
+def _scope_config(rec, ctx):
+    """Mark rec['config'] 'app' when it is one of this app's own staged yamls.
+
+    Both kinds live in ~/.fixs/apps/<id>/ - the app's AUTHORED yamls and the ones
+    generated per map - and only the scope tells them apart. --config records 'map'
+    because it cannot know; here the app is bound, so it can. Getting this wrong is
+    not cosmetic: the generator writes over a 'map'-scoped path that does not exist
+    yet, which for an app yaml means replacing the file the app shipped with a
+    probe-shaped one, and the run then quietly does something else."""
+    chosen = rec.get("config")
+    if not chosen:
+        return
+    staged = {os.path.normcase(os.path.abspath(s["path"])) for s in ctx.get("staged") or []}
+    if os.path.normcase(os.path.abspath(chosen)) in staged:
+        rec["config_scope"] = "app"
 
 
 def _apply_cli(rec, args):
@@ -1795,18 +2310,22 @@ def _apply_cli(rec, args):
     if args.map is not None:
         rec["map"], rec["map_origin"], rec["map_local"] = args.map, None, None
     if args.config is not None:
-        rec["config"], rec["config_scope"] = args.config, "map"
+        rec["config"] = args.config
+        # Scope is corrected against the app's staged yamls once the app is bound
+        # (_bind_app -> _scope_config): 'map' here is only the default for a path
+        # that turns out not to be one of the app's own.
+        rec["config_scope"] = "map"
     if args.engine is not None:
         rec["engine"] = args.engine
-    if args.carla_host is not None:
-        rec["carla_host"] = args.carla_host
-    if args.carla_port is not None:
-        rec["carla_port"] = args.carla_port
     if args.sumo_gui is not None:
         rec["sumo_gui"] = args.sumo_gui
-    # --carla-tick and --fast are NOT overlaid here: they belong to the scenario
-    # yaml, and main() writes them through to it (the --carla-host pattern), so one
-    # file stays the single source of truth for what the engines read.
+    # --carla-tick, --fast and the CARLA endpoint (--peer / --carla-host /
+    # --carla-port) are NOT overlaid here: they belong to the scenario yaml, and
+    # they are written through to it - the endpoint by _push_cli_endpoint below,
+    # the cadence by main() - so one file stays the single source of truth for what
+    # the engines read. Parking a copy on the record was worse than useless: the
+    # record's copy is stripped before saving and nothing ever read it, while the
+    # summary kept deriving line 5 from the yaml, so --carla-host looked ignored.
 
 
 def _disable_quickedit():
@@ -1848,6 +2367,90 @@ def _yaml_exists(path):
     return bool(path) and os.path.isfile(path)
 
 
+def resolve_peer(args):
+    """Fold --peer HOST[:PORT] into the CARLA endpoint it names.
+
+    --peer is the traffic host's word for "CARLA is on that machine over there",
+    which is the vocabulary a two-machine run is actually described in - the other
+    end runs --serve. It is not a second setting: it resolves to
+    --carla-host/--carla-port here, once, so everything downstream (the yaml
+    write-through, the --no-launch implication, the peer handshake, --doctor) keeps
+    reading one endpoint.
+
+    One token rather than two flags, because an address is written down and passed
+    around as one. Given both spellings, it stops rather than picking a winner:
+    which CARLA to talk to is not something to guess at."""
+    if args.peer is None:
+        return args
+    spec = (args.peer or "").strip()
+    host, sep, port = spec.rpartition(":")
+    if not sep:
+        host, port = spec, ""
+    if not host:
+        sys.exit(f"[cosim] --peer '{args.peer}': expected HOST or HOST:PORT, "
+                 f"e.g. --peer 192.168.1.9 or --peer 192.168.1.9:2000.")
+    if port and not (port.isdigit() and 0 < int(port) < 65536):
+        sys.exit(f"[cosim] --peer '{args.peer}': '{port}' is not a port number.")
+    clash = [f for f, v in (("--carla-host", getattr(args, "carla_host", None)),
+                            ("--carla-port", getattr(args, "carla_port", None)))
+             if v is not None]
+    if clash:
+        sys.exit(f"[cosim] --peer already says which CARLA to talk to; "
+                 f"{' and '.join(clash)} sets the same thing. Pass one.")
+    args.carla_host = host
+    if port:
+        args.carla_port = int(port)
+    return args
+
+
+def write_carla_endpoint(config_yaml, host, port):
+    """Write the CARLA endpoint into the scenario yaml. Returns the address written.
+
+    One place, one owner: VirCarlaEnv reads CarlaSetup.CarlaServerIP/Port out of
+    this file itself (CommonLib/ConfigHelper.cpp), so anything that decides the
+    endpoint has to land HERE or it only moves run_cosim's own probe. The C++ side
+    takes a literal address, not a resolvable name, so 'localhost' is written as
+    127.0.0.1."""
+    wire = "127.0.0.1" if host in ("localhost", "") else host
+    set_yaml_scalar(config_yaml, "CarlaSetup", "CarlaServerIP", wire)
+    set_yaml_scalar(config_yaml, "CarlaSetup", "CarlaServerPort", port)
+    return wire
+
+
+def _push_cli_endpoint(config_yaml, args, ctx):
+    """Write an endpoint given on the command line into the scenario yaml, once.
+
+    --peer / --carla-host / --carla-port name the CARLA this run talks to, and the
+    setup summary DERIVES that line from the scenario yaml (see derived_from_yaml).
+    Written through only after the review loop, the flag was invisible on the very
+    screen it was meant to change: you passed --peer 192.168.1.9, the summary drew
+    the yaml's 127.0.0.1, and the run then dialled the peer - the flag looked
+    ignored while actually being in force.
+
+    Once per yaml, not once per redraw, so changing the CARLA row afterwards still
+    wins: the flag is the starting point for this run, not a value that keeps
+    overwriting the file behind the editor. A yaml that does not exist yet is left
+    alone - generate_config_yaml seeds it from the same args."""
+    if args is None or (args.carla_host is None and args.carla_port is None):
+        return
+    if not _yaml_exists(config_yaml):
+        return
+    key = os.path.normcase(os.path.abspath(config_yaml))
+    pushed = ctx.setdefault("endpoint_pushed", set())
+    if key in pushed:
+        return
+    pushed.add(key)
+    was_host, was_port = read_carla_endpoint(config_yaml)
+    host = args.carla_host or was_host or DEFAULT_CARLA_HOST
+    port = args.carla_port or was_port or DEFAULT_CARLA_PORT
+    wire = "127.0.0.1" if host in ("localhost", "") else host
+    if wire == was_host and port == was_port:
+        return
+    print(f"[cosim] {os.path.basename(config_yaml)}: CARLA -> {wire}:{port} "
+          f"(from the command line; the yaml said {was_host or '?'}:{was_port or '?'})")
+    write_carla_endpoint(config_yaml, host, port)
+
+
 def await_peer(args):
     """Serve mode: wait for the traffic machine and take its instructions.
 
@@ -1887,15 +2490,30 @@ def await_peer(args):
                 try: sock.close()
                 except OSError: pass
                 continue
-            # The peer decides; this side only carries it out.
+            # The peer decides; this side only carries it out - so it has to have
+            # decided. With no map on either side the run would fall through to the
+            # map picker, which is a prompt on a host whose whole contract is that
+            # it prompts for nothing; the peer would then wait out --prep-timeout
+            # against a menu. Refuse it as the protocol error it is, and stay up.
+            if not (msg.get("map") or args.map):
+                peer.fail(sock, "SERVE carried no map, and this host has no "
+                                "--carla-map to fall back on", retryable=False)
+                print("[serve] peer sent no map; still listening.")
+                continue
             args.map = msg.get("map") or args.map
             args.carla_port = msg.get("carla_port") or args.carla_port
             args.quality_level = msg.get("quality_level") or args.quality_level
             args.render_offscreen = bool(msg.get("render_offscreen",
                                                  args.render_offscreen))
+            # Stashed rather than acted on here: the map is not resolved until the
+            # preflight, which is where the comparison belongs. Absent from an older
+            # peer, which just means the check does not run.
+            args.peer_map_sha = msg.get("map_sha")
             print(f"[serve] peer asked for map '{args.map}' on port "
                   f"{args.carla_port or DEFAULT_CARLA_PORT}")
             srv.close()
+            global _SERVE_SOCK
+            _SERVE_SOCK = sock       # so any later sys.exit can still say why
             return sock
     except KeyboardInterrupt:
         srv.close()
@@ -1905,17 +2523,32 @@ def await_peer(args):
 def ask_peer_to_serve(args, target_map):
     """Traffic side: tell the CARLA host what to serve, and wait for it.
 
-    Returns the live control socket, or None when no peer answers - in which case
-    the run continues exactly as it did before this existed, against a CARLA
-    someone started by hand. Retrying is what makes start order irrelevant."""
+    Returns the live control socket, or None when no peer answers AND the user has
+    said that is acceptable (--allow-manual-carla). Retrying is what makes start
+    order irrelevant."""
     import peer
     port = args.peer_port or peer.peer_port(args.carla_port or DEFAULT_CARLA_PORT)
     try:
         sock = peer.connect(args.carla_host, port, wait=args.peer_wait)
     except peer.PeerError as e:
+        # Continuing here used to be the default, and it is the one failure in this
+        # protocol that does not look like a failure: nothing is listening, so the
+        # run proceeds against whatever CARLA is up on that host - which, after a
+        # --serve that died, is the PREVIOUS run's server, still holding the
+        # previous map. It then works, for the wrong reason, and the peer protocol
+        # is quietly not in use. Same class of bug as the one serve_forever's
+        # docstring describes. So: say so and stop, unless asked not to.
+        if not args.allow_manual_carla:
+            sys.exit(f"[peer] {e}\n"
+                     f"[peer] not continuing: a CARLA already running on "
+                     f"{args.carla_host} may be serving a different map, and this "
+                     f"run cannot tell.\n"
+                     f"[peer] Start it there with 'run_cosim --serve', or pass "
+                     f"--allow-manual-carla if you started CARLA by hand with "
+                     f"'{target_map}' loaded.")
         print(f"[peer] {e}\n"
-              f"[peer] continuing anyway - assuming CARLA on {args.carla_host} was "
-              f"started by hand with '{target_map}' loaded.")
+              f"[peer] --allow-manual-carla: continuing, assuming CARLA on "
+              f"{args.carla_host} was started by hand with '{target_map}' loaded.")
         return None
     try:
         r, welcome = peer.hello(sock, _fixs_version())
@@ -1926,10 +2559,16 @@ def ask_peer_to_serve(args, target_map):
     if mine != theirs:
         print(f"[peer] WARNING FIXS versions differ - here {mine}, peer {theirs}. "
               f"Mismatched builds is how the two ends come to disagree silently.")
+    import import_map
+    # Which bundle THIS machine's traffic data came from. Sent because only this
+    # machine can know it: the CARLA host would otherwise compare its cooked map
+    # against the library's current release, which is a different question - and
+    # the wrong one whenever this side is running off a cached bundle.
     peer.send(sock, {"t": "SERVE", "map": target_map,
                      "carla_port": args.carla_port,
                      "quality_level": args.quality_level,
-                     "render_offscreen": bool(args.render_offscreen)})
+                     "render_offscreen": bool(args.render_offscreen),
+                     "map_sha": import_map.read_cached_sha(target_map)})
     print(f"[peer] asked {args.carla_host} to serve '{target_map}'; waiting ...")
     waited = 0.0
     while True:
@@ -1961,7 +2600,16 @@ def ask_peer_to_serve(args, target_map):
             return sock
         elif msg.get("t") == "ERROR":
             sock.close()
-            sys.exit(f"[peer] the CARLA host could not serve it: {msg.get('why')}")
+            # retryable says whether the render host thinks another attempt could
+            # work. It goes back to listening either way, so the advice is what
+            # differs: "run it again" is right for a busy port and actively
+            # misleading for a map that host can never install.
+            again = ("\n[peer] The render host is listening again - re-run this "
+                     "once it is ready." if msg.get("retryable") else
+                     "\n[peer] Retrying will not help until that is fixed on "
+                     f"{args.carla_host}.")
+            sys.exit(f"[peer] the CARLA host could not serve it: "
+                     f"{msg.get('why')}{again}")
 
 
 class _Tee:
@@ -2027,6 +2675,85 @@ def _tell_peer(sock, stage, msg):
     peer.progress(sock, stage, msg)
 
 
+# The control socket of the run currently being served, or None. Module-level
+# because serve_forever() has to reach it and main() does not hand it back:
+# main() fails by sys.exit() from dozens of places, and the peer is entitled to
+# the reason from every one of them. Threading a socket out of each would be a
+# far larger change than the problem is worth, and --serve holds exactly one of
+# these at a time (await_peer stops listening once a peer connects), so a single
+# slot is the whole state.
+_SERVE_SOCK = None
+
+
+def _drop_serve_sock():
+    """Close and forget the served run's control socket, if it is still open."""
+    global _SERVE_SOCK
+    sock, _SERVE_SOCK = _SERVE_SOCK, None
+    if sock is None:
+        return
+    try:
+        sock.close()
+    except OSError:
+        pass
+
+
+def _fail_peer(why, retryable=False):
+    """Tell the waiting traffic machine WHY this run is not happening, then close.
+
+    Every render-side failure used to reach the peer as a bare socket close, which
+    it reported as "the CARLA host disconnected before serving" - the same
+    sentence for a map that is not installed, a busy RPC port, a failed cook and a
+    pulled cable. The peer cannot act on that, and the person reading it is on the
+    machine that has none of the evidence.
+
+    `retryable` says whether re-running could help: the render host goes back to
+    listening either way (serve_forever), but "the port was busy, try again" and
+    "this CARLA is packaged and cannot cook that map" deserve different advice,
+    and only this side can tell them apart."""
+    global _SERVE_SOCK
+    sock, _SERVE_SOCK = _SERVE_SOCK, None
+    if sock is None:
+        return
+    import peer
+    peer.fail(sock, why, retryable=retryable)
+
+
+def _check_map_source(args, carla_root, target_map, mode):
+    """Is the map already cooked here the one this run's SUMO data belongs to?
+
+    Only meaningful for an ALREADY-cooked map: a fresh cook stamps whatever it just
+    downloaded, so the two halves agree by construction. The stale case is the quiet
+    one - the CARLA half is cooked once and kept while the SUMO half tracks the
+    library, so an updated map leaves geometry and traffic data one release apart
+    under the same name, with nothing failing.
+
+    Silent unless both sides recorded a sha AND they differ. A map with no sha
+    (local pick, hand-prepped, imported before this existed) is not checked at all
+    rather than nagged about."""
+    import import_map
+    have = import_map.cooked_sha(carla_root, target_map, mode=mode)
+    # What this run's traffic data came from: the peer's, when a traffic machine is
+    # driving us, else this machine's own cached bundle.
+    want = getattr(args, "peer_map_sha", None) or import_map.read_cached_sha(target_map)
+    if not have or not want or have == want:
+        return
+
+    where = "the traffic machine" if getattr(args, "peer_map_sha", None) else "this machine"
+    why = (f"map '{target_map}' was cooked from a different bundle than the one "
+           f"{where} is running (cooked {have}, running {want}). Geometry and "
+           f"traffic data are one release apart, which places vehicles against a "
+           f"road that moved.")
+    if args.serve and not args.allow_map_skew:
+        # Refused rather than warned: under --serve the person who would read a
+        # warning is at the other machine, looking at a different console. The exit
+        # message reaches them as-is - serve_forever turns a sys.exit(str) into the
+        # peer's ERROR reason - so it is phrased to be read from there.
+        sys.exit(f"[cosim] this CARLA host: {why} Re-cook here with --reimport, or "
+                 f"pass --allow-map-skew to run anyway.")
+    print(f"[cosim] WARNING {why}\n"
+          f"        Fix: re-run with --reimport to re-cook it.")
+
+
 def _who_has_port(port):
     """(pid, process name) LISTENING on `port`, or None. Handed to doctor so it can
     name what is squatting on the CARLA port instead of only noting that something
@@ -2055,9 +2782,51 @@ def _peek_any_endpoint():
         path = rec.get("config")
         if path and os.path.isfile(path):
             return read_carla_endpoint(path)
-    except Exception:
+    # BaseException, not Exception. read_carla_endpoint sys.exit()s when PyYAML is
+    # missing -- correctly, for a caller that needs the config, since substituting
+    # defaults there invents settings and drives real decisions with them. But
+    # THIS caller does not need it: it is a best-effort peek that promises
+    # (None, None) when it cannot read. SystemExit derives from BaseException, so
+    # `except Exception` let it through and a helper that is allowed to fail took
+    # the whole process down.
+    #
+    # It broke the bootstrap contract: run_cosim.bat starts under any python on
+    # PATH and re-execs under the configured one, so the bootstrap is meant to
+    # need nothing beyond the stdlib. --doctor reaches here BEFORE that re-exec,
+    # so `run_cosim.bat --doctor` died on a machine whose PATH python has no
+    # PyYAML -- while the configured interpreter had it all along.
+    except BaseException:
         pass
     return None, None
+
+
+def _peek_scenario(args, maps_root):
+    """(config yaml, net xml) for --doctor's Scenario tier, or None.
+
+    Same source of truth as a real run: --profile when given, else the saved
+    'last' setup. So `run_cosim --doctor` with no arguments checks the scenario
+    you would actually launch, and `--doctor --profile <name>` targets another.
+
+    Returns None rather than guessing when nothing is selected; doctor reports
+    that as skipped, which is the point -- a scenario check that quietly does not
+    run is how a route the ego could not drive survived a whole day of runs.
+    """
+    try:
+        doc = run_profile.load_doc()
+        name = getattr(args, "profile", None) or doc.get("last")
+        rec = (doc.get("setups") or {}).get(name) or {}
+        config_path = rec.get("config")
+        if not config_path or not os.path.isfile(config_path):
+            return None
+        net = None
+        map_dir = os.path.join(maps_root, rec.get("map") or "", "sumo")
+        if os.path.isdir(map_dir):
+            nets = sorted(f for f in os.listdir(map_dir) if f.endswith(".net.xml"))
+            if nets:
+                net = os.path.join(map_dir, nets[0])
+        return (config_path, net)
+    except Exception:
+        return None
 
 
 def print_fingerprint(cfg, host, port):
@@ -2088,7 +2857,10 @@ def print_fingerprint(cfg, host, port):
 
 def _fixs_version():
     try:
-        with open(os.path.join(FIXS_ROOT, "FIXS_VERSION.txt"), encoding="utf-8") as f:
+        # utf-8-sig for the same reason as _fixs_tag_repo: a BOM left on line 1 rides
+        # into the returned string, and printing that to a cp1252 console raises
+        # UnicodeEncodeError - which is how --version crashed on Windows.
+        with open(os.path.join(FIXS_ROOT, "FIXS_VERSION.txt"), encoding="utf-8-sig") as f:
             return f.readline().strip()
     except OSError:
         return "unknown"
@@ -2150,17 +2922,71 @@ def hold_carla(carla_proc, target_map, args, sock=None):
     return 0
 
 
-def _edit_slots(slots, rec, ctx, cfg, apps, catalog, repo, tag_prefix, args=None):
+def _sumo_for_local_pick(rec, ctx, local, args):
+    """Fill the SUMO slot now, when the map just picked leaves it empty and saying
+    so is free.
+
+    The scenario is normally resolved late, in main(), because four of the five
+    things that fill it need work done first: a bundle has to be OPENED to know it
+    ships a sumo/, and an app has to be STARTED to know it reports its own. Asking
+    every run would either ask what the bundle answers, or drag a ~380MB download
+    into a loop whose whole point is that it decides and downloads nothing.
+
+    A LOCAL pick has neither problem - it is a path on this disk, so the question is
+    one directory walk. A raw export never carries a .sumocfg, and deferring that
+    put the prompt between the cook and the signal placement, in the middle of the
+    one stretch you cannot walk away from.
+
+    Stores nothing new: choose_sumo_source caches under ~/.fixs/maps/<map>/sumo,
+    which main()'s chain already reads, so a skipped or cancelled pick lands back on
+    the late resolver unchanged."""
+    import import_map
+    if not local or args is None or not _interactive(args):
+        return
+    if args.sumocfg is not None:
+        return
+    if (ctx.get("app") or {}).get("launch"):
+        return
+    if import_map.local_pick_carries_sumo(local):
+        return
+    # NOT gated on args.reimport the way the flag check above is: main()'s own
+    # cached_sumo_dir ignores this same cache whenever --reimport is set (a
+    # deliberate "refresh from the source" rule - see its docstring), so an early
+    # check that skipped here because the cache exists would just watch the late
+    # chain re-ask anyway - after the cook has already started, which is the exact
+    # failure this function exists to prevent. Skipping the cache is therefore
+    # keyed to the SAME flag the late chain uses, not exempted by it.
+    if not args.reimport and import_map.map_sumo_dir(rec["map"]):
+        return                    # a previous run already picked one for this map
+    import_map.choose_sumo_source(cache_name=rec["map"])
+
+
+def _edit_slots(slots, rec, ctx, cfg, apps, catalog, repo, tag_prefix, args=None,
+                auto=()):
     """Run the editor for each requested slot. Always in SLOT_KEYS order, so a
     dependency is settled before the thing that depends on it (pick the app, then
     its map, then the scenario for that pairing). Returns the CARLA config, which
-    the CARLA editor may have replaced."""
+    the CARLA editor may have replaced.
+
+    `auto` are the slots being filled as a CONSEQUENCE - a new setup's blanks, or
+    what cascade() invalidated - rather than because the user selected that row.
+    A slot with one obvious answer settles itself there and reports what it took;
+    the row on the summary is how you disagree with it. Only the scenario slot has
+    such an answer today: the app declares its yaml, so asking which one to run
+    before the user has even seen the setup is a question with a single sensible
+    reply. app and map have no default worth guessing and always ask."""
     import import_map
+    # Each editor marks what the setup is currently using, so Enter keeps it. That
+    # only holds while the value is still THIS app's / THIS map's: when an earlier
+    # slot in the same pass has just changed, what the record still remembers
+    # belongs to what we left, and offering it as current would be the same lie.
+    # Which one survives what is cascade()'s rule, applied here to the values.
+    was = {"app": rec.get("app"), "map": rec.get("map")}
     for slot in run_profile.SLOT_KEYS:
         if slot not in slots:
             continue
         if slot == "app":
-            app = app_catalog.choose_app(apps) if apps else None
+            app = app_catalog.choose_app(apps, current=rec.get("app")) if apps else None
             rec["app"] = app["id"] if app else None
             _bind_app(rec, apps, ctx)
             if app:
@@ -2174,10 +3000,12 @@ def _edit_slots(slots, rec, ctx, cfg, apps, catalog, repo, tag_prefix, args=None
                         rec[key] = app["defaults"][key]
         elif slot == "map":
             app = ctx.get("app")
+            if rec.get("app") != was["app"]:
+                rec["map"] = None          # belonged to the app we just left
             target, tag, local = import_map.choose_map(
                 repo, tag_prefix, cfg.get("carla_root") if cfg else None,
                 catalog=catalog, preferred=(app or {}).get("maps"),
-                app_label=(app or {}).get("title"))
+                app_label=(app or {}).get("title"), current=rec.get("map"))
             ent = import_map.catalog_entry(catalog, target)
             rec["map"] = ent["map_name"] if ent else target
             rec["map_origin"] = ("Digital-Twin-Library" if tag else
@@ -2188,12 +3016,26 @@ def _edit_slots(slots, rec, ctx, cfg, apps, catalog, repo, tag_prefix, args=None
             # already cooked - reimport it?" is worth asking; a replayed one is not.
             ctx["picked_now"] = True
             print(f"[cosim] selected map: {rec['map']}")
+            _sumo_for_local_pick(rec, ctx, local, args)
         elif slot == "config":
             if not rec.get("map"):
                 continue                      # nothing to scope a scenario to yet
-            rec["config"], rec["config_scope"] = edit_config(
-                ctx.get("staged"), (ctx.get("app") or {}).get("title"),
-                rec["map"], rec.get("app") or run_profile.GENERIC)
+            # An app-owned yaml is written against the app, so it survives a map
+            # change; a per-map one does not. Neither survives an app change.
+            keep = rec.get("app") == was["app"] and (
+                rec.get("map") == was["map"]
+                or (rec.get("config_scope") or "map") == "app")
+            if slot in auto:
+                rec["config"], rec["config_scope"] = default_config(
+                    ctx.get("staged"), rec["map"],
+                    rec.get("app") or run_profile.GENERIC,
+                    rec.get("config") if keep else None)
+            else:
+                rec["config"], rec["config_scope"] = edit_config(
+                    ctx.get("staged"), (ctx.get("app") or {}).get("title"),
+                    rec["map"], rec.get("app") or run_profile.GENERIC,
+                    rec.get("config") if keep else None,
+                    interactive=(_interactive(args) if args is not None else None))
         elif slot == "engine":
             # Derived from the yaml, not from the record: the yaml owns it, so the
             # value being edited must be the one currently in the file.
@@ -2202,7 +3044,10 @@ def _edit_slots(slots, rec, ctx, cfg, apps, catalog, repo, tag_prefix, args=None
             # No yaml to write to yet? Park it on args, which is where the CLI
             # flags live and what generate_config_yaml reads - so a menu choice
             # and --engine take the identical path instead of one being dropped.
-            if args is not None and not _yaml_exists(rec.get("config")):
+            # Park it on args either way. With no yaml this is the only record of
+            # the choice; with one, edit_engine has just written it there, and
+            # args.engine is what makes THIS run honour it regardless of read order.
+            if args is not None:
                 args.engine = picked
         elif slot == "carla":
             now = derived_from_yaml(rec.get("config"), ctx.get("staged"), args)
@@ -2215,6 +3060,57 @@ def _edit_slots(slots, rec, ctx, cfg, apps, catalog, repo, tag_prefix, args=None
             rec["sumo_gui"] = edit_sumo(rec.get("config"), rec.get("sumo_gui", True),
                                         now["carla_tick"] or FIXS_FEED_S)
     return cfg
+
+
+# The answers configure_run has collected so far, for the case where it never
+# returns. Module-level because an exception unwinds its locals before main() can
+# read them, and because the alternative - threading a holder through the
+# signature - puts a parameter on a function whose callers do not care.
+_IN_PROGRESS = {}
+
+# The setup name the pre-import checkpoint wrote, if any. A dict rather than a bare
+# name so main() can set it without a `global` declaration at the top of a very long
+# function.
+_CHECKPOINT = {}
+
+
+def _say_checkpoint_kept():
+    """Point at the saved setup, once, on a run that failed after it was written.
+
+    The pre-import checkpoint is silent by design: it fires on EVERY run, before
+    the cook, and cannot know yet whether the cook will succeed - announcing it
+    there would print a line on every good run to report something that only
+    matters on a bad one. So the notice hangs off the failure instead, which is the
+    one moment it is both abnormal and useful. Nothing is printed when the
+    questionnaire itself was interrupted: that path says its own piece, and the
+    checkpoint below it never ran."""
+    name = _CHECKPOINT.pop("name", None)
+    if name:
+        print(f"[cosim] setup '{name}' is saved; the next run opens on it.")
+
+
+def _checkpoint_interrupted_setup():
+    """Keep the answers given so far when setup is abandoned part-way.
+
+    The questionnaire is where most of the typing happens, and Ctrl+C in it used to
+    throw all of it away - the pre-import checkpoint sits AFTER configure_run
+    returns, so it only ever covered a failed cook. This covers the other half.
+
+    Two guards, both about not making things worse than losing the answers:
+    `dirty` skips a setup that was opened and not edited - there is nothing to
+    keep, and writing would only re-tag a good record as unfinished. And an
+    existing name is never overwritten: reaching the confirm step is what offers
+    to fork, and an interrupted edit is exactly a fork nobody got to name, so it
+    lands beside the original instead of on top of it."""
+    rec, doc = _IN_PROGRESS.get("rec"), _IN_PROGRESS.get("doc") or {}
+    if not rec or not _IN_PROGRESS.get("dirty"):
+        return
+    name = _IN_PROGRESS.get("name")
+    if not name or name in (doc.get("setups") or {}):
+        name = run_profile.suggest_name(rec.get("app"), doc)
+    run_profile.save_partial(name, rec, "setup")
+    print(f"\n[cosim] kept the answers so far as '{name}'; "
+          f"it is offered on the next run.")
 
 
 def configure_run(args, cfg, repo, tag_prefix, catalog):
@@ -2234,7 +3130,7 @@ def configure_run(args, cfg, repo, tag_prefix, catalog):
     # wrong human - two people picking independently is exactly how the two ends
     # come to disagree about the map, and that failure lands minutes later inside
     # a cook. So a serving host runs the same code path a non-tty run takes.
-    interactive = sys.stdin.isatty() and not args.serve
+    interactive = _interactive(args)
     doc = run_profile.load_doc()
     ctx = {"app": None, "staged": [], "picked_local": None, "picked_now": False}
 
@@ -2267,6 +3163,11 @@ def configure_run(args, cfg, repo, tag_prefix, catalog):
     #    name: an untouched setup keeps its own, an edited one offers to fork.
     dirty = rec is None
     while True:
+        # Publish the state an interrupt should keep. Once per redraw is enough:
+        # rec is edited in place, so the entry below tracks the edits themselves -
+        # this only has to catch rec being REPLACED (a new setup, or switching to
+        # another saved one).
+        _IN_PROGRESS.update(name=name, rec=rec, dirty=dirty, doc=doc)
         if rec is None:
             rec = {"app": None, "sumo_gui": True}
             _apply_cli(rec, args)
@@ -2283,19 +3184,35 @@ def configure_run(args, cfg, repo, tag_prefix, catalog):
                 # sitting at the wrong machine for an answer nothing would read.
                 # ('none' is a legitimate answer, but `not rec.get("app")` cannot
                 # tell "chose none" from "not asked yet", so it is set here.)
+                # The SCENARIO YAML is the same story, and was missed. peer.py's
+                # contract is "decisions, never files - the yaml stays on the
+                # machine that owns it", and every key a render host would read
+                # out of one is consumed elsewhere: Backend picks a bridge this
+                # host never dispatches (--serve returns at hold_carla),
+                # CarlaTimeStep / TrafficRefreshRate / RealtimePacing are read by
+                # VirCarlaEnv and TrafficLayer on the TRAFFIC machine, and
+                # CarlaServerIP/Port would be written back to a local file nothing
+                # local reads. So it changes nothing here and cost a prompt: every
+                # serve on a fresh host stopped on the scenario menu.
                 rec["app"] = None
-                pending -= {"app"}
+                pending -= {"app", "config"}
+            # Every one of these is a blank being filled, not a row the user chose.
+            auto = set(pending)
             dirty = True
         else:
             _apply_cli(rec, args)
             _bind_app(rec, apps, ctx)
-            pending = set()
+            pending, auto = set(), set()
 
         while True:
             if pending:
-                cfg = _edit_slots(pending, rec, ctx, cfg, apps, catalog, repo, tag_prefix, args)
+                cfg = _edit_slots(pending, rec, ctx, cfg, apps, catalog, repo,
+                                  tag_prefix, args, auto=auto)
                 dirty = True
-                pending = set()
+                pending, auto = set(), set()
+            # An endpoint named on the command line has to be in the file the
+            # summary reads before the summary reads it - see _push_cli_endpoint.
+            _push_cli_endpoint(rec.get("config"), args, ctx)
             # Re-read the yaml-owned settings on every redraw, so a yaml edited by
             # hand (or by the editors above) is what the summary shows.
             derived = derived_from_yaml(rec.get("config"), ctx.get("staged"), args)
@@ -2325,7 +3242,16 @@ def configure_run(args, cfg, repo, tag_prefix, catalog):
                 rec = dict(doc["setups"][picked]) if picked else None
                 dirty = rec is None
                 break
-            pending = action          # a set of slot keys to edit, then redraw
+            # `action` is what the user selected; cascade() adds what that
+            # invalidated. Widened HERE rather than inside ask() so the two stay
+            # distinguishable: a row you picked opens its editor, a row that merely
+            # fell over with it settles itself where it can (see _edit_slots).
+            pending = run_profile.cascade(rec, action)
+            auto = pending - action
+            if auto:
+                labels = ", ".join(l for s, l in run_profile.SLOTS if s in auto)
+                print(f"[cosim] also settling: {labels} "
+                      f"(it depended on what you changed)")
 
 
 def _rec_to_args(rec, args):
@@ -2341,7 +3267,48 @@ def _rec_to_args(rec, args):
     args.sumo_gui = bool(rec.get("sumo_gui", True))
 
 
-def edit_config(staged, app_title, map_name, setup_app_id):
+def default_config(staged, map_name, setup_app_id, current=None):
+    """The scenario yaml to run without asking. Returns (path, scope).
+
+    Filling this slot is not a question when the application has already answered
+    it: an app DECLARES its scenario yamls in apps.json, and the first one it lists
+    is the one it means - the rest are variants you switch to deliberately. Opening
+    a co-sim with a list of yamls asked which config to run before the user had
+    seen the app or the map it belonged to, and the honest answer was almost always
+    "the one the app ships".
+
+    An app that declares none gets the per-map path, ~/.fixs/apps/<app>/maps/<map>/
+    config.yaml. That file need not exist: main() generates it on the first run,
+    which is what makes "or create a new one" a real answer rather than an error.
+
+    `current` is what the setup already runs, when that survived the change that
+    got us here; keeping it is more right than re-deriving a default over the top
+    of a choice the user has already made. edit_config (summary row 3) is where
+    every candidate is still listed."""
+    import import_map
+    # Same one-shot migration edit_config does, because either path can be the
+    # first to touch this app+map pairing.
+    app_catalog.migrate_scenarios(setup_app_id, map_name,
+                                  import_map._map_cache_dir(map_name))
+    staged_paths = {os.path.normcase(os.path.abspath(c["path"])) for c in staged or []}
+    if current and os.path.isfile(current):
+        scope = "app" if os.path.normcase(os.path.abspath(current)) in staged_paths \
+            else "map"
+        return current, scope
+    if staged:
+        pick = staged[0]
+        print(f"[cosim] scenario config: {os.path.basename(pick['path'])} "
+              f"({pick['title']}) - this app's own; row 3 lists the alternatives.")
+        return pick["path"], "app"
+    generated = app_catalog.scenario_path(setup_app_id, map_name)
+    how = "existing" if os.path.isfile(generated) else "generated on the first run"
+    print(f"[cosim] scenario config: {os.path.basename(generated)} for '{map_name}' "
+          f"({how}); row 3 lists the alternatives.")
+    return generated, "map"
+
+
+def edit_config(staged, app_title, map_name, setup_app_id, current=None,
+                interactive=None):
     """Pick the scenario yaml, from every candidate that exists for this pairing.
 
     Two kinds are legitimate and both are listed together, because from where the
@@ -2351,6 +3318,12 @@ def edit_config(staged, app_title, map_name, setup_app_id):
                  whichever map it runs against
       per-map    ~/.fixs/apps/<app>/maps/<map>/*.yaml - generated for this app on
                  this map, plus any variant the user dropped beside it
+    `current` is the yaml the setup is already running, so the menu can mark it and
+    Enter can genuinely keep it. It is matched case-insensitively, because the path
+    makes a round trip through run_profiles.json between runs; the menu is then
+    handed the spelling from the list, which is what the app/per-map test below
+    compares against.
+
     Returns (path, scope). The scope matters downstream twice: an app-owned yaml is
     AUTHORED, so the generator must never overwrite it, and only a per-map one is
     invalidated when the map changes."""
@@ -2385,13 +3358,48 @@ def edit_config(staged, app_title, map_name, setup_app_id):
         options.append((generated, f"{os.path.basename(generated):<42} "
                                    f"auto-generate for this map"))
 
+    # The setup's own yaml has to be ON the list before it can be marked on it.
+    # Normally it is already there; the two ways it is not are both worth saying out
+    # loud rather than quietly falling back to another file, since the fallback is
+    # what the user would then run.
+    if current:
+        match = next((p for p, _ in options
+                      if os.path.normcase(p) == os.path.normcase(current)), None)
+        if match:
+            current = match
+        elif os.path.isfile(current):
+            # Authored elsewhere (a scratch yaml, a path passed as --config). It is
+            # what the setup runs, so it belongs on the list; listed last because it
+            # is not part of this app's folder.
+            options.append((current, f"{os.path.basename(current):<42} "
+                                     f"in use, outside this app's folder"))
+        else:
+            print(f"[cosim] note: this setup's scenario yaml is gone "
+                  f"({current}); pick one below.")
+            current = None
+
     who = f"{app_title} on '{map_name}'" if app_title else f"'{map_name}'"
     app_paths = {c["path"] for c in staged}
     # WHICH yaml is only half of it: mostly there is one, and what people actually
     # want is to change what is IN it. So the list always offers the file itself.
-    picked = _config_menu(who, options, app_paths)
+    picked = _config_menu(who, options, current, interactive=interactive)
     print(f"[cosim] scenario config: {picked}")
     return picked, ("app" if picked in app_paths else "map")
+
+
+def _declares_backend(config_yaml):
+    """Whether the yaml sets CarlaSetup.EnablePythonBackend itself.
+
+    read_backend cannot say: it answers 'py' both for "the file says py" and for
+    "the file says nothing", which is exactly the ambiguity declared_engine exists
+    to cover. A textual check distinguishes them without a second parse.
+    """
+    try:
+        with open(config_yaml, encoding="utf-8", errors="replace") as f:
+            return any(ln.split("#", 1)[0].strip().startswith("EnablePythonBackend:")
+                       for ln in f)
+    except OSError:
+        return False
 
 
 def declared_engine(staged, config_yaml):
@@ -2422,9 +3430,12 @@ def main():
     ap.add_argument("--fresh", action="store_true",
                     help="ignore the saved run profile and ask every question again")
     ap.add_argument("--sumocfg", default=None,
-                    help="SUMO .sumocfg. Optional: if omitted it comes from the chosen "
-                         "map bundle's sumo/ (a DT-Library map ships its scenario). Pass "
-                         "it to override with your own demand on a shared map.")
+                    help="SUMO .sumocfg. Optional: if omitted it comes from the "
+                         "application's apps.json 'sumocfg' if it declares one, else "
+                         "the chosen map bundle's sumo/ (a DT-Library map ships its "
+                         "scenario). Pass it to run your own demand - an app that "
+                         "generates its scenario is given it and builds from it, so "
+                         "its ego and outputs stay with the network you named.")
     ap.add_argument("--map", default=None,
                     help="Map to run: a Digital-Twin-Library location (e.g. 'roosevelt'), "
                          "or an already-cooked map name. If omitted, pick from the catalog "
@@ -2444,8 +3455,31 @@ def main():
                     help="URL of the map package zip for --auto-import (e.g. a release asset)")
     ap.add_argument("--map-config", default=None,
                     help="text file declaring the import package (package= and url= lines)")
-    ap.add_argument("--reimport", action="store_true",
-                    help="re-import the map even if already cooked (re-download + re-cook)")
+    ap.add_argument("--reimport", nargs="?", const=True, default=False,
+                    metavar="PATH",
+                    help="re-import the map even if already cooked (re-download + "
+                         "re-cook). With PATH: for a LOCAL map, re-import from "
+                         "that .fbx/.xodr file or folder directly, skipping the "
+                         "file dialog, and remember it for next time - PATH is "
+                         "ignored (with a note) for a Digital-Twin-Library map, "
+                         "which has nothing local to browse to.")
+    ap.add_argument("--purge-map", nargs="?", const="", default=None,
+                    metavar="NAME[,NAME]",
+                    help="delete imported maps from this machine, then stop. With no "
+                         "NAME: list what is here and ask (accepts 1,3,4 or 'all'). "
+                         "Keeps the downloaded bundle unless asked otherwise.")
+    ap.add_argument("--purge-cache", dest="purge_cache", action="store_true",
+                    default=None,
+                    help="with --purge-map: drop ~/.fixs/maps/<name>/ too "
+                         "(the next import re-downloads it)")
+    ap.add_argument("--keep-cache", dest="purge_cache", action="store_false",
+                    help="with --purge-map: keep ~/.fixs/maps/<name>/ without asking")
+    ap.add_argument("--clean-import", action="store_true",
+                    help="before importing, clear stale per-map staging out of "
+                         "CARLA's Import/ (everything except the map this run "
+                         "imports). CARLA's own files and anything unrecognised are "
+                         "listed, never removed. Complements --purge-map, which "
+                         "clears what ONE map owns everywhere.")
     ap.add_argument("--tl-table", default=None, help="traffic_light_table.csv (for --tls-manager sumo)")
     ap.add_argument("--tls-manager", default=None, choices=["sumo", "carla", "none"],
                     help="who drives the lights (default: the map's catalog setting, else 'sumo')")
@@ -2467,8 +3501,21 @@ def main():
                     help="do not pace the co-sim to real time (run as fast as "
                          "possible). Written to CarlaSetup.RealtimePacing, so it "
                          "applies to whichever bridge runs.")
-    ap.add_argument("--no-net-offset", action="store_true",
-                    help="zero the SUMO net offset (RoadRunner-local maps)")
+    # ON by default. Every tl_table FIXS writes is in SUMO coordinates - measured
+    # across five cooked maps here (uga, roosevelt, mlk x2, atlanta): 1156 rows, not
+    # one negative y. CARLA's world is left-handed, so SUMO (x, y) is CARLA (x, -y),
+    # and without the flip the spectator is sent to +y where there is no road: on the
+    # UGA campus map the busiest junction sits at y=1200, so the camera framed a point
+    # 2400 m north of it and the map looked unloaded. Off was never right for a
+    # FIXS-generated table; it is only right for a table already in CARLA coordinates,
+    # which is what --net-offset is for.
+    ap.add_argument("--no-net-offset", dest="no_net_offset", action="store_true",
+                    default=None,
+                    help="zero the SUMO net offset - read the TL table's y as SUMO y "
+                         "and flip it into CARLA's left-handed world. ON by default.")
+    ap.add_argument("--net-offset", dest="no_net_offset", action="store_false",
+                    help="the opposite: take the TL table's y as CARLA y unchanged, "
+                         "for a table already written in CARLA coordinates")
     ap.add_argument("--carla-host", default=None,
                     help="CARLA RPC host (default: CarlaSetup.CarlaServerIP from "
                          "the scenario yaml, else localhost). A non-local host "
@@ -2479,6 +3526,25 @@ def main():
     ap.add_argument("--carla-timeout", type=float, default=10.0,
                     help="CARLA client connect timeout in seconds (default: 10; "
                          "raise for heavy source-build maps)")
+    # SUMO + TrafficLayer + the app's controller, with no CARLA anywhere: not
+    # launched, not connected to, not rendered into. For a scenario CARLA cannot
+    # render yet - a network edited on the SUMO side, or a controller change worth
+    # checking before a map is cooked for it.
+    #
+    # Documented rather than SUPPRESSed. It was hidden while it was a development
+    # escape hatch, on the reasoning that offering "...but without the simulator
+    # half" invites picking it to make a CARLA problem go away, and results from a
+    # run nobody can place. That worry belongs in the help text, not in hiding the
+    # flag: an application whose scenario CARLA cannot render yet has no other way
+    # to run, and a hidden flag is found by reading the source, which is worse.
+    ap.add_argument("--sumo-only", action="store_true",
+                    help="run the traffic half only: SUMO, TrafficLayer and the "
+                         "app's controller, same scenario and same ports, with no "
+                         "CARLA started, connected to or rendered into. For "
+                         "iterating on a controller without waiting for a map to "
+                         "load, and for a network CARLA has no cooked map for. "
+                         "Nothing is rendered, so say so when reporting a result "
+                         "from it -- it is not a co-simulation result.")
     ap.add_argument("--connect-timeout", type=float, default=15.0,
                     help="seconds to wait for the CARLA RPC handshake (default 15). "
                          "Separate from --load-timeout: reaching a server is fast or "
@@ -2494,6 +3560,14 @@ def main():
                     help="check this machine can run a co-sim (python deps, SUMO, "
                          "FIXS binaries, CARLA, peer, maps, gh auth) and exit; "
                          "non-zero exit if anything is broken")
+    ap.add_argument("--cleanup", action="store_true",
+                    help="stop everything a co-sim leaves behind -- SUMO, "
+                         "TrafficLayer, the bridge, CARLA and the application -- "
+                         "then exit. A run closed by its window X or killed "
+                         "mid-tick leaves the APPLICATION alive with nothing to "
+                         "notice it, and the next run then sits at 0 exchanges. "
+                         "With --app, that app's own process is included; without "
+                         "it, every app's is")
     ap.add_argument("--role", choices=["traffic", "render"], default=None,
                     help="which half of a distributed co-sim this machine is; "
                          "--doctor infers it from what is installed here, and this "
@@ -2513,6 +3587,14 @@ def main():
                          "but a stray click then blocks stdout and stalls the co-sim "
                          "until you press Enter. Worth it for a long unattended run; "
                          "costs you mouse copy/paste.")
+    ap.add_argument("--peer", default=None, metavar="HOST[:PORT]",
+                    help="traffic host: the machine running CARLA, which is where "
+                         "the other half of a distributed run sits (it runs "
+                         "--serve). Written to the scenario yaml's "
+                         "CarlaSetup.CarlaServerIP/Port, so every component here "
+                         "dials it; implies --no-launch. The same setting as "
+                         "--carla-host/--carla-port, spelled the way a two-machine "
+                         "run is described.")
     ap.add_argument("--serve", action="store_true",
                     help="CARLA host: wait for the traffic machine, serve the map it "
                          "asks for, and hold CARLA until it disconnects. Like "
@@ -2520,6 +3602,10 @@ def main():
     ap.add_argument("--peer-port", type=int, default=None,
                     help="control-channel port (default: CarlaServerPort + 400). Set "
                          "it on BOTH machines if the default is taken.")
+    ap.add_argument("--allow-map-skew", action="store_true",
+                    help="run even when the cooked map came from a different bundle "
+                         "than the SUMO data being run against it. Warned about on a "
+                         "normal run; refused under --serve, which this overrides.")
     ap.add_argument("--peer-wait", type=float, default=120.0,
                     help="traffic host: seconds to keep retrying the CARLA peer "
                          "(default 120), so the two machines can start in any order.")
@@ -2527,12 +3613,23 @@ def main():
                     help="traffic host: seconds to wait for the peer to cook and "
                          "launch (default 2700). A first cook is minutes of Unreal "
                          "work plus shader compilation.")
+    ap.add_argument("--allow-manual-carla", action="store_true",
+                    help="traffic host: run against a CARLA started by hand on the "
+                         "peer host when no 'run_cosim --serve' answers. Off by "
+                         "default - a leftover server from an earlier run happily "
+                         "accepts the connection while holding a DIFFERENT map.")
     ap.add_argument("--carla-only", action="store_true",
                     help="launch CARLA, load the map and HOLD it open, running no "
                          "bridge here - the CARLA half of a two-machine run, driven "
                          "by run_cosim on the traffic machine. Ctrl+C stops it.")
     ap.add_argument("--reconfigure", action="store_true",
                     help="re-run CARLA env setup before launching (pick a different CARLA)")
+    ap.add_argument("--update-python", action="store_true",
+                    help="re-resolve ONLY the python env (carla + SUMO client) and save "
+                         "it to carla.json, then exit. The CARLA / UE4 paths are kept. "
+                         "Use after creating the env setup asked for, or to move off one "
+                         "picked by mistake; every entry point follows carla.json, so "
+                         "this changes them all at once")
     ap.add_argument("--render-offscreen", action="store_true", help="headless CARLA")
     ap.add_argument("--no-spectator", action="store_true",
                     help="do not auto-frame the CARLA spectator on the scene")
@@ -2548,18 +3645,40 @@ def main():
     ap.add_argument("--no-sumo-gui", dest="sumo_gui", action="store_false",
                     help="run SUMO headless")
     ap.add_argument("--engine", choices=["py", "cpp"], default=None,
-                    help="co-sim bridge: py=run_synchronization.py (default), "
-                         "cpp=TrafficLayer+VirCarlaEnv (FIXS-native). Overrides the "
-                         "scenario yaml's CarlaSetup.Backend.")
+                    help="which VirEnvCore drives the FIXS-native stack: "
+                         "py=Carla/VirEnv/mainVirCarla.py (the Python core), "
+                         "cpp=VirCarlaEnv.exe (the C++ core). Both run SUMO + "
+                         "TrafficLayer + a bridge and read the same yaml. Overrides "
+                         "CarlaSetup.EnablePythonBackend.")
+    ap.add_argument("--standalone-bridge", action="store_true",
+                    help="run CARLA's own run_synchronization.py instead of the FIXS "
+                         "stack. It speaks no FIXS and drives SUMO over its own TraCI "
+                         "connection, so no controller, XIL component or TrafficLayer "
+                         "subscription takes part. Outside the normal FIXS route; "
+                         "kept for comparison against upstream CARLA.")
     ap.add_argument("--config", default=None,
                     help="[cpp] scenario yaml for the native bridge (default: "
                          "~/.fixs/maps/<cooked>/config.yaml, generated if missing).")
+    ap.add_argument("--refresh-deps", action="store_true",
+                    help="re-apply the selected application's 'requirements' into "
+                         "the configured interpreter even if they were already "
+                         "applied. Normally they are installed once and skipped "
+                         "while the file is unchanged.")
     ap.add_argument("--no-update-check", action="store_true",
                     help="skip the FIXS-bundle freshness check against the release")
     ap.add_argument("--sumo-no-start", action="store_true",
                     help="[cpp] launch sumo-gui but omit --start, so it opens loaded "
                          "and waits for you to press Play (overrides SumoSetup.AutoStart)")
     args = ap.parse_args()
+    # --reimport PATH parses as a string in args.reimport; split it out here so
+    # every OTHER site in this file - there are over a dozen - can go on reading
+    # args.reimport as the plain bool it has always been.
+    args.reimport_path = args.reimport if isinstance(args.reimport, str) else None
+    args.reimport = bool(args.reimport)
+
+    # Resolved before anything reads the endpoint, so --doctor, --version and the
+    # run itself all see one setting rather than two spellings of it.
+    resolve_peer(args)
 
     # OFF by default. Disabling QuickEdit costs mouse selection in cmd, and losing
     # copy/paste on every run is a worse trade than an occasional freeze that Enter
@@ -2570,6 +3689,19 @@ def main():
         _disable_quickedit()
     if args.log or args.log_file:
         start_log(args.log_file)
+
+    # --update-python answers a question and stops, and it is the one flag that must
+    # NOT re-exec first: re-execing runs it under the very interpreter it exists to
+    # replace, so a config pointing at a broken env could never be repaired from the
+    # front door. Handled before everything else for the same reason.
+    if args.update_python:
+        return env.update_python()
+
+    # --cleanup stops things rather than starting them, so it runs before any
+    # setup, map or CARLA work - the point is to be usable when the machine is in
+    # a state that would make those fail.
+    if args.cleanup:
+        return run_cleanup(getattr(args, "app", None))
 
     # --doctor and --version answer a question and stop. Neither touches a map, a
     # setup or a server, so they are safe to run at any time - including while a
@@ -2585,12 +3717,36 @@ def main():
             return print_fingerprint(cfg, host, port)
         import doctor
         import peer
-        return doctor.run(cfg, env, FIXS_ROOT,
-                          os.path.join(os.path.dirname(env.CONFIG_PATH), "maps"),
+        maps_root = os.path.join(os.path.dirname(env.CONFIG_PATH), "maps")
+        return doctor.run(cfg, env, FIXS_ROOT, maps_root,
                           host, port, _fixs_version(),
                           peer_port=args.peer_port or peer.peer_port(port),
                           who_has_port=_who_has_port,
+                          scenario=_peek_scenario(args, maps_root),
                           **_doctor_role(doctor, cfg, args))
+
+    # --purge-map answers a question about this machine's disk and stops. Sits with
+    # --doctor rather than further down because it is pure filesystem work: it needs
+    # the saved config to find CARLA, but never the carla module, so it must not pay
+    # for (or be blocked by) the re-exec and env repair everything below depends on.
+    #
+    # The work is import_map's - it owns where a cooked map, its staging and its
+    # bundle live, and those rules differ by flavour. What is passed in is what only
+    # this process can answer: whether anyone is there to be asked, and whether a
+    # CARLA is holding Content/ open. Same shape as doctor.run(who_has_port=...).
+    if args.purge_map is not None:
+        import import_map
+        cfg = env.load_config() or {}
+        mode = cfg.get("mode") or "source"
+        port = args.carla_port or DEFAULT_CARLA_PORT
+        return import_map.purge(
+            # client mode means no CARLA on this machine, so there is no cooked
+            # content here to find - only the bundle cache, which is still local.
+            None if mode == "client" else cfg.get("carla_root"),
+            mode=mode, named=args.purge_map, drop_cache=args.purge_cache,
+            interactive=_interactive(args),
+            carla_busy=lambda: _carla_pid_on(port),
+            carla_kill=_kill_pid_tree)
 
     # --carla-only holds a CARLA this machine launched, so the flags that mean
     # "launch nothing" contradict it outright. Caught here rather than later
@@ -2620,7 +3776,7 @@ def main():
                   f"world step.")
 
     # Advisory: nudge to update a stale local FIXS bundle before doing real work.
-    maybe_update_fixs(no_check=args.no_update_check)
+    maybe_update_fixs(no_check=args.no_update_check, interactive=_interactive(args))
 
     # Resolve the saved CARLA env (running first-time setup if needed) and make
     # sure we are on its python before importing carla. --no-launch still needs
@@ -2629,8 +3785,10 @@ def main():
     if not args.no_launch and (cfg is None or args.reconfigure):
         cfg = resolve_carla_env(reconfigure=args.reconfigure)
     if cfg is not None:
-        cfg = ensure_runtime(cfg)  # repair stale configs that lack a python env
-        maybe_reexec(cfg)          # may not return (re-execs under the env python)
+        cfg = env.ensure_runtime(cfg)   # repair stale configs that lack a python env
+        # may not return (re-execs under the env python). --reconfigure is dropped:
+        # it has already been honoured above, and the child must not ask again.
+        env.reexec_under_configured(__file__, cfg, drop=("--reconfigure",), tag="cosim")
         if cfg.get("mode") == "client" and args.carla_only:
             sys.exit("[cosim] --carla-only serves a CARLA on THIS machine, but "
                      "carla.json is 'client' mode (no CARLA here). Run it on the "
@@ -2648,13 +3806,26 @@ def main():
         print("[cosim] no CARLA env configured; running under the current python. "
               "If 'import carla' fails, run setup_carla first.")
 
+    # --sumo-only launches no CARLA, loads no world and connects no client, so
+    # every CARLA-local preflight below - the source-build cook, the carla half of
+    # a map bundle, TL and sign placement - has nothing to do for it. All of those
+    # are already gated on --no-launch, so saying it once here is what turns them
+    # off; threading a second flag through each would be the same decision written
+    # four more times. Deliberately AFTER the config gate above: this must not stop
+    # a fresh machine from settling WHICH PYTHON to use, which a traffic-only run
+    # needs exactly as much as a CARLA one does.
+    if args.sumo_only and not args.no_launch:
+        print("[cosim] --sumo-only: no CARLA is launched, loaded or dialled; "
+              "implying --no-launch.")
+        args.no_launch = True
+
     import import_map
     repo, tag_prefix = import_map.resolve_map_source(args.repo, args.tag_prefix)
     catalog = import_map.fetch_catalog(repo)
 
     # Everything the run needs - application, map, scenario yaml, bridge, CARLA,
     # SUMO - is decided here, from a saved setup you pick and edit until you
-    # confirm. Deliberately AFTER maybe_reexec: it prompts, and re-execing under
+    # confirm. Deliberately AFTER the re-exec: it prompts, and re-execing under
     # the env python afterwards would ask the same questions twice. And
     # deliberately BEFORE anything heavy: no download, cook or load happens while
     # the user is still deciding what to run, so quitting out of it leaves nothing
@@ -2667,28 +3838,44 @@ def main():
     if args.serve:
         ctl_sock = await_peer(args)
 
-    app, setup_name, staged_configs, setup, cfg, ctx = configure_run(
-        args, cfg, repo, tag_prefix, catalog)
+    # Ctrl+C at a prompt, and the deliberate quits, both leave by an exception; the
+    # answers are only worth keeping on the way out, so the checkpoint hangs off
+    # the exit rather than costing a write per question.
+    try:
+        app, setup_name, staged_configs, setup, cfg, ctx = configure_run(
+            args, cfg, repo, tag_prefix, catalog)
+    except (KeyboardInterrupt, SystemExit):
+        _checkpoint_interrupted_setup()
+        raise
+    finally:
+        _IN_PROGRESS.clear()
 
-    def cached_sumo_dir(name):
-        """An already-extracted ~/.fixs/maps/<name>/sumo, or None.
+    # Does this run have a CARLA half? The scenario yaml answers it, and nothing
+    # asked before: every CarlaSetup read is defaulted, so no block read the same as
+    # one spelling out the defaults - and the defaults are a complete, plausible
+    # CARLA. Here rather than at the --sumo-only gate above, which runs before the
+    # yaml is chosen; still ahead of the cook, the app, the install and the connect.
+    _chosen_yaml = args.config or (setup or {}).get("config")
+    if _chosen_yaml and not scenario_has_carla(_chosen_yaml):
+        print(f"[cosim] {os.path.basename(_chosen_yaml)} declares no CarlaSetup: this "
+              f"is a traffic-only scenario (SUMO + TrafficLayer"
+              + (f" + {app['id']}" if app else "")
+              + "). No CARLA is launched, loaded or dialled.")
+        args.sumo_only = True
+        args.no_launch = True
 
-        Consulted at EVERY site that would otherwise reach for the map bundle,
-        because opening the bundle is not free: download_release_zip prompts
-        "[U]se it / [R]e-download" over a ~380MB archive that a map with its
-        sumo/ already extracted would immediately throw away. There is more than
-        one such site - the source-build preflight, and the SUMO slot below that
-        also runs for --no-launch / packaged builds - and fixing only one of them
-        just moves the prompt. --sumocfg and --reimport deliberately bypass it:
-        one supplies the scenario outright, the other means "refresh from the
-        bundle"."""
-        if args.sumocfg is not None or args.reimport:
-            return None
-        found = import_map.map_sumo_dir(name)
-        if found:
-            print(f"[cosim] using cached SUMO scenario for '{name}': "
-                  f"{import_map.bundle_sumocfg(found)}")
-        return found
+    # The app is settled and we are already running under the configured interpreter
+    # (reexec_under_configured above), so this is the first point where "what does THIS app
+    # need" is answerable. Deliberately here rather than later: it is still before
+    # any download, cook or load, so a missing package is reported while nothing
+    # slow has happened yet - instead of as an ImportError minutes into a run.
+    if app and app.get("requirements"):
+        if not env.ensure_app_deps(sys.executable, app["id"],
+                                   os.path.join(app_catalog.app_dir(app),
+                                                app["requirements"]),
+                                   refresh=args.refresh_deps):
+            sys.exit(f"[cosim] '{app['id']}' is missing its declared dependencies; "
+                     f"not starting the run.")
 
     # Two slots to fill: a CARLA map (to cook + load) and a SUMO scenario. A
     # Digital-Twin-Library bundle fills both. The map itself was settled above; what
@@ -2711,16 +3898,141 @@ def main():
     picked_local = ctx.get("picked_local") or setup.get("map_local")
     if picked_local and not os.path.exists(picked_local):
         picked_local = None
+
+    # --reimport on a LOCAL map used to silently trust whatever path this setup
+    # remembered from however long ago - which goes stale the moment the export
+    # moves, and re-cooks last week's files with no error at all if the old
+    # folder is still sitting there with old content in it. A path given on the
+    # command line, or a fresh pick made just now in the editor (ctx), always
+    # wins; a bare --reimport with neither reopens the same browse dialog used at
+    # first setup instead of trusting the old one. The result becomes this run's
+    # picked_local, which the checkpoint save right below writes back into
+    # map_local - so the NEXT --reimport remembers whatever was just chosen here.
+    if args.reimport:
+        if map_origin != "local file":
+            if args.reimport_path:
+                print(f"[cosim] --reimport {args.reimport_path!r} ignored: "
+                      f"'{target_map}' is a {map_origin} map, not a local pick.")
+        elif args.reimport_path:
+            # An explicit path wins even over a fresh pick just made in the
+            # editor (ctx) - it is the more deliberate of the two - so whatever
+            # that pick's own _sumo_for_local_pick call already asked about is
+            # stale the moment this line runs. Ask again, for the path that will
+            # actually be cooked.
+            picked_local = args.reimport_path
+            _sumo_for_local_pick(setup, ctx, picked_local, args)
+        elif not ctx.get("picked_local"):
+            # No fresh pick this run either: the browse dialog opened just below
+            # is the only place that named a source, so it is the only place
+            # that can ask about its SUMO half. A fresh pick THROUGH THE EDITOR
+            # (which would have made ctx["picked_local"] truthy) already asked,
+            # via _edit_slots's own call - asking again here would be a second
+            # dialog for the same answer.
+            picked_local = import_map._select_package("map", None,
+                                                       inside=("xodr", "fbx"))
+            _sumo_for_local_pick(setup, ctx, picked_local, args)
+    # An app that BUILDS its scenario from the map's needs the map's scenario on disk
+    # BEFORE it starts, which is the opposite of the default the comment below
+    # describes - so it is opened here, and only for an app that says it needs it.
+    # `sumo_dir` is the same one the SUMO slot further down reuses; opening the
+    # bundle twice would prompt twice over the same archive.
+    sumo_dir = None              # dir holding the chosen bundle's .sumocfg (set on open)
+    map_sumocfg = None
+    if app and app.get("needs_map_sumo") and args.sumocfg is None:
+        sumo_dir = import_map.map_sumo_dir(target_map)
+        if sumo_dir is not None:
+            # This app BUILDS its scenario from the map's, so the map's files decide
+            # what the traffic does. Say whether they are still the published ones
+            # before anything is built on top of them.
+            import_map.report_bundle_parity(
+                target_map, "sumo", where=import_map.bundle_sumocfg(sumo_dir),
+                repo=repo, tag=(ent or {}).get("release"),
+                asset=(ent or {}).get("asset"))
+        if sumo_dir is None and (picked_local or picked_tag):
+            bundle = picked_local
+            if not bundle and picked_tag:
+                bundle = import_map.download_release_zip(
+                    repo, picked_tag, force_redownload=args.reimport,
+                    cache_name=target_map, asset=(ent or {}).get("asset"))
+            # A precooked .tar.gz is the CARLA half only - there is no sumo/ in it.
+            if bundle and not str(bundle).lower().endswith(".tar.gz"):
+                _carla_src, sumo_dir = import_map.open_bundle(bundle,
+                                                              cache_name=target_map)
+        map_sumocfg = import_map.bundle_sumocfg(sumo_dir)
+        if map_sumocfg:
+            print(f"[cosim] '{app['id']}' builds its scenario from the map's: "
+                  f"{map_sumocfg}")
+        else:
+            print(f"[cosim] '{app['id']}' declares needs_map_sumo, but '{target_map}' "
+                  f"ships no SUMO scenario to build from; it falls back to its own.")
+
+    # The application is launched further down - see "The application starts HERE".
+    # Bound now because cached_sumo_dir, defined immediately below, reads
+    # app_sumocfg, and a closure over a name that does not exist yet is a
+    # NameError waiting for the first caller.
+    app_proc, app_sumocfg = (None, None)
+
+    def cached_sumo_dir(name):
+        """An already-extracted ~/.fixs/maps/<name>/sumo, or None.
+
+        Consulted at EVERY site that would otherwise reach for the map bundle,
+        because opening the bundle is not free: download_release_zip prompts
+        "[U]se it / [R]e-download" over a ~380MB archive that a map with its
+        sumo/ already extracted would immediately throw away. There is more than
+        one such site - the source-build preflight, and the SUMO slot below that
+        also runs for --no-launch / packaged builds - and fixing only one of them
+        just moves the prompt. --sumocfg, an app-reported scenario and --reimport
+        deliberately bypass it: the first two supply the scenario outright, the
+        last means "refresh from the bundle"."""
+        if args.sumocfg is not None or app_sumocfg is not None or args.reimport:
+            return None
+        found = import_map.map_sumo_dir(name)
+        if found:
+            # Not just WHICH scenario, but whether it is still the published one.
+            # A cached sumo/ is reused for runs and runs, and nothing else on screen
+            # would ever mention that its contents had drifted from the library's.
+            import_map.report_bundle_parity(
+                name, "sumo", where=import_map.bundle_sumocfg(found),
+                repo=repo, tag=(ent or {}).get("release"),
+                asset=(ent or {}).get("asset"))
+        return found
+
+    # Checkpoint. Everything the questionnaire asked is now decided, and the next
+    # thing that runs - the map import - is the one that fails for reasons outside
+    # this script (a cook that crashes the editor, a bundle that will not open).
+    # The full save is ~400 lines below, past that import, so a failed cook used to
+    # discard the app, map and local pick just chosen. config/config_scope are NOT
+    # passed: they are resolved after the import, and `setup` already carries
+    # whatever the previous run knew, which is the right thing to come back to.
+    run_profile.save_partial(setup_name, {**setup,
+                                          "app": app["id"] if app else None,
+                                          "map": target_map,
+                                          "map_origin": map_origin,
+                                          "map_local": picked_local,
+                                          "sumo_gui": bool(args.sumo_gui)},
+                             "map import")
+    _CHECKPOINT["name"] = setup_name
+    # Where this map's CARLA half came from. Only a LOCAL pick needs it: a
+    # release download already stamps .source_sha, and a pick has no
+    # equivalent - which is why a hand-picked map carries no origin at all
+    # today. Written before the import, so a cook that fails still leaves a
+    # record of what was attempted.
+    if picked_local:
+        import_map.record_source(target_map, "carla", picked_local)
     # Was the map chosen from the menu on THIS run? Only then is "you just picked a
     # map that is already cooked - reimport it?" worth asking. A replayed setup is a
     # deliberate re-run, and prompting about re-cooking it every time is noise.
     picked_now = bool(ctx.get("picked_now"))
 
     # Per-map settings are defaults; explicit CLI flags override.
-    no_net_offset = args.no_net_offset or settings.get("net_offset") == "zero"
+    # None = neither --no-net-offset nor --net-offset was given, so the map's own
+    # setting decides and its default is ON (see the flag). A map opts out with
+    # net_offset: "keep"; "zero" is the historical spelling of ON and still reads as
+    # ON here, so an existing per-map setting keeps meaning what it meant.
+    no_net_offset = (args.no_net_offset if args.no_net_offset is not None
+                     else settings.get("net_offset") != "keep")
     tls_manager = args.tls_manager or settings.get("tls_manager") or "sumo"
 
-    sumo_dir = None              # dir holding the chosen bundle's .sumocfg (set on open)
     # /Game/... path to boot CARLA into (set by the source-build preflight). None
     # (packaged build / --no-launch) = let the engine pick.
     target_level = None
@@ -2752,25 +4064,90 @@ def main():
               f"'{target_map}' cooked with TLs/signs placed.")
         args.no_launch = True
 
+    # Asked for before the import, not after: Import/ is the folder CARLA's
+    # Import.py cooks out of, so clearing it is only meaningful while there is
+    # still a cook ahead. `keep` is this run's map, which must survive.
+    if args.clean_import and cfg is not None and cfg.get("carla_root"):
+        import_map.clean_import_dir(cfg["carla_root"], keep=target_map,
+                                    interactive=_interactive(args),
+                                    assume_yes=not _interactive(args))
+
     # Source-build preflight: a custom map must be cooked into the build before
     # CARLA can load it. Import it if missing - from a DT-Library bundle (downloaded
     # + cached, split into carla/ + sumo/) or a local pick - else fail clearly.
     if not args.no_launch and cfg is not None and cfg.get("mode") == "source":
         resolved = None if args.reimport else \
-            import_map.resolve_cooked_map(cfg["carla_root"], target_map)
+            import_map.resolve_cooked_map(cfg["carla_root"], target_map, mode="source")
+        if resolved is not None:
+            _check_map_source(args, cfg["carla_root"], target_map, "source")
 
         # Already imported? If this was a FRESH source pick (an online release or a
         # local .zip/folder), offer to reimport - re-cook + re-place TLs/signs +
         # regenerate the TL table. A pick of an already-imported map (both picked_*
         # None) is run as-is, no prompt.
         if resolved is not None and picked_now and (picked_tag or picked_local) \
-                and not args.reimport and sys.stdin.isatty():
+                and not args.reimport and _interactive(args):
             ans = input(f"[cosim] '{resolved[0]}' is already imported. Reimport "
                         f"(re-cook + re-place TLs/signs + regen TL table)? [y/N]: ").strip().lower()
             if ans.startswith("y"):
                 args.reimport = True
                 resolved = None
 
+    # The application starts HERE: after the last question this script asks, and
+    # before anything reaches for a map bundle.
+    #
+    # BEFORE THE BUNDLE, because the app may be the one that says which scenario to
+    # run - and an app that generates its own from scratch needs no sumo/ half at all,
+    # so reaching for one would prompt over a ~380MB archive whose SUMO content is
+    # about to be thrown away.
+    #
+    # AFTER THE LAST QUESTION, because the controller prints "Waiting for TrafficLayer
+    # on <host>:<port> ..." to this same terminal the moment it starts. Launched
+    # before the reimport prompt, that line landed on top of the question:
+    #
+    #     [cosim] 'mlk_no_signal' is already imported. Reimport (re-cook + re-place
+    #     TLs/signs + regen TL table)? [y/N]: Waiting for TrafficLayer on 127.0.0.1:430
+    #
+    # - a question and an unrelated status line sharing one row, with the cursor
+    # parked after the wrong one. The prompt is the LAST thing this script asks, so
+    # starting the app just after it is enough; there is no output to interleave with
+    # from here on.
+    #
+    # There is a second reason to start it late. Every sys.exit between the
+    # questionnaire and this point - an unreachable remote CARLA, a map that will not
+    # resolve, a source check that fails - used to leave the controller running as an
+    # orphan, waiting on a bridge that was never going to come.
+    #
+    # It keeps running from this point: it is the controller, and it waits for
+    # TrafficLayer while the map is cooked and CARLA comes up. A first cook is
+    # minutes, so its wait for the bridge has to be patient - run_cosim stops it if
+    # anything below fails.
+    if app and app.get("launch"):
+        # A leftover app from an earlier run holds no port, so the port sweep
+        # cannot see it, and it waits forever (the eco app runs --fixsTimeout 0).
+        # It then answers TrafficLayer instead of the one started here and the
+        # bridge reports "0 exchanges" with nothing naming the cause. Swept HERE,
+        # before this run's app exists, so there is nothing of ours to confuse it
+        # with. CARLA is skipped: the preflight owns it.
+        for pid, pname, _ in _cosim_leftovers(app.get("id")):
+            if _is_carla_process(pname):
+                continue
+            print(f"[cosim] {pname} (pid {pid}) is left over from an earlier run; "
+                  f"stopping it so this one is not answered by a ghost.")
+            _kill_pid_tree(pid)
+
+        # The yaml this run will hand TrafficLayer. Known already for a config that
+        # was chosen (--config, or the one the profile remembers); a first run that
+        # GENERATES a per-map config has none yet, and the app falls back to its own.
+        app_proc, app_sumocfg = start_app(app, args.config or setup.get("config"),
+                                          sumo_only=args.sumo_only,
+                                          sumocfg=args.sumocfg or map_sumocfg)
+
+    # Same condition as the preflight above, resumed. Split rather than moved so the
+    # app can start between the two: everything above this line only DECIDES what the
+    # import will do, everything below it acts on that decision, and the app has to
+    # start in between - after the last prompt, before the first bundle read.
+    if not args.no_launch and cfg is not None and cfg.get("mode") == "source":
         # The bundle fills two slots - the CARLA package to cook, and the SUMO
         # scenario - so check what is actually still missing before touching it.
         if sumo_dir is None:
@@ -2779,24 +4156,36 @@ def main():
         # download_release_zip caches under ~/.fixs/maps; open_bundle splits it.
         carla_src = None
         need_bundle = (resolved is None                          # must cook the map
-                       or (args.sumocfg is None and sumo_dir is None))   # need its sumo/
+                       or (args.sumocfg is None                  # need its sumo/
+                           and app_sumocfg is None
+                           and sumo_dir is None))
         if need_bundle and (picked_local or picked_tag):
             zip_path = picked_local or import_map.download_release_zip(
-                repo, picked_tag, force_redownload=args.reimport, cache_name=target_map)
+                repo, picked_tag, force_redownload=args.reimport,
+                cache_name=target_map, asset=(ent or {}).get("asset"))
             carla_src, bundle_sumo = import_map.open_bundle(zip_path, cache_name=target_map)
             if bundle_sumo:            # keep a cached sumo/ if this bundle has none
                 sumo_dir = bundle_sumo
 
         if resolved is None:
             if carla_src is not None:                    # a DT/local bundle or raw export
-                real = import_map.map_name_in(carla_src) or target_map
+                # descriptor_only: a bundle that SHIPS a descriptor names the
+                # package CARLA cooks, and that name is not ours to change. A raw
+                # export ships none - FIXS generates it - so the name chosen at the
+                # import prompt is the name. The old .xodr-stem fallback could not
+                # tell those apart and always won, which silently discarded the
+                # rename: the prompt took 'uga_untextured', the export was
+                # ugaaa.xodr, and the cook, the descriptor and /Game all said
+                # 'ugaaa' while the run profile said 'uga_untextured'.
+                real = import_map.map_name_in(carla_src, descriptor_only=True) or target_map
                 verb = "re-importing" if args.reimport else "importing"
                 print(f"[cosim] {verb} '{real}' before launch ...")
                 _tell_peer(ctl_sock, "cook", f"importing and cooking '{real}' - "
                            f"this is the slow one (Unreal + shaders)")
                 import_map.ensure_map(real, carla_root=cfg["carla_root"],
                                       ue4_root=cfg.get("ue4_root"),
-                                      package_dir=carla_src, force=args.reimport)
+                                      package_dir=carla_src, force=args.reimport,
+                                      source_sha=import_map.read_cached_sha(target_map))
                 target_map = real
             elif args.auto_import or args.reimport:      # legacy explicit --map + url/config
                 url = args.map_package_url
@@ -2808,39 +4197,155 @@ def main():
                            f"'{target_map}' - this is the slow one (Unreal + shaders)")
                 import_map.ensure_map(target_map, carla_root=cfg["carla_root"],
                                       ue4_root=cfg.get("ue4_root"),
-                                      package_url=url, force=args.reimport)
+                                      package_url=url, force=args.reimport,
+                                      source_sha=import_map.read_cached_sha(target_map))
             else:
                 sys.exit(
                     f"[cosim] map '{target_map}' is not imported into {cfg['carla_root']}.\n"
                     f"        Pick a DT-Library map (--map <location>), a local bundle "
                     f"(--package-dir <zip/folder>), or --auto-import [--map-package-url <zip>].")
-            resolved = import_map.resolve_cooked_map(cfg["carla_root"], target_map)
+            resolved = import_map.resolve_cooked_map(cfg["carla_root"], target_map,
+                                                     mode="source")
 
         if resolved is None:
             print(f"[cosim] could not tell which cooked map '{target_map}' provides; "
                   f"pick the one to load:")
-            target_map = import_map.choose_imported_map(cfg["carla_root"])
-            target_level = import_map.choose_level_path(cfg["carla_root"], target_map)
+            target_map = import_map.choose_imported_map(cfg["carla_root"], mode="source",
+                                                        interactive=_interactive(args))
+            target_level = import_map.choose_level_path(cfg["carla_root"], target_map,
+                                                       mode="source",
+                                                       interactive=_interactive(args))
         else:
             if resolved[0] != target_map:
                 print(f"[cosim] package '{target_map}' provides map '{resolved[0]}'")
             target_map, target_level = resolved
 
-        note = import_map.duplicate_level_note(cfg["carla_root"], target_map, target_level)
+        note = import_map.duplicate_level_note(cfg["carla_root"], target_map,
+                                               target_level, mode="source")
         if note:
             print(note)
 
-    # SUMO slot: --sumocfg wins; else an already-extracted sumo/, else the chosen
-    # bundle's. This also runs for the paths that skip the source-build preflight
-    # above (--no-launch, packaged builds), so the cache is checked here too - the
-    # bundle is the LAST resort, not the first.
+    # Packaged-build preflight: the same job as above, by the only mechanism a
+    # packaged CARLA has. It cannot cook anything - cooking runs the Unreal editor,
+    # which a packaged build does not ship - so the map must arrive ALREADY cooked,
+    # as the DT-Library's precooked .tar.gz, and installing that is a plain extract
+    # into the package root (see import_map.install_cooked).
+    #
+    # Without this block a packaged run skipped the CARLA slot entirely: the SUMO
+    # slot below still filled, the run looked healthy, and the first sign of trouble
+    # was load_world failing on a map that was never there.
+    #
+    # `client` never reaches here - that mode has no local CARLA to install into,
+    # and the map is the remote server's business.
+    if not args.no_launch and cfg is not None and cfg.get("mode") == "packaged":
+        resolved = None if args.reimport else \
+            import_map.resolve_cooked_map(cfg["carla_root"], target_map, mode="packaged")
+        if resolved is not None:
+            _check_map_source(args, cfg["carla_root"], target_map, "packaged")
+
+        if resolved is None:
+            # Say so BEFORE the download. A precooked package is gigabytes, and the
+            # source branch above already narrates its cook - so this branch staying
+            # silent meant the traffic machine sat through the longest step of a
+            # packaged bring-up being told only "it is launching CARLA and loading
+            # the map", which is not what is happening yet.
+            _tell_peer(ctl_sock, "install", f"installing the precooked '{target_map}' "
+                       f"package - a download and extract, several GB")
+            # Which asset, and the three "not from here" cases, live in import_map -
+            # the same call --import-map makes, so the two front doors cannot come to
+            # disagree about what a packaged build can install (#276).
+            target_map = import_map.install_precooked(
+                cfg["carla_root"], target_map, repo=repo, tag=picked_tag, entry=ent,
+                local=picked_local, force=args.reimport, log="cosim")
+            resolved = import_map.resolve_cooked_map(cfg["carla_root"], target_map,
+                                                     mode="packaged")
+
+        if resolved is None:
+            print(f"[cosim] could not tell which installed map '{target_map}' provides; "
+                  f"pick the one to load:")
+            target_map = import_map.choose_imported_map(cfg["carla_root"], mode="packaged",
+                                                        interactive=_interactive(args))
+            target_level = import_map.choose_level_path(cfg["carla_root"], target_map,
+                                                        mode="packaged",
+                                                        interactive=_interactive(args))
+        else:
+            target_map, target_level = resolved
+
+        note = import_map.duplicate_level_note(cfg["carla_root"], target_map,
+                                               target_level, mode="packaged")
+        if note:
+            print(note)
+
+        # TLs and signs are placed through the UE4 editor, which a packaged build
+        # does not have - so whatever the asset was cooked with is what you get, for
+        # the whole run. Said out loud because the failure is silent: a map cooked
+        # without traffic lights runs fine and produces a co-sim with no TL sync,
+        # i.e. plausible numbers that are wrong.
+        print(f"[cosim] note: packaged CARLA - traffic lights and signs cannot be "
+              f"placed here (that needs a source build's editor). TL sync depends on "
+              f"what '{target_map}' was cooked with.")
+        if platform.system() == "Windows":
+            print("[cosim] note: packaged CARLA on Windows is EXPERIMENTAL - it needs "
+                  "the map's Windows cook, which few library maps publish yet.")
+
+        # The other silent one: a cook made for a different shader platform. The
+        # level loads and every actor is where it should be, so nothing downstream
+        # notices - the road just renders as default-material grey.
+        have_sp = import_map.shader_platforms_in(
+            import_map.cooked_content_dir(cfg["carla_root"], target_map, mode="packaged"))
+        want_sp = import_map.host_shader_platform()
+        if have_sp and want_sp not in have_sp:
+            print(f"[cosim] WARNING: '{target_map}' was cooked for "
+                  f"{'/'.join(sorted(have_sp))}, not {want_sp}. A packaged CARLA has no "
+                  f"shader compiler, so its materials will fall back to the default one - "
+                  f"geometry and traffic lights will be correct, the road surface will "
+                  f"render grey.")
+            if want_sp == "d3d" and "vulkan" in have_sp:
+                # -vulkan is not a way out: measured on 0.9.15, a Linux cook under
+                # -vulkan crashed CARLA on load, and -vulkan -RenderOffScreen
+                # crashes even a stock town at startup.
+                print(f"[cosim]   This is a Linux cook. Re-run with --reimport to "
+                      f"install the library's Windows cook (*_cooked_windows.tar.gz) "
+                      f"if it publishes one, or use a source build. See "
+                      f"FIXS_Applications#29.")
+
+    # SUMO slot: --sumocfg wins; else the scenario the app reported; else an
+    # already-extracted sumo/, else the chosen bundle's. This also runs for the paths
+    # that skip the source-build preflight above (--no-launch, packaged builds), so
+    # the cache is checked here too - the bundle is the LAST resort, not the first.
+    #
+    # The app sits above the bundle because a bundle ships ONE app-independent
+    # scenario, and an application's may not exist until the run starts: a run
+    # directory, its own demand, output paths written into the config. That cannot be
+    # a path anyone declares in advance, which is why the app reports it instead.
     sumocfg = args.sumocfg
+    # An app that REPORTED a scenario owns it, and owning it is what turns the SUMO
+    # convention off. Declaring `launch` is not enough: an app whose controller is
+    # happy with the map's own scenario reports nothing, claims nothing, and keeps
+    # the convention - which is what a roosevelt-shaped app with a controller wants.
+    # ...and it owns it whether or not --sumocfg was passed: the app was handed that
+    # flag as FIXS_SUMOCFG, so what it reports is what it built FROM it. Running the
+    # flag's own file instead would throw away the ego, the demand and the output
+    # paths the app just put in place.
+    app_owns_scenario = app_sumocfg is not None
+    if app_owns_scenario:
+        if sumocfg is not None and os.path.abspath(sumocfg) != os.path.abspath(app_sumocfg):
+            print(f"[cosim] --sumocfg reached '{app['id']}' as FIXS_SUMOCFG; running "
+                  f"what it built from it")
+            print(f"[cosim]   you named : {sumocfg}")
+            print(f"[cosim]   it reports: {app_sumocfg}")
+        sumocfg = app_sumocfg
     if sumocfg is None:
         if sumo_dir is None:
             sumo_dir = cached_sumo_dir(target_map)
-        if sumo_dir is None and (picked_local or picked_tag):
-            zip_path = picked_local or import_map.download_release_zip(
-                repo, picked_tag, cache_name=target_map)
+        # A local pick that is a precooked .tar.gz holds no sumo/ - it is the CARLA
+        # half only - so it is not a bundle to open; fall through to the picker.
+        local_bundle = None if (picked_local or '').lower().endswith('.tar.gz') \
+            else picked_local
+        if sumo_dir is None and (local_bundle or picked_tag):
+            zip_path = local_bundle or import_map.download_release_zip(
+                repo, picked_tag, cache_name=target_map,
+                asset=(ent or {}).get("asset"))
             _carla, sumo_dir = import_map.open_bundle(zip_path, cache_name=target_map)
         sumocfg = import_map.bundle_sumocfg(sumo_dir)
         # Still nothing (first time, no cache): pick one now. choose_sumo_source
@@ -2888,13 +4393,14 @@ def main():
                              args.carla_port or DEFAULT_CARLA_PORT,
                              realtime=not args.fast,
                              carla_tick=args.carla_tick or FIXS_FEED_S,
-                             backend=args.engine or prior or "py")
+                             backend=args.engine or prior or "cpp")
 
     # --carla-tick / --fast are scenario settings, so they are written THROUGH to the
     # yaml instead of living for one process: both bridges then read the same file,
     # and the file stops disagreeing with what just ran. Same reasoning as the CARLA
-    # endpoint below.
-    if os.path.isfile(config_yaml):
+    # endpoint below. Every key here is a CarlaSetup key, so a yaml without that
+    # section has nothing for this block to correct.
+    if os.path.isfile(config_yaml) and scenario_has_carla(config_yaml):
         if args.carla_tick is not None:
             if set_yaml_scalar(config_yaml, "CarlaSetup", "CarlaTimeStep",
                                f"{args.carla_tick:g}",
@@ -2943,8 +4449,16 @@ def main():
     # the saved profile records the bridge that ACTUALLY ran instead of the raw
     # (usually empty) --engine flag. An app may declare which stack its yaml is
     # written for; --engine still wins over everything.
-    backend = args.engine or declared_engine(staged_configs, config_yaml) \
-        or read_backend(config_yaml)
+    # An EXPLICIT EnablePythonBackend outranks the app's declaration, for the same
+    # reason the summary row does: the declaration covers a yaml that OMITS the key,
+    # and edit_engine's whole job is to put it there. Ranking the declaration first
+    # made the engine menu unreachable for any config an app declares an engine for -
+    # the choice was written into the file and then ignored on this very line.
+    backend = (args.engine
+               or (read_backend(config_yaml) if _declares_backend(config_yaml)
+                   else None)
+               or declared_engine(staged_configs, config_yaml)
+               or read_backend(config_yaml))
     args.engine = backend
 
     # CARLA RPC endpoint: the scenario yaml is the source of truth, because that is
@@ -2974,7 +4488,13 @@ def main():
     # at this machine cannot be satisfied by anything. Caught here rather than at
     # connect time because the failure would otherwise surface as a bare RPC
     # timeout, which reads as "CARLA is down" instead of "nothing was ever there".
-    if cfg is not None and cfg.get("mode") == "client" and _is_local_host(args.carla_host):
+    # Not for --sumo-only: that run dials no CARLA at all, so CarlaServerIP is
+    # simply unread, not contradictory. Without this exemption a machine that
+    # answered "no CARLA here" could not run traffic-only at all - the stock
+    # scenario yamls point CarlaServerIP at 127.0.0.1, so the check fired on every
+    # single-machine run and exited 1 before reaching the --sumo-only path below.
+    if (cfg is not None and cfg.get("mode") == "client"
+            and _is_local_host(args.carla_host) and not args.sumo_only):
         sys.exit(
             f"[cosim] carla.json is 'client' mode (no CARLA on this machine), but "
             f"{os.path.basename(config_yaml)} points CarlaSetup.CarlaServerIP at "
@@ -3079,7 +4599,11 @@ def main():
                 place_signs.place_signs(target_map, carla_root=cfg["carla_root"],
                                         ue4_root=cfg.get("ue4_root"), force=args.reimport)
 
-    elif cfg is not None and cfg.get("mode") == "client":
+    # Not for --sumo-only, for the same reason as the CarlaServerIP check above:
+    # this says who must cook the map, and a traffic-only run needs no cooked map
+    # anywhere. Printed unconditionally it also asserts a CARLA machine exists,
+    # which "no CARLA on this machine" does not claim.
+    elif cfg is not None and cfg.get("mode") == "client" and not args.sumo_only:
         # Cooking a map and placing actors both write into a CARLA content tree and
         # save a .umap, so they can only happen where CARLA lives. In client mode
         # that is another machine, and this is the only place that says so - the
@@ -3095,6 +4619,46 @@ def main():
     if args.prep_only:
         print(f"[cosim] --prep-only: '{target_map}' imported + prepped (TLs/signs); not launching.")
         return 0
+
+    # --sumo-only leaves before any of the CARLA preflight below: no server is
+    # started, no client connects, no world is loaded. Returning here rather than
+    # threading a flag through that block is deliberate - the block's job is to put
+    # a specific map in front of a specific server, and a run with no server has no
+    # part of it to keep. Everything the stack needs (the scenario yaml, the
+    # sumocfg, the app and its controller) is already resolved above.
+    if args.sumo_only:
+        # No check on `backend` here on purpose. It selects WHICH CARLA bridge would
+        # run (cpp = VirCarlaEnv, py = run_synchronization), and this mode runs
+        # neither - so a yaml declaring either is equally fine, and refusing 'py'
+        # would reject a SUMO-only scenario for naming a bridge nothing will start.
+        print(f"[cosim] --sumo-only: SUMO + TrafficLayer"
+              + (f" + {app['id']}" if app is not None else "")
+              + ", no CARLA. config " + str(config_yaml))
+        # TrafficLayer serves whoever the yaml says will subscribe, and waits for
+        # all of them. A CARLA scenario yaml lists the bridge port among them, so
+        # with no bridge running TrafficLayer waits for a client that never comes
+        # and tears the run down at the end of warm-up - the app then dies on a
+        # connection reset, which reads as an app bug rather than a missing
+        # subscriber. Say it up front, at the point where it is still cheap to fix.
+        try:
+            _, _bridge_port = read_stack_ports(config_yaml)
+            # None: the yaml declares no CarlaSetup, so it lists no bridge port to
+            # be subscribed to and there is nothing here to warn about.
+            if _bridge_port is not None and os.path.isfile(config_yaml):
+                _txt = open(config_yaml, encoding="utf-8", errors="ignore").read()
+                if re.search(rf"^\s*port:\s*\[\s*{_bridge_port}\s*\]", _txt, re.MULTILINE):
+                    print(f"[cosim] WARN {os.path.basename(config_yaml)} lists the bridge "
+                          f"port {_bridge_port} as a subscriber, but --sumo-only starts no "
+                          f"bridge.\n"
+                          f"[cosim]      TrafficLayer will wait for a client that never "
+                          f"connects and stop after the warm-up.\n"
+                          f"[cosim]      Use a scenario yaml with no bridge subscriber "
+                          f"(SUMO + the app only).")
+        except Exception:
+            pass
+        return run_native_stack(config_yaml, sumocfg, tl_table, cfg, args, app,
+                                ctl_sock=None, app_owns_scenario=app_owns_scenario,
+                                app_proc=app_proc, sumo_only=True)
 
     carla_proc = None
     try:
@@ -3126,8 +4690,10 @@ def main():
             _tell_peer(ctl_sock, "launch", "starting the CARLA server")
             carla_proc = launch_carla(cfg, args.carla_port, args.render_offscreen,
                                       args.quality_level, target_level)
-            if not wait_for_port(args.carla_host, args.carla_port):
-                sys.exit("CARLA RPC port did not open in time.")
+            if not wait_for_port(args.carla_host, args.carla_port,
+                                 proc=carla_proc, cfg=cfg):
+                sys.exit("[cosim] CARLA never became reachable; not starting the "
+                         "stack. See the lines above for why.")
 
         # A remote CARLA with a peer listening: ask it to serve this map rather
         # than requiring someone to have started it by hand with the right one.
@@ -3215,7 +4781,9 @@ def main():
         if not args.no_spectator:
             # Default: zoom to one intersection from the TL table so the signal
             # sync is legible. --spectator-all frames the whole network (placed TL
-            # actors, else the full table).
+            # actors, else the full table). A map with no signals at all falls back
+            # to the map centre - anywhere on the map beats the world origin, which
+            # is where the server otherwise leaves the camera.
             frame = None
             if tl_table and not args.spectator_all:
                 frame = _frame_from_table(tl_table, no_net_offset,
@@ -3224,10 +4792,13 @@ def main():
                 frame = _frame_from_actors(world)
             if frame is None and tl_table:
                 frame = _frame_from_table(tl_table, no_net_offset, whole=True)
+            if frame is None:
+                frame = _frame_from_map(world)
             if frame is not None:
                 position_spectator(world, frame)
             else:
-                print("[VIEW] no TL actors/table to anchor on; leaving spectator as is")
+                print("[VIEW] no TL actors/table and no spawn points to anchor on; "
+                      "leaving spectator as is")
 
         # The scenario yaml is a per-map artifact like tl_table.csv: always written
         # on first use (and refreshed by --reimport), whichever bridge runs. That
@@ -3244,17 +4815,27 @@ def main():
         if args.carla_only or args.serve:
             return hold_carla(carla_proc, target_map, args, sock=ctl_sock)
 
-        # Engine dispatch: CarlaSetup.Backend in that yaml picks the bridge
-        # (--engine overrides). cpp = FIXS-native (TrafficLayer + VirCarlaEnv); py
-        # (default) = the standalone run_synchronization.py bridge below.
-        if backend == "cpp":
-            print(f"[cosim] engine=cpp (FIXS-native); config {config_yaml}")
-            return run_native_stack(config_yaml, sumocfg, tl_table, cfg, args, app,
-                                    ctl_sock=ctl_sock)
+        # The standalone bridge is deliberately NOT reachable from a scenario key:
+        # it speaks no FIXS, so a yaml that configures TrafficLayer subscriptions,
+        # an XIL component and a controller would have every one of them silently
+        # ignored. Asking for it has to be an explicit act.
+        if args.standalone_bridge:
+            print("[cosim] standalone bridge (run_synchronization.py) -- no FIXS, no "
+                  "TrafficLayer, no controller.")
+            return run_python_bridge(config_yaml, sumocfg, tl_table, tls_manager,
+                                     no_net_offset, args, app,
+                                     app_owns_scenario=app_owns_scenario,
+                                     app_proc=app_proc)
 
-        print("[cosim] engine=py (run_synchronization.py)")
-        return run_python_bridge(config_yaml, sumocfg, tl_table, tls_manager,
-                                 no_net_offset, args, app)
+        # Engine dispatch: CarlaSetup.EnablePythonBackend picks WHICH VirEnvCore
+        # drives the same FIXS-native stack (--engine overrides). See read_backend.
+        print(f"[cosim] engine={backend} "
+              f"({'Python' if backend == 'py' else 'C++'} VirEnvCore); "
+              f"config {config_yaml}")
+        return run_native_stack(config_yaml, sumocfg, tl_table, cfg, args, app,
+                                ctl_sock=ctl_sock,
+                                app_owns_scenario=app_owns_scenario,
+                                app_proc=app_proc, bridge=backend)
     finally:
         # Say goodbye BEFORE tearing down locally: the peer is blocked on this
         # socket, and a clean BYE lets it report "the peer finished" rather than a
@@ -3279,18 +4860,94 @@ def serve_forever():
     CARLA up. That is the worst kind of working: right answer, wrong reason, and
     the peer protocol quietly not in use.
 
-    So loop: serve one run, tear its CARLA down, listen again."""
+    So loop: serve one run, tear its CARLA down, listen again.
+
+    A FAILED run has to loop too, and used not to. `rc = main(); if rc != 0` was
+    nearly dead code: almost every failure in main() is sys.exit("message"), which
+    raises SystemExit straight past that check and out of the process. So any
+    error at all - a map that is not installed, a busy RPC port, a failed cook -
+    took the whole service down, and the next run from the traffic machine found
+    nothing listening and fell into exactly the "assume CARLA was started by hand"
+    path described above. The clean-exit hole was closed; this is the same hole on
+    the error path.
+
+    Ctrl+C is the one thing that still stops serving: it is the operator at THIS
+    machine saying so, which is the only voice this loop takes."""
     n = 0
+    consecutive = 0
     while True:
         n += 1
-        rc = main()
-        if rc != 0:
+        try:
+            rc = main()
+        except KeyboardInterrupt:
+            _fail_peer("stopped from the render host (Ctrl+C)", retryable=True)
+            print("\n[serve] stopped.")
+            return 0
+        except SystemExit as e:
+            # sys.exit("message") carries the reason in .code as a string, and that
+            # message is the most useful thing this side has. sys.exit(int) means a
+            # status with no words; sys.exit() / sys.exit(None) is a clean stop.
+            code = e.code
+            if code is None or code == 0:
+                rc = 0
+            else:
+                rc = code if isinstance(code, int) else 1
+                _fail_peer(code if isinstance(code, str) else
+                           f"the render host exited with status {code}",
+                           retryable=False)
+                print(f"\n[serve] run {n} FAILED - reported to the peer.")
+        except Exception as e:                 # noqa: BLE001 - a service must not die
+            # An unhandled exception is a bug, not a decision. Print the traceback
+            # so it is diagnosable, tell the peer, and go back to listening rather
+            # than leaving the traffic machine to time out against a dead port.
+            traceback.print_exc()
+            _fail_peer(f"unexpected error on the render host: {e!r}", retryable=True)
+            rc = 1
+            print(f"\n[serve] run {n} FAILED ({e!r}) - reported to the peer.")
+        else:
+            if rc != 0:
+                _fail_peer(f"the render host exited with status {rc}", retryable=False)
+
+        # Whatever happened, this run's control socket is finished with. hold_carla
+        # returns without closing it on the two paths where the peer spoke first
+        # (it disconnected, or it said BYE), so without this the next run would
+        # start holding a dead socket in the slot _fail_peer reports through.
+        _drop_serve_sock()
+
+        consecutive = consecutive + 1 if rc != 0 else 0
+        if consecutive >= SERVE_MAX_CONSECUTIVE_FAILURES:
+            # Something here is broken in a way retrying cannot fix, and a service
+            # silently failing every run looks identical to one nobody is using.
+            print(f"[serve] {consecutive} runs failed in a row; stopping so the "
+                  f"problem is not hidden by an endlessly listening port.")
             return rc
-        print(f"\n[serve] run {n} finished; listening again "
-              f"(Ctrl+C to stop serving).\n")
+        print(f"\n[serve] run {n} {'finished' if rc == 0 else 'failed'}; listening "
+              f"again (Ctrl+C to stop serving).\n")
 
 
 if __name__ == "__main__":
     # Parsed here only to decide whether this is a one-shot run or a service;
     # main() does the real argument handling.
-    sys.exit(serve_forever() if "--serve" in sys.argv else main())
+    if "--serve" in sys.argv and "--peer" in sys.argv:
+        # Caught before the service loop, not inside main(): serve_forever treats
+        # every SystemExit as one failed run and goes back to listening, so a
+        # contradiction in the FLAGS would be re-discovered on every iteration
+        # until the failure cap stopped it. The two halves of a distributed run are
+        # two machines - --serve where CARLA is, --peer where the traffic is.
+        sys.exit("[cosim] --serve is the CARLA half of a distributed run and "
+                 "--peer is the traffic half; they run on different machines.")
+    # Wrapped so a run that dies AFTER the setup was checkpointed says where the
+    # answers went. Both exits are covered: sys.exit with a message (the usual way
+    # a cook failure is reported) and a non-zero return.
+    try:
+        _rc = serve_forever() if "--serve" in sys.argv else main()
+    except SystemExit as exc:
+        if exc.code not in (0, None):
+            _say_checkpoint_kept()
+        raise
+    except KeyboardInterrupt:
+        _say_checkpoint_kept()
+        raise
+    if _rc:
+        _say_checkpoint_kept()
+    sys.exit(_rc)

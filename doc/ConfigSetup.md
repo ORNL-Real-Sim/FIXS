@@ -16,10 +16,48 @@ The Real-Sim interface is configured through YAML files (for example `config.yam
 | SelectedTrafficSimulator | string | `"SUMO"` | Use `"SUMO"` or `"VISSIM"`. |
 | TrafficSimulatorIP | string | `"127.0.0.1"` | Host for TraCI/VISSIM connections. |
 | TrafficSimulatorPort | int | 1337 | Port for the selected simulator. |
-| SimulationMode | int | 0 | Bitmask mode as documented in the README. |
-| SimulationModeParameter | double | 0 | Auxiliary parameter consumed by selected modes. |
+| WarmUpUntilEgoEntry | bool | false | Run the traffic simulator with the FIXS boundary closed until the first subscribed ego is in the network. SUMO only. |
+| WarmUpTime | double | 0 | Run the traffic simulator with the FIXS boundary closed until this **absolute** simulation time, in one batch step. SUMO only. |
 | TrafficLayerIP | string | inferred | Defaults to the first vehicle subscription IP if not provided. |
 | TrafficLayerPort | int | inferred | Defaults to the first vehicle subscription port if not provided. |
+
+### Warm-up
+
+XIL testing usually cares about the simulation only from the moment the ego is on the
+road. A warm-up runs the traffic simulator up to that moment with the **FIXS boundary
+closed**: no message reaches any client, and no client is accepted yet, so CARLA's map
+load and CarMaker's start-up overlap the warm-up instead of queueing ahead of it. The
+sockets are bound and listening the whole time, so a client's `connect()` succeeds
+exactly as it always did — it simply gets no data until the warm-up ends.
+
+Pick the trigger by who knows the entry time:
+
+- `WarmUpUntilEgoEntry: true` — the warm-up ends when the first ego appears. Use this
+  when a controller inserts the ego: the controller keeps owning the entry time and no
+  number is duplicated in this file. The ids watched are the **union** of the by-id
+  vehicle subscriptions in `ApplicationSetup` and `XilSetup`; with several egos the
+  *first* to arrive ends the warm-up, because an ego on the road while the boundary is
+  still closed would be driven by the traffic model rather than by its XIL.
+- `WarmUpTime: <absolute simulation time>` — the warm-up ends at that time, reached in a
+  single batch step. Use this when nothing else inserts the ego, i.e. the CarMaker path
+  where TrafficLayer injects it and has to be told when. Note it is absolute simulation
+  time, not a duration: a scenario that begins at 28800 warms up to, say, 28985.
+
+The two are mutually exclusive: a batch step observes nothing on the way, so it cannot
+also watch for an ego. Setting both warns and uses ego entry. Setting neither means no
+warm-up — the interface syncs from the first step.
+
+Both are SUMO-only today; TrafficLayer does not own the VISSIM clock (the DriverModel
+DLL does), and a VISSIM config that sets either key is rejected at startup rather than
+silently ignored.
+
+> **Renamed in v0.9.0 (#86).** `SimulationMode` and `SimulationModeParameter` are gone —
+> the "bitfield" never behaved like one (`5` was a duplicate of `4`, and `3`/`6`/`7`
+> silently meant `0`). `SimulationMode: 1` becomes `WarmUpUntilEgoEntry: true`,
+> `SimulationMode: 4` + `SimulationModeParameter: T` becomes `WarmUpTime: T`, and
+> `SimulationMode: 0` means removing the key. No config in either FIXS or
+> FIXS_Applications set them, so they are simply gone: an old config that still does is
+> ignored like any other unknown key, and runs with no warm-up.
 
 ## SumoSetup
 

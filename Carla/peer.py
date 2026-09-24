@@ -182,3 +182,27 @@ def progress(sock, stage, msg):
         send(sock, {"t": "PROGRESS", "stage": stage, "msg": msg})
     except OSError:
         pass
+
+
+def fail(sock, why, retryable=False):
+    """Tell the traffic machine this run is not happening, and why. Then close.
+
+    The counterpart to bye(): that one means "it is over", this one means "it
+    never started, and this is what stopped it". Both exist so the traffic side is
+    never left inferring a cause from a bare disconnection - which is all it used
+    to get, in the same sentence, for a map that is not installed, a busy RPC
+    port, a failed cook and a pulled cable.
+
+    `retryable` is this side's read on whether another attempt could work. The
+    render host returns to listening either way, so it changes no behaviour here;
+    it changes the advice the other end can honestly print."""
+    if sock is None:
+        return
+    try:
+        send(sock, {"t": "ERROR", "why": str(why), "retryable": bool(retryable)})
+    except OSError:
+        pass                       # it may be the peer that vanished; nothing to do
+    try:
+        sock.close()
+    except OSError:
+        pass

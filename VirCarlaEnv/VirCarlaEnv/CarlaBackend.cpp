@@ -26,6 +26,10 @@
 // 0.5 m warns only on a genuine map/elevation mismatch. Policy/threshold config: #193.
 static constexpr double kZMismatchTolM = 0.5;
 
+// How many exchanges the z audit takes to cover every mapped vehicle. Mirrors
+// kZAuditStride in Carla/VirEnv/CarlaBackend.py so both bridges sample it the same.
+static constexpr int kZAuditStride = 5;
+
 namespace virenv {
 
 // #174 coord fix: the SUMO/FIXS wire carries the FRONT-of-vehicle position; the
@@ -148,7 +152,20 @@ void CarlaBackend::auditZAlignment() {
     if (!world_) return;
     if (!map_) map_ = world_->GetMap();
     if (!map_) return;
+    // Sampled over a rotating slice, not exhaustive. This asks whether the two MAPS
+    // agree on elevation -- a STATIC property of the map pair, not of the traffic --
+    // so checking every vehicle every exchange re-answers one question hundreds of
+    // times per second, each answer costing a whole-map waypoint search. Measured on
+    // the Python peer, where the same loop was 9.6 ms of a 42.7 ms tick: 23% of the
+    // bridge's own work for a #193 placeholder that only warns.
+    //
+    // Stride 5 covers every mapped vehicle within 0.5 s at the 0.1 s feed, shorter
+    // than the shortest violation observed on the MLK corridor (~5 consecutive
+    // exchanges), so nothing that was reported before is missed.
+    zAuditPhase_ = (zAuditPhase_ + 1) % kZAuditStride;
+    std::size_t n = 0;
     for (const std::pair<const VehHandle, carla::geom::Transform>& kv : lastApplied_) {
+        if ((n++ % kZAuditStride) != (std::size_t)zAuditPhase_) continue;
         carla::SharedPtr<carla::client::Waypoint> wp = map_->GetWaypoint(kv.second.location);
         if (wp)
             fixs::RS_XIL_GUARD("sumo_carla_z_mismatch",
@@ -158,8 +175,15 @@ void CarlaBackend::auditZAlignment() {
 }
 
 void CarlaBackend::flushBatch() {
-    if (client_) client_->ApplyBatch(batch_, false);
+    // ApplyBatchSync, not ApplyBatch: ApplyBatch returns before the server has
+    // applied the commands, and the very next thing the loop does is Tick(), so
+    // the bridge raced its own message and rendered vehicles a step behind.
+    if (client_) client_->ApplyBatchSync(batch_, false);
     batch_.clear();
+}
+
+void CarlaBackend::queueTransform(carla::rpc::ActorId id, const carla::geom::Transform& tf) {
+    batch_.push_back(carla::rpc::Command::ApplyTransform(id, tf));
 }
 
 void CarlaBackend::syncTrafficLight(const std::string& junctionId, const std::string& stateStr) {
@@ -263,7 +287,7 @@ void CarlaBackend::setEgoRoute(const std::vector<std::pair<double, double>>& fix
               << egoDriver_.routeSize() << " path points (EgoDriver fallback module)\n";
 }
 
-void CarlaBackend::driveEgoFallback(double targetSpeed) {
+void CarlaBackend::stepEgoDriver(double targetSpeed) {
     // Per-tick fallback driver: read the ego pose in the Carla frame, ask the
     // module for a neutral DriveCommand, apply it through full PhysX dynamics.
     if (!egoActor_ || !egoDriver_.hasRoute()) return;
@@ -282,24 +306,37 @@ void CarlaBackend::driveEgoFallback(double targetSpeed) {
     c.brake    = (float)dc.brake;
     c.steer    = (float)dc.steer;
     egoActor_->ApplyControl(c);
+
+    // Remember what was applied, and the target it was chasing. Without this the
+    // only observable is "the ego did not move" -- which is the same symptom for
+    // a driver commanding nothing, a driver commanding the wrong thing, and a
+    // vehicle that cannot act on what it was told. Reported on the ego's own
+    // record so it lands in whatever log is already collecting it.
+    lastEgoCmd_ = dc;
+    lastEgoTarget_ = tgt;
 }
 
 void CarlaBackend::applyEgoActuation(double throttle, double brake, double steerNorm) {
     // #174 unified EgoDriver apply-path: the actuation comes from an external FIXS
     // client (EgoDriver client / L4 controller) via the ego's wire record; Carla just
-    // realizes it on the physics ego. Same VehicleControl seam as driveEgoFallback.
+    // realizes it on the physics ego. Same VehicleControl seam as stepEgoDriver.
     if (!egoActor_) return;
     carla::rpc::VehicleControl c;
     c.throttle = (float)std::max(0.0, std::min(1.0, throttle));
     c.brake    = (float)std::max(0.0, std::min(1.0, brake));
     c.steer    = (float)std::max(-1.0, std::min(1.0, steerNorm));
     egoActor_->ApplyControl(c);
+    // Record what was APPLIED. The datalog asks the backend what the ego was
+    // commanded this tick; who produced the command is not its business.
+    lastEgoCmd_.throttle = c.throttle;
+    lastEgoCmd_.brake    = c.brake;
+    lastEgoCmd_.steer    = c.steer;
 }
 
 void CarlaBackend::applyEgoControl(const std::string& /*egoId*/, double desiredSpeed) {
     // L2 actuation seam: route an EXTERNAL desired-speed advisory to whichever L0
     // driver owns the ego. Native TM -> SetDesiredSpeed (km/h) on the ego's TM
-    // instance; EgoDriver fallback -> stash the target for the next driveEgoFallback
+    // instance; EgoDriver fallback -> stash the target for the next stepEgoDriver
     // tick. No ego -> nothing to advise.
     if (!egoActor_) return;
     egoDesiredOverride_ = desiredSpeed;

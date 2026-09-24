@@ -6,7 +6,15 @@ import math
 import time
 import argparse
 
-import carla
+# Get onto the interpreter carla.json names before importing carla/traci: this is a
+# standalone tool (Carla/README.md), so it starts on whatever python is on PATH, and
+# on the wrong one the imports below fail by naming a module rather than the env.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import carla_env_setup as env  # noqa: E402
+if __name__ == "__main__":
+    env.reexec_under_configured(__file__, tag="tlsync")
+
+import carla  # noqa: E402  (deliberately after the re-exec above)
 
 try:
     import traci
