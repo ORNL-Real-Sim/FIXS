@@ -50,6 +50,14 @@ SimpleLoop's geometry — about 2 in 41 spawns, the same for #174's binary and
 which used to report FAIL on a healthy co-sim (#208). `RS_SUMO_SEED=none` runs
 unseeded, which is how you check whether a result depends on the seed.
 
+The self-check drives the **Python bridge** (`Carla/VirEnv/mainVirCarla.py`, the
+one `run_cosim` runs) by default. `RS_BRIDGE=cpp` drives `VirCarlaEnv.exe`, but
+only one **built** from this tree: it no longer falls back to the committed
+`tests/SumoCarla/VirCarlaEnv.exe`, which dates from June — before #266 and #358 —
+so a PASS on it said nothing about the code in the tree. Since `VirCarlaEnv` does
+not compile today (#380), that fallback was the only bridge this check could run.
+The one-click demo `.bat`s below still use the C++ bridge.
+
 Stop order: **close VirCarlaEnv → close SUMO → Ctrl+C TrafficLayer → close CARLA.**
 
 ## Files

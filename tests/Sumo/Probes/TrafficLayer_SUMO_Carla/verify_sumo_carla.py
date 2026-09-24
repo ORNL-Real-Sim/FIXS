@@ -9,12 +9,15 @@ Pipeline:
      (Carla\launch_carla.bat + Carla\load_opendrive_world.py -- see README).
      This script verifies the RPC is reachable and skips cleanly if not.
   1. SUMO (headless) on the shared SimpleLoop net, TraCI server on port 1337
-  2. TrafficLayer (SUMO path) -> serves the Carla bridge on port 440
-  3. VirCarlaEnv.exe -f config.yaml -t traffic_light_table.csv  (the real bridge)
+  2. TrafficLayer (SUMO path) -> serves the Carla bridge on the config's port
+  3. the bridge, -f config.yaml -t traffic_light_table.csv. RS_BRIDGE picks it:
+       py  (default) Carla/VirEnv/mainVirCarla.py -- the maintained bridge, and
+                     the one run_cosim runs
+       cpp           VirCarlaEnv.exe, BUILT from this tree only (see BRIDGE)
 
 Reasons over the captured output (config has EnableVerboseLog: true):
-  - bridge connected to CARLA (prints "Client API version" / "Server API version")
-  - bridge spawned >=1 vehicle ("Spawning actor" / "Spawned actor")
+  - bridge connected to CARLA (prints "Carla client ... / server ...")
+  - bridge spawned >=1 vehicle ("Spawned Carla actor")
   - active-id churn looks sane (spawns happen, despawns only for vehicles that left)
   - no spawn-failure storm / exceptions (a FEW spawn-point contentions are a
     property of SimpleLoop, not a regression -- see SPAWN_FAIL_FRACTION)
@@ -38,9 +41,15 @@ import pathlib
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parents[3]
 TL = REPO / "TrafficLayer" / "x64" / "Release" / "TrafficLayer.exe"
+#: Which bridge this verifies. "py" (default) is the Python bridge -- maintained,
+#: and what run_cosim runs. "cpp" is VirCarlaEnv.exe, and only one BUILT from this
+#: tree. This used to fall back to tests/SumoCarla/VirCarlaEnv.exe when no build
+#: existed: a binary committed in June, before #266 and #358. VirCarlaEnv does not
+#: compile today (#380), so that fallback was the only thing this probe could run,
+#: and a PASS was a verdict on June's code, not on the code in the tree. FIXS#208.
+BRIDGE = os.environ.get("RS_BRIDGE", "py").lower()
 VCE = REPO / "VirCarlaEnv" / "x64" / "Release" / "VirCarlaEnv.exe"
-if not VCE.is_file():
-    VCE = REPO / "tests" / "SumoCarla" / "VirCarlaEnv.exe"   # committed fallback
+PY_BRIDGE = REPO / "Carla" / "VirEnv" / "mainVirCarla.py"
 CONFIG = HERE / "config.yaml"
 TLS = HERE / "traffic_light_table.csv"
 SUMOCFG = REPO / "tests" / "Sumo" / "networks" / "simple_loop" / "simple_loop_ego.sumocfg"
@@ -79,6 +88,31 @@ def sumo_exe() -> str:
     return exe or "sumo"
 
 
+def bridge_python() -> str:
+    """The interpreter run_cosim runs the bridge under (~/.fixs/carla.json), which
+    is the one with the carla client installed; else this one."""
+    sys.path.insert(0, str(REPO / "Carla"))
+    try:
+        import carla_env_setup
+        py = (carla_env_setup.load_config() or {}).get("python")
+        if py and os.path.isfile(py):
+            return py
+    except Exception:
+        pass
+    finally:
+        sys.path.pop(0)
+    return sys.executable
+
+
+def bridge_cmd() -> list[str]:
+    if BRIDGE == "cpp":
+        return [str(VCE), "-f", str(CONFIG), "-t", str(TLS)]
+    # -u: the bridge's stdout is a pipe, which Python block-buffers, and this script
+    # KILLS the bridge when the run ends -- so without it the lines that decide the
+    # verdict can die in the buffer and read as "never connected, spawned nothing".
+    return [bridge_python(), "-u", str(PY_BRIDGE), "-f", str(CONFIG), "-t", str(TLS)]
+
+
 def carla_reachable(host: str, port: int, timeout=2.0) -> bool:
     try:
         with socket.create_connection((host, port), timeout=timeout):
@@ -99,7 +133,11 @@ def pump(proc, sink, logfile, tag):
 
 def main() -> int:
     LOGS.mkdir(exist_ok=True)
-    for p, label in [(TL, "TrafficLayer.exe"), (VCE, "VirCarlaEnv.exe"),
+    if BRIDGE not in ("py", "cpp"):
+        print(f"[verify] FAIL: RS_BRIDGE={BRIDGE!r}; expected 'py' or 'cpp'")
+        return 2
+    bridge = (PY_BRIDGE, "mainVirCarla.py") if BRIDGE == "py" else (VCE, "VirCarlaEnv.exe (built)")
+    for p, label in [(TL, "TrafficLayer.exe"), bridge,
                      (CONFIG, "config.yaml"), (SUMOCFG, "simple_loop.sumocfg")]:
         if not p.is_file():
             print(f"[verify] FAIL: missing {label}: {p}")
@@ -149,13 +187,13 @@ def main() -> int:
                 return 1
             time.sleep(1)
 
-        print("[verify] launching VirCarlaEnv (Carla bridge) ...")
+        cmd = bridge_cmd()
+        print(f"[verify] launching the Carla bridge ({BRIDGE}): {' '.join(cmd)}")
         vce_out: list[str] = []
-        vce = subprocess.Popen([str(VCE), "-f", str(CONFIG), "-t", str(TLS)],
-                               cwd=str(HERE), stdout=subprocess.PIPE,
+        vce = subprocess.Popen(cmd, cwd=str(HERE), stdout=subprocess.PIPE,
                                stderr=subprocess.STDOUT, text=True, bufsize=1)
         procs.append(vce)
-        threading.Thread(target=pump, args=(vce, vce_out, LOGS / "vce.log", "VirCarla"),
+        threading.Thread(target=pump, args=(vce, vce_out, LOGS / "bridge.log", "bridge"),
                          daemon=True).start()
 
         t1 = time.time()
@@ -177,15 +215,19 @@ def main() -> int:
     spawns = len(re.findall(r"Spawn(?:ing|ed)(?: Carla)? actor", vce_text))
     despawns = len(re.findall(r"(?:Removing Sumo actor|Destroyed Carla actor)", vce_text))
     spawn_fail = len(re.findall(r"Failed to spawn actor", vce_text))
-    exceptions = [l for l in vce_out if "Exception" in l]
+    # C++ says "Exception"; Python says "Traceback" and "<Name>Error: ...". Missing
+    # the Python form would pass a bridge that crashed.
+    exceptions = [l for l in vce_out
+                  if "Exception" in l or l.startswith("Traceback")
+                  or re.match(r"^\w+(Error|Exception): ", l)]
     tls_notice = "no traffic-light data" in vce_text  # our empty-TLS fix kicked in (expected)
 
     print("\n========== EVIDENCE ==========")
-    print("VirCarlaEnv:", "connected to CARLA" if carla_connected else "(did NOT reach CARLA)")
+    print(f"bridge ({BRIDGE}):", "connected to CARLA" if carla_connected else "(did NOT reach CARLA)")
     allowed = max(SPAWN_FAIL_FLOOR, int(spawns * SPAWN_FAIL_FRACTION))
-    print(f"VirCarlaEnv: spawns={spawns}, despawns={despawns}, "
+    print(f"bridge ({BRIDGE}): spawns={spawns}, despawns={despawns}, "
           f"spawn-failures={spawn_fail} (tolerated: {allowed})")
-    print("VirCarlaEnv:", "ran vehicles-only (empty TLS handled)" if tls_notice
+    print(f"bridge ({BRIDGE}):", "ran vehicles-only (empty TLS handled)" if tls_notice
           else "(no empty-TLS notice -- check config)")
     if exceptions:
         print(f"Exceptions ({len(exceptions)}):")
