@@ -75,48 +75,67 @@ def save_config(cfg):
     print(f"[setup] saved CARLA env -> {CONFIG_PATH}")
 
 
-# Which tool builds the python env, conda or uv: {"use_uv": true|false}. Setup asks
-# and saves the answer here (_ask_env_manager). Its own file, not a key in
-# carla.json, because run_setup writes carla.json from scratch and would drop it.
+# Which tool provides the python env, as setup asked it (_ask_env_manager):
+#   {"env_manager": "conda" | "uv" | "system"}
+# plus, when FIXS installed conda or uv itself, where it put them ("conda_root",
+# "uv_dir") - a folder the user typed is somewhere the usual search never looks.
+# Its own file, not keys in carla.json, because run_setup writes carla.json from
+# scratch and would drop them.
 ENV_FLAG_PATH = os.path.join(CONFIG_DIR, "env.json")
+ENV_MANAGERS = ("conda", "uv", "system")
 UV_INSTALL_URL = "https://docs.astral.sh/uv/getting-started/installation/"
+MINIFORGE_URL = "https://conda-forge.org/download/"
+
+
+def _env_file():
+    """env.json as a dict; {} when it is missing, unreadable or not an object."""
+    try:
+        with open(ENV_FLAG_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def env_choice():
-    """'uv' or 'conda' as saved in ~/.fixs/env.json, or None when nothing is saved.
-    Only a JSON true/false counts: `1` or "yes" is not an answer, and reads as none."""
-    try:
-        with open(ENV_FLAG_PATH, encoding="utf-8") as f:
-            v = json.load(f).get("use_uv")
-    except (OSError, ValueError, AttributeError):
-        return None
-    if v is True:
+    """'conda', 'uv' or 'system' as saved in ~/.fixs/env.json, or None when nothing
+    is saved. Also reads {"use_uv": true|false}, the form dev_v0.10.0 (#399) and
+    hand-made files use; only a JSON true/false counts there, so `1` or "yes" is
+    not an answer. The next save replaces it with env_manager."""
+    data = _env_file()
+    manager = data.get("env_manager")
+    if manager in ENV_MANAGERS:
+        return manager
+    legacy = data.get("use_uv")
+    if legacy is True:
         return "uv"
-    if v is False:
+    if legacy is False:
         return "conda"
     return None
 
 
 def use_uv():
-    """True when ~/.fixs/env.json opts this machine into a uv env."""
+    """True when ~/.fixs/env.json says the python env is a uv env."""
     return env_choice() == "uv"
 
 
-def _save_env_choice(uv):
-    """Write use_uv into env.json, keeping any other keys already there."""
-    data = {}
-    try:
-        with open(ENV_FLAG_PATH, encoding="utf-8") as f:
-            loaded = json.load(f)
-        if isinstance(loaded, dict):
-            data = loaded
-    except (OSError, ValueError):
-        pass
-    data["use_uv"] = uv
+def _saved_dir(key):
+    """A folder env.json recorded for an install FIXS made ('conda_root', 'uv_dir')."""
+    d = _env_file().get(key)
+    return d if isinstance(d, str) and os.path.isdir(d) else None
+
+
+def _save_env_choice(manager, **dirs):
+    """Write env_manager (and any install folders) into env.json, keeping the other
+    keys already there - except the legacy use_uv, which env_manager replaces."""
+    data = _env_file()
+    data.pop("use_uv", None)
+    data["env_manager"] = manager
+    data.update(dirs)
     os.makedirs(os.path.dirname(ENV_FLAG_PATH), exist_ok=True)
     with open(ENV_FLAG_PATH, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
-    print(f"[setup] saved: {'uv' if uv else 'conda'} -> {ENV_FLAG_PATH}")
+    print(f"[setup] saved: {manager} -> {ENV_FLAG_PATH}")
 
 
 # ------------------------------------------------------- the configured python
@@ -360,6 +379,8 @@ def _conda_roots():
             # a prefix like .../envs/foo -> also include the install root above it
             roots.append(os.environ[var])
             roots.append(os.path.dirname(os.path.dirname(os.environ[var])))
+    # A Miniforge FIXS installed where the user asked (_install_miniforge).
+    roots.append(_saved_dir("conda_root"))
     home = os.path.expanduser("~")
     roots += [os.path.join(home, n) for n in
               ("miniconda3", "anaconda3", "miniforge3", "mambaforge",
@@ -533,15 +554,259 @@ def _uv_env_python(name):
     return py if os.path.isfile(py) else None
 
 
+def _uv_bin_dir():
+    """~/.local/bin: where uv's installers put it by default, on Windows and Linux."""
+    return os.path.join(os.path.expanduser("~"), ".local", "bin")
+
+
 def _find_uv():
-    """Locate the uv executable, or None. Its installer puts it in ~/.local/bin,
+    """Locate the uv executable, or None: on PATH, in the folder FIXS installed it
+    to (env.json uv_dir), or in ~/.local/bin - where its installer puts it, and
     which a shell started before the install does not have on PATH yet."""
     found = shutil.which("uv")
     if found:
         return found
     exe = "uv.exe" if platform.system() == "Windows" else "uv"
-    local = os.path.join(os.path.expanduser("~"), ".local", "bin", exe)
-    return local if os.path.isfile(local) else None
+    for d in (_saved_dir("uv_dir"), _uv_bin_dir()):
+        if d and os.path.isfile(os.path.join(d, exe)):
+            return os.path.join(d, exe)
+    return None
+
+
+def _uv_install_command():
+    """The one line that installs uv on this OS, for a user to paste."""
+    if platform.system() == "Windows":
+        return ('powershell -ExecutionPolicy ByPass -c '
+                '"irm https://astral.sh/uv/install.ps1 | iex"')
+    return "curl -LsSf https://astral.sh/uv/install.sh | sh"
+
+
+def _miniforge_install_steps():
+    """How a user installs Miniforge by hand on this OS, for a user to follow."""
+    if platform.system() == "Windows":
+        return (f"download and run Miniforge3-Windows-x86_64.exe from\n"
+                f"            {MINIFORGE_URL}")
+    return ('curl -L -O "https://github.com/conda-forge/miniforge/releases/latest/'
+            'download/Miniforge3-$(uname)-$(uname -m).sh"\n'
+            '            bash Miniforge3-$(uname)-$(uname -m).sh')
+
+
+def _urlopen(url, timeout):
+    """urlopen with a User-Agent. astral.sh answers Python's default one
+    ("Python-urllib/3.x") with 403 Forbidden - measured on Windows and Ubuntu
+    20.04 alike - while the same request naming any agent gets the script."""
+    import urllib.request
+    req = urllib.request.Request(url, headers={"User-Agent": "FIXS-setup"})
+    return urllib.request.urlopen(req, timeout=timeout)
+
+
+def _download(url, dest, sha256=None):
+    """Fetch url into dest; True on success. With sha256, a file that does not
+    match is refused: it is about to be run."""
+    h = hashlib.sha256()
+    try:
+        with _urlopen(url, timeout=60) as r, open(dest, "wb") as f:
+            while True:
+                chunk = r.read(1 << 20)
+                if not chunk:
+                    break
+                h.update(chunk)
+                f.write(chunk)
+    except OSError as exc:
+        print(f"[setup] could not download {url}: {exc}")
+        return False
+    if sha256 and h.hexdigest() != sha256.lower():
+        print(f"[setup] {os.path.basename(url)} does not match its published sha256; "
+              f"not running it.")
+        return False
+    return True
+
+
+def _temp_path(suffix):
+    import tempfile
+    fd, path = tempfile.mkstemp(suffix=suffix)
+    os.close(fd)
+    return path
+
+
+def _remove_quietly(path):
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def _install_uv(install_dir):
+    """Run uv's official installer for this OS into install_dir; return the uv it
+    installed, or None.
+
+    The same script the user would paste (_uv_install_command): user-level, no admin
+    or sudo, and it verifies the checksum of the uv it downloads. It also puts
+    install_dir on PATH - the shell rc files on Linux, the user Path on Windows - so
+    `uv` works in the user's own terminal afterwards; this process, whose PATH
+    predates the install, uses the path returned here instead.
+
+    Python fetches the script, so neither curl nor PowerShell's web client is needed
+    for that part. On Linux the script itself downloads uv with curl or wget, so a
+    box with neither is told what to install instead of failing halfway through."""
+    windows = platform.system() == "Windows"
+    if not windows and not (shutil.which("curl") or shutil.which("wget")):
+        print("[setup] uv's installer downloads uv with curl or wget; neither is "
+              "installed.\n"
+              "        Install one (Ubuntu: sudo apt install -y curl), then run "
+              "run_cosim again.")
+        return None
+    url = ("https://astral.sh/uv/install.ps1" if windows
+           else "https://astral.sh/uv/install.sh")
+    script = _temp_path(".ps1" if windows else ".sh")
+    try:
+        if not _download(url, script):
+            return None
+        if windows:
+            ps = shutil.which("powershell") or os.path.join(
+                os.environ.get("SystemRoot", r"C:\Windows"),
+                "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+            cmd = [ps, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script]
+        else:
+            cmd = ["sh", script]
+        print(f"[setup] installing uv into {install_dir} (from {url}) ...")
+        try:
+            rc = subprocess.call(cmd, env=dict(os.environ, UV_INSTALL_DIR=install_dir))
+        except OSError as exc:
+            print(f"[setup] could not run the uv installer: {exc}")
+            return None
+    finally:
+        _remove_quietly(script)
+    uv = os.path.join(install_dir, "uv.exe" if windows else "uv")
+    if rc != 0 or not os.path.isfile(uv):
+        print(f"[setup] the uv installer did not finish (exit {rc}); its output is above.")
+        return None
+    print(f"[setup] uv installed: {uv}")
+    return uv
+
+
+MINIFORGE_RELEASE_API = "https://api.github.com/repos/conda-forge/miniforge/releases/latest"
+
+
+def _miniforge_asset():
+    """The Miniforge installer for this OS and CPU, by its unversioned release name."""
+    machine = platform.machine().lower()
+    arm = machine in ("aarch64", "arm64")
+    if platform.system() == "Windows":
+        return "Miniforge3-Windows-x86_64.exe"
+    if platform.system() == "Darwin":
+        return f"Miniforge3-MacOSX-{'arm64' if arm else 'x86_64'}.sh"
+    return f"Miniforge3-Linux-{'aarch64' if arm else 'x86_64'}.sh"
+
+
+def _install_miniforge(prefix):
+    """Install Miniforge (conda from conda-forge) into prefix; return its conda, or
+    None.
+
+    Miniforge, not Miniconda: it is BSD-licensed and carries no Anaconda terms of
+    service, which bind organizations of 200+ people, and environment.yml lists
+    conda-forge first anyway. The installer's sha256 comes from the GitHub release
+    itself and a mismatch is refused, since the file is about to be run.
+
+    Installed for this user only, NOT added to PATH and not registered as the
+    system python - Miniforge's own recommendation on Windows, and on Linux the
+    batch install (-b) never touches the shell rc files. FIXS finds it through
+    env.json's conda_root, so nothing else on the machine changes."""
+    name = _miniforge_asset()
+    try:
+        with _urlopen(MINIFORGE_RELEASE_API, timeout=30) as r:
+            release = json.loads(r.read().decode("utf-8"))
+        asset = next(a for a in release.get("assets", []) if a.get("name") == name)
+    except (OSError, ValueError, StopIteration) as exc:
+        print(f"[setup] could not find {name} in the latest Miniforge release "
+              f"({exc!r}).")
+        return None
+    digest = asset.get("digest") or ""
+    if not digest.startswith("sha256:"):
+        print(f"[setup] the Miniforge release publishes no sha256 for {name}; "
+              f"not running an unverified installer.")
+        return None
+    windows = platform.system() == "Windows"
+    installer = _temp_path(".exe" if windows else ".sh")
+    try:
+        print(f"[setup] downloading {name} ({(asset.get('size') or 0) >> 20} MB) ...")
+        if not _download(asset["browser_download_url"], installer,
+                         digest[len("sha256:"):]):
+            return None
+        print(f"[setup] installing Miniforge into {prefix} (a few minutes) ...")
+        if windows:
+            # NSIS takes /D last and UNQUOTED, spaces and all, so this command line
+            # is written out rather than built from a list, which would quote it.
+            cmd = (f'"{installer}" /InstallationType=JustMe /RegisterPython=0 '
+                   f'/AddToPath=0 /S /D={prefix}')
+        else:
+            cmd = ["bash", installer, "-b", "-p", prefix]
+        try:
+            rc = subprocess.call(cmd)
+        except OSError as exc:
+            print(f"[setup] could not run the Miniforge installer: {exc}")
+            return None
+    finally:
+        _remove_quietly(installer)
+    conda = (os.path.join(prefix, "Scripts", "conda.exe") if windows
+             else os.path.join(prefix, "bin", "conda"))
+    if rc != 0 or not os.path.isfile(conda):
+        print(f"[setup] the Miniforge installer did not finish (exit {rc}).")
+        return None
+    activate = (f'"{os.path.join(prefix, "Scripts", "activate.bat")}"' if windows
+                else f"source {os.path.join(prefix, 'bin', 'activate')}")
+    print(f"[setup] conda installed: {conda}\n"
+          f"        It is not on PATH; FIXS finds it by itself. To use conda in a "
+          f"terminal:\n"
+          f"            {activate}")
+    return conda
+
+
+def _ask_install_dir(default, conda_prefix=False):
+    """Ask where to install; Enter keeps `default`. None when there is no console.
+
+    conda_prefix: a folder the Miniforge installers will take - no spaces in the
+    path (the Linux installer stops with "Cannot install into directories with
+    spaces", and conda does not support them on Windows either, where the default
+    under C:\\Users\\<name> has one whenever the account name does) and nothing in
+    it yet. Anything else is asked about again here rather than failing after a
+    120-150 MB download."""
+    while True:
+        try:
+            typed = input(f"        install location [{default}]\n"
+                          f"        Enter to accept, or type another folder: ")
+        except EOFError:
+            return None
+        typed = typed.strip().strip('"')
+        path = os.path.abspath(os.path.expanduser(typed)) if typed else default
+        if conda_prefix and " " in path:
+            example = r"C:\miniforge3" if platform.system() == "Windows" else "~/miniforge3"
+            print(f"[setup] conda cannot be installed into a path with spaces: {path}\n"
+                  f"        choose another folder (for example {example}).")
+            continue
+        if conda_prefix and os.path.isdir(path) and os.listdir(path):
+            print(f"[setup] {path} already exists and is not empty; choose a new or "
+                  f"empty folder.")
+            continue
+        return path
+
+
+def _offer_install(what, default_dir, installer, conda_prefix=False):
+    """Ask whether FIXS should install `what`, then where, and run installer(dir).
+    (the installed executable, its folder), or (None, None) when declined, when
+    there is no console to ask on, or when the install failed."""
+    try:
+        ans = input(f"[setup] {what} is not installed. Should FIXS install it for "
+                    f"you? [Y/n]: ").strip().lower()
+    except EOFError:
+        return None, None
+    if ans not in ("", "y", "yes"):
+        return None, None
+    where = _ask_install_dir(default_dir, conda_prefix)
+    if not where:
+        return None, None
+    exe = installer(where)
+    return (exe, where) if exe else (None, None)
 
 
 def _is_uv_venv(py_exe):
@@ -572,7 +837,9 @@ def _resolve_uv_python(name):
     uv = _find_uv()
     if not uv:
         print(f"[setup] {ENV_FLAG_PATH} asks for a uv env, but uv is not installed.\n"
-              f"        Install it (https://docs.astral.sh/uv/) and re-run setup.")
+              f"        Install it with:\n"
+              f"            {_uv_install_command()}\n"
+              f"        or re-run setup, which offers to install it.")
         return None
     lock = os.path.join(UV_PROJECT, "uv.lock")
     if not os.path.isfile(lock):
@@ -594,43 +861,67 @@ def _resolve_uv_python(name):
 
 
 def _ask_env_manager():
-    """Ask whether the python env is conda's or uv's, save the answer to env.json,
-    and return it ('conda' or 'uv').
+    """Ask where the python env comes from - conda, uv, or a python already on this
+    machine - offer to install conda or uv when the one chosen is missing, save the
+    answer to env.json, and return it ('conda', 'uv' or 'system').
 
     Only setup and --update-python ask; an ordinary run, and the automatic repair
     of a broken config, keep what was saved. The default is the saved answer, else
-    whichever tool is installed, else conda - so Enter does what setup did before
-    this question existed. With no console to ask on, the saved answer stands
-    (None if there is none, which _resolve_python treats as conda) and nothing is
-    written.
+    conda when it is installed - so Enter does what setup did before this question
+    existed - else uv, the lighter of the two FIXS can install. With no console to
+    ask on, the saved answer stands (None if there is none, which _resolve_python
+    treats as conda) and nothing is written.
 
-    Choosing uv without uv installed, or with a FIXS too old to ship uv.lock, stops
-    setup rather than falling back to conda: the user just said they do not want
-    conda, and binding it anyway is the one outcome they ruled out."""
+    Choosing conda or uv when it is missing offers to install it (conda as
+    Miniforge), asking where. Declined or failed, setup stops with the steps to
+    install it by hand rather than falling back to something else: the user just
+    said which one they want. Nothing is saved on the way out, so the question
+    comes back on the next run."""
     saved = env_choice()
     conda = _find_conda()
     uv = _find_uv()
-    default = saved or ("uv" if uv and not conda else "conda")
-    print("How should FIXS manage its python env?")
-    print(f"  [1] conda  ({'found: ' + conda if conda else 'not found'})")
-    print(f"  [2] uv     ({'found: ' + uv if uv else 'not installed - ' + UV_INSTALL_URL})")
+    default = saved or ("conda" if conda else "uv")
+    if not conda and not uv:
+        print("[setup] neither conda nor uv is installed. FIXS can install either; "
+              "uv is\n        the lighter one (no admin rights needed).")
+    print("Where should FIXS's python env come from?")
+    print(f"  [1] conda   ({'found: ' + conda if conda else 'not installed - FIXS can install Miniforge'})")
+    print(f"  [2] uv      ({'found: ' + uv if uv else 'not installed - FIXS can install it'})")
+    print("  [3] system  (a python already on this machine; FIXS asks before "
+          "installing into it)")
+    number = {"conda": "1", "uv": "2", "system": "3"}
     try:
-        ans = input(f"Enter 1 or 2 [{'2' if default == 'uv' else '1'}]: ").strip()
+        ans = input(f"Enter 1, 2 or 3 [{number[default]}]: ").strip()
     except EOFError:
         print(f"        (no console to ask on - keeping {saved or 'conda'}.)")
         return saved
-    choice = {"1": "conda", "2": "uv", "": default}.get(ans)
+    choice = {"1": "conda", "2": "uv", "3": "system", "": default}.get(ans)
     if choice is None:
-        sys.exit("[setup] invalid choice (expected 1 or 2).")
+        sys.exit("[setup] invalid choice (expected 1, 2 or 3).")
+    dirs = {}
     if choice == "uv":
-        if not uv:
-            sys.exit(f"[setup] uv is not installed. Install it ({UV_INSTALL_URL}),\n"
-                     f"        open a new terminal, and re-run setup.")
         lock = os.path.join(UV_PROJECT, "uv.lock")
         if not os.path.isfile(lock):
             sys.exit(f"[setup] this FIXS has no {lock}, so it cannot build a uv env.\n"
-                     f"        Update FIXS, or re-run setup and choose conda.")
-    _save_env_choice(choice == "uv")
+                     f"        Update FIXS, or run run_cosim again and choose conda.")
+        if not uv:
+            uv, where = _offer_install("uv", _uv_bin_dir(), _install_uv)
+            if not uv:
+                sys.exit(f"[setup] uv is not installed. Install it with:\n"
+                         f"            {_uv_install_command()}\n"
+                         f"        ({UV_INSTALL_URL})\n"
+                         f"        then open a new terminal and run run_cosim again.")
+            dirs["uv_dir"] = where
+    elif choice == "conda" and not conda:
+        conda, where = _offer_install(
+            "conda", os.path.join(os.path.expanduser("~"), "miniforge3"),
+            _install_miniforge, conda_prefix=True)
+        if not conda:
+            sys.exit(f"[setup] conda is not installed. Install Miniforge:\n"
+                     f"            {_miniforge_install_steps()}\n"
+                     f"        then open a new terminal and run run_cosim again.")
+        dirs["conda_root"] = where
+    _save_env_choice(choice, **dirs)
     return choice
 
 
@@ -690,33 +981,37 @@ def ensure_runtime(cfg, force=False):
 def _resolve_python(ask=False):
     """Resolve the interpreter that runs the co-sim.
 
-    Order:
-      0. uv chosen (asked now when `ask`, else as saved in ~/.fixs/env.json): the
-         uv env of that name, built from uv.lock if it is missing; if that cannot
-         be had, carry on with 1-3;
+    Order, after the conda / uv / system choice (asked now when `ask`, else as
+    saved in ~/.fixs/env.json; nothing saved reads as conda):
+      0. uv: the uv env of that name, built from uv.lock if it is missing; if that
+         cannot be had, carry on with 1-3;
       1. the canonical env (FIXS_ENV_NAME, else environment.yml's name) if it exists;
       2. else, if conda is available, offer to create it from environment.yml;
       3. else fall back to any conda env that already has the co-sim deps
          (carla + SUMO), then to a manual python picker.
+    system skips 1-2 and starts at 3: the user said to use a python they have.
     This keeps the reproducible 'realsim' path primary while staying usable on
     machines that named their env differently."""
     name = _canonical_env_name()
+    choice = _ask_env_manager() if ask else env_choice()
 
     # 0. uv chosen.
-    if (_ask_env_manager() if ask else env_choice()) == "uv":
+    if choice == "uv":
         py = _resolve_uv_python(name)
         if py:
             return py
 
     # 1. canonical env already installed -> good to go.
-    py = _named_env_python(name)
+    py = _named_env_python(name) if choice != "system" else None
     if py:
         print(f"[setup] found the '{name}' env: {py}")
         return py
 
     # 2. not installed, but conda is here -> offer to create it from the spec.
-    conda = _find_conda()
-    if conda and os.path.isfile(ENV_YML):
+    conda = _find_conda() if choice != "system" else None
+    if choice == "system":
+        pass
+    elif conda and os.path.isfile(ENV_YML):
         print(f"[setup] the '{name}' env is not installed (conda found: {conda}).")
         ans = input(f"        create it now from {ENV_YML}? [Y/n]: ").strip().lower()
         if ans in ("", "y", "yes"):

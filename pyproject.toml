@@ -1,5 +1,5 @@
 # The FIXS python env as a uv project - the same env environment.yml builds, for
-# machines where setup was told to use uv (saved as ~/.fixs/env.json: {"use_uv": true}).
+# machines where setup was told to use uv (saved as ~/.fixs/env.json: {"env_manager": "uv"}).
 #
 # carla_env_setup builds it with `uv sync --locked` into ~/.fixs/envs/<name>, so uv.lock
 # pins every version on every machine. After editing this file, run `uv lock` and

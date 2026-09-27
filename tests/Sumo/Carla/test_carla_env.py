@@ -350,15 +350,21 @@ def test_resolve_python_without_flag_ignores_uv_envs(fixs_home, monkeypatch):
     assert env._resolve_python() == "conda_py"
 
 
-# ------------------------------------------------ setup asks: conda or uv
+# ---------------------------------- setup asks: conda, uv or a system python
 
 @pytest.mark.parametrize("content, expected", [
     (None, None),                        # nothing saved yet
-    ('{"use_uv": true}', "uv"),
+    ('{"env_manager": "conda"}', "conda"),
+    ('{"env_manager": "uv"}', "uv"),
+    ('{"env_manager": "system"}', "system"),
+    ('{"env_manager": "pip"}', None),    # not one of the three
+    ('{"use_uv": true}', "uv"),          # dev_v0.10.0 / hand-made form
     ('{"use_uv": false}', "conda"),
-    ('{"use_uv": 1}', None),             # only a JSON true/false is an answer
+    ('{"use_uv": 1}', None),             # only a JSON true/false is an answer there
     ('{"use_uv": "yes"}', None),
+    ('{"env_manager": "system", "use_uv": true}', "system"),   # the new key wins
     ('{}', None),
+    ('["uv"]', None),
 ])
 def test_env_choice_reads_the_saved_answer(fixs_home, content, expected):
     if content is not None:
@@ -368,80 +374,179 @@ def test_env_choice_reads_the_saved_answer(fixs_home, content, expected):
 
 @pytest.fixture
 def ask(fixs_home, tmp_path, monkeypatch):
-    """_ask_env_manager with conda/uv presence and the typed answer controlled.
-    Returns a function: ask(answer, conda=..., uv=...) -> (choice, prompts)."""
+    """_ask_env_manager with conda/uv presence, the typed answers and both
+    installers controlled. Returns a function:
+        ask(answers, conda=..., uv=..., installs=...) -> (choice, prompts)
+    `answers` is one answer or a list, one per prompt; EOFError as an answer raises
+    it. `installs` is what the installer returns (None = it failed); every call is
+    recorded in ask.installed as (tool, folder)."""
     (tmp_path / "uv.lock").write_text("", encoding="utf-8")
     monkeypatch.setattr(env, "UV_PROJECT", str(tmp_path))
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    installed = []
 
-    def _run(answer, conda="conda.exe", uv="uv.exe"):
+    def _run(answers, conda="conda.exe", uv="uv.exe", installs="new_exe"):
         monkeypatch.setattr(env, "_find_conda", lambda: conda)
         monkeypatch.setattr(env, "_find_uv", lambda: uv)
+        monkeypatch.setattr(env, "_install_uv",
+                            lambda d: installed.append(("uv", d)) or installs)
+        monkeypatch.setattr(env, "_install_miniforge",
+                            lambda d: installed.append(("conda", d)) or installs)
+        queue = list(answers) if isinstance(answers, list) else [answers]
         prompts = []
 
         def _input(prompt=""):
             prompts.append(prompt)
+            answer = queue.pop(0)
             if answer is EOFError:
                 raise EOFError
             return answer
         monkeypatch.setattr("builtins.input", _input)
         return env._ask_env_manager(), prompts
+    _run.installed = installed
+    _run.home = home
     return _run
 
 
 @pytest.mark.parametrize("conda, uv, default", [
     ("conda.exe", "uv.exe", "conda"),    # both: conda, as setup did before
-    (None, None, "conda"),               # neither: conda, whose absence setup handles
-    (None, "uv.exe", "uv"),              # only uv: uv
     ("conda.exe", None, "conda"),
+    (None, "uv.exe", "uv"),              # only uv: uv
+    (None, None, "uv"),                  # neither: uv, the lighter install
 ])
 def test_ask_enter_takes_the_detected_default(ask, fixs_home, conda, uv, default):
-    choice, prompts = ask("", conda=conda, uv=uv)
+    # Enter; the 'neither' row then reaches the install offer and the folder: Enter.
+    choice, prompts = ask(["", "", ""], conda=conda, uv=uv)
     assert choice == default
-    assert prompts == [f"Enter 1 or 2 [{'2' if default == 'uv' else '1'}]: "]
+    assert prompts[0] == "Enter 1, 2 or 3 [%s]: " % ("2" if default == "uv" else "1")
     assert env.env_choice() == default
+    assert [t for t, _ in ask.installed] == (["uv"] if not uv and not conda else [])
+
+
+def test_ask_neither_says_so(ask, fixs_home, capsys):
+    ask("3", conda=None, uv=None)
+    assert "neither conda nor uv is installed" in capsys.readouterr().out
 
 
 def test_ask_default_is_the_saved_answer(ask, fixs_home):
     """--update-python re-asks, offering what was chosen last time."""
-    (fixs_home / "env.json").write_text('{"use_uv": true}', encoding="utf-8")
-    choice, prompts = ask("", conda="conda.exe", uv="uv.exe")
-    assert choice == "uv" and prompts == ["Enter 1 or 2 [2]: "]
+    (fixs_home / "env.json").write_text('{"env_manager": "system"}', encoding="utf-8")
+    choice, prompts = ask("")
+    assert choice == "system" and prompts == ["Enter 1, 2 or 3 [3]: "]
 
 
-def test_ask_saves_the_answer_and_keeps_other_keys(ask, fixs_home):
+def test_ask_system_is_saved_and_installs_nothing(ask, fixs_home):
+    choice, _ = ask("3", conda=None, uv=None)
+    assert choice == "system" and ask.installed == []
+    assert env.env_choice() == "system"
+
+
+def test_ask_saves_env_manager_drops_use_uv_keeps_the_rest(ask, fixs_home):
     (fixs_home / "env.json").write_text('{"use_uv": true, "other": 7}', encoding="utf-8")
-    choice, _ = ask("1")
-    assert choice == "conda"
+    assert ask("1")[0] == "conda"
     assert json.loads((fixs_home / "env.json").read_text(encoding="utf-8")) == \
-        {"use_uv": False, "other": 7}
+        {"env_manager": "conda", "other": 7}
 
 
-def test_ask_uv_without_uv_stops_and_saves_nothing(ask, fixs_home):
-    """Choosing uv rules conda out, so setup stops rather than binding conda."""
+def test_ask_installs_uv_into_the_default_folder(ask, fixs_home):
+    choice, prompts = ask(["2", "", ""], uv=None)
+    assert choice == "uv"
+    assert "Should FIXS install it for you" in prompts[1]
+    assert f"[{env._uv_bin_dir()}]" in prompts[2]
+    assert ask.installed == [("uv", env._uv_bin_dir())]
+    assert json.loads((fixs_home / "env.json").read_text(encoding="utf-8"))["uv_dir"] \
+        == env._uv_bin_dir()
+
+
+def test_ask_installs_uv_into_a_folder_the_user_types(ask, fixs_home, tmp_path):
+    tools = str(tmp_path / "my tools" / "uv")
+    choice, _ = ask(["2", "y", '"%s"' % tools], uv=None)    # quotes are stripped
+    assert choice == "uv" and ask.installed == [("uv", tools)]
+    assert json.loads((fixs_home / "env.json").read_text(encoding="utf-8"))["uv_dir"] \
+        == tools
+
+
+def test_ask_installs_miniforge_into_the_default_folder(ask, fixs_home):
+    choice, prompts = ask(["1", "", ""], conda=None)
+    default = os.path.join(str(ask.home), "miniforge3")
+    assert choice == "conda" and ask.installed == [("conda", default)]
+    assert f"[{default}]" in prompts[2]
+    assert json.loads((fixs_home / "env.json").read_text(encoding="utf-8"))[
+        "conda_root"] == default
+
+
+def test_ask_conda_folder_must_be_empty(ask, fixs_home, tmp_path, capsys):
+    """Miniforge refuses a folder with files in it, so that is asked again."""
+    full = tmp_path / "full"
+    full.mkdir()
+    (full / "something").write_text("", encoding="utf-8")
+    fresh = str(tmp_path / "fresh")
+    choice, prompts = ask(["1", "", str(full), fresh], conda=None)
+    assert choice == "conda" and ask.installed == [("conda", fresh)]
+    assert len(prompts) == 4
+    assert "not empty" in capsys.readouterr().out
+
+
+def test_ask_conda_folder_without_spaces(ask, fixs_home, tmp_path, capsys):
+    """Miniforge's Linux installer stops on a path with spaces (measured on Ubuntu
+    20.04), so it is asked again here - before the download, not after it."""
+    fresh = str(tmp_path / "forge")
+    choice, prompts = ask(["1", "", str(tmp_path / "my forge"), fresh], conda=None)
+    assert choice == "conda" and ask.installed == [("conda", fresh)]
+    assert len(prompts) == 4
+    assert "path with spaces" in capsys.readouterr().out
+
+
+def test_ask_uv_folder_may_have_spaces(ask, fixs_home, tmp_path):
+    """The check is conda's: uv installs anywhere."""
+    spaced = str(tmp_path / "my tools")
+    ask(["2", "", spaced], uv=None)
+    assert ask.installed == [("uv", spaced)]
+
+
+@pytest.mark.parametrize("tool, answers, installs, steps", [
+    ("uv", ["2", "n"], "new_exe", "THE-UV-COMMAND"),              # declined
+    ("uv", ["2", EOFError], "new_exe", "THE-UV-COMMAND"),         # no console
+    ("uv", ["2", "", EOFError], "new_exe", "THE-UV-COMMAND"),     # no folder given
+    ("uv", ["2", "", ""], None, "THE-UV-COMMAND"),                # install failed
+    ("conda", ["1", "n"], "new_exe", "THE-CONDA-STEPS"),
+    ("conda", ["1", "", ""], None, "THE-CONDA-STEPS"),
+])
+def test_ask_missing_tool_not_installed_stops_with_the_manual_steps(
+        ask, fixs_home, monkeypatch, tool, answers, installs, steps):
+    """The user named the tool, so setup stops rather than binding another one -
+    and says how to install it by hand, and to run run_cosim again."""
+    monkeypatch.setattr(env, "_uv_install_command", lambda: "THE-UV-COMMAND")
+    monkeypatch.setattr(env, "_miniforge_install_steps", lambda: "THE-CONDA-STEPS")
     with pytest.raises(SystemExit) as exc:
-        ask("2", uv=None)
-    assert "uv is not installed" in str(exc.value)
+        ask(answers, conda=None, uv=None, installs=installs)
+    assert f"{tool} is not installed" in str(exc.value)
+    assert steps in str(exc.value) and "run run_cosim again" in str(exc.value)
     assert not (fixs_home / "env.json").exists()
 
 
 def test_ask_uv_without_a_lock_stops(ask, fixs_home, tmp_path, monkeypatch):
     monkeypatch.setattr(env, "UV_PROJECT", str(tmp_path / "old_fixs"))
     with pytest.raises(SystemExit) as exc:
-        ask("2")
+        ask("2", uv=None)
     assert "cannot build a uv env" in str(exc.value)
-    assert not (fixs_home / "env.json").exists()
+    assert ask.installed == [] and not (fixs_home / "env.json").exists()
 
 
 def test_ask_invalid_answer_stops(ask, fixs_home):
-    with pytest.raises(SystemExit):
-        ask("3")
+    with pytest.raises(SystemExit) as exc:
+        ask("4")
+    assert "expected 1, 2 or 3" in str(exc.value)
     assert not (fixs_home / "env.json").exists()
 
 
 def test_ask_without_a_console_keeps_the_saved_answer(ask, fixs_home):
     assert ask(EOFError)[0] is None
     assert not (fixs_home / "env.json").exists()
-    (fixs_home / "env.json").write_text('{"use_uv": true}', encoding="utf-8")
+    (fixs_home / "env.json").write_text('{"env_manager": "uv"}', encoding="utf-8")
     assert ask(EOFError)[0] == "uv"
 
 
@@ -457,6 +562,16 @@ def test_resolve_python_asks_only_when_told(fixs_home, monkeypatch):
     assert env._resolve_python(ask=True) == uv_py and asked == [1]
 
 
+def test_resolve_python_system_skips_conda(fixs_home, monkeypatch):
+    """'system' goes straight to the pythons already on the machine."""
+    (fixs_home / "env.json").write_text('{"env_manager": "system"}', encoding="utf-8")
+    _no_conda(monkeypatch)
+    monkeypatch.setattr(env, "_python_candidates", lambda: ["sys_py"])
+    monkeypatch.setattr(env, "_python_can_import", lambda py, mods: True)
+    monkeypatch.setattr(env, "_interpreter_kind", lambda py: ("SYSTEM python", True))
+    assert env._resolve_python() == "sys_py"
+
+
 def test_ensure_runtime_asks_on_update_python_not_on_repair(monkeypatch):
     seen = []
     monkeypatch.setattr(env, "resolve_python", lambda ask=False: seen.append(ask) or "py")
@@ -466,6 +581,236 @@ def test_ensure_runtime_asks_on_update_python_not_on_repair(monkeypatch):
     env.ensure_runtime({"mode": "client", "python": None})
     env.ensure_runtime({"mode": "client", "python": None}, force=True)
     assert seen == [False, True]
+
+
+# ------------------------------ where FIXS put conda / uv, found again later
+
+def test_conda_roots_include_the_saved_root(fixs_home, tmp_path):
+    root = tmp_path / "my conda"
+    root.mkdir()
+    (fixs_home / "env.json").write_text(json.dumps({"conda_root": str(root)}),
+                                        encoding="utf-8")
+    assert os.path.normcase(str(root)) in [os.path.normcase(r) for r in env._conda_roots()]
+
+
+def test_find_uv_looks_in_the_saved_dir(fixs_home, tmp_path, monkeypatch):
+    monkeypatch.setattr(env.shutil, "which", lambda name: None)
+    d = tmp_path / "tools"
+    d.mkdir()
+    exe = d / ("uv.exe" if platform.system() == "Windows" else "uv")
+    exe.write_text("", encoding="utf-8")
+    (fixs_home / "env.json").write_text(json.dumps({"uv_dir": str(d)}), encoding="utf-8")
+    assert env._find_uv() == str(exe)
+
+
+# ----------------------------------------------- the installers, per OS
+
+@pytest.mark.parametrize("system, expected", [
+    ("Windows", 'powershell -ExecutionPolicy ByPass -c '
+                '"irm https://astral.sh/uv/install.ps1 | iex"'),
+    ("Linux", "curl -LsSf https://astral.sh/uv/install.sh | sh"),
+])
+def test_uv_install_command_per_os(monkeypatch, system, expected):
+    monkeypatch.setattr(env.platform, "system", lambda: system)
+    assert env._uv_install_command() == expected
+
+
+@pytest.mark.parametrize("system, needle", [
+    ("Windows", "Miniforge3-Windows-x86_64.exe"),
+    ("Linux", "bash Miniforge3-$(uname)-$(uname -m).sh"),
+])
+def test_miniforge_install_steps_per_os(monkeypatch, system, needle):
+    monkeypatch.setattr(env.platform, "system", lambda: system)
+    assert needle in env._miniforge_install_steps()
+
+
+@pytest.mark.parametrize("system, machine, asset", [
+    ("Windows", "AMD64", "Miniforge3-Windows-x86_64.exe"),
+    ("Linux", "x86_64", "Miniforge3-Linux-x86_64.sh"),
+    ("Linux", "aarch64", "Miniforge3-Linux-aarch64.sh"),
+    ("Darwin", "arm64", "Miniforge3-MacOSX-arm64.sh"),
+])
+def test_miniforge_asset_per_os(monkeypatch, system, machine, asset):
+    monkeypatch.setattr(env.platform, "system", lambda: system)
+    monkeypatch.setattr(env.platform, "machine", lambda: machine)
+    assert env._miniforge_asset() == asset
+
+
+class _Resp:
+    """urlopen's response: read(n) in chunks, then b''."""
+    def __init__(self, data):
+        self.data = data
+
+    def read(self, n=-1):
+        if n is None or n < 0:
+            n = len(self.data)
+        out, self.data = self.data[:n], self.data[n:]
+        return out
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+def test_downloads_name_a_user_agent(monkeypatch, tmp_path):
+    """astral.sh answers Python's default agent with 403; name one."""
+    seen = []
+
+    def _urlopen(req, timeout=None):
+        seen.append((req.full_url, req.get_header("User-agent")))
+        return _Resp(b"x")
+    monkeypatch.setattr("urllib.request.urlopen", _urlopen)
+    assert env._download("https://astral.sh/uv/install.sh", str(tmp_path / "s"))
+    assert seen == [("https://astral.sh/uv/install.sh", "FIXS-setup")]
+
+
+def _exe_name(system, tool):
+    if tool == "uv":
+        return "uv.exe" if system == "Windows" else "uv"
+    return os.path.join("Scripts", "conda.exe") if system == "Windows" \
+        else os.path.join("bin", "conda")
+
+
+@pytest.mark.parametrize("system", ["Windows", "Linux"])
+def test_install_uv_runs_the_official_installer(monkeypatch, tmp_path, system):
+    """Downloads the OS's script and runs it with UV_INSTALL_DIR = the folder asked
+    for; returns the uv it put there, and removes the script."""
+    monkeypatch.setattr(env.platform, "system", lambda: system)
+    monkeypatch.setattr(env.shutil, "which", lambda name: "/usr/bin/" + name)
+    target = tmp_path / "uv home"
+    urls, runs = [], []
+
+    def _urlopen(url, timeout=None):
+        url = getattr(url, "full_url", url)     # a urllib Request
+        urls.append(url)
+        return _Resp(b"echo installer")
+    monkeypatch.setattr("urllib.request.urlopen", _urlopen)
+
+    def _call(cmd, env=None):
+        with open(cmd[-1], "rb") as f:
+            runs.append((cmd, env["UV_INSTALL_DIR"], f.read()))
+        target.mkdir()
+        (target / _exe_name(system, "uv")).write_text("", encoding="utf-8")
+        return 0
+    monkeypatch.setattr(env.subprocess, "call", _call)
+
+    assert env._install_uv(str(target)) == str(target / _exe_name(system, "uv"))
+    (cmd, install_dir, script), = runs
+    assert script == b"echo installer" and install_dir == str(target)
+    if system == "Windows":
+        assert urls == ["https://astral.sh/uv/install.ps1"]
+        assert cmd[1:5] == ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]
+        assert cmd[-1].endswith(".ps1")
+    else:
+        assert urls == ["https://astral.sh/uv/install.sh"]
+        assert cmd[0] == "sh" and cmd[-1].endswith(".sh")
+    assert not os.path.exists(cmd[-1])
+
+
+def test_install_uv_on_linux_without_curl_or_wget_says_what_to_install(
+        monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(env.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(env.shutil, "which", lambda name: None)
+
+    def _no_download(*a, **k):
+        raise AssertionError("downloaded although the installer cannot run")
+    monkeypatch.setattr("urllib.request.urlopen", _no_download)
+    assert env._install_uv(str(tmp_path)) is None
+    assert "sudo apt install -y curl" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("failure", ["download", "exit", "no_uv"])
+def test_install_uv_failures_return_none(monkeypatch, tmp_path, failure):
+    monkeypatch.setattr(env.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(env.shutil, "which", lambda name: "/usr/bin/" + name)
+
+    def _urlopen(url, timeout=None):
+        url = getattr(url, "full_url", url)     # a urllib Request
+        if failure == "download":
+            raise OSError("offline")
+        return _Resp(b"")
+    monkeypatch.setattr("urllib.request.urlopen", _urlopen)
+
+    def _call(cmd, env=None):
+        if failure != "no_uv":
+            (tmp_path / "uv").write_text("", encoding="utf-8")
+        return 1 if failure == "exit" else 0
+    monkeypatch.setattr(env.subprocess, "call", _call)
+    assert env._install_uv(str(tmp_path)) is None
+
+
+def _miniforge_release(name, payload, digest=True):
+    import hashlib
+    asset = {"name": name, "size": len(payload),
+             "browser_download_url": "https://example.invalid/" + name}
+    if digest:
+        asset["digest"] = "sha256:" + hashlib.sha256(payload).hexdigest()
+    return json.dumps({"assets": [{"name": "other.sh"}, asset]}).encode()
+
+
+@pytest.mark.parametrize("system", ["Windows", "Linux"])
+def test_install_miniforge_verifies_and_runs_the_installer(monkeypatch, tmp_path,
+                                                            system):
+    monkeypatch.setattr(env.platform, "system", lambda: system)
+    monkeypatch.setattr(env.platform, "machine", lambda: "x86_64")
+    name = env._miniforge_asset()
+    payload = b"miniforge installer bytes"
+    prefix = tmp_path / "mini forge"
+
+    def _urlopen(url, timeout=None):
+        url = getattr(url, "full_url", url)     # a urllib Request
+        if url == env.MINIFORGE_RELEASE_API:
+            return _Resp(_miniforge_release(name, payload))
+        assert url == "https://example.invalid/" + name
+        return _Resp(payload)
+    monkeypatch.setattr("urllib.request.urlopen", _urlopen)
+    runs = []
+
+    def _call(cmd, env=None):
+        runs.append(cmd)
+        conda = prefix / _exe_name(system, "conda")
+        conda.parent.mkdir(parents=True)
+        conda.write_text("", encoding="utf-8")
+        return 0
+    monkeypatch.setattr(env.subprocess, "call", _call)
+
+    assert env._install_miniforge(str(prefix)) == str(prefix / _exe_name(system, "conda"))
+    (cmd,) = runs
+    if system == "Windows":
+        # One string, /D last and unquoted even though the folder has a space.
+        assert isinstance(cmd, str)
+        assert cmd.endswith(f" /S /D={prefix}")
+        assert "/AddToPath=0" in cmd and "/RegisterPython=0" in cmd
+        assert "/InstallationType=JustMe" in cmd
+    else:
+        assert cmd[0] == "bash" and cmd[2:] == ["-b", "-p", str(prefix)]
+
+
+@pytest.mark.parametrize("problem", ["sha_mismatch", "no_digest", "no_asset",
+                                     "api_down"])
+def test_install_miniforge_refuses_what_it_cannot_verify(monkeypatch, tmp_path,
+                                                         problem):
+    monkeypatch.setattr(env.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(env.platform, "machine", lambda: "x86_64")
+    name = env._miniforge_asset()
+
+    def _urlopen(url, timeout=None):
+        url = getattr(url, "full_url", url)     # a urllib Request
+        if url == env.MINIFORGE_RELEASE_API:
+            if problem == "api_down":
+                raise OSError("offline")
+            release_name = "not-this.sh" if problem == "no_asset" else name
+            return _Resp(_miniforge_release(release_name, b"good",
+                                            digest=problem != "no_digest"))
+        return _Resp(b"tampered")
+    monkeypatch.setattr("urllib.request.urlopen", _urlopen)
+
+    def _never(*a, **k):
+        raise AssertionError("ran an installer it could not verify")
+    monkeypatch.setattr(env.subprocess, "call", _never)
+    assert env._install_miniforge(str(tmp_path / "mf")) is None
 
 
 def test_find_source_wheel_prefers_tag(tmp_path):

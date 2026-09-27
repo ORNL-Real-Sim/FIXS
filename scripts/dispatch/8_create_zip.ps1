@@ -130,7 +130,7 @@ try {
     # Include the conda env spec so the fetched FIXS/ folder carries the
     # canonical 'realsim' environment definition. carla is pulled from PyPI
     # (carla==0.9.15), so no wheel needs to be bundled here.
-    # pyproject.toml + uv.lock are the same env for uv (~/.fixs/env.json use_uv);
+    # pyproject.toml + uv.lock are the same env for uv (~/.fixs/env.json env_manager);
     # carla_env_setup looks for them beside environment.yml.
     foreach ($spec in @('environment.yml', 'pyproject.toml', 'uv.lock')) {
         $specPath = Join-Path $RepoRoot $spec
