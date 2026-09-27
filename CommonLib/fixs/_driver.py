@@ -369,31 +369,9 @@ class Controller:
         #: What the bench last achieved. None until it has answered once.
         self.vDyno = None
 
-        # EVERYTHING THAT DOES NOT NEED THE EGO IS BUILT HERE, not in _build.
-        #
-        # _build runs on the first controlled tick. With a warm-up that tick is
-        # also the one where the whole network arrives in CARLA at once, so it
-        # is the single worst tick in the run to add work to -- and a bench in
-        # the loop feels it as a freeze the instant it starts being commanded.
-        # Measured inside that tick on MLK eco-driving: BehaviorAgent(...)
-        # 0.734 s, of which ~0.58 s was its own world.get_map(), plus 0.157 s
-        # for the route snap. FIXS#373.
-        #
-        # This constructor runs at bridge start-up, right before the bridge
-        # blocks in recv for the whole warm-up, so the same work costs nothing.
-        # The agent itself still cannot be built here: it is constructed on
-        # carla.ego, and the traffic simulator has not inserted the ego yet.
-        # Only when a bridge is actually behind this module. The law below is
-        # exercised on its own -- tests construct the driver with no backend
-        # registered -- and carla.map REFUSES rather than inventing a world, so
-        # asking unconditionally would make the driver unusable without CARLA.
-        # None is what BasicAgent already treats as "make your own", so the
-        # no-bridge path is exactly the old behaviour.
-        #: ... and not on a passive rung, where there is no agent to hand them
-        #: to. _build never runs there (control() returns before it), so the map
-        #: and the planner would be built, paid for, and never read. FIXS#373
-        #: moved this work off the first controlled tick because it cost 0.73 s
-        #: there; on this rung it costs that at start-up for nothing at all.
+        # Map and route planner are built at start-up, not on the first
+        # controlled tick (FIXS#373). Skipped without a bridge (unit tests) and
+        # on a passive rung, which has no agent to use them.
         self._map, self._grp = None, None
         if not self.passive and carla.available():
             self._map = carla.map      # FIXS caches it; the agent reuses it
