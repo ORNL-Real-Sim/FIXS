@@ -113,18 +113,14 @@ def test_detector_says_it_is_not_decoded():
 
 
 class _Cfg:
-    """Minimal ConfigHelper stand-in for subscription-selection tests.
-
-    `raw` is the document as written, which is what ConfigHelper exposes and what
-    _selectSubscription reads CarlaSetup out of. It is carried here rather than
-    left off because a stand-in that lacks a field the code under test reads
-    fails on the stand-in, not on the behaviour.
-    """
+    """Minimal ConfigHelper stand-in for subscription-selection tests."""
 
     def __init__(self, subscriptions, raw=None):
         self.simulation_setup = {'VehicleMessageField': ['id', 'speed']}
         self.application_setup = {'VehicleSubscription': subscriptions}
-        self.raw = raw or {}
+        # _selectSubscription reads the document as written to tell the bridge's
+        # subscription from the caller's; ConfigHelper always sets it.
+        self.raw = dict(raw or {})
 
 
 def _sub(port, ids=('ego',)):

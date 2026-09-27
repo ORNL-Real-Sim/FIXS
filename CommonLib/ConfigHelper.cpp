@@ -721,7 +721,7 @@ int ConfigHelper::getConfig(string configName) {
 			CarlaSetup.CarlaClientPort = 4440;
 		}
 	}
-	if (node["CarlaMap"]) {
+	if (node["CarlaMapName"]) {
 		CarlaSetup.CarlaMapName = parserString(node, "CarlaMapName");
 	}
 	else {
@@ -979,7 +979,8 @@ void ConfigHelper::resetConfig() {
 
 }
 
-bool ConfigHelper::parserFlag(YAML::Node node, string name) {
+bool ConfigHelper::parserFlag(YAML::Node node, string name, bool defaultValue) {
+	if (!node[name]) return defaultValue;
 	bool flag = false;
 	const std::string Flag_str = node[name].as<std::string>();
 	if (Flag_str.compare("false") == 0) {
@@ -998,21 +999,24 @@ bool ConfigHelper::parserFlag(YAML::Node node, string name) {
 
 }
 
-string ConfigHelper::parserString(YAML::Node node, string name) {
+string ConfigHelper::parserString(YAML::Node node, string name, string defaultValue) {
+	if (!node[name]) return defaultValue;
 	const std::string strVal = node[name].as<std::string>();
 
 	return strVal;
 }
 
 
-double ConfigHelper::parserDouble(YAML::Node node, string name) {
+double ConfigHelper::parserDouble(YAML::Node node, string name, double defaultValue) {
+	if (!node[name]) return defaultValue;
 	double value = node[name].as<double>();
 
 	return value;
 
 }
 
-int ConfigHelper::parserInteger(YAML::Node node, string name) {
+int ConfigHelper::parserInteger(YAML::Node node, string name, int defaultValue) {
+	if (!node[name]) return defaultValue;
 	int value = node[name].as<int>();
 
 	return value;

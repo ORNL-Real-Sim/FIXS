@@ -1073,6 +1073,10 @@ int main(int argc, char* argv[]) {
 		PERF_LOG("t=%.2f vehicles_in_network=%d\n", simTime, (int)MsgServer_c.VehDataRecv_um.size());
 #endif
 
+		// print every 10 simulation seconds: an edge on the 10 s slot, not a
+		// tolerance test, which a drifting clock stops passing (#169)
+		static long long lastPrintSlot = -1;
+		const long long printSlot = (long long)(simTime / 10 + 1e-3);
 		if (ENABLE_VERBOSE) {
 			printf("\n===========New time step==============\n");
 			printf("===========SimTime %f==============\n", simTime);
@@ -1082,10 +1086,10 @@ int main(int argc, char* argv[]) {
 			fprintf(f, "\n===SimTime %f\n", simTime);
 			fclose(f);
 		}
-		// print every 10 simulation seconds
-		else if (abs(simTime / 10 - round(simTime / 10)) < 1e-5) {
+		else if (printSlot != lastPrintSlot) {
 			printf("===========SimTime %f==============\n", simTime);
 		}
+		lastPrintSlot = printSlot;
 
 		// ===================================================================
 		// 			Warm-up gate (#86)

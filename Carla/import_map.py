@@ -37,7 +37,7 @@ read from the saved config and dispatched on, not used to refuse:
   source    COOKS the package. The cook runs the Unreal editor, so this is the
             only flavour that can turn an fbx/xodr into a map.
   packaged  INSTALLS the precooked package (the Digital-Twin Library's
-            `*_cooked.tar.gz`) into the package root - a plain extract, no editor
+            `*_cooked*.tar.gz`) into the package root - a plain extract, no editor
             (`install_precooked` -> `install_cooked`).
 
 run_cosim's preflight calls the same `install_precooked`, so the two front doors
@@ -282,7 +282,7 @@ def _select_package(name, package_url, precooked=False, inside=("xodr", "fbx")):
 
     `precooked` says which artefact this CARLA can actually take, and it has to be
     asked for by name. A PACKAGED build cooks nothing, so the only thing it can
-    install is the library's `*_cooked.tar.gz` (install_precooked) - yet this
+    install is the library's `*_cooked*.tar.gz` (install_precooked) - yet this
     dialog offered "[Z = zip, F = folder]" and filtered `*.zip`, steering the one
     flavour that needs the tarball towards the two artefacts it must reject (#283).
     A SOURCE build is the mirror image: it cooks, so it wants the .zip or the
@@ -298,7 +298,7 @@ def _select_package(name, package_url, precooked=False, inside=("xodr", "fbx")):
     never a second dialog to cancel into. Everything downstream already takes
     either (_stage_from_path copies a tree or unpacks an archive)."""
     shown = "/".join("." + e for e in inside)
-    what = ("precooked package (*_cooked.tar.gz)" if precooked
+    what = ("precooked package (*_cooked*.tar.gz)" if precooked
             else f".zip (or an extracted folder, by its {shown})")
     print(f"\n[import] Select the downloaded '{name}' {what}.")
     if not precooked:
@@ -317,7 +317,7 @@ def _select_package(name, package_url, precooked=False, inside=("xodr", "fbx")):
         root.update()
         if precooked:
             path = filedialog.askopenfilename(
-                title=f"Select the downloaded precooked {name} package (*_cooked.tar.gz)",
+                title=f"Select the downloaded precooked {name} package (*_cooked*.tar.gz)",
                 initialdir=start,
                 filetypes=[("Precooked map packages", "*.tar.gz"), ("All files", "*.*")])
         else:
@@ -1046,7 +1046,7 @@ def local_pick_carries_sumo(path):
     making decisions. classify_source answers the same question but EXTRACTS a
     bundle to do it, so it stays after the decisions rather than inside them.
 
-    False for a raw RoadRunner export and for a precooked *_cooked.tar.gz: the two
+    False for a raw RoadRunner export and for a precooked *_cooked*.tar.gz: the two
     picks that leave run_cosim's SUMO slot empty."""
     if not path:
         return False
@@ -1403,9 +1403,19 @@ def _safe_members(tar, dest):
         yield m
 
 
-def cooked_asset_name(asset):
+def _is_windows(system=None):
+    return (system or platform.system()) == "Windows"
+
+
+def cooked_asset_name(asset, system=None):
     """The precooked asset that pairs with source bundle `asset`, by convention:
-    `<stem>_cooked.tar.gz` (mlk_no_signal.zip -> mlk_no_signal_cooked.tar.gz).
+    `<stem>_cooked.tar.gz` (mlk_no_signal.zip -> mlk_no_signal_cooked.tar.gz), or
+    `<stem>_cooked_windows.tar.gz` on Windows.
+
+    Per OS because a cook is: a packaged CARLA has no shader compiler, and a Linux
+    cook carries only Vulkan shaders, so on Windows its road renders with the
+    default material (FIXS_Applications#29). `system` defaults to this machine,
+    which is the one the package is installed into.
 
     A fallback, not the truth. The catalog is meant to name the cooked asset
     outright (FIXS_Applications#27); until that field lands this derives it, and
@@ -1415,23 +1425,25 @@ def cooked_asset_name(asset):
     if not asset:
         return None
     stem = asset[:-4] if asset.lower().endswith(".zip") else asset
-    return stem + "_cooked.tar.gz"
+    return stem + ("_cooked_windows.tar.gz" if _is_windows(system) else "_cooked.tar.gz")
 
 
-def catalog_cooked_asset(entry):
+def catalog_cooked_asset(entry, system=None):
     """The precooked asset name for a catalog entry, or None if that map has no
-    precooked build published. `cooked_asset` when the catalog says so; else the
-    conventional name derived from the source bundle."""
+    precooked build published for this OS. The catalog's `cooked_asset` (Linux) or
+    `cooked_asset_windows` when it says so; else the conventional name derived
+    from the source bundle."""
     if not entry:
         return None
-    named = entry.get("cooked_asset")
+    key = "cooked_asset_windows" if _is_windows(system) else "cooked_asset"
+    named = entry.get(key)
     if named:
         return named
-    # An explicit false/empty cooked_asset is a deliberate "this map has none";
+    # An explicit false/empty value is a deliberate "this map has none";
     # only a MISSING key falls through to the convention.
-    if "cooked_asset" in entry:
+    if key in entry:
         return None
-    return cooked_asset_name(entry.get("asset"))
+    return cooked_asset_name(entry.get("asset"), system)
 
 
 def install_precooked(carla_root, name, repo=None, tag=None, entry=None,
@@ -1466,12 +1478,12 @@ def install_precooked(carla_root, name, repo=None, tag=None, entry=None,
         # the one thing this flavour cannot do.
         sys.exit(f"[{log}] '{local}' is a source bundle and this CARLA is PACKAGED, "
                  f"which cannot cook one. Point at the map's precooked "
-                 f"*_cooked.tar.gz, or configure a source build (run_cosim --setup).")
+                 f"*_cooked*.tar.gz, or configure a source build (run_cosim --setup).")
     elif not tag:
         sys.exit(f"[{log}] map '{name}' is not installed in {carla_root} and is not a "
                  f"Digital-Twin-Library map, so there is no precooked package to "
                  f"install. Pick a library map, or point --package-dir at a precooked "
-                 f"*_cooked.tar.gz.")
+                 f"*_cooked*.tar.gz.")
     else:
         asset = catalog_cooked_asset(entry)
         # Say "not published" by NAME, before downloading anything. The alternative
@@ -1567,8 +1579,9 @@ def shader_platforms_in(content_dir, size_cap=2 * 1024 * 1024):
     placed actors are correct, and the road surface renders as grey checkerboard.
     Nothing downstream can detect that, which is why it is detected here.
 
-    Every *_cooked.tar.gz the Digital-Twin-Library publishes today is a Linux cook
-    (FIXS_Applications#29), so on Windows this fires.
+    A `<map>_cooked.tar.gz` is a Linux cook; on Windows the library's
+    `<map>_cooked_windows.tar.gz` is the one to install (FIXS_Applications#29), so
+    this fires on Windows when the Linux one got installed instead.
 
     A heuristic by necessity: this pattern-matches container magic rather than
     parsing UE4 packages, so it is used to WARN, never to refuse. Only small .uexp
@@ -1820,7 +1833,7 @@ def library_bundles(releases, catalog, tag_prefix=""):
 def choose_map(repo, tag_prefix="", carla_root=None, catalog=None,
                preferred=None, app_label=None, current=None):
     """Interactive chooser. Two sections plus `L` for a file the user downloaded by
-    hand - a .zip / folder on a source build, a precooked *_cooked.tar.gz on a
+    hand - a .zip / folder on a source build, a precooked *_cooked*.tar.gz on a
     packaged one, which is also the only route left when gh cannot reach the
     library (list_map_releases then returns [] and section 1 is simply empty):
       1. ONLINE - Digital-Twin-Library releases in `repo`. When an application is
@@ -1900,7 +1913,7 @@ def choose_map(repo, tag_prefix="", carla_root=None, catalog=None,
             print(f"   {len(menu):>2}) {name}{mark}")
     if not menu:
         print("   (no online bundles or imported maps found)")
-    print("   L) select a local precooked *_cooked.tar.gz instead" if packaged
+    print("   L) select a local precooked *_cooked*.tar.gz instead" if packaged
           else "   L) select a local .zip / folder instead")
     if current_idx:
         default_idx = current_idx
@@ -2504,6 +2517,10 @@ def _download_release_asset(repo, tag, pattern, suffix, force_redownload=False,
     tag_dir = _map_cache_dir(cache_name or tag)
     cached = [f for f in os.listdir(tag_dir) if f.lower().endswith(suffix)] \
         if os.path.isdir(tag_dir) else []
+    # An exact name must be matched exactly: a map's cache can hold both its
+    # Linux and Windows cooks, and the suffix alone would hand back either.
+    if not any(c in pattern for c in "*?["):
+        cached = [f for f in cached if f == pattern]
 
     if cached and not force_redownload:
         path = os.path.join(tag_dir, cached[0])

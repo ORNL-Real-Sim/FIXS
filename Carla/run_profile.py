@@ -99,15 +99,27 @@ def _carla_row_hidden(carla_cfg, derived):
     return (derived or {}).get("carla_local") is not False
 
 
+def _engine_row_hidden(derived):
+    """True when no bridge will run, so there is none to choose.
+
+    The row picks WHICH VirEnvCore drives the stack - cpp VirCarlaEnv or the python
+    mainVirCarla. A run with no CARLA half starts neither, so the row named a
+    process that was never going to exist. --engine still sets it."""
+    return bool((derived or {}).get("sumo_only"))
+
+
 def visible_slots(carla_cfg=None, derived=None):
-    """SLOTS minus rows with nothing to say for this machine.
+    """SLOTS minus rows with nothing to say for this machine and this run.
 
     The printed numbers ARE the edit keys, so show() and the reader below must
     build from this one list - numbering a hidden row out of existence in one and
     not the other is how "5" opens SUMO while the screen says CARLA."""
+    drop = set()
     if _carla_row_hidden(carla_cfg, derived):
-        return [(k, l) for k, l in SLOTS if k != "carla"]
-    return list(SLOTS)
+        drop.add("carla")
+    if _engine_row_hidden(derived):
+        drop.add("engine")
+    return [(k, l) for k, l in SLOTS if k not in drop]
 
 
 def profiles_path():
