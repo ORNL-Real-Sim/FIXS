@@ -26,8 +26,11 @@ name: Linux build (TrafficLayer + VirCarlaEnv)
 
 on:
   workflow_dispatch:
+  # Globbed like release.yml, so a new train or tier is covered the day its
+  # branch exists; a literal list left PRs to dev_v0.10.0 with no Linux
+  # compile gate. #408.
   pull_request:
-    branches: [dev, dev_v0.9.0, main]
+    branches: [dev, main, 'dev_v*', 'beta_v*']
     paths:
       - 'CommonLib/**'
       - 'TrafficLayer/**'
@@ -39,7 +42,7 @@ on:
       - 'dependencies.yaml'
       - '.github/workflows/linux-build.yml'
   push:
-    branches: [main, dev_v0.9.0]
+    branches: [main, 'dev_v*', 'beta_v*']
 
 jobs:
   linux-build:
