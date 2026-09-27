@@ -135,7 +135,7 @@ class IVirEnvBackend(ABC):
         """
 
     @abstractmethod
-    def spawnVehicle(self, vType, vClass, spawnPose):
+    def spawnVehicle(self, vType, vClass, spawnPose, vehId=''):
         """(string, string, Pose) -> VehHandle -- acquire a handle for a new vehicle.
 
         :param vType: the FIXS vehicle type.
@@ -145,6 +145,10 @@ class IVirEnvBackend(ABC):
         :param spawnPose: the raw FIXS pose to place the vehicle at. Carla's
             ``try_spawn_actor`` needs a transform; CarMaker's pre-placed slots
             ignore it.
+        :param vehId: the traffic simulator's id for this vehicle. Optional so
+            an older backend still satisfies the interface; Carla keys its
+            blueprint choice on it, so that what a vehicle looks like depends on
+            WHICH vehicle it is and not on how many spawned before it.
         :returns: :data:`kNoHandle` if the vehicle cannot be placed (e.g. the
             CarMaker pool is exhausted); the core then skips it this step.
         """
@@ -195,6 +199,19 @@ class IVirEnvBackend(ABC):
         unavailable this step. The out-parameter shape is the C++ signature kept
         deliberately: the core calls it identically in both languages, so the
         seven-step body reads the same.
+
+        "Unavailable" includes "exists but has no pose yet". A backend that has
+        just created the ego may not be able to say where it is until its
+        simulator advances, and returning a placeholder pose there is how a
+        controller ends up commanding from somewhere the ego has never been.
+        """
+
+    def noteWorldTicked(self):
+        """The simulator advanced a step, so any actor created since the last
+        one now has a state to read.
+
+        Optional: the default does nothing, for backends whose readback never
+        lags creation. CARLA's does -- see CarlaBackend.readEgoState.
         """
 
     def setEgoPose(self, egoId, p):

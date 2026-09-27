@@ -51,6 +51,12 @@ Three attributes are rebound on every ``recv()``:
     fixs.vehicle        every vehicle in this moment's feed
     fixs.trafficlight   this moment's signal states
 
+``fixs.launch`` is the one that is NOT rebound, and that is the whole difference:
+it answers about how this process was started rather than about a tick, so it
+works before connect() and never changes afterwards. It is where the variables
+run_cosim sets are read, so an application does not reach into os.environ for
+FIXS_SUMOCFG, FIXS_CONFIG_YAML, FIXS_HANDOFF or FIXS_SUMO_ONLY by hand.
+
 ``fixs.sim`` is a record for the same reason vehicles are: the header's values
 arrive together, so they come back together. Growth is a field on it rather than
 another module-level function, which is why there is no ``getTime()``.
@@ -74,6 +80,7 @@ import dataclasses
 import math
 import os
 import socket
+import sys
 import time as _time
 import typing
 
@@ -83,11 +90,56 @@ from CommonLib.SocketHelper import SocketHelper
 from CommonLib.VehDataMsgDefs import VehData
 
 __all__ = [
-    'connect', 'recv', 'send', 'close',
-    'sim', 'vehicle', 'trafficlight',
+    'connect', 'recv', 'send', 'close', 'running',
+    'simulationEndTime',
+    'sim', 'vehicle', 'trafficlight', 'launch',
     'emit', 'transport', 'commandKind',
-    'Vehicle', 'Shutdown', 'FixsError', 'NotConnected', 'ProtocolError',
+    'Vehicle', 'MAX_STEER_RAD',
+    'Shutdown', 'FixsError', 'NotConnected', 'ProtocolError',
+    'driver',
 ]
+
+
+def driver(exchange=None, **options):
+    """A ready-made controller for the ego -- see :mod:`CommonLib.fixs._driver`.
+
+        Controller = fixs.driver()              # no cell
+        Controller = fixs.driver(exchange)      # yours: (vref, dt) -> mps
+
+    Imported lazily: the driver pulls in fixs.carla and CARLA's agents, which
+    a SUMO-only or CarMaker run has no reason to load.
+    """
+    from CommonLib.fixs._driver import driver as _driver
+    return _driver(exchange, **options)
+
+
+#: Full-lock front road-wheel angle [rad]. `steerAngleDesired` is an ANGLE on
+#: the wire, where a CARLA agent's VehicleControl.steer is normalised [-1, 1];
+#: the plant divides by this same constant, so multiplying by it here makes the
+#: round trip the agent's own number. Must match mainVirCarla's kMaxSteerRad.
+MAX_STEER_RAD = 0.7
+
+
+def _addCarlaAgentsToPath():
+    """Make the vendored CARLA agents importable off `import fixs`.
+
+    A controller that brings a CARLA-shaped agent writes
+
+        import fixs
+        from agents.navigation.behavior_agent import BehaviorAgent
+
+    so agents/ has to be on the path by the time the second line runs. Appended,
+    not inserted: an installed CARLA PythonAPI, or the user's own copy, wins.
+    """
+    # __file__ is CommonLib/fixs/__init__.py, so the FIXS root is three up.
+    root = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        'Carla', 'carla_agents')
+    if os.path.isdir(os.path.join(root, 'agents')) and root not in sys.path:
+        sys.path.append(root)
+
+
+_addCarlaAgentsToPath()
 
 #: The roles a connection can be opened in. A CONTROLLER decides -- it may write
 #: only the command fields, and may return only records that arrived, which is
@@ -356,6 +408,103 @@ class _Sim:
         return f'<sim t={self._time:.2f} state={self._state}>'
 
 
+class _Launch:
+    """How this process was started, as ``fixs.launch``.
+
+    run_cosim tells an application about the run it is part of through the
+    environment -- it has to, since the app is a separate process it starts. An
+    application should not be reading those variables by hand: the name, the
+    spelling and the meaning are FIXS's, and every app that reads
+    ``os.environ['FIXS_SUMOCFG']`` is a second place they are written down.
+
+    That was already half-fixed, which is what made it worth finishing.
+    ``connect()`` has always read FIXS_CONFIG_YAML itself and ``fixs.sumo`` has
+    always written FIXS_HANDOFF itself, so two of the five never leaked; the rest
+    did, and an application ended up mixing both styles::
+
+        # before
+        if not os.environ.get('FIXS_HANDOFF'):
+            raise SystemExit('run this through run_cosim')
+        src = os.environ.get('FIXS_SUMOCFG') or MY_DEFAULT
+        tag = pathlib.Path(os.environ['FIXS_CONFIG_YAML']).stem
+
+        # after
+        if not fixs.launch.supervised:
+            raise SystemExit('run this through run_cosim')
+        src = fixs.launch.sumocfg or MY_DEFAULT
+        tag = pathlib.Path(fixs.launch.configPath).stem
+
+    NOT ON ``fixs.sim``, which is the obvious place until you try it. Every _Sim
+    property calls _require(), and connect() builds it with _NO_TICK_YET, so
+    ``fixs.sim.x`` raises until the first recv() -- while the value most wanted
+    here, ``sumocfg``, is needed BEFORE connect(), when the application builds its
+    scenario and reports it into a stack that does not exist yet. ``fixs.sumo``
+    already sits on that side of the line for the same reason. The two also have
+    different lifetimes: ``fixs.sim`` is rebound every tick; these never change
+    once the process is running.
+
+    Every property answers from the environment on each access rather than
+    latching at import, so a test can set FIXS_SUMOCFG and be believed.
+
+    Unset means "nothing told us", not a default: ``sumocfg`` is None when the
+    user passed no --sumocfg, and the application supplies its own fallback
+    rather than FIXS inventing one it cannot know.
+    """
+
+    __slots__ = ()
+
+    @property
+    def supervised(self):
+        """bool -- did run_cosim start us, and therefore SUMO and TrafficLayer?
+
+        FIXS_HANDOFF is the signal because it is the one run_cosim sets for EVERY
+        app it launches, whether or not that app ever reports a scenario back.
+        """
+        return bool(os.environ.get('FIXS_HANDOFF'))
+
+    @property
+    def configPath(self):
+        """string | None -- the scenario yaml TrafficLayer was given.
+
+        The same file connect() defaults to, so a controller deriving anything
+        from it -- a run tag, an output name -- reads the yaml actually in play
+        rather than one it guessed.
+        """
+        return os.environ.get('FIXS_CONFIG_YAML') or None
+
+    @property
+    def sumocfg(self):
+        """string | None -- the scenario the user asked for with --sumocfg.
+
+        None when they asked for nothing, which is NOT the same as the map's own:
+        only the application knows what it falls back to.
+        """
+        return os.environ.get('FIXS_SUMOCFG') or None
+
+    @property
+    def carla(self):
+        """bool | None -- is CARLA in this run? None when nothing started us.
+
+        The yaml cannot answer this: every co-sim yaml has a CarlaSetup section,
+        which is what makes it one, so an app checking the yaml gets the same
+        answer either way. Only run_cosim knows, so run_cosim says.
+        """
+        if not self.supervised:
+            return None
+        return os.environ.get('FIXS_SUMO_ONLY') != '1'
+
+    def __repr__(self):
+        if not self.supervised:
+            return '<launch: not started by run_cosim>'
+        return (f'<launch config={self.configPath!r} sumocfg={self.sumocfg!r} '
+                f'carla={self.carla}>')
+
+
+#: This run's launch facts. A singleton rather than one module-level name per
+#: variable, so growth is a property here rather than another `fixs.something`.
+launch = _Launch()
+
+
 class _VehicleView(_View):
     _KIND = 'vehicle'
 
@@ -406,6 +555,21 @@ sim: _Sim = _Sim(unavailable=_NOT_CONNECTED)
 vehicle: _VehicleView = _VehicleView(unavailable=_NOT_CONNECTED)
 trafficlight: _TrafficLightView = _TrafficLightView(unavailable=_NOT_CONNECTED)
 
+#: False once TrafficLayer has ended the run, so a controller writes
+#: `while fixs.running:` instead of `while True` with an exception for control
+#: flow. Read off the wire, never computed: it is the same state=0 that raises
+#: Shutdown, so a client cannot end its loop on a different answer than the one
+#: TrafficLayer gave -- which is how a client stops replying while the tick is
+#: still waiting for it.
+_running = False
+
+#: The config connect() resolved, so the run's own facts can be answered later
+#: without the caller repeating the path. None until connect().
+_connectedConfigPath = None
+
+#: SimulationEndTime by config path. Read once: it cannot change under a run.
+_endTimeCache = {}
+
 #: VehicleMessageField for this connection; None until connect().
 _declaredFields: typing.Optional[frozenset] = None
 #: Why tick data is unavailable, or None while a tick is held.
@@ -435,6 +599,38 @@ def _requireConnection():
 # Connecting
 # ---------------------------------------------------------------------------
 
+_END_TIME_UNSET = object()
+
+
+def simulationEndTime(configPath=None):
+    """(string) -> double or None -- when this run ends, from the scenario yaml.
+
+    Not something an application should have to ask for: fixs.running ends its
+    loop, and fixs.sumo defaults a generated scenario to this. It is public
+    because the value has exactly one owner -- SimulationSetup.SimulationEndTime,
+    which TrafficLayer reads -- and anything that needs it should read it from
+    there rather than keep a second copy.
+
+    None when the config does not declare one. ConfigHelper applies a 90000
+    default to that key, so the parsed value cannot say "the author was silent";
+    config.raw can, and the difference matters to a caller deciding whether to
+    write an end time into a SUMO config at all.
+    """
+    configPath = (configPath or _connectedConfigPath
+                  or os.environ.get('FIXS_CONFIG_YAML') or 'config.yaml')
+    if not os.path.isfile(configPath):
+        raise FixsError(f'config not found: {configPath}')
+    cached = _endTimeCache.get(configPath, _END_TIME_UNSET)
+    if cached is not _END_TIME_UNSET:
+        return cached
+    config = ConfigHelper()
+    config.getConfig(configPath)
+    declared = (config.raw.get('SimulationSetup') or {}).get('SimulationEndTime')
+    value = None if declared is None else float(declared)
+    _endTimeCache[configPath] = value
+    return value
+
+
 def connect(configPath=None, *, port=None, host=None, ego=None,
             connectTimeout=None, recvTimeout=None, role='controller'):
     """(string, ...) -> (string, integer) -- connect and return the endpoint.
@@ -462,6 +658,7 @@ def connect(configPath=None, *, port=None, host=None, ego=None,
         controller must not have.
     """
     global _helper, _sock, _egoIds, _declaredFields, _role
+    global _running, _connectedConfigPath
     global sim, vehicle, trafficlight, _noTick
 
     if role not in _ROLES:
@@ -479,6 +676,7 @@ def connect(configPath=None, *, port=None, host=None, ego=None,
     config.getConfig(configPath)
 
     declared = config.simulation_setup.get('VehicleMessageField') or ['id', 'speed']
+
 
     subscription = _selectSubscription(config, configPath, port)
     if host is None:
@@ -502,6 +700,8 @@ def connect(configPath=None, *, port=None, host=None, ego=None,
     vehicle = _VehicleView(unavailable=_NO_TICK_YET,
                            fields=_declaredFields, egoIDs=_egoIds)
     trafficlight = _TrafficLightView(unavailable=_NO_TICK_YET)
+    _connectedConfigPath = configPath
+    _running = True
     atexit.register(close)          # an unanswered tick must still go out
     return host, int(port)
 
@@ -523,10 +723,31 @@ def _selectSubscription(config, configPath, port):
             f'It declares: {declaredPorts}.'
         )
     if len(subscriptions) > 1:
+        # One of them is usually not an application at all: a CARLA scenario
+        # subscribes the BRIDGE on ApplicationSetup too, and says so elsewhere in
+        # the same file as CarlaSetup.CarlaClientPort -- which is exactly what
+        # run_cosim reads to decide where to start it. So the config already
+        # distinguishes them, and a controller should not have to answer a
+        # question its own scenario yaml answers.
+        #
+        # Presence, not value: CarlaClientPort DEFAULTS to 430, which is also a
+        # perfectly ordinary application port, so a defaulted 430 would exclude
+        # the caller's own subscription. config.raw is the document as written.
+        carlaSection = (config.raw.get('CarlaSetup') or {})
+        if 'CarlaClientPort' in carlaSection:
+            bridgePort = carlaSection['CarlaClientPort']
+            mine = [e for e in subscriptions
+                    if bridgePort not in (e.get('port') or [])]
+            if len(mine) == 1:
+                return mine[0]
         declaredPorts = [p for e in subscriptions for p in e.get('port', [])]
         raise FixsError(
             f'{configPath} declares {len(subscriptions)} vehicle subscriptions '
-            f'(ports {declaredPorts}); pass port= to say which is this client.'
+            f'(ports {declaredPorts}); pass port= to say which is this client. '
+            f'A CARLA scenario normally needs no port here: '
+            f'CarlaSetup.CarlaClientPort names the subscription belonging to '
+            f'the bridge, and the one left over is the application. More than '
+            f'one was left over.'
         )
     return subscriptions[0]
 
@@ -619,13 +840,15 @@ def recv():
     the views, so nothing is encoded in a return value that would have to change
     shape as more status is exposed::
 
-        try:
-            while True:
-                fixs.recv()
-                ...
-                fixs.send()
-        except fixs.Shutdown:
-            pass
+        while fixs.running:
+            fixs.recv()
+            ...
+            fixs.send()
+
+    ``fixs.running`` goes False when TrafficLayer ends the run, so a controller
+    needs no end time of its own. Shutdown is still raised, because the run can
+    end in the middle of a tick this loop has already entered; catch it only if
+    there is something to do on the way out.
 
     :raises Shutdown: TrafficLayer has ended the run.
     :raises ProtocolError: the previous tick was never answered. TrafficLayer
@@ -633,7 +856,7 @@ def recv():
         would otherwise surface as an unexplained hang here.
     """
     _requireConnection()
-    global sim, vehicle, trafficlight, _armed, _received, _simState, _simTime
+    global sim, vehicle, trafficlight, _armed, _received, _simState, _simTime, _running
     global _noTick
 
     if _armed:
@@ -650,6 +873,7 @@ def recv():
         # reached is a fact, and reporting it is the natural thing to do in the
         # `except fixs.Shutdown:` block.
         _noTick = _SHUTDOWN
+        _running = False
         vehicle = _VehicleView(unavailable=_SHUTDOWN,
                                fields=_declaredFields, egoIDs=_egoIds)
         trafficlight = _TrafficLightView(unavailable=_SHUTDOWN)
@@ -846,9 +1070,30 @@ def _validateCommand(record):
 
 
 def __getattr__(name):
+    # `import fixs` is the whole of the integration, so the submodules answer to
+    # it. Python does not bind a subpackage on a parent import, which meant an
+    # application had to write `import fixs.sumo` as well and know that fixs is
+    # laid out in parts -- the opposite of the point.
+    #
+    # On demand rather than at the top of this file: carla pulls in the CARLA
+    # side, which a client that is not driving an ego has no reason to load, and
+    # sumo reads scenario files a controller may never touch. Bound into the
+    # module afterwards, so the cost is once and later lookups are ordinary.
+    if name in ('sumo', 'carla'):
+        import importlib
+        module = importlib.import_module(f'{__name__}.{name}')
+        globals()[name] = module
+        return module
     # Detector records are received but not decoded -- SocketHelper.recv_data
     # drops them. Say so rather than handing back an empty view, which would
     # read as "no detectors this tick".
+    if name == 'running':
+        # The loop condition, owned by FIXS so an application does not compute
+        # one of its own. Refuses before connect() rather than answering False:
+        # a loop that never runs is indistinguishable from a finished one.
+        if _sock is None:
+            raise NotConnected('call fixs.connect(...) first')
+        return _running
     if name == 'detector':
         raise NotImplementedError(
             'detector data is not decoded yet -- SocketHelper.recv_data drops '

@@ -25,8 +25,8 @@ int VirEnvHelper::initialization(const char** errorMsg, const char* configPath,
     core_.ENABLE_REALSIM              = Config_c.CarMakerSetup.EnableCosimulation;
     core_.ENABLE_SEPARATE_EGO_TRAFFIC = Config_c.CarMakerSetup.EnableEgoSimulink;
     core_.SYNCHRONIZE_TRAFFIC_SIGNAL  = Config_c.CarMakerSetup.SynchronizeTrafficSignal;
-    core_.egoId_              = Config_c.CarMakerSetup.EgoId;
-    core_.egoType_            = Config_c.CarMakerSetup.EgoType;
+    core_.egoId_              = Config_c.EgoSetup.Id;
+    core_.egoType_            = Config_c.EgoSetup.Type;
     core_.trafficLayerIP_     = Config_c.SimulationSetup.TrafficLayerIP;
     core_.vehDataPort_        = Config_c.CarMakerSetup.CarMakerPort;
     core_.trafficSignalPort_  = Config_c.CarMakerSetup.TrafficSignalPort;

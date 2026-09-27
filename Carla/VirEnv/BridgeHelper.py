@@ -26,6 +26,7 @@ constant.
 import csv
 import math
 import os
+import hashlib
 import random
 
 import carla
@@ -86,6 +87,10 @@ class TrafficLight:
         self.state = SumoTrafficLightState.OFF
         self.carlaTrafficLightActorId = ''
         self.carlaTrafficLightActorPtr = None
+
+
+#: Default for CarlaSetup.BlueprintSeed. Any fixed value does; it must be fixed.
+_kBlueprintSeed = 20260913
 
 
 class BridgeHelper:
@@ -167,12 +172,12 @@ class BridgeHelper:
         return carla.Location(x, -y, in_carla_location.z)
 
     # ------------------------------------------------------------ blueprints
-    # The C++ keeps these in unordered_set and picks with random_select_from_set,
-    # which is a uniform draw over the set. Sorted tuples here so the CANDIDATE
-    # LIST is deterministic across runs and interpreters; the DRAW still uses the
-    # module RNG, exactly as the C++ does, so seeding `random` makes a run's
-    # blueprint choices reproducible -- which the C++ (a static random_device) does
-    # not offer and which a visual A/B comparison wants.
+    # The candidates for each vClass, in a FIXED order. The pick is not a draw: it
+    # is an index into these, keyed on (seed, vehicle id) -- see
+    # map_Sumo_vClass_to_Carla_blueprintId (FIXS#373). So the order is part of the
+    # answer: reordering re-deals every vehicle in every seeded run. The C++ bridge
+    # carries the same lists in the same order (CommonLib/BlueprintPick.h), and
+    # tests/VirEnv/test_blueprint_parity.py holds the two together.
     _CARS = (
         'vehicle.audi.a2', 'vehicle.audi.etron', 'vehicle.audi.tt',
         'vehicle.bmw.grandtourer', 'vehicle.chevrolet.impala', 'vehicle.citroen.c3',
@@ -219,9 +224,52 @@ class BridgeHelper:
     #: on every spawn, which on a corridor with one unmapped class buries the log.
     _warnedVClasses = set()
 
+    #: The blueprint draw's own generator, not the module RNG. A blueprint sets
+    #: the bounding box, and extent.x is the pose anchor, so an unseeded draw
+    #: moves every vehicle run to run. Seed from CarlaSetup.BlueprintSeed. FIXS#355.
+    _blueprintRng = random.Random(_kBlueprintSeed)
+    #: The seed itself, kept so the per-vehicle draw can derive from it.
+    _blueprintSeed = _kBlueprintSeed
+
     @staticmethod
-    def map_Sumo_vClass_to_Carla_blueprintId(vClass):
-        """(string) -> string -- a blueprint id for one SUMO vehicle class."""
+    def setBlueprintSeed(seed):
+        """Re-seed the blueprint draw (CarlaSetup.BlueprintSeed)."""
+        BridgeHelper._blueprintSeed = seed
+        BridgeHelper._blueprintRng = random.Random(seed)
+
+    @staticmethod
+    def _blueprintIndexOf(vehId, n):
+        """(string, int) -> int -- a stable index from (seed, vehicle id).
+
+        blake2b rather than hash(): Python randomises str hashing per process
+        unless PYTHONHASHSEED is set, so hash() would give a different model
+        every run -- the exact thing the seed exists to prevent.
+        """
+        key = ('%s|%s' % (BridgeHelper._blueprintSeed, vehId)).encode('utf-8')
+        return int.from_bytes(hashlib.blake2b(key, digest_size=8).digest(),
+                              'big') % n
+
+    @staticmethod
+    def map_Sumo_vClass_to_Carla_blueprintId(vClass, vehId=''):
+        """(string[, string]) -> string -- a blueprint id for one SUMO vehicle.
+
+        Given the vehicle's id, the blueprint is a function of (seed, id) and of
+        nothing else. Without it, the old sequential draw.
+
+        The sequential draw was reproducible only by accident. Every vehicle took
+        the next value from one shared generator, so a vehicle's model depended on
+        how many vehicles had drawn BEFORE it -- and a spawn CARLA refuses still
+        consumes a draw, then draws again when the core retries it next exchange.
+        Measured on MLK: nine refusals in the warm-up burst shifted the sequence
+        by nine, and 46 vehicles got a different model. That matters because the
+        blueprint fixes bounding_box.extent.x, which is the pose anchor (the wire
+        carries the vehicle's NOSE, a CARLA actor is placed by its CENTRE), so
+        those 46 sat up to 1.58 m from where they had been -- for their whole
+        lives, and in front of an agent reading them as its leader.
+
+        Keyed on the id, a retry, a refusal, an arrival order or a spare pool
+        cannot change what any vehicle looks like.
+        """
         pool = BridgeHelper._BY_VCLASS.get(vClass)
         if pool is None:
             if vClass not in BridgeHelper._warnedVClasses:
@@ -232,7 +280,9 @@ class BridgeHelper:
                       'Defaulting to vehicle.tesla.model3.'
                       % (vClass, ', '.join(sorted(BridgeHelper._BY_VCLASS))))
             return 'vehicle.tesla.model3'          # default to a passenger car
-        return random.choice(pool)
+        if vehId:
+            return pool[BridgeHelper._blueprintIndexOf(vehId, len(pool))]
+        return BridgeHelper._blueprintRng.choice(pool)
 
     # --------------------------------------------------------- signal states
     @staticmethod

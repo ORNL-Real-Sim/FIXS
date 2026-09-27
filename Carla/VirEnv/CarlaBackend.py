@@ -43,6 +43,11 @@ kZMismatchTolM = 0.5
 #: missed now, and it still removes four fifths of the cost.
 kZAuditStride = 5
 
+#: How far below the world a spare vehicle waits. Physics is off, so it neither
+#: falls nor collides; this only has to clear the network, and 200 m clears every
+#: corridor FIXS has imported (MLK's road surface sits near z 205).
+_kParkZ = -200.0
+
 # The SUMO/FIXS wire carries the FRONT-of-vehicle position; a CARLA actor
 # transform is the actor PIVOT, which sits at the bounding-box CENTRE
 # horizontally. Landing the model's FRONT on the SUMO front therefore means
@@ -55,21 +60,82 @@ kZAuditStride = 5
 # transform: an actor's bbox is not queryable until it exists, and setVehiclePose
 # overwrites the pose the same tick.
 _kDefaultExtent = carla.Vector3D(2.3, 1.0, 0.75)
-_kSpawnOffsetZ = 0.1
+# How far above the wire's road-surface z a vehicle is CREATED. Transient:
+# setVehiclePose overwrites the pose in the same tick, before world.tick, so
+# nothing is rendered at this height -- it only has to clear the spawn's
+# collision test, which 0.1 did not for the larger blueprints. Measured: 0.1 ->
+# 9 of 197 refused, 0.2 and above -> 0. See FIXS#373 / PR #374.
+_kSpawnOffsetZ = 0.5
 
 
 class CarlaBackend(IVirEnvBackend):
     """Implements :class:`IVirEnvBackend` against the CARLA Python client API."""
 
-    def __init__(self, world, client, useVehicleTypeAsBlueprint, verbose):
+    @property
+    def carlaWorld(self):
+        """The live carla.World, for an in-process controller that needs a map.
+
+        FIXS holds the backend client, so a road question a CARLA-shaped agent
+        asks -- `get_world().get_map().get_waypoint(...)` -- is FORWARDED to the
+        real map rather than answered from a reconstruction of it. Named here
+        and not on IVirEnvBackend because it is CARLA's own type: a caller that
+        reaches for it is asking for CARLA, and gets nothing from any other
+        backend.
+        """
+        return self._world
+
+    @property
+    def carlaClient(self):
+        """The live carla.Client, for `fixs.carla.client`.
+
+        Handed out rather than let a controller open its own: a synchronous
+        world may only be advanced by one party, and this is the one already
+        driving the run.
+        """
+        return self._client
+
+    @property
+    def carlaEgoActor(self):
+        """The physics ego CARLA owns, for `fixs.carla.ego`.
+
+        This is the vehicle a user's agent should be built on. It is real, its
+        physics are live, and its get_velocity is truthful -- measured 9.839 m/s
+        against the wire's 9.83768 at the same instant -- so there is nothing
+        about the ego worth standing in for.
+        """
+        return self._egoActor
+
+    def __init__(self, world, client, useVehicleTypeAsBlueprint, verbose,
+                 sparePoolSize=0):
         self._world = world
         self._client = client
         self._useVType = useVehicleTypeAsBlueprint
         self._verbose = verbose
 
+        #: CarlaSetup.SpareVehiclePool -- actors to spawn UP FRONT and hand out
+        #: when the traffic arrives. 0 is off, and off is today's behaviour.
+        self._sparePoolSize = max(0, int(sparePoolSize or 0))
+        self._spares = {}                # blueprint id -> [unused carla.Vehicle]
+        self._sparesLeft = 0             # how many are still parked
+        self._spareHits = 0              # handed out instead of spawned
+        self._spareMisses = 0            # wanted a spare, had none of that blueprint
+        self._spareTaken = False         # has the pool been drawn from at all
+        self._peakMapped = 0             # most vehicles alive at once, for the report
+
         self._bpLib = None
         self._map = None                 # cached for the z-alignment guard
         self._egoActor = None            # EgoMode >= 1: the CARLA-driven ego
+        #: True between spawning the ego and CARLA's first snapshot of it. The
+        #: actor exists on the client the instant try_spawn_actor returns, but
+        #: its transform reads the ORIGIN until a tick delivers a snapshot --
+        #: so readEgoState would report a pose that is not the ego's.
+        self._egoAwaitingSnapshot = False
+        # Backstep guard state; see readEgoState. FIXS#358.
+        self._lastEgoPose = None
+        self._egoBackstepHolds = 0
+        self._egoBackstepGuard = os.environ.get('FIXS_EGO_BACKSTEP_GUARD', '1') != '0'
+        self._egoBackstepRelease = float(
+            os.environ.get('FIXS_EGO_BACKSTEP_RELEASE', '0.5'))
         self._tmPort = 0
         self._egoUsesTM = False
         self._egoDesiredOverride = -1.0  # L2 advisory target (m/s); < 0 = none
@@ -131,11 +197,146 @@ class CarlaBackend(IVirEnvBackend):
         self._trafficLightMap = BridgeHelper.readTrafficLightTable(path)
 
     def initTrafficPool(self):
-        """CARLA spawns lazily; this only caches the blueprint library."""
-        if self._bpLib is None and self._world is not None:
-            self._bpLib = self._world.get_blueprint_library()
+        """Everything this backend can pay for BEFORE the first exchange.
 
-    def spawnVehicle(self, vType, vClass, spawnPose):
+        The core calls this on the first step, at simTime 0 -- the one iteration
+        that does no recv -- so with a warm-up the bridge then blocks here for the
+        whole warm-up and anything done now is done in dead time. Three things,
+        each of which otherwise lands in the tick where the traffic arrives:
+
+        * the blueprint library;
+        * the MAP. ``world.get_map()`` serialises and re-parses the whole
+          OpenDRIVE and is not shared between callers -- measured twice back to
+          back in one process at 0.640 s and 0.578 s. The z-alignment audit is its
+          only user here and first runs on the exchange that carries the traffic,
+          so without this the parse is paid inside that exchange;
+        * the spare pool, when CarlaSetup.SpareVehiclePool asks for one.
+        """
+        if self._world is None:
+            return
+        if self._bpLib is None:
+            self._bpLib = self._world.get_blueprint_library()
+        if self._map is None:
+            self._map = self._world.get_map()
+        if self._sparePoolSize and not self._spares:
+            self._preSpawnSpares(self._sparePoolSize)
+
+    # --- the spare pool ----------------------------------------------------
+    def _parkTransform(self, i, cols=25, pitch=8.0):
+        """A lattice well below the road surface, keyed off the map's own extent.
+
+        Physics is off, so a parked actor neither falls nor collides; the depth
+        only has to clear the network. Measured on the MLK corridor (road surface
+        ~z 205): 250 of 250 spawned at z = -200, none failed. WHERE they sit makes
+        no difference to what they cost -- 0.030 ms/tick each below the map
+        against 0.039 ms/tick 20 km away -- so this is about not colliding with
+        the road, not about hiding them from the camera.
+        """
+        cx, cy = 0.0, 0.0
+        spawn = self._map.get_spawn_points() if self._map is not None else []
+        if spawn:
+            cx = sum(p.location.x for p in spawn) / len(spawn)
+            cy = sum(p.location.y for p in spawn) / len(spawn)
+        return carla.Transform(carla.Location(
+            x=cx + (i % cols) * pitch, y=cy + (i // cols) * pitch, z=_kParkZ))
+
+    def _spareBlueprints(self, n):
+        """Which blueprints to stock, and how many of each.
+
+        Round-robin over the passenger set, NOT a draw from it. The draw that
+        matters belongs to the vehicles: map_Sumo_vClass_to_Carla_blueprintId
+        picks from a seeded generator, and the blueprint it picks fixes
+        bounding_box.extent.x, which is the pose anchor (FIXS#355). Consuming that
+        generator here would hand every vehicle a different model than before. A
+        spare is used only when its blueprint id MATCHES what the vehicle drew, so
+        nothing about the result changes; an even spread only maximises how often
+        that match is there to be had.
+
+        A vClass whose blueprints are not stocked, and every vehicle when
+        UseVehicleTypeAsBlueprint is on, falls through to try_spawn_actor exactly
+        as before.
+        """
+        pool = BridgeHelper._BY_VCLASS.get('passenger') or ()
+        if not pool:
+            return []
+        return [pool[i % len(pool)] for i in range(n)]
+
+    def _preSpawnSpares(self, n):
+        """Park n actors now so the arrival burst does not have to spawn them."""
+        made = 0
+        for i, bpId in enumerate(self._spareBlueprints(n)):
+            try:
+                bp = self._bpLib.find(bpId)
+            except (IndexError, RuntimeError):
+                continue
+            actor = self._world.try_spawn_actor(bp, self._parkTransform(i))
+            if actor is None:
+                continue
+            actor.set_simulate_physics(False)
+            self._spares.setdefault(bpId, []).append(actor)
+            made += 1
+        self._sparesLeft = made
+        print('Spare vehicle pool: %d of %d parked across %d blueprints; the '
+              'arrival burst is handed these instead of spawning them.'
+              % (made, n, len(self._spares)))
+        if made < n:
+            print('[Warning] only %d of %d spares could be parked; the rest of the '
+                  'burst spawns as before.' % (made, n))
+
+    def _takeSpare(self, bpId):
+        """(string) -> carla.Vehicle or None -- an unused actor of that blueprint."""
+        free = self._spares.get(bpId)
+        if not free:
+            if self._sparesLeft:
+                self._spareMisses += 1
+            return None
+        actor = free.pop()
+        self._sparesLeft -= 1
+        self._spareHits += 1
+        self._spareTaken = True
+        return actor
+
+    def spareTaken(self):
+        """() -> bool -- has the pool been drawn from? The driver's cue to trim."""
+        return self._spareTaken
+
+    def trimSpares(self):
+        """Destroy whatever the burst did not need. Once, and not before it.
+
+        A parked actor is not free: measured, it costs ~0.03 ms of EVERY
+        world.tick just by existing, so a pool left standing taxes the whole run
+        to have saved one exchange. Removing one is cheap by comparison -- 0.16 ms
+        batched against 1.6-3.8 ms to spawn it -- so the leftovers go as soon as
+        the burst is over.
+        """
+        left = [a for free in self._spares.values() for a in free]
+        self._spares = {}
+        self._sparesLeft = 0
+        if not left:
+            return 0
+        if self._client is not None:
+            self._client.apply_batch_sync(
+                [carla.command.DestroyActor(a.id) for a in left], False)
+        else:                                   # no client (tests): per actor
+            for a in left:
+                a.destroy()
+        print('Spare vehicle pool: trimmed %d unused (a parked actor still costs '
+              'every tick).' % len(left))
+        return len(left)
+
+    def spareReport(self):
+        """() -> string -- what the pool did, and what to set it to next time."""
+        if not self._sparePoolSize and not self._peakMapped:
+            return ''
+        enough = self._sparePoolSize >= self._peakMapped
+        return ('Spare vehicle pool: %d configured, %d handed out, %d found none of '
+                'their blueprint and spawned; peak %d vehicles alive at once%s'
+                % (self._sparePoolSize, self._spareHits, self._spareMisses,
+                   self._peakMapped,
+                   '.' if enough else
+                   ' -- CarlaSetup.SpareVehiclePool: %d covers it.' % self._peakMapped))
+
+    def spawnVehicle(self, vType, vClass, spawnPose, vehId=''):
         if self._world is None:
             return kNoHandle
         if self._bpLib is None:
@@ -149,7 +350,7 @@ class CarlaBackend(IVirEnvBackend):
         carlaTf.location.z += _kSpawnOffsetZ
 
         bpId = vType if self._useVType else \
-            BridgeHelper.map_Sumo_vClass_to_Carla_blueprintId(vClass)
+            BridgeHelper.map_Sumo_vClass_to_Carla_blueprintId(vClass, vehId)
         try:
             bp = self._bpLib.find(bpId)
         except (IndexError, RuntimeError):
@@ -158,15 +359,22 @@ class CarlaBackend(IVirEnvBackend):
             self.logError('Blueprint not found: %s' % bpId)
             return kNoHandle
 
-        actor = self._world.try_spawn_actor(bp, carlaTf)
+        # A parked spare of the SAME blueprint is this vehicle, already made. The
+        # pose it is parked at is as transient as a spawn transform: setVehiclePose
+        # corrects both in this same step, before world.tick.
+        actor = self._takeSpare(bpId)
         if actor is None:
-            if self._verbose:
-                print('[Warning] Failed to spawn actor (vClass=%s)' % vClass)
-            return kNoHandle
-        actor.set_simulate_physics(False)
+            actor = self._world.try_spawn_actor(bp, carlaTf)
+            if actor is None:
+                if self._verbose:
+                    print('[Warning] Failed to spawn actor (vClass=%s)' % vClass)
+                return kNoHandle
+            actor.set_simulate_physics(False)
 
         h = int(actor.id)
         self._actors[h] = actor
+        if len(self._actors) > self._peakMapped:
+            self._peakMapped = len(self._actors)
         if self._verbose:
             print('Spawned Carla actor %d (%s)' % (h, bpId))
         return h
@@ -218,22 +426,60 @@ class CarlaBackend(IVirEnvBackend):
     def readEgoState(self, egoId, out):
         """Mode A: read the CARLA-driven ego back in FIXS terms.
 
-        Returns False when no ego actor is owned (EgoMode 0 -- the driver does the
-        readback itself for interested ids).
+        Returns False when there is no pose to report: no ego actor is owned
+        (EgoMode 0 -- the driver does the readback itself for interested ids),
+        or the ego was spawned this tick and CARLA has not yet snapshotted it.
+
+        The second case is not hypothetical. A freshly spawned actor's
+        get_transform() returns the ORIGIN until the next tick delivers a
+        snapshot, so the first readback of a deferred ego reported (0, 0) while
+        the ego was really 933 m away. Callers treat False as "not this tick",
+        which is the honest answer -- and it spares every controller from
+        recognising the jump by its size, which only works while the origin
+        happens to be far from the route.
         """
-        if self._egoActor is None:
+        if self._egoActor is None or self._egoAwaitingSnapshot:
             return False
         cTf = self._egoActor.get_transform()
         ext = self._egoActor.bounding_box.extent
         vel = self._egoActor.get_velocity()
         sTf = BridgeHelper.map_transfrom_Carla_to_Sumo(cTf, ext)
-        out.x = sTf.location.x
-        out.y = sTf.location.y
-        out.z = sTf.location.z
-        out.heading = sTf.rotation.yaw
+        # Backstep guard: never report a pose behind the last one reported --
+        # the sign is lost on the `out.speed` line below, and SUMO answers a
+        # backward target by throwing the ego off its lane. FIXS#358.
+        fwd = cTf.get_forward_vector()
+        vLong = vel.x * fwd.x + vel.y * fwd.y
+        held = False
+        if self._egoBackstepGuard and self._lastEgoPose is not None:
+            lx, ly, lz, lh = self._lastEgoPose
+            hRad = lh * math.pi / 180.0
+            ahead = ((sTf.location.x - lx) * math.sin(hRad)
+                     + (sTf.location.y - ly) * math.cos(hRad))
+            behind = math.sqrt((sTf.location.x - lx) ** 2
+                               + (sTf.location.y - ly) ** 2)
+            # vLong catches the first backward tick; the projection cannot drift.
+            held = (vLong < 0.0 or ahead <= 0.0) and behind < self._egoBackstepRelease
+        if held:
+            out.x, out.y, out.z = lx, ly, lz
+            out.heading = lh
+            self._egoBackstepHolds += 1
+        else:
+            out.x = sTf.location.x
+            out.y = sTf.location.y
+            out.z = sTf.location.z
+            out.heading = sTf.rotation.yaw
+            self._lastEgoPose = (out.x, out.y, out.z, out.heading)
         out.grade = sTf.rotation.pitch * math.pi / 180.0
         out.speed = math.sqrt(vel.x * vel.x + vel.y * vel.y)
         return True
+
+    def noteWorldTicked(self):
+        """CARLA has advanced a tick, so every actor now has a snapshot.
+
+        Called by the host right after world.tick(). It is what ends the window
+        in which a just-spawned ego has no pose -- see readEgoState.
+        """
+        self._egoAwaitingSnapshot = False
 
     def applyEgoControl(self, egoId, desiredSpeed):
         """L2 actuation seam: route an EXTERNAL desired-speed advisory to the driver.
@@ -386,6 +632,29 @@ class CarlaBackend(IVirEnvBackend):
     def trafficLightMap(self):
         return self._trafficLightMap
 
+    def signalHeads(self):
+        """[(carla.TrafficLight, carla.Transform)] -- each light, and where its
+        STOP BAR actually is.
+
+        The table gives one row per controlled movement in the SUMO frame
+        (junction, link, x, y, z, heading); this converts each to the CARLA
+        frame with the same arithmetic that places every mirrored vehicle. A
+        controller needs it because an agent locates the signal governing it
+        from the actor's trigger volume, and on an imported corridor those
+        volumes do not line up with the lanes.
+        """
+        out = []
+        for linkMap in self._trafficLightMap.values():
+            for tl in linkMap.values():
+                actor = tl.carlaTrafficLightActorPtr
+                if actor is None:
+                    continue
+                x, y, z, pitch, yaw, roll = BridgeHelper.sumo_to_carla_numeric(
+                    tl.x, tl.y, tl.z, tl.heading, 0.0, 0.0, 0.0)
+                out.append((actor, carla.Transform(carla.Location(x, y, z),
+                                                   carla.Rotation(pitch, yaw, roll))))
+        return out
+
     def lastAppliedPose(self, h):
         """(VehHandle) -> carla.Transform or None -- the pose last APPLIED to h.
 
@@ -422,6 +691,7 @@ class CarlaBackend(IVirEnvBackend):
             return kNoHandle
         self._egoActor = actor
         self._egoActor.set_simulate_physics(True)     # full PhysX: tire contact, dynamics
+        self._egoAwaitingSnapshot = True             # no pose until CARLA ticks
         print('L0 ego spawned: %s actor %d (physics ON)' % (blueprintId, actor.id))
         return int(actor.id)
 
@@ -485,6 +755,12 @@ class CarlaBackend(IVirEnvBackend):
         return self._egoActor
 
     def destroyEgo(self):
+        # A count with no standstill in the run means backward physics. FIXS#358.
+        if self._egoBackstepHolds:
+            print('[carla] backstep guard held the ego pose on %d readbacks '
+                  '(backward or non-advancing motion, not reported to FIXS)'
+                  % self._egoBackstepHolds, flush=True)
         if self._egoActor is not None:
             self._egoActor.destroy()
             self._egoActor = None
+        self._egoAwaitingSnapshot = False

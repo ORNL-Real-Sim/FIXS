@@ -6,9 +6,8 @@ A simple Python client that receives VehicleData from TrafficLayer.exe and echoe
 
 1. Create conda environment (first time only):
 ```bash
-conda create -n realsim python=3.9
+conda env create -f ../../../environment.yml
 conda activate realsim
-pip install -r ../../../requirements.txt
 ```
 
 2. Ensure SUMO is installed and accessible in your PATH

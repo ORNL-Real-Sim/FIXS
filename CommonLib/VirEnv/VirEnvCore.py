@@ -43,7 +43,7 @@ import time as _time
 from dataclasses import replace
 
 from ..MsgHelper import MsgHelper
-from .FixsProtocol import kFeedHz, onFeedBoundary
+from .FixsProtocol import feedSlot, kFeedHz
 from .IVirEnvBackend import EgoState, Pose, VehHandle, kNoHandle
 
 __all__ = ['VirEnvCore', 'InitErr', 'StepErr', 'lerpHeadingDeg']
@@ -157,6 +157,7 @@ class VirEnvCore:
         #: last raw pose the core set (replaces the C++ ``TrfObj->t_0`` readback)
         self._lastSet = {}
         self._lastRefreshSlot = -1
+        self._lastFeedSlot = 0     # slot 0 is t = 0, which is not an exchange
 
         self._rsDbg = None
         self._rsDebugEnabled = bool(os.environ.get('RS_DEBUG'))
@@ -269,6 +270,7 @@ class VirEnvCore:
         self._next.clear()
         self._lastSet.clear()
         self._lastRefreshSlot = -1
+        self._lastFeedSlot = 0
         if self._rsDbg is not None:
             self._rsDbg.close()
             self._rsDbg = None
@@ -292,7 +294,11 @@ class VirEnvCore:
         simStateRecv = 0
         simTimeRecv = 0.0
 
-        onUpdate = (simTime > 1e-5 and onFeedBoundary(simTime, 1e-5))
+        # An edge on the slot, not a tolerance test: a host clock that is a
+        # running sum drifts off the grid over a long run (#169).
+        slot = feedSlot(simTime)
+        onUpdate = (slot != self._lastFeedSlot and simTime > 1e-5)
+        self._lastFeedSlot = slot
         self.lastRecvSeconds = 0.0
         if onUpdate and self.ENABLE_REALSIM:
             _t0 = _time.monotonic()
@@ -340,7 +346,7 @@ class VirEnvCore:
                     continue                        # already mapped
                 sp = Pose(x=rec.positionX, y=rec.positionY, z=rec.positionZ,
                           headingDeg=rec.heading, gradeRad=rec.grade)
-                h = backend.spawnVehicle(rec.type, rec.vehicleClass, sp) \
+                h = backend.spawnVehicle(rec.type, rec.vehicleClass, sp, idTs) \
                     if backend is not None else kNoHandle
                 if h == kNoHandle:
                     continue                        # backend full -> skip
