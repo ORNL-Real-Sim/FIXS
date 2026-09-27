@@ -140,6 +140,24 @@ def test_several_subscriptions_require_a_port():
     assert '430' in str(excinfo.value) and '440' in str(excinfo.value)
 
 
+def test_carla_client_port_names_the_bridge_so_the_rest_is_mine():
+    """A CARLA scenario subscribes the BRIDGE on ApplicationSetup too, and says
+    which one that is in CarlaSetup.CarlaClientPort. The application should not
+    have to answer a question its own scenario yaml already answers."""
+    cfg = _Cfg([_sub(430), _sub(2444)], raw={'CarlaSetup': {'CarlaClientPort': 430}})
+    assert fixs._selectSubscription(cfg, 'c.yaml', None)['port'] == [2444]
+
+
+def test_two_left_over_after_the_bridge_still_needs_a_port():
+    """Naming the bridge removes ONE candidate. Two still ambiguous is still an
+    error -- silently taking entry 0 is how two clients share one endpoint."""
+    cfg = _Cfg([_sub(430), _sub(2444), _sub(2445)],
+               raw={'CarlaSetup': {'CarlaClientPort': 430}})
+    with pytest.raises(fixs.FixsError) as excinfo:
+        fixs._selectSubscription(cfg, 'c.yaml', None)
+    assert '2444' in str(excinfo.value) and '2445' in str(excinfo.value)
+
+
 def test_port_selects_its_own_subscription():
     entry = fixs._selectSubscription(_Cfg([_sub(430), _sub(440)]), 'c.yaml', 440)
     assert entry['port'] == [440]

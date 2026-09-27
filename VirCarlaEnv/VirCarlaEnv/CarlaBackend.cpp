@@ -68,7 +68,7 @@ void CarlaBackend::initTrafficPool() {
 }
 
 VehHandle CarlaBackend::spawnVehicle(const std::string& vType, const std::string& vClass,
-                                     const Pose& spawnPose) {
+                                     const Pose& spawnPose, const std::string& vehId) {
     if (!world_) return kNoHandle;
     if (!bpLib_) bpLib_ = world_->GetBlueprintLibrary();
 
@@ -77,7 +77,8 @@ VehHandle CarlaBackend::spawnVehicle(const std::string& vType, const std::string
     carla::geom::Transform carlaTf = BridgeHelper::map_transfrom_Sumo_to_Carla(sumoTransformOf(spawnPose), kDefaultExtent);
     carlaTf.location.z += kSpawnOffsetZ;
 
-    std::string bpId = useVType_ ? vType : BridgeHelper::map_Sumo_vClass_to_Carla_blueprintId(vClass);
+    std::string bpId = useVType_ ? vType
+                                 : BridgeHelper::map_Sumo_vClass_to_Carla_blueprintId(vClass, vehId);
     const carla::client::ActorBlueprint* bp = bpLib_->Find(bpId);
     if (bp == nullptr) {
         logError(("Blueprint not found: " + bpId).c_str());
