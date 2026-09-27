@@ -2,8 +2,8 @@
 
 On one user's Ubuntu desktop xdg-open handed the yaml to GNOME's autorun helper for
 removable media - the MIME default for application/yaml - which exited at once and
-left the prompt waiting for an editor that never opened. The launcher now asks for
-the text/plain default and a known editor before it ever falls back to xdg-open.
+left the prompt waiting for an editor that never opened. The launcher now asks each
+platform for its default TEXT editor and never for the yaml's own association.
 
 Nothing is launched: every process call is recorded instead, so these run anywhere.
 """
@@ -103,9 +103,10 @@ def test_a_desktop_with_no_gui_editor_gets_a_terminal_one_before_xdg_open(linux)
     assert _launched(linux) == [("call", ["nano", YAML])]
 
 
-def test_xdg_open_is_the_last_resort(linux):
+def test_xdg_open_is_never_used(linux):
     linux["on_path"] |= {"xdg-open"}
-    assert run_cosim._open_in_editor(YAML) == ("xdg-open", False)
+    assert run_cosim._open_in_editor(YAML) is None
+    assert _launched(linux) == []
 
 
 def test_no_display_goes_straight_to_the_terminal(linux, monkeypatch):
@@ -119,7 +120,7 @@ def test_editor_variable_is_split_and_waited_on(linux, monkeypatch):
     """`code -w` is a command line. And $EDITOR is waited on: a terminal editor
     left in the background reads the same keystrokes as the Enter prompt."""
     monkeypatch.setenv("EDITOR", "code -w")
-    linux["on_path"] |= {"xdg-mime", "gtk-launch", "gedit"}
+    linux["on_path"] |= {"xdg-mime", "gtk-launch", "gedit", "code"}
     assert run_cosim._open_in_editor(YAML) == ("code", True)
     assert _launched(linux) == [("call", ["code", "-w", YAML])]
 
@@ -127,7 +128,38 @@ def test_editor_variable_is_split_and_waited_on(linux, monkeypatch):
 def test_visual_wins_over_editor(linux, monkeypatch):
     monkeypatch.setenv("VISUAL", "vim")
     monkeypatch.setenv("EDITOR", "nano")
+    linux["on_path"] |= {"vim", "nano"}
     assert run_cosim._open_in_editor(YAML) == ("vim", True)
+
+
+def test_an_editor_variable_that_is_not_installed_is_skipped(linux, monkeypatch, capsys):
+    """Announcing it and then opening something else would name the wrong editor."""
+    monkeypatch.setenv("EDITOR", "no_such_editor")
+    linux["on_path"] |= {"nano"}
+    assert run_cosim._open_in_editor(YAML) == ("nano", True)
+    assert "no_such_editor" not in capsys.readouterr().out
+
+
+def test_windows_uses_the_txt_default(linux, monkeypatch):
+    monkeypatch.delenv("DISPLAY")
+    monkeypatch.setattr(run_cosim.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(run_cosim, "_open_as_text_windows", lambda p: True)
+    assert run_cosim._open_in_editor(YAML) == ("the .txt default", False)
+    assert _launched(linux) == []
+
+
+def test_windows_falls_back_to_notepad(linux, monkeypatch):
+    monkeypatch.delenv("DISPLAY")
+    monkeypatch.setattr(run_cosim.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(run_cosim, "_open_as_text_windows", lambda p: False)
+    assert run_cosim._open_in_editor(YAML) == ("notepad", False)
+    assert _launched(linux) == [("popen", ["notepad", YAML])]
+
+
+def test_macos_asks_for_the_default_text_editor(linux, monkeypatch):
+    monkeypatch.setattr(run_cosim.platform, "system", lambda: "Darwin")
+    assert run_cosim._open_in_editor(YAML) == ("the default text editor", False)
+    assert _launched(linux) == [("popen", ["open", "-t", YAML])]
 
 
 def test_nothing_to_launch_is_reported(linux, monkeypatch):

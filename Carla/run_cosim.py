@@ -1921,7 +1921,8 @@ class _Parser(argparse.ArgumentParser):
 # Tried on a Linux desktop when neither $VISUAL/$EDITOR nor the text/plain default
 # gets an editor up. Each of these edits any text file whatever its extension -
 # which is the point: none of them is chosen by the yaml's MIME type.
-_TEXT_EDITORS = ("gnome-text-editor", "gedit", "kate", "mousepad", "xed", "pluma", "code")
+_TEXT_EDITORS = ("gnome-text-editor", "gedit", "kate", "kwrite", "mousepad", "xed",
+                 "pluma", "featherpad", "cosmic-edit", "code")
 
 
 def _announce_editor(name):
@@ -1958,46 +1959,69 @@ def _launch_text_plain_default(path):
     return name
 
 
+def _open_as_text_windows(path):
+    """Open `path` with whatever opens a .txt. True if the shell launched it.
+
+    ShellExecuteEx with lpClass=".txt" applies the .txt association to a file of
+    any extension, Store apps included. The .yaml association is not used: a stock
+    Windows has none, and any app installed later may claim it."""
+    import ctypes
+    from ctypes import wintypes
+
+    class SHELLEXECUTEINFOW(ctypes.Structure):
+        _fields_ = [("cbSize", wintypes.DWORD), ("fMask", ctypes.c_ulong),
+                    ("hwnd", wintypes.HWND), ("lpVerb", wintypes.LPCWSTR),
+                    ("lpFile", wintypes.LPCWSTR), ("lpParameters", wintypes.LPCWSTR),
+                    ("lpDirectory", wintypes.LPCWSTR), ("nShow", ctypes.c_int),
+                    ("hInstApp", wintypes.HINSTANCE), ("lpIDList", ctypes.c_void_p),
+                    ("lpClass", wintypes.LPCWSTR), ("hkeyClass", wintypes.HKEY),
+                    ("dwHotKey", wintypes.DWORD), ("hIcon", wintypes.HANDLE),
+                    ("hProcess", wintypes.HANDLE)]
+
+    SEE_MASK_CLASSNAME, SEE_MASK_NOASYNC, SEE_MASK_FLAG_NO_UI = 0x1, 0x100, 0x400
+    info = SHELLEXECUTEINFOW(cbSize=ctypes.sizeof(SHELLEXECUTEINFOW),
+                             fMask=SEE_MASK_CLASSNAME | SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI,
+                             lpVerb="open", lpFile=path, lpClass=".txt", nShow=1)
+    return bool(ctypes.windll.shell32.ShellExecuteExW(ctypes.byref(info)))
+
+
 def _open_in_editor(path):
     """Open `path` in a text editor. (name, waited), or None if nothing started.
 
-    Order matters. $VISUAL / $EDITOR first: they are set deliberately and they
-    work with no display - which is the render host over SSH, exactly where
-    someone is most likely to be poking at a config with no GUI. They are waited
-    on, as git and crontab do: that is the contract for those variables, and a
-    terminal editor left running in the background reads the same keystrokes as
-    the Enter prompt. Then the platform default, and a terminal editor last so a
-    headless box is never left with nothing.
+    $VISUAL / $EDITOR first: they are set deliberately and they work with no
+    display - the render host over SSH. They are waited on, as git does: a
+    terminal editor left in the background reads the same keystrokes as the
+    Enter prompt.
 
-    On Linux the platform default is NOT xdg-open. It picks the handler by the
-    file's MIME type, and nothing ties application/yaml to an editor: one user's
-    desktop had it mapped to GNOME's autorun helper for removable media, which
-    exited at once and left the prompt waiting for a window that never came
-    (#405). xdg-open is kept only as the very last resort."""
+    Then the platform's default TEXT editor, never the default for the yaml's own
+    type. That type is whatever app last claimed it: one Ubuntu desktop had it
+    mapped to GNOME's autorun helper for removable media, which exited at once and
+    left the prompt waiting for a window that never came (#405). Windows: the .txt
+    association, then notepad. macOS: `open -t`. Linux: the text/plain default,
+    a known editor on PATH, then nano / vi."""
     env_editor = os.environ.get("VISUAL") or os.environ.get("EDITOR")
     if env_editor:
         # `code -w` is a command line, not a program name. Windows paths are
         # left whole: POSIX splitting would eat their backslashes.
         argv = ([env_editor] if platform.system() == "Windows"
                 else shlex.split(env_editor))
-        try:
-            name = os.path.basename(argv[0])
-            _announce_editor(name)
-            subprocess.call(argv + [path])
-            return name, True
-        except Exception:
-            pass
+        if argv and shutil.which(argv[0]):
+            try:
+                name = os.path.basename(argv[0])
+                _announce_editor(name)
+                subprocess.call(argv + [path])
+                return name, True
+            except Exception:
+                pass
     try:
         if platform.system() == "Windows":
-            try:
-                os.startfile(path)                  # the file association
-                return "the .yaml file association", False
-            except Exception:
-                subprocess.Popen(["notepad", path])
-                return "notepad", False
+            if _open_as_text_windows(path):
+                return "the .txt default", False
+            subprocess.Popen(["notepad", path])
+            return "notepad", False
         if platform.system() == "Darwin":
-            subprocess.Popen(["open", path])
-            return "open", False
+            subprocess.Popen(["open", "-t", path])
+            return "the default text editor", False
         if os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"):
             name = _launch_text_plain_default(path)
             if name:
@@ -2011,9 +2035,6 @@ def _open_in_editor(path):
                 _announce_editor(term)
                 subprocess.call([term, path])       # blocks, and should
                 return term, True
-        if os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"):
-            subprocess.Popen(["xdg-open", path])
-            return "xdg-open", False
     except Exception:
         pass
     return None
