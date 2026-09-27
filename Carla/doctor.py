@@ -147,6 +147,13 @@ def _check_python(rep, cfg, env_mod):
     rep.add("Python", "interpreter", OK if os.path.isfile(py) else FAIL, f"{py}  ({where})")
     if not os.path.isfile(py):
         return py
+    label, _ = env_mod._interpreter_kind(py)
+    if env_mod.use_uv() and not label.startswith("uv env"):
+        # Setting the flag does not move an already-bound interpreter.
+        rep.add("Python", "env", WARN, f"{label}; {env_mod.ENV_FLAG_PATH} asks for uv - "
+                                       f"run setup with --update-python to switch")
+    else:
+        rep.add("Python", "env", OK, label)
     missing = env_mod.missing_runtime(py)
     for mod in env_mod.CHECKED_MODULES:
         hurt = {"yaml": "scenario yamls read as defaults - endpoints silently wrong",

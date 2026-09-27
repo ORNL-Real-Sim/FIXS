@@ -68,6 +68,46 @@ def _anchorOf(b):
     return b._egoActor.x + _kAnchorX
 
 
+def _wired(monkeypatch, **env):
+    """A backend built through __init__, so the env wiring is under test too.
+
+    Every other test here sets `_egoBackstepGuard` on the object. That covers
+    the guard's arithmetic and never the line that decides whether it runs at
+    all -- measured: flipping that default to off left all of them green while
+    the guard was dead, which is the same defect as having no test.
+    """
+    for k in ('FIXS_EGO_BACKSTEP_GUARD', 'FIXS_EGO_BACKSTEP_RELEASE'):
+        monkeypatch.delenv(k, raising=False)
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    b = CarlaBackend(None, None, False, False)
+    b._egoActor = _Ego()
+    return b
+
+
+def test_the_guard_is_wired_on_by_default(monkeypatch):
+    """No env var set: a backward millimetre is held. Guards the default."""
+    b = _wired(monkeypatch)
+    b._egoActor.vx = 5.0
+    settled = _read(b).x
+    b._egoActor.x -= 0.003
+    b._egoActor.vx = -0.02
+    assert _read(b).x == pytest.approx(settled)
+    assert b._egoBackstepHolds == 1
+
+
+def test_the_env_var_is_the_way_off(monkeypatch):
+    """FIXS_EGO_BACKSTEP_GUARD=0 is how FIXS#358's 'before' arm was run, so it
+    has to keep working -- and it has to be the ONLY thing that turns it off."""
+    b = _wired(monkeypatch, FIXS_EGO_BACKSTEP_GUARD='0')
+    b._egoActor.vx = 5.0
+    _read(b)
+    b._egoActor.x -= 0.003
+    b._egoActor.vx = -0.02
+    assert _read(b).x == pytest.approx(_anchorOf(b))
+    assert b._egoBackstepHolds == 0
+
+
 def test_forward_motion_is_reported_unchanged():
     b = _backend()
     b._egoActor.vx = 5.0

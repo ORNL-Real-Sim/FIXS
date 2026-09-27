@@ -141,12 +141,15 @@ def test_shader_scan_ignores_large_blobs(packaged_root):
 
 
 def test_cooked_asset_name_convention_and_catalog_override():
-    assert import_map.cooked_asset_name("mlk_no_signal.zip") == \
+    # The Linux convention; the Windows one is in test_cooked_asset_platform.py.
+    assert import_map.cooked_asset_name("mlk_no_signal.zip", system="Linux") == \
         "mlk_no_signal_cooked.tar.gz"
     # catalog wins over the convention ...
     assert import_map.catalog_cooked_asset(
-        {"asset": "a.zip", "cooked_asset": "b.tar.gz"}) == "b.tar.gz"
+        {"asset": "a.zip", "cooked_asset": "b.tar.gz"}, system="Linux") == "b.tar.gz"
     # ... and an explicit empty value means "this map has none", which must NOT
     # fall back to a derived name that is not published.
-    assert import_map.catalog_cooked_asset({"asset": "a.zip", "cooked_asset": ""}) is None
-    assert import_map.catalog_cooked_asset({"asset": "a.zip"}) == "a_cooked.tar.gz"
+    assert import_map.catalog_cooked_asset({"asset": "a.zip", "cooked_asset": ""},
+                                           system="Linux") is None
+    assert import_map.catalog_cooked_asset({"asset": "a.zip"}, system="Linux") == \
+        "a_cooked.tar.gz"

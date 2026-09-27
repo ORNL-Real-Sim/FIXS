@@ -1037,6 +1037,8 @@ int TrafficHelper::sendToVISSIM(double simTime, MsgHelper Msg_c) {
 
 			}
 
+			// #169: if revived, gate on the step slot changing (see fixs::feedSlot);
+			// this |x - round(x)| < 1e-5 test stops passing once the clock drifts.
 			//if (vissimSock.size() > 1 && vissimSockName_um[vissimSock[i]].find(SIGNAL_SOCK_PATTERN) != string::npos) {
 			//	// if is signal controller
 			//	if (abs(round(simTime / (vissimSignalStep * vissimBaseDt)) - simTime / (vissimSignalStep * vissimBaseDt)) < 1e-5) {
@@ -2166,6 +2168,8 @@ int TrafficHelper::recvFromVISSIM(double* simTime, MsgHelper& Msg_c) {
 			//fclose(f);
 		}
 
+		// #169: if revived, gate on the step slot changing (see fixs::feedSlot);
+		// this |x - round(x)| < 1e-5 test stops passing once the clock drifts.
 		//if (vissimSock.size() > 1 && vissimSockName_um[vissimSock[i]].find(SIGNAL_SOCK_PATTERN) != string::npos) {
 		//	// if is signal controller
 		//	// if simTime has reached steps for SC

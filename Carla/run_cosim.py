@@ -30,6 +30,7 @@ import json
 import re
 import os
 import platform
+import shlex
 import shutil
 import signal
 import socket
@@ -280,7 +281,7 @@ def _read_scenario_config(config_yaml):
             f"[cosim] cannot parse scenario yamls: {e}\n"
             f"        CommonLib/ConfigHelper.py needs PyYAML. Install it into the "
             f"interpreter run_cosim uses (the 'python' entry in {env.CONFIG_PATH}):\n"
-            f"            \"{sys.executable}\" -m pip install pyyaml\n"
+            f"            {env._pip_hint(sys.executable, ['pyyaml'])}\n"
             f"        Continuing without it would silently substitute defaults for "
             f"every setting in {os.path.basename(config_yaml)}.")
     except Exception as e:
@@ -1339,7 +1340,31 @@ def _carla_command(cfg, port, render_offscreen, quality_level=None, level=None):
         cmd.append(f"-quality-level={quality_level}")  # Low is much cheaper to render
     if render_offscreen:
         cmd.append("-RenderOffScreen")  # headless, no display (Linux/CI)
+    else:
+        # UE4's own command line (GameEngine.cpp), so packaged and editor -game alike.
+        w, h = _window_res(cfg)
+        cmd += ["-windowed", f"-ResX={w}", f"-ResY={h}"]
     return cmd
+
+
+def _window_res(cfg):
+    """The CARLA window size carla.json asks for, else the default."""
+    saved = cfg.get("carla_res")
+    res = env.parse_res(saved)
+    if res is None:
+        if saved is not None:
+            print(f"[CARLA] carla.json carla_res {saved!r} is not WxH; using "
+                  f"{env.DEFAULT_CARLA_RES}.")
+        res = env.parse_res(env.DEFAULT_CARLA_RES)
+    return res
+
+
+def _res_arg(text):
+    """argparse type for --carla-res: normalises to "WxH"."""
+    res = env.parse_res(text)
+    if res is None:
+        raise argparse.ArgumentTypeError(f"expected WIDTHxHEIGHT, e.g. 1280x720, got {text!r}")
+    return f"{res[0]}x{res[1]}"
 
 
 def launch_carla(cfg, port=2000, render_offscreen=False, quality_level=None, level=None):
@@ -1917,42 +1942,126 @@ class _Parser(argparse.ArgumentParser):
         sys.exit(2)
 
 
-def _open_in_editor(path):
-    """Open `path` in whatever editor this machine has. True if something started.
+# Tried on a Linux desktop when neither $VISUAL/$EDITOR nor the text/plain default
+# gets an editor up. Each of these edits any text file whatever its extension -
+# which is the point: none of them is chosen by the yaml's MIME type.
+_TEXT_EDITORS = ("gnome-text-editor", "gedit", "kate", "kwrite", "mousepad", "xed",
+                 "pluma", "featherpad", "cosmic-edit", "code")
 
-    Order matters. $VISUAL / $EDITOR first: they are set deliberately and they
-    work with no display - which is the render host over SSH, exactly where
-    someone is most likely to be poking at a config with no GUI. Then the
-    platform default, and a terminal editor last so a headless box is never left
-    with nothing."""
+
+def _announce_editor(name):
+    print(f"        editor: {name}  (set VISUAL to use a different one)")
+
+
+def _launch_text_plain_default(path):
+    """The desktop's text/plain default, launched on `path`. Its name, or None.
+
+    Linux has no 'default text editor' setting, only a default per MIME type, and
+    text/plain is the one every desktop maps to an editor. gtk-launch may hand off
+    and exit or may stay up with the app, so a quick non-zero exit is the only
+    failure it can report."""
+    if not shutil.which("xdg-mime") or not shutil.which("gtk-launch"):
+        return None
+    try:
+        out = subprocess.run(["xdg-mime", "query", "default", "text/plain"],
+                             capture_output=True, text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    app = out.strip().split(";")[0]
+    if not app:
+        return None
+    name = app[:-len(".desktop")] if app.endswith(".desktop") else app
+    try:
+        proc = subprocess.Popen(["gtk-launch", app, path])
+    except OSError:
+        return None
+    try:
+        if proc.wait(timeout=5) != 0:
+            return None
+    except subprocess.TimeoutExpired:
+        pass                                    # still up with the app: it launched
+    return name
+
+
+def _open_as_text_windows(path):
+    """Open `path` with whatever opens a .txt. True if the shell launched it.
+
+    ShellExecuteEx with lpClass=".txt" applies the .txt association to a file of
+    any extension, Store apps included. The .yaml association is not used: a stock
+    Windows has none, and any app installed later may claim it."""
+    import ctypes
+    from ctypes import wintypes
+
+    class SHELLEXECUTEINFOW(ctypes.Structure):
+        _fields_ = [("cbSize", wintypes.DWORD), ("fMask", ctypes.c_ulong),
+                    ("hwnd", wintypes.HWND), ("lpVerb", wintypes.LPCWSTR),
+                    ("lpFile", wintypes.LPCWSTR), ("lpParameters", wintypes.LPCWSTR),
+                    ("lpDirectory", wintypes.LPCWSTR), ("nShow", ctypes.c_int),
+                    ("hInstApp", wintypes.HINSTANCE), ("lpIDList", ctypes.c_void_p),
+                    ("lpClass", wintypes.LPCWSTR), ("hkeyClass", wintypes.HKEY),
+                    ("dwHotKey", wintypes.DWORD), ("hIcon", wintypes.HANDLE),
+                    ("hProcess", wintypes.HANDLE)]
+
+    SEE_MASK_CLASSNAME, SEE_MASK_NOASYNC, SEE_MASK_FLAG_NO_UI = 0x1, 0x100, 0x400
+    info = SHELLEXECUTEINFOW(cbSize=ctypes.sizeof(SHELLEXECUTEINFOW),
+                             fMask=SEE_MASK_CLASSNAME | SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI,
+                             lpVerb="open", lpFile=path, lpClass=".txt", nShow=1)
+    return bool(ctypes.windll.shell32.ShellExecuteExW(ctypes.byref(info)))
+
+
+def _open_in_editor(path):
+    """Open `path` in a text editor. (name, waited), or None if nothing started.
+
+    $VISUAL / $EDITOR first: they are set deliberately and they work with no
+    display - the render host over SSH. They are waited on, as git does: a
+    terminal editor left in the background reads the same keystrokes as the
+    Enter prompt.
+
+    Then the platform's default TEXT editor, never the default for the yaml's own
+    type. That type is whatever app last claimed it: one Ubuntu desktop had it
+    mapped to GNOME's autorun helper for removable media, which exited at once and
+    left the prompt waiting for a window that never came (#405). Windows: the .txt
+    association, then notepad. macOS: `open -t`. Linux: the text/plain default,
+    a known editor on PATH, then nano / vi."""
     env_editor = os.environ.get("VISUAL") or os.environ.get("EDITOR")
     if env_editor:
-        try:
-            subprocess.Popen([env_editor, path])
-            return True
-        except Exception:
-            pass
+        # `code -w` is a command line, not a program name. Windows paths are
+        # left whole: POSIX splitting would eat their backslashes.
+        argv = ([env_editor] if platform.system() == "Windows"
+                else shlex.split(env_editor))
+        if argv and shutil.which(argv[0]):
+            try:
+                name = os.path.basename(argv[0])
+                _announce_editor(name)
+                subprocess.call(argv + [path])
+                return name, True
+            except Exception:
+                pass
     try:
         if platform.system() == "Windows":
-            try:
-                os.startfile(path)                  # the file association
-                return True
-            except Exception:
-                subprocess.Popen(["notepad", path])
-                return True
+            if _open_as_text_windows(path):
+                return "the .txt default", False
+            subprocess.Popen(["notepad", path])
+            return "notepad", False
         if platform.system() == "Darwin":
-            subprocess.Popen(["open", path])
-            return True
+            subprocess.Popen(["open", "-t", path])
+            return "the default text editor", False
         if os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"):
-            subprocess.Popen(["xdg-open", path])
-            return True
+            name = _launch_text_plain_default(path)
+            if name:
+                return name, False
+            for gui in _TEXT_EDITORS:
+                if shutil.which(gui):
+                    subprocess.Popen([gui, path])
+                    return gui, False
         for term in ("nano", "vi"):
             if shutil.which(term):
+                _announce_editor(term)
                 subprocess.call([term, path])       # blocks, and should
-                return True
+                return term, True
     except Exception:
         pass
-    return False
+    return None
 
 
 def _yaml_snapshot(path):
@@ -1997,9 +2106,11 @@ def _yaml_problems(path):
 def edit_yaml_in_editor(path):
     """Open the scenario yaml, wait for the user, then re-read and report.
 
-    Do NOT wait on the editor process: notepad blocks, `code` returns instantly,
-    vi blocks in the terminal. The Enter prompt covers all three, and it is also
-    what lets someone keep the editor open while fixing a validation failure.
+    A GUI editor is not waited on: notepad blocks, `code` returns instantly. The
+    Enter prompt covers both, and it is also what lets someone keep the editor
+    open while fixing a validation failure. An editor that WAS waited on - a
+    terminal one - has closed by the time the file is re-read, so a validation
+    failure reopens it instead.
 
     The yaml is written to be READ - every block carries comments saying what a
     key means and what breaks if it is wrong - so handing the whole file to an
@@ -2009,10 +2120,15 @@ def edit_yaml_in_editor(path):
     print(f"\n[cosim] opening {os.path.basename(path)} in your editor ...\n"
           f"        {path}\n"
           f"        View it, change it, save it. You can leave the editor open.")
-    if not _open_in_editor(path):
+    opened = _open_in_editor(path)
+    if opened is None:
         print("[cosim] could not launch an editor - open the path above yourself.")
+    elif not opened[1]:
+        _announce_editor(opened[0])
+    waited = bool(opened and opened[1])
     while True:
-        ans = _ask("[cosim] Press Enter when you have saved  (Q = leave it): ").lower()
+        ans = _ask("[cosim] Press Enter to re-read it  (Q = leave it): " if waited else
+                   "[cosim] Press Enter when you have saved  (Q = leave it): ").lower()
         if ans.startswith("q"):
             return
         after = _yaml_snapshot(path)
@@ -2039,7 +2155,13 @@ def edit_yaml_in_editor(path):
             return
         for msg in bad:
             print(f"[cosim] FAIL {msg}")
-        print("[cosim] Fix it and press Enter to re-check, or Q to leave it as is.")
+        if not waited:
+            print("[cosim] Fix it and press Enter to re-check, or Q to leave it as is.")
+            continue
+        if _ask("[cosim] Enter = reopen the editor to fix it, Q = leave it as is: "
+                ).lower().startswith("q"):
+            return
+        _open_in_editor(path)
 
 
 def _menu(title, options, current=None):
@@ -3497,6 +3619,9 @@ def main():
                     help=argparse.SUPPRESS)   # deprecated: see --carla-tick
     ap.add_argument("--quality-level", choices=["Low", "Medium", "High", "Epic"], default=None,
                     help="CARLA render quality; Low is much faster on heavy maps")
+    # CARLA window WxH, saved to carla.json "carla_res" for later runs. Hidden
+    # from --help for now.
+    ap.add_argument("--carla-res", type=_res_arg, default=None, help=argparse.SUPPRESS)
     ap.add_argument("--fast", action="store_true",
                     help="do not pace the co-sim to real time (run as fast as "
                          "possible). Written to CarlaSetup.RealtimePacing, so it "
@@ -3789,6 +3914,10 @@ def main():
         # may not return (re-execs under the env python). --reconfigure is dropped:
         # it has already been honoured above, and the child must not ask again.
         env.reexec_under_configured(__file__, cfg, drop=("--reconfigure",), tag="cosim")
+        if args.carla_res and args.carla_res != cfg.get("carla_res"):
+            cfg["carla_res"] = args.carla_res
+            env.save_config(cfg)
+            print(f"[cosim] CARLA window {args.carla_res}, kept for later runs.")
         if cfg.get("mode") == "client" and args.carla_only:
             sys.exit("[cosim] --carla-only serves a CARLA on THIS machine, but "
                      "carla.json is 'client' mode (no CARLA here). Run it on the "
@@ -4284,6 +4413,9 @@ def main():
         print(f"[cosim] note: packaged CARLA - traffic lights and signs cannot be "
               f"placed here (that needs a source build's editor). TL sync depends on "
               f"what '{target_map}' was cooked with.")
+        if platform.system() == "Windows":
+            print("[cosim] note: packaged CARLA on Windows is EXPERIMENTAL - it needs "
+                  "the map's Windows cook, which few library maps publish yet.")
 
         # The other silent one: a cook made for a different shader platform. The
         # level loads and every actor is where it should be, so nothing downstream
@@ -4298,9 +4430,13 @@ def main():
                   f"geometry and traffic lights will be correct, the road surface will "
                   f"render grey.")
             if want_sp == "d3d" and "vulkan" in have_sp:
-                print(f"[cosim]   Launching CARLA with -vulkan may resolve them "
-                      f"(unverified). Otherwise use a source build, or ask the map "
-                      f"library for a Windows cook. See FIXS_Applications#29.")
+                # -vulkan is not a way out: measured on 0.9.15, a Linux cook under
+                # -vulkan crashed CARLA on load, and -vulkan -RenderOffScreen
+                # crashes even a stock town at startup.
+                print(f"[cosim]   This is a Linux cook. Re-run with --reimport to "
+                      f"install the library's Windows cook (*_cooked_windows.tar.gz) "
+                      f"if it publishes one, or use a source build. See "
+                      f"FIXS_Applications#29.")
 
     # SUMO slot: --sumocfg wins; else the scenario the app reported; else an
     # already-extracted sumo/, else the chosen bundle's. This also runs for the paths
