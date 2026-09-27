@@ -120,6 +120,7 @@ void VirEnvCore::shutdown() {
     id2handle_.clear();
     prev_.clear(); next_.clear(); lastSet_.clear();
     lastRefreshSlot_ = -1;
+    lastFeedSlot_ = 0;
 }
 
 //============================================================================
@@ -134,7 +135,11 @@ int VirEnvCore::runStep(double simTime, const char** errorMsg) {
     // fixs::kFeedPeriodS is the protocol's exchange period, not a knob: the host
     // may tick as fine as it likes, but it trades messages with TrafficLayer only
     // here, and TrafficLayer steps the traffic simulator once per exchange.
-    bool onUpdate = (simTime > 1e-5 && fixs::onFeedBoundary(simTime, 1e-5));
+    // An edge on the slot, not a tolerance test: CarMaker's clock is a running
+    // sum and drifts off the grid over a long run (#169).
+    const long long feedSlot = fixs::feedSlot(simTime);
+    bool onUpdate = (feedSlot != lastFeedSlot_ && simTime > 1e-5);
+    lastFeedSlot_ = feedSlot;
     lastRecvSeconds = 0.0;
     if (onUpdate) {
         const auto recvT0 = std::chrono::steady_clock::now();
