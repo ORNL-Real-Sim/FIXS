@@ -23,6 +23,12 @@ from . import FixsError
 
 __all__ = ['enabled', 'dyno']
 
+#: How long a udp exchange waits for the cell's answer to the reference it just
+#: sent. An 8-byte datagram on a LAN comes back in well under a millisecond.
+UDP_REPLY_TIMEOUT_S = 0.1
+#: Consecutive unanswered exchanges before the run is stopped.
+UDP_MAX_MISSES = 20
+
 
 def _scenario(configPath):
     """The scenario this run is using, read the same way fixs.connect() reads it."""
@@ -126,6 +132,7 @@ class _Dyno:
         self.transport = transport
         self.sim = None
         self.misses = 0
+        self._missRun = 0
         if transport == 'inprocess':
             # Named parameters, straight through. CommonLib.xil refuses one it
             # does not know rather than ignoring it, so a typo in the yaml is a
@@ -152,7 +159,30 @@ class _Dyno:
         is the only fallback that cannot invent motion; ``misses`` counts how
         often it was taken, and a run that ends with a large one did not test
         what it claims to have tested.
+
+        ``udp`` is LOCKSTEP, the way TrafficLayer holds every other client: the
+        answer to THIS reference is waited for, up to UDP_REPLY_TIMEOUT_S. Not
+        waiting returned the previous tick's answer, one CARLA step behind
+        inprocess. A cell that stays silent for UDP_MAX_MISSES ticks in a row
+        stops the run rather than driving it on references.
         """
+        if self.transport == 'udp':
+            self.link.drain()                   # a late answer is not this tick's
+            self.link.send_reference(speed, steer)
+            got = self.link.recv_wait(UDP_REPLY_TIMEOUT_S)
+            if got is None:
+                self.misses += 1
+                self._missRun += 1
+                if self._missRun >= UDP_MAX_MISSES:
+                    raise FixsError(
+                        'XilSetup.Transport udp: the dyno at %s:%d has not answered '
+                        'for %d exchanges (%.2f s timeout each). Is the cell running '
+                        'and answering on :%d?' % (self.link._peer[0], self.link._peer[1],
+                                                   self._missRun, UDP_REPLY_TIMEOUT_S,
+                                                   self.link._rx.getsockname()[1]))
+                return speed
+            self._missRun = 0
+            return got[0]
         self.link.send_reference(speed, steer)
         if self.sim is not None:
             reference = self.link.recv_reference()
