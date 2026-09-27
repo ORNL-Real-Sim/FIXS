@@ -24,6 +24,14 @@
 #include <ctime>
 
 #ifdef _WIN32
+    // socketErrorCode() needs WSAGetLastError. <windows.h> supplies it only via
+    // the old <winsock.h>, which it skips under WIN32_LEAN_AND_MEAN -- and
+    // boost.asio (reached through libcarla) defines that, so VirCarlaEnv did not
+    // compile (#380). winsock2 must precede windows.h; the guard leaves a TU
+    // that already has either winsock header alone.
+    #ifndef _WINSOCKAPI_
+        #include <winsock2.h>
+    #endif
     #include <windows.h>
     #include <shlwapi.h>
     #pragma comment(lib, "shlwapi.lib")

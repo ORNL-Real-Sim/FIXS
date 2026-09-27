@@ -227,9 +227,10 @@ jobs:
       # the PUBLIC VirCarlaEnv exe. Fetch it from the public fixs-native-deps
       # release (prebuilt, gh-free), cached by dependencies.yaml so it downloads
       # at most once per deps version. On a cache hit fetch_native_deps skips;
-      # dispatch step 4c then builds VirCarlaEnv against it. OPTIONAL: if no deps
-      # release is published yet this soft-warns and VirCarlaEnv is simply absent
-      # from the zip - it never fails the build. #109.
+      # dispatch step 4c then builds VirCarlaEnv against it. REQUIRED here, though
+      # optional on a developer box: the bundle ships the Carla co-sim, so a
+      # release without VirCarlaEnv.exe is incomplete. It used to soft-warn, and
+      # VirCarlaEnv went missing from every bundle without anyone noticing. #380.
       - name: Cache libcarla (native deps)
         if: needs.detect.outputs.should_build == 'true'
         uses: actions/cache@v4
@@ -242,8 +243,8 @@ jobs:
         run: |
           & scripts/dispatch/fetch_native_deps.ps1 -Component carla -Mode prebuilt
           if ($LASTEXITCODE -ne 0) {
-            Write-Host "::warning::libcarla prebuilt fetch failed (no fixs-native-deps release yet?) - VirCarlaEnv will be skipped."
-            exit 0
+            Write-Host "::error::libcarla prebuilt fetch failed - VirCarlaEnv cannot build without it. Check that the libcarla asset for dependencies.yaml's CARLA version is published on the fixs-native-deps release."
+            exit 1
           }
 
       # libsumo (~127 MB) is REQUIRED, not optional like libcarla: since #238 it
@@ -340,6 +341,17 @@ jobs:
             Write-Error "TrafficLayer.exe missing from build/ - public core did not build."
             exit 1
           }
+          # Read the ZIP, not build/: the zip is what ships, and its lacking
+          # the file is how #380 went unnoticed.
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $z = [System.IO.Compression.ZipFile]::OpenRead($zip.FullName)
+          try { $entries = $z.Entries | ForEach-Object { $_.FullName -replace '\\', '/' } }
+          finally { $z.Dispose() }
+          if ($entries -notcontains 'VirCarlaEnv.exe') {
+            Write-Error "VirCarlaEnv.exe missing from $($zip.Name) - the C++ Carla bridge did not build or was not packaged (#380)."
+            exit 1
+          }
+          Write-Host "VirCarlaEnv.exe present in $($zip.Name)."
           if ($names -contains 'VirtualEnvironment.lib') {
             Write-Host "VirtualEnvironment.lib present (SDK-free CI build - expected on the 0.9.0 train)."
           } else {
