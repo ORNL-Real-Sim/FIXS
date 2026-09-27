@@ -55,11 +55,14 @@ public:
     void loadSignalTable(const char* path) override { rec("loadSignalTable", path ? path : ""); }
     void initTrafficPool() override { rec("initTrafficPool", ""); poolInit_ = true; }
 
+    // vehId is recorded, not just accepted: a core that stops passing it then
+    // produces a different transcript, and test_core_parity fails on it. Accepting
+    // it silently is how the two cores disagreed about it without any test noticing.
     VehHandle spawnVehicle(const std::string& vType, const std::string& vClass,
-                           const Pose& /*spawnPose*/) override {
+                           const Pose& /*spawnPose*/, const std::string& vehId) override {
         VehClass cls = classify(vClass);
         std::queue<VehHandle>& pool = poolFor(cls);
-        std::string tag = clsName(cls) + "(" + vType + "/" + vClass + ")";
+        std::string tag = clsName(cls) + "(" + vType + "/" + vClass + ") id=" + vehId;
         if (pool.empty()) { rec("spawnVehicle", tag + " -> kNoHandle"); return kNoHandle; }
         VehHandle h = pool.front(); pool.pop();
         rec("spawnVehicle", tag + " -> " + std::to_string(h));

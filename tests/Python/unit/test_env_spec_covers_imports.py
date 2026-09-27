@@ -4,7 +4,8 @@
 did not list it, and an env built from the spec could not import BasicAgent or
 BehaviorAgent at all -- mainVirCarla exited at startup and run_cosim stopped the
 whole stack. The declaration existed, in requirements.txt (#305) -- a file that
-no install path reads -- and nothing compared the two manifests.
+no install path read -- and nothing compared the two manifests. That file is gone
+(#221), so this is now the only thing standing between an import and a manifest.
 
 This walks the shipped Python instead, so the check is against what the code
 actually imports rather than against a second hand-written list.
@@ -60,6 +61,26 @@ def _declared():
             if m:
                 out.add(m.group(1).split("=")[0].lower())
     return out
+
+
+def _declared_pyproject():
+    """Package names in pyproject.toml's [project] dependencies (the uv env).
+
+    A regex rather than tomllib, which python 3.10 - the env's own version - lacks."""
+    with open(os.path.join(ROOT, "pyproject.toml"), encoding="utf-8") as f:
+        text = f.read()
+    block = re.search(r"^dependencies\s*=\s*\[(.*?)^\]", text, re.M | re.S).group(1)
+    lines = (ln.split("#")[0] for ln in block.splitlines())
+    return {re.match(r"[A-Za-z0-9_.\-]+", s).group(0).lower()
+            for ln in lines for s in re.findall(r'"([^"]+)"', ln)}
+
+
+#: environment.yml entries that are conda's business, not packages uv installs.
+CONDA_ONLY = {"python", "pip", "vs2015_runtime", "vc14_runtime"}
+
+#: pyproject.toml entries environment.yml leaves out (they are on PyPI, and uv has
+#: no reason to defer them the way the conda spec does).
+UV_ONLY = {"traci", "sumolib"}
 
 
 def _local_names():
@@ -136,6 +157,24 @@ def test_every_shipped_import_is_declared():
         for imp, files in sorted(missing.items()))
 
 
+def test_every_shipped_import_is_declared_in_pyproject():
+    missing = _undeclared(_declared_pyproject())
+    assert not missing, "pyproject.toml does not declare: " + "; ".join(
+        f"{imp} (imported by {', '.join(sorted(set(files))[:3])})"
+        for imp, files in sorted(missing.items()))
+
+
+def test_pyproject_and_environment_yml_declare_the_same_env():
+    """Two specs for one env: a package added to one and not the other is how
+    the uv env and the conda env would start to differ."""
+    yml = _declared() - CONDA_ONLY
+    uv = _declared_pyproject()
+    assert UV_ONLY <= uv, f"pyproject.toml no longer declares {sorted(UV_ONLY - uv)}"
+    uv -= UV_ONLY
+    assert yml == uv, (f"only in environment.yml: {sorted(yml - uv)}; "
+                       f"only in pyproject.toml: {sorted(uv - yml)}")
+
+
 def test_the_check_reports_a_package_that_is_absent():
     """Negative control: a checker that cannot fail looks exactly like success.
 
@@ -146,3 +185,48 @@ def test_the_check_reports_a_package_that_is_absent():
     missing = _undeclared(declared)
     assert "numpy" in missing, "the import scan found no numpy to report"
     assert missing["numpy"], "numpy reported with no file to look at"
+
+
+# --------------------------------------------------------------------------
+# the other half of "one manifest": the SUMO clients are pinned to the server
+# --------------------------------------------------------------------------
+def _setup():
+    sys.path.insert(0, os.path.join(ROOT, "Carla"))
+    try:
+        import carla_env_setup
+    finally:
+        sys.path.pop(0)
+    return carla_env_setup
+
+
+def test_the_sumo_clients_are_pinned_to_the_manifest():
+    """The clients are published in lockstep with the server, so an unpinned
+    install takes whatever is newest -- measured at 1.27.1 against a build
+    targeting 1.22.0, with nothing warning. FIXS#221."""
+    env = _setup()
+    want = env.sumo_version()
+    assert want, "dependencies.yaml has a sumo version and it must be readable"
+    assert env.sumo_client_pkgs() == ["eclipse-sumo==" + want,
+                                      "traci==" + want,
+                                      "sumolib==" + want]
+
+
+def test_the_pin_follows_the_manifest_rather_than_a_constant(tmp_path, monkeypatch):
+    """A hardcoded version is how requirements.txt drifted. Bump the manifest and
+    the pin must move with it -- otherwise this test passes on a coincidence."""
+    env = _setup()
+    fake = tmp_path / "dependencies.yaml"
+    fake.write_text(
+        'tools:{nl}  sumo:{nl}    version: "9.99.9"{nl}'.format(nl=chr(10)),
+        encoding="utf-8")
+    monkeypatch.setattr(env, "DEPS_YAML", str(fake))
+    assert env.sumo_client_pkgs() == ["eclipse-sumo==9.99.9", "traci==9.99.9",
+                                      "sumolib==9.99.9"]
+
+
+def test_an_unreadable_manifest_leaves_the_clients_unpinned(monkeypatch):
+    """Unpinned beats refusing to build an env: the caller prints what it is
+    about to install, so a missing pin is visible rather than silent."""
+    env = _setup()
+    monkeypatch.setattr(env, "DEPS_YAML", os.path.join(ROOT, "no-such-file.yaml"))
+    assert env.sumo_client_pkgs() == ["eclipse-sumo", "traci", "sumolib"]

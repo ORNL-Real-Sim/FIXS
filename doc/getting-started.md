@@ -5,7 +5,7 @@ Use this page as the on-ramp into the Real-Sim toolchain. It pulls together the 
 ## 1. Clone and Initialize
 
 1. Clone the repository and update submodules (see `README.md` for any project-specific flags).
-2. Review `requirements.txt` together with `doc/setupGuide.md` so you know which external tools (SUMO, CarMaker, MATLAB, etc.) must already be on your workstation.
+2. Review `dependencies.yaml` together with `doc/setupGuide.md` so you know which external tools (SUMO, CarMaker, MATLAB, etc.) must already be on your workstation, and which versions this checkout targets.
 
 ## 2. Verify Prerequisites
 

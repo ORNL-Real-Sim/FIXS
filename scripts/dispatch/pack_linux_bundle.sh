@@ -16,7 +16,7 @@
 #   CommonLib/                    python + libsumo HEADERS (bin/ is fetched from
 #                                 the native-deps release, exactly as on Windows)
 #   Carla/                        the co-sim component, minus wheels/__pycache__
-#   environment.yml, BUILD_INFO.txt
+#   environment.yml, pyproject.toml + uv.lock (the uv env), BUILD_INFO.txt
 #
 #   NOT here: carmaker/ and vissim/ (licensed Windows toolchains), and
 #   VirtualEnvironment.lib (an MSVC static library).
@@ -158,7 +158,9 @@ if [ -d "$REPO_ROOT/Carla" ]; then
     note "+ Carla/ co-sim component"
 fi
 
-[ -f "$REPO_ROOT/environment.yml" ] && cp "$REPO_ROOT/environment.yml" "$STAGE/"
+for spec in environment.yml pyproject.toml uv.lock; do
+    [ -f "$REPO_ROOT/$spec" ] && cp "$REPO_ROOT/$spec" "$STAGE/"
+done
 
 # --- BUILD_INFO.txt -------------------------------------------------------------
 # Not decoration: update_fixs.{sh,ps1} read the SUMO version from this file to
