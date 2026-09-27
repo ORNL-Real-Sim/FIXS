@@ -172,12 +172,12 @@ class BridgeHelper:
         return carla.Location(x, -y, in_carla_location.z)
 
     # ------------------------------------------------------------ blueprints
-    # The C++ keeps these in unordered_set and picks with random_select_from_set,
-    # which is a uniform draw over the set. Sorted tuples here so the CANDIDATE
-    # LIST is deterministic across runs and interpreters; the DRAW still uses the
-    # module RNG, exactly as the C++ does, so seeding `random` makes a run's
-    # blueprint choices reproducible -- which the C++ (a static random_device) does
-    # not offer and which a visual A/B comparison wants.
+    # The candidates for each vClass, in a FIXED order. The pick is not a draw: it
+    # is an index into these, keyed on (seed, vehicle id) -- see
+    # map_Sumo_vClass_to_Carla_blueprintId (FIXS#373). So the order is part of the
+    # answer: reordering re-deals every vehicle in every seeded run. The C++ bridge
+    # carries the same lists in the same order (CommonLib/BlueprintPick.h), and
+    # tests/VirEnv/test_blueprint_parity.py holds the two together.
     _CARS = (
         'vehicle.audi.a2', 'vehicle.audi.etron', 'vehicle.audi.tt',
         'vehicle.bmw.grandtourer', 'vehicle.chevrolet.impala', 'vehicle.citroen.c3',

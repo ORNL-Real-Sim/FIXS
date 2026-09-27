@@ -4,7 +4,8 @@
 did not list it, and an env built from the spec could not import BasicAgent or
 BehaviorAgent at all -- mainVirCarla exited at startup and run_cosim stopped the
 whole stack. The declaration existed, in requirements.txt (#305) -- a file that
-no install path reads -- and nothing compared the two manifests.
+no install path read -- and nothing compared the two manifests. That file is gone
+(#221), so this is now the only thing standing between an import and a manifest.
 
 This walks the shipped Python instead, so the check is against what the code
 actually imports rather than against a second hand-written list.
@@ -146,3 +147,48 @@ def test_the_check_reports_a_package_that_is_absent():
     missing = _undeclared(declared)
     assert "numpy" in missing, "the import scan found no numpy to report"
     assert missing["numpy"], "numpy reported with no file to look at"
+
+
+# --------------------------------------------------------------------------
+# the other half of "one manifest": the SUMO clients are pinned to the server
+# --------------------------------------------------------------------------
+def _setup():
+    sys.path.insert(0, os.path.join(ROOT, "Carla"))
+    try:
+        import carla_env_setup
+    finally:
+        sys.path.pop(0)
+    return carla_env_setup
+
+
+def test_the_sumo_clients_are_pinned_to_the_manifest():
+    """The clients are published in lockstep with the server, so an unpinned
+    install takes whatever is newest -- measured at 1.27.1 against a build
+    targeting 1.22.0, with nothing warning. FIXS#221."""
+    env = _setup()
+    want = env.sumo_version()
+    assert want, "dependencies.yaml has a sumo version and it must be readable"
+    assert env.sumo_client_pkgs() == ["eclipse-sumo==" + want,
+                                      "traci==" + want,
+                                      "sumolib==" + want]
+
+
+def test_the_pin_follows_the_manifest_rather_than_a_constant(tmp_path, monkeypatch):
+    """A hardcoded version is how requirements.txt drifted. Bump the manifest and
+    the pin must move with it -- otherwise this test passes on a coincidence."""
+    env = _setup()
+    fake = tmp_path / "dependencies.yaml"
+    fake.write_text(
+        'tools:{nl}  sumo:{nl}    version: "9.99.9"{nl}'.format(nl=chr(10)),
+        encoding="utf-8")
+    monkeypatch.setattr(env, "DEPS_YAML", str(fake))
+    assert env.sumo_client_pkgs() == ["eclipse-sumo==9.99.9", "traci==9.99.9",
+                                      "sumolib==9.99.9"]
+
+
+def test_an_unreadable_manifest_leaves_the_clients_unpinned(monkeypatch):
+    """Unpinned beats refusing to build an env: the caller prints what it is
+    about to install, so a missing pin is visible rather than silent."""
+    env = _setup()
+    monkeypatch.setattr(env, "DEPS_YAML", os.path.join(ROOT, "no-such-file.yaml"))
+    assert env.sumo_client_pkgs() == ["eclipse-sumo", "traci", "sumolib"]

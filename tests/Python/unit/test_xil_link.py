@@ -10,6 +10,7 @@ import os
 import socket
 import struct
 import sys
+import time
 
 import pytest
 
@@ -31,12 +32,41 @@ class FakeClock(object):
         return self.t
 
 
-def free_port():
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+def free_port(kind=socket.SOCK_STREAM):
+    """A port the OS just handed out FOR THIS PROTOCOL.
+
+    The TCP and UDP port spaces are independent, so a number free for UDP says
+    nothing about TCP -- and this used to pick every port with a UDP socket,
+    including the ones a TcpLink then tried to bind. Windows refuses some of
+    those with WinError 10013, an access error rather than "in use", which
+    surfaces as a test dying in TcpLink.__init__ before any assertion runs.
+    Measured: 1 full-suite run in 25.
+    """
+    s = socket.socket(socket.AF_INET, kind)
     s.bind(('127.0.0.1', 0))
     port = s.getsockname()[1]
     s.close()
     return port
+
+
+def free_udp_port():
+    return free_port(socket.SOCK_DGRAM)
+
+
+def dyno_link(attempts=8):
+    """A listening TcpLink on a port that actually accepted the bind.
+
+    Naming a free port and binding it are two steps with a gap between them, and
+    nothing can close that gap from here. Retrying is the honest fix: the
+    alternative is a test that fails for a reason unrelated to what it asserts.
+    """
+    for i in range(attempts):
+        port = free_port()
+        try:
+            return TcpLink('dyno', port=port), port
+        except OSError:
+            if i == attempts - 1:
+                raise
 
 
 # -------------------------------------------------------------- wire format
@@ -98,7 +128,7 @@ def test_age_reports_how_stale_a_value_is():
 # ----------------------------------------------------------------------- udp
 
 def test_udp_carries_both_directions_on_loopback():
-    ref, meas = free_port(), free_port()
+    ref, meas = free_udp_port(), free_udp_port()
     sim = UdpLink('simulator', reference_port=ref, measurement_port=meas)
     dyno = UdpLink('dyno', reference_port=ref, measurement_port=meas)
     try:
@@ -123,8 +153,8 @@ def test_udp_carries_both_directions_on_loopback():
 
 
 def test_udp_never_blocks_when_nothing_has_arrived():
-    link = UdpLink('simulator', reference_port=free_port(),
-                   measurement_port=free_port())
+    link = UdpLink('simulator', reference_port=free_udp_port(),
+                   measurement_port=free_udp_port())
     try:
         assert link.recv() is None
         assert link.age() is None
@@ -133,7 +163,7 @@ def test_udp_never_blocks_when_nothing_has_arrived():
 
 
 def test_udp_keeps_only_the_newest_of_a_burst():
-    ref, meas = free_port(), free_port()
+    ref, meas = free_udp_port(), free_udp_port()
     sim = UdpLink('simulator', reference_port=ref, measurement_port=meas)
     dyno = UdpLink('dyno', reference_port=ref, measurement_port=meas)
     try:
@@ -167,19 +197,58 @@ def test_both_transports_present_the_same_calls():
 
 # ---------------------------------------------------------------------- tcp
 
-def tcp_pair():
-    """dyno first: it listens, and the simulator end connects to it."""
-    port = free_port()
-    dyno = TcpLink('dyno', port=port)
-    return TcpLink('simulator', peer_ip='127.0.0.1', port=port), dyno, port
+def tcp_pair(timeout=2.0):
+    """dyno first: it listens, the simulator end connects, and BOTH are up
+    before the caller sends anything.
+
+    The link is non-blocking at both ends on purpose: before the peer is there
+    `send` does nothing and `recv` answers None, which is what a real bench does
+    while the other end is still starting. That makes a send issued before the
+    handshake a SILENT no-op -- the packet is not queued, it is dropped -- so a
+    test that sends first is racing the connect, not testing the wire. The
+    simulator end gives connect 0.05 s; under a loaded machine that expires.
+    Measured: 2 of 20 full-suite runs lost their first sends exactly here.
+    """
+    dyno, port = dyno_link()
+    sim = TcpLink('simulator', peer_ip='127.0.0.1', port=port)
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if sim._connected() is not None and dyno._connected() is not None:
+            return sim, dyno, port
+        time.sleep(0.005)
+    sim.close()
+    dyno.close()
+    raise AssertionError('TcpLink pair did not connect within %.1f s' % timeout)
 
 
-def poll(fn):
-    for _ in range(200):
+def poll(fn, timeout=2.0):
+    """Wait for a non-None value, bounded by TIME rather than by a spin count.
+
+    A fixed iteration budget is a race against the OS: 200 non-blocking reads
+    can all complete before loopback has delivered anything, and the test then
+    fails for running fast on a busy machine.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
         got = fn()
         if got is not None:
             return got
-    return None
+        if time.monotonic() >= deadline:
+            return None
+        time.sleep(0.001)
+
+
+def poll_for(fn, want, timeout=2.0):
+    """Wait until `fn` reports `want`; returns what it last reported."""
+    deadline = time.monotonic() + timeout
+    got = None
+    while True:
+        got = fn()
+        if got is not None and got == want:
+            return got
+        if time.monotonic() >= deadline:
+            return got
+        time.sleep(0.001)
 
 
 def test_tcp_carries_a_value_each_way():
@@ -212,8 +281,7 @@ def test_tcp_waits_for_the_rest_of_a_split_packet():
     Five bytes of an eight-byte packet is not three bytes lost, so they are held
     until the rest arrives rather than being decoded or discarded.
     """
-    port = free_port()
-    dyno = TcpLink('dyno', port=port)
+    dyno, port = dyno_link()
     raw = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         raw.connect(('127.0.0.1', port))
@@ -229,15 +297,20 @@ def test_tcp_waits_for_the_rest_of_a_split_packet():
 
 
 def test_tcp_keeps_only_the_newest_of_a_burst():
+    """Three references, one settled answer: the newest, and it stays.
+
+    Asserted as "wait for 12.0, then it does not change" rather than "read 51
+    times and the 51st is 12.0" -- how many reads it takes for all three to
+    land is the OS's business, not the contract's.
+    """
     sim, dyno, _ = tcp_pair()
     try:
         for v in (10.0, 11.0, 12.0):
             sim.send_reference(v)
-        got = poll(dyno.recv_reference)
+        newest = pytest.approx((12.0, 0.0))
+        assert poll_for(dyno.recv_reference, newest) == newest
         for _ in range(50):
-            dyno.recv_reference()
-        assert dyno.recv_reference() == pytest.approx((12.0, 0.0))
-        assert got is not None
+            assert dyno.recv_reference() == newest   # sticky, never rewinds
     finally:
         sim.close()
         dyno.close()
