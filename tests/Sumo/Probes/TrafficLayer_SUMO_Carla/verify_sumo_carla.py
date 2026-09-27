@@ -44,7 +44,7 @@ TL = REPO / "TrafficLayer" / "x64" / "Release" / "TrafficLayer.exe"
 #: Which bridge this verifies. "py" (default) is the Python bridge -- maintained,
 #: and what run_cosim runs. "cpp" is VirCarlaEnv.exe, and only one BUILT from this
 #: tree. This used to fall back to tests/SumoCarla/VirCarlaEnv.exe when no build
-#: existed: a binary committed in June, before #266 and #358. VirCarlaEnv does not
+#: existed: a binary committed in June, before #266 and all since. VirCarlaEnv does not
 #: compile today (#380), so that fallback was the only thing this probe could run,
 #: and a PASS was a verdict on June's code, not on the code in the tree. FIXS#208.
 BRIDGE = os.environ.get("RS_BRIDGE", "py").lower()

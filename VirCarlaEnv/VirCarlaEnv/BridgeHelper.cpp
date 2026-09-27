@@ -82,7 +82,7 @@ std::string BridgeHelper::map_Sumo_vClass_to_Carla_blueprintId(const std::string
     // (CommonLib/BlueprintPick.h). This used to be random_select_from_set over an
     // unordered_set: a draw from one shared generator, so a vehicle's model -- and
     // with it the pose anchor -- depended on how many vehicles spawned before it,
-    // and a refused spawn re-dealt every later one. FIXS#358 fixed that in Python;
+    // and a refused spawn re-dealt every later one. FIXS#373 fixed that in Python;
     // this is the same fix, held to the same answer by test_blueprint_parity.
     bool unknown = false;
     std::string id = fixs::blueprint::pick(vClass, vehId, fixs::blueprint::kDefaultSeed, &unknown);

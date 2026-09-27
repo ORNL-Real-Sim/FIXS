@@ -117,7 +117,7 @@ int main(int argc, char** argv) {
         dump("Carla-style", mock.events());
         assert(hasInOrder(mock.events(), {
             "initTrafficPool",
-            "spawnVehicle Car(car/passenger) id=v1 -> 0",  // the core names the vehicle (#358)
+            "spawnVehicle Car(car/passenger) id=v1 -> 0",  // the core names the vehicle (#373)
             "setVehiclePose 0 (10.000,0.000,0.100)",   // direct @ A (step 0.1 refresh)
             "spawnVehicle Truck(car/truck) id=v2",     // v2 appears (step 0.2 map)
             "setVehiclePose 0 (20.000,0.000,0.100)",   // direct @ B, NO interpolation (step 0.2 refresh)

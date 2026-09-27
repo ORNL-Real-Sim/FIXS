@@ -2,10 +2,10 @@
 
 The blueprint is not cosmetic: it fixes bounding_box.extent.x, and both bridges
 anchor a vehicle by stepping back that half-length from the nose the wire gives
-them. FIXS#358 made the Python choice a function of (seed, vehicle id) after a
+them. FIXS#373 made the Python choice a function of (seed, vehicle id) after a
 shared random draw re-dealt 46 vehicles and walked the ego 150 m off its
-baseline. The C++ bridge kept the random draw for months afterwards, and nothing
-could see it: the two interfaces did not even take the same arguments.
+baseline. The C++ bridge kept the random draw, and nothing could see it: the two
+interfaces did not even take the same arguments.
 
 This runs the C++ picker (CommonLib/BlueprintPick.h, via blueprint_pick.exe)
 and holds it to the Python one on three things, each of which alone re-deals

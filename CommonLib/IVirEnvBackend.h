@@ -110,7 +110,7 @@ public:
     // vehId is the traffic simulator's id for the vehicle, and the core always
     // passes it. Carla keys its blueprint on it, so what a vehicle looks like --
     // and so where its pose anchor sits -- depends on WHICH vehicle it is, not on
-    // how many spawned before it (FIXS#358). CarMaker's slot pool ignores it. It
+    // how many spawned before it (FIXS#373). CarMaker's slot pool ignores it. It
     // is a required parameter, not a defaulted one: the Python core already passes
     // it, and a backend that forgot it should fail to compile, not silently draw.
     virtual VehHandle spawnVehicle(const std::string& vType, const std::string& vClass,

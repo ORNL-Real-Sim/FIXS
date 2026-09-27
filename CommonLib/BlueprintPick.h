@@ -7,7 +7,7 @@
 // carries, so two models put one car in two places for its whole life. The old
 // draw here took the next value from a shared random generator, so a vehicle's
 // model depended on how many vehicles had drawn before it; a refused spawn
-// re-dealt every later one. Measured on MLK (Python side, FIXS#358): nine
+// re-dealt every later one. Measured on MLK (Python side, FIXS#373): nine
 // refusals, 46 vehicles re-modelled, up to 1.58 m each, the ego 150 m off its
 // baseline. Keyed on the vehicle's id, nothing but WHICH vehicle it is decides.
 //
@@ -16,7 +16,7 @@
 // Python's -- BLAKE2b, 8-byte digest, of "<seed>|<vehId>" in UTF-8, read
 // big-endian, modulo the pool size -- rather than something shorter to write:
 // a different hash would re-deal every vehicle in every seeded baseline the
-// Python bridge has already produced, which is the damage #358 fixed.
+// Python bridge has already produced, which is the damage #373 fixed.
 // tests/VirEnv/test_blueprint_parity.py holds the two to that, including
 // BLAKE2b itself against hashlib across the block boundaries.
 //
