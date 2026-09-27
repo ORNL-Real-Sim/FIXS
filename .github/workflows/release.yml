@@ -48,6 +48,15 @@ on:
   push:
     branches: [main, 'dev_v*', 'beta_v*']
 
+# One run per ref at a time. Two pushes close together used to run side by side
+# and both recreate the same rolling release, so whichever published LAST won -
+# possibly the older commit. Pushes now queue (a newer queued push replaces an
+# older queued one, which is fine: the rolling release only wants the newest).
+# On a PR a new push makes the running build moot, so that one is cancelled. #408.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: write        # create/update the rolling release + tag on publish
   pull-requests: read    # the detect step lists the PR's changed files via the API
