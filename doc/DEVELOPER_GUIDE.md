@@ -240,14 +240,6 @@ Python orchestration script that automates the complete build process. Compiles 
 
 ## Setup Scripts
 
-### `checkRequirements.ps1` / `runCheckRequirements.bat`
-PowerShell script to verify installation requirements and dependencies. Checks for required software installations (Visual Studio, CMake, MATLAB, etc.).
-
-**Usage:**
-```batch
-runCheckRequirements.bat
-```
-
 ### `env.check.py`
 Python environment validation script. Verifies that required Python packages and software dependencies are properly installed.
 
@@ -273,9 +265,8 @@ Utility script to add or modify vehicle message field definitions across the cod
 
 2. **Setup Python Environment:**
    ```batch
-   conda create -n realsimdev python=3.8
-   conda activate realsimdev
-   pip install -r requirements.txt
+   conda env create -f environment.yml
+   conda activate realsim
    ```
 
 3. **Compile External Libraries:**
