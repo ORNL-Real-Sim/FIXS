@@ -114,6 +114,32 @@ def save_config(cfg):
     print(f"[setup] saved CARLA env -> {CONFIG_PATH}")
 
 
+# The CARLA window size, carla.json "carla_res" as "WxH", passed on every launch.
+# Unset, UE4 sizes the window off the desktop - too big on a wide screen.
+DEFAULT_CARLA_RES = "1280x720"
+
+
+def parse_res(text):
+    """(width, height) from "WxH", or None when it is not two positive integers."""
+    m = re.fullmatch(r"\s*(\d+)\s*[xX]\s*(\d+)\s*", text if isinstance(text, str) else "")
+    if not m:
+        return None
+    w, h = int(m.group(1)), int(m.group(2))
+    return (w, h) if w > 0 and h > 0 else None
+
+
+def _saved_carla_res():
+    """carla_res from the carla.json on disk, if it holds a valid one, else None.
+    Read raw rather than through load_config: setup runs on a config that call
+    may have rejected, and the window size is still the user's."""
+    try:
+        with open(CONFIG_PATH, encoding="utf-8") as f:
+            res = json.load(f).get("carla_res")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return res if parse_res(res) else None
+
+
 # Which tool provides the python env, as setup asked it (_ask_env_manager):
 #   {"env_manager": "conda" | "uv" | "system"}
 # plus, when FIXS installed conda or uv itself, where it put them ("conda_root",
@@ -1655,6 +1681,10 @@ def run_setup(allow_packaged_windows=False):
     wheel = ensure_carla(cfg["python"], cfg["mode"], cfg.get("carla_root"))
     if wheel:
         cfg["carla_wheel"] = wheel
+    # Not a setup question: kept from the file this replaces, else seeded so the
+    # key is there to edit. 'client' has no CARLA window here to size.
+    if cfg["mode"] != "client":
+        cfg["carla_res"] = _saved_carla_res() or DEFAULT_CARLA_RES
 
     save_config(cfg)
     # Not "on another host": a remote CARLA is one of the things this answer

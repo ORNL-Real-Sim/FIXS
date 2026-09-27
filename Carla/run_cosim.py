@@ -1340,7 +1340,31 @@ def _carla_command(cfg, port, render_offscreen, quality_level=None, level=None):
         cmd.append(f"-quality-level={quality_level}")  # Low is much cheaper to render
     if render_offscreen:
         cmd.append("-RenderOffScreen")  # headless, no display (Linux/CI)
+    else:
+        # UE4's own command line (GameEngine.cpp), so packaged and editor -game alike.
+        w, h = _window_res(cfg)
+        cmd += ["-windowed", f"-ResX={w}", f"-ResY={h}"]
     return cmd
+
+
+def _window_res(cfg):
+    """The CARLA window size carla.json asks for, else the default."""
+    saved = cfg.get("carla_res")
+    res = env.parse_res(saved)
+    if res is None:
+        if saved is not None:
+            print(f"[CARLA] carla.json carla_res {saved!r} is not WxH; using "
+                  f"{env.DEFAULT_CARLA_RES}.")
+        res = env.parse_res(env.DEFAULT_CARLA_RES)
+    return res
+
+
+def _res_arg(text):
+    """argparse type for --carla-res: normalises to "WxH"."""
+    res = env.parse_res(text)
+    if res is None:
+        raise argparse.ArgumentTypeError(f"expected WIDTHxHEIGHT, e.g. 1280x720, got {text!r}")
+    return f"{res[0]}x{res[1]}"
 
 
 def launch_carla(cfg, port=2000, render_offscreen=False, quality_level=None, level=None):
@@ -3595,6 +3619,9 @@ def main():
                     help=argparse.SUPPRESS)   # deprecated: see --carla-tick
     ap.add_argument("--quality-level", choices=["Low", "Medium", "High", "Epic"], default=None,
                     help="CARLA render quality; Low is much faster on heavy maps")
+    # CARLA window WxH, saved to carla.json "carla_res" for later runs. Hidden
+    # from --help for now.
+    ap.add_argument("--carla-res", type=_res_arg, default=None, help=argparse.SUPPRESS)
     ap.add_argument("--fast", action="store_true",
                     help="do not pace the co-sim to real time (run as fast as "
                          "possible). Written to CarlaSetup.RealtimePacing, so it "
@@ -3887,6 +3914,10 @@ def main():
         # may not return (re-execs under the env python). --reconfigure is dropped:
         # it has already been honoured above, and the child must not ask again.
         env.reexec_under_configured(__file__, cfg, drop=("--reconfigure",), tag="cosim")
+        if args.carla_res and args.carla_res != cfg.get("carla_res"):
+            cfg["carla_res"] = args.carla_res
+            env.save_config(cfg)
+            print(f"[cosim] CARLA window {args.carla_res}, kept for later runs.")
         if cfg.get("mode") == "client" and args.carla_only:
             sys.exit("[cosim] --carla-only serves a CARLA on THIS machine, but "
                      "carla.json is 'client' mode (no CARLA here). Run it on the "
