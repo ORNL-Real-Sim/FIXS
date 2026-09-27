@@ -220,6 +220,42 @@ function Select-Release($releases) {
     return ($releases | Where-Object { $_.tag_name -eq $default } | Select-Object -First 1)
 }
 
+function Grant-TrafficLayerFirewall($exe) {
+    # TrafficLayer listens on all interfaces (a remote XIL client has to reach
+    # it), so the first launch from a new path pops Windows Defender Firewall's
+    # "allow access" dialog. That rule is keyed on the exe PATH, so every fresh
+    # app checkout asked again mid co-sim. Creating it here, once per install,
+    # moves the question to setup. Creating a rule needs admin; unelevated we
+    # print the one command to run instead. Never fails the install: the bundle
+    # is complete either way, and a local-only run works without the rule.
+    # Windows-only concern, so update_fixs.sh has no counterpart.
+    if (-not (Test-Path $exe)) { return }
+    try {
+        $existing = @(Get-NetFirewallApplicationFilter -Program $exe -ErrorAction SilentlyContinue |
+            Get-NetFirewallRule | Where-Object {
+                $_.Enabled -eq 'True' -and $_.Direction -eq 'Inbound' -and $_.Action -eq 'Allow' })
+        if ($existing.Count -gt 0) {
+            Write-Host "Firewall: inbound rule for TrafficLayer.exe already present."
+            return
+        }
+        $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+            [Security.Principal.WindowsBuiltInRole]::Administrator)
+        if ($admin) {
+            New-NetFirewallRule -DisplayName 'FIXS TrafficLayer' -Direction Inbound -Action Allow `
+                -Program $exe -Profile Any | Out-Null
+            Write-Host "Firewall: added inbound allow rule 'FIXS TrafficLayer' for $exe"
+            return
+        }
+    } catch {
+        Write-Host "Firewall: could not check/add a rule ($($_.Exception.Message))."
+    }
+    Write-Host ""
+    Write-Host "Firewall: no inbound rule for TrafficLayer.exe, and this shell is not elevated."
+    Write-Host "  Windows will ask to allow it on the first co-sim run. To set it up once instead,"
+    Write-Host "  run this in an Administrator prompt:"
+    Write-Host "    netsh advfirewall firewall add rule name=`"FIXS TrafficLayer`" dir=in action=allow program=`"$exe`" enable=yes profile=any"
+}
+
 # ---------------------------------------------------------------------------
 # Resolve the release.
 #
@@ -303,6 +339,9 @@ if ((Test-Path $VersionFile) -and -not $release.prerelease) {
     $current = (Get-Content $VersionFile | Select-Object -First 1).Trim()
     if ($current -eq $Version) {
         Write-Host "FIXS $Version is already installed (delete $VersionFile to force)."
+        # Re-running the update is also how an unelevated first install gets
+        # a second chance at the rule, so check here too.
+        Grant-TrafficLayerFirewall (Join-Path $OutputDir 'TrafficLayer.exe')
         exit 0
     }
 }
@@ -388,6 +427,8 @@ if (Test-Path (Join-Path $OutputDir 'BUILD_INFO.txt')) {
     Write-Host "Build details:"
     Get-Content (Join-Path $OutputDir 'BUILD_INFO.txt') | Select-Object -First 15
 }
+Write-Host ""
+Grant-TrafficLayerFirewall (Join-Path $OutputDir 'TrafficLayer.exe')
 
 # Declare success explicitly so the caller can trust $LASTEXITCODE rather than
 # whatever the last command happened to leave behind.
