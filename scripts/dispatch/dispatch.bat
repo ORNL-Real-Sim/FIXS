@@ -145,11 +145,18 @@ REM Step 4c: Carla virtual environment (libcarla + VirCarlaEnv)
 REM   PUBLIC component (open-source Carla) - NOT gated by
 REM   RS_FIXS_AUTOMATION; it builds on CI too. Skips internally
 REM   when Carla is not configured (~/.fixs/carla.json). #109.
+REM   A skip exits 0; a nonzero exit is a real build failure, which
+REM   is fatal under RS_FIXS_AUTOMATION: the release ships Carla, so
+REM   it must not ship without VirCarlaEnv.exe. #380.
 REM ============================================================
 echo [4c/9] Building Carla virtual environment (VirCarlaEnv)...
 call powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0\4c_carla_virenv.ps1" -RunMode inline
 if !ERRORLEVEL! neq 0 (
-    echo WARNING: VirCarlaEnv build failed or skipped
+    if defined RS_FIXS_AUTOMATION (
+        echo ERROR: VirCarlaEnv build failed - a release must not ship without it
+        goto :failed
+    )
+    echo WARNING: VirCarlaEnv build failed
 )
 echo.
 
