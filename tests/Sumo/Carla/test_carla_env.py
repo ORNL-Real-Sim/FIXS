@@ -150,6 +150,75 @@ def test_carla_command_packaged_carries_no_editor_flags(tmp_path):
     assert "-DisableFrameTraceCapture" not in cmd
 
 
+def _res_flags(cmd):
+    return [c for c in cmd if c == "-windowed" or c.startswith(("-ResX=", "-ResY="))]
+
+
+def test_carla_command_default_window_is_1280x720(tmp_path):
+    """No carla_res saved -> 1280x720, not UE4's desktop-sized window."""
+    root = str(tmp_path / "carla")
+    _make_packaged(root)
+    cfg = {"mode": "packaged", "carla_root": root}
+    cmd = run_cosim._carla_command(cfg, 2000, render_offscreen=False)
+    assert _res_flags(cmd) == ["-windowed", "-ResX=1280", "-ResY=720"]
+
+
+def test_carla_command_uses_saved_res_packaged_and_source(tmp_path):
+    root = str(tmp_path / "pkg")
+    _make_packaged(root)
+    cmd = run_cosim._carla_command({"mode": "packaged", "carla_root": root,
+                                    "carla_res": "960x540"}, 2000, render_offscreen=False)
+    assert _res_flags(cmd) == ["-windowed", "-ResX=960", "-ResY=540"]
+
+    carla_root, ue4_root, _, _ = _make_source(tmp_path)
+    cmd = run_cosim._carla_command({"mode": "source", "carla_root": carla_root,
+                                    "ue4_root": ue4_root, "carla_res": "1600x900"},
+                                   2000, render_offscreen=False)
+    assert _res_flags(cmd) == ["-windowed", "-ResX=1600", "-ResY=900"]
+
+
+def test_carla_command_bad_saved_res_falls_back(tmp_path, capsys):
+    root = str(tmp_path / "carla")
+    _make_packaged(root)
+    cfg = {"mode": "packaged", "carla_root": root, "carla_res": "big"}
+    cmd = run_cosim._carla_command(cfg, 2000, render_offscreen=False)
+    assert _res_flags(cmd) == ["-windowed", "-ResX=1280", "-ResY=720"]
+    assert "'big' is not WxH" in capsys.readouterr().out
+
+
+def test_carla_command_offscreen_has_no_window_flags(tmp_path):
+    """No window to size: the offscreen command is left as it was."""
+    root = str(tmp_path / "carla")
+    _make_packaged(root)
+    cfg = {"mode": "packaged", "carla_root": root, "carla_res": "960x540"}
+    assert _res_flags(run_cosim._carla_command(cfg, 2000, render_offscreen=True)) == []
+
+
+@pytest.mark.parametrize("text, want", [("1280x720", "1280x720"), (" 960X540 ", "960x540")])
+def test_res_arg_normalises(text, want):
+    assert run_cosim._res_arg(text) == want
+
+
+@pytest.mark.parametrize("text", ["1280", "1280x", "x720", "0x720", "1280x-1", "1280*720", ""])
+def test_res_arg_rejects(text):
+    import argparse
+    with pytest.raises(argparse.ArgumentTypeError):
+        run_cosim._res_arg(text)
+
+
+def test_saved_carla_res(tmp_path, monkeypatch):
+    """What setup carries over: a valid carla_res from the file on disk, else None."""
+    path = tmp_path / "carla.json"
+    monkeypatch.setattr(env, "CONFIG_PATH", str(path))
+    assert env._saved_carla_res() is None                      # no file
+    path.write_text('{"mode": "weird", "carla_res": "1600x900"}', encoding="utf-8")
+    assert env._saved_carla_res() == "1600x900"                # kept even if load_config rejects
+    path.write_text('{"mode": "packaged", "carla_res": "huge"}', encoding="utf-8")
+    assert env._saved_carla_res() is None
+    path.write_text('[]', encoding="utf-8")
+    assert env._saved_carla_res() is None
+
+
 def test_carla_command_packaged_missing_raises(tmp_path):
     cfg = {"mode": "packaged", "carla_root": str(tmp_path / "empty")}
     with pytest.raises(FileNotFoundError):
