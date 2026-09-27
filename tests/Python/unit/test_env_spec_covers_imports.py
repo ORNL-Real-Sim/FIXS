@@ -62,6 +62,26 @@ def _declared():
     return out
 
 
+def _declared_pyproject():
+    """Package names in pyproject.toml's [project] dependencies (the uv env).
+
+    A regex rather than tomllib, which python 3.10 - the env's own version - lacks."""
+    with open(os.path.join(ROOT, "pyproject.toml"), encoding="utf-8") as f:
+        text = f.read()
+    block = re.search(r"^dependencies\s*=\s*\[(.*?)^\]", text, re.M | re.S).group(1)
+    lines = (ln.split("#")[0] for ln in block.splitlines())
+    return {re.match(r"[A-Za-z0-9_.\-]+", s).group(0).lower()
+            for ln in lines for s in re.findall(r'"([^"]+)"', ln)}
+
+
+#: environment.yml entries that are conda's business, not packages uv installs.
+CONDA_ONLY = {"python", "pip", "vs2015_runtime", "vc14_runtime"}
+
+#: pyproject.toml entries environment.yml leaves out (they are on PyPI, and uv has
+#: no reason to defer them the way the conda spec does).
+UV_ONLY = {"traci", "sumolib"}
+
+
 def _local_names():
     """Top-level names that resolve inside this repo rather than site-packages.
 
@@ -134,6 +154,24 @@ def test_every_shipped_import_is_declared():
     assert not missing, "environment.yml does not declare: " + "; ".join(
         f"{imp} (imported by {', '.join(sorted(set(files))[:3])})"
         for imp, files in sorted(missing.items()))
+
+
+def test_every_shipped_import_is_declared_in_pyproject():
+    missing = _undeclared(_declared_pyproject())
+    assert not missing, "pyproject.toml does not declare: " + "; ".join(
+        f"{imp} (imported by {', '.join(sorted(set(files))[:3])})"
+        for imp, files in sorted(missing.items()))
+
+
+def test_pyproject_and_environment_yml_declare_the_same_env():
+    """Two specs for one env: a package added to one and not the other is how
+    the uv env and the conda env would start to differ."""
+    yml = _declared() - CONDA_ONLY
+    uv = _declared_pyproject()
+    assert UV_ONLY <= uv, f"pyproject.toml no longer declares {sorted(UV_ONLY - uv)}"
+    uv -= UV_ONLY
+    assert yml == uv, (f"only in environment.yml: {sorted(yml - uv)}; "
+                       f"only in pyproject.toml: {sorted(uv - yml)}")
 
 
 def test_the_check_reports_a_package_that_is_absent():
