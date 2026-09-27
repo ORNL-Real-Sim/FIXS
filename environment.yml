@@ -24,8 +24,9 @@ dependencies:
   # standalone/run_synchronization/sumo_integration/sumo_simulation.py imports
   # lxml.etree, and nothing else installs it, so it has to be declared here.
   - lxml
-  - vs2015_runtime
-  - vc14_runtime
+  # No vs2015_runtime / vc14_runtime: they exist for Windows only, so listing them
+  # failed every Linux build of this spec, and on Windows python itself depends on
+  # vc14_runtime - a solve with or without them installs the same 103 packages.
   - pip
   # No carla, traci or sumolib here on purpose. The release zip strips *.whl from
   # Carla/ (scripts/dispatch/8_create_zip.ps1), so a wheel path in this spec makes
