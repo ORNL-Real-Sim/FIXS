@@ -220,6 +220,62 @@ function Select-Release($releases) {
     return ($releases | Where-Object { $_.tag_name -eq $default } | Select-Object -First 1)
 }
 
+function Grant-TrafficLayerFirewall($exe) {
+    # TrafficLayer listens on all interfaces (a remote XIL client has to reach
+    # it), so the first launch from a new path pops Windows Defender Firewall's
+    # "allow access" dialog. That rule is keyed on the exe PATH, so every fresh
+    # app checkout asked again mid co-sim. Creating it here, once per install,
+    # moves the question to setup. Creating a rule needs admin: elevated we just
+    # add it; unelevated and interactive we ask, and a yes raises one UAC
+    # prompt; otherwise we print the one command to run. Never fails the
+    # install: the bundle is complete either way, and a local-only run works
+    # without the rule. Windows-only concern, so update_fixs.sh has no
+    # counterpart.
+    if (-not (Test-Path $exe)) { return }
+    $hasRule = {
+        @(Get-NetFirewallApplicationFilter -Program $exe -ErrorAction SilentlyContinue |
+            Get-NetFirewallRule | Where-Object {
+                $_.Enabled -eq 'True' -and $_.Direction -eq 'Inbound' -and $_.Action -eq 'Allow' }).Count -gt 0
+    }
+    $netshArgs = "advfirewall firewall add rule name=`"FIXS TrafficLayer`" dir=in action=allow program=`"$exe`" enable=yes profile=any"
+    try {
+        if (& $hasRule) {
+            Write-Host "Firewall: inbound rule for TrafficLayer.exe already present."
+            return
+        }
+        $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+            [Security.Principal.WindowsBuiltInRole]::Administrator)
+        if ($admin) {
+            Start-Process netsh -ArgumentList $netshArgs -Wait -NoNewWindow | Out-Null
+        } elseif ([Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
+            Write-Host ""
+            Write-Host "Firewall: TrafficLayer.exe has no inbound rule yet, so Windows will pop an" -ForegroundColor Yellow
+            Write-Host "  'allow access' dialog during the first co-sim run. Adding the rule now" -ForegroundColor Yellow
+            Write-Host "  needs administrator approval (one Windows UAC prompt)." -ForegroundColor Yellow
+            $answer = Read-Host "Add the firewall rule now? [Y/n]"
+            if ($answer -notmatch '^\s*[nN]') {
+                try {
+                    Start-Process netsh -ArgumentList $netshArgs -Verb RunAs -Wait -WindowStyle Hidden | Out-Null
+                } catch {
+                    Write-Host "  UAC prompt declined or failed ($($_.Exception.Message))."
+                }
+            }
+        }
+        if (& $hasRule) {
+            Write-Host "Firewall: added inbound allow rule 'FIXS TrafficLayer' for $exe" -ForegroundColor Green
+            Write-Host ""
+            return
+        }
+    } catch {
+        Write-Host "Firewall: could not check/add a rule ($($_.Exception.Message))."
+    }
+    Write-Host ""
+    Write-Host "Firewall: no inbound rule for TrafficLayer.exe. Windows will ask to allow it on" -ForegroundColor Yellow
+    Write-Host "  the first co-sim run. To set it up once instead, run this in an Administrator prompt:" -ForegroundColor Yellow
+    Write-Host "    netsh $netshArgs"
+    Write-Host ""
+}
+
 # ---------------------------------------------------------------------------
 # Resolve the release.
 #
@@ -303,6 +359,9 @@ if ((Test-Path $VersionFile) -and -not $release.prerelease) {
     $current = (Get-Content $VersionFile | Select-Object -First 1).Trim()
     if ($current -eq $Version) {
         Write-Host "FIXS $Version is already installed (delete $VersionFile to force)."
+        # Re-running the update is also how an unelevated first install gets
+        # a second chance at the rule, so check here too.
+        Grant-TrafficLayerFirewall (Join-Path $OutputDir 'TrafficLayer.exe')
         exit 0
     }
 }
@@ -388,6 +447,8 @@ if (Test-Path (Join-Path $OutputDir 'BUILD_INFO.txt')) {
     Write-Host "Build details:"
     Get-Content (Join-Path $OutputDir 'BUILD_INFO.txt') | Select-Object -First 15
 }
+Write-Host ""
+Grant-TrafficLayerFirewall (Join-Path $OutputDir 'TrafficLayer.exe')
 
 # Declare success explicitly so the caller can trust $LASTEXITCODE rather than
 # whatever the last command happened to leave behind.
