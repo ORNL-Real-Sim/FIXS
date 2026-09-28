@@ -96,18 +96,6 @@ class ConfigHelper:
             raise SystemExit(
                 "ERROR: XilSetup.Transport must be one of inprocess|udp|tcp, got '%s'"
                 % self.Xil_setup["Transport"])
-        # The bench itself: what vehicle is on it, and what the dyno does. Both
-        # are passed to CommonLib.xil by name, so the yaml names the parameter
-        # rather than restating a list that would then have to be kept in step.
-        # An unknown one is refused there, not ignored.
-        self.Xil_setup["Vehicle"] = dict(xil_node.get("Vehicle") or {})
-        self.Xil_setup["Dyno"] = dict(xil_node.get("Dyno") or {})
-        # The ROBOT DRIVER on the bench. Its own block because it is not the
-        # vehicle and not the dyno: on a real cell it is the one of the three
-        # that is yours to set. Capping its pedal is how a bench is held to an
-        # acceleration envelope without pretending the vehicle has less torque
-        # than it has (#24).
-        self.Xil_setup["Driver"] = dict(xil_node.get("Driver") or {})
 
         # Carla Setup
         carla_node = config.get("CarlaSetup", {})

@@ -1,9 +1,9 @@
-"""fixs.xil -- the simulated dynamometer, when the scenario asks for one.
+"""fixs.xil -- the simulated dynamometer FIXS ships.
 
     import fixs.xil
 
-    dyno = fixs.xil.dynosim()       # None unless XilSetup.EnableXil
-    if dyno is not None:
+    if fixs.xil.enabled():
+        dyno = fixs.xil.dynosim(vehicle={'mass_kg': 2100.0})
         vRef = dyno.exchange(vRef, dt)
 
 FIXS ships the simulated dyno and nothing else. Which dyno answers a run is
@@ -24,19 +24,13 @@ def enabled(configPath=None):
     return bool(config.get('xil', configPath)['enable_xil'])
 
 
-def dynosim(configPath=None, vehicle=None, dyno=None, driver=None):
-    """The simulated dyno this scenario describes, or None unless EnableXil.
-
-    Vehicle, dyno and robot-driver parameters come from ``XilSetup.Vehicle``,
-    ``Dyno`` and ``Driver``; any given here win over the yaml. CommonLib.xil
-    refuses a parameter it does not know, so a typo fails the run.
+def dynosim(vehicle=None, dyno=None, driver=None):
+    """The simulated dyno, built from the vehicle, dyno and robot-driver
+    parameters given. Reads no scenario: whether one is in the loop is the
+    caller's question (:func:`enabled`, ``fixs.config.get('xil')``).
+    CommonLib.xil refuses a parameter it does not know, so a typo fails.
     """
-    xil = config.get('xil', configPath)
-    if not xil['enable_xil']:
-        return None
-    return _Dyno(vehicle=dict(xil['vehicle'] or {}, **(vehicle or {})),
-                 dyno=dict(xil['dyno'] or {}, **(dyno or {})),
-                 driver=dict(xil['driver'] or {}, **(driver or {})))
+    return _Dyno(vehicle=vehicle, dyno=dyno, driver=driver)
 
 
 class _Dyno:
