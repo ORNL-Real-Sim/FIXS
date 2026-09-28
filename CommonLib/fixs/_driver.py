@@ -21,9 +21,10 @@ is the glue, and it is the whole of what this module asks for.
 
 Pass nothing and nothing is in the loop. This module never goes looking for a
 dyno -- deciding one is there belongs to the caller, so passing a function IS
-the declaration. For the simulated dyno, pass the one FIXS already has::
+the declaration. For the simulated dyno, wrap the one FIXS already has::
 
-    Controller = fixs.driver(fixs.xil.exchange)
+    dyno = fixs.xil.dynosim()
+    Controller = fixs.driver(lambda vref, dt: dyno.exchange(vref, 0.0, dt))
 
 which is a function like any other and holds no privilege over yours.
 
@@ -358,8 +359,8 @@ class Controller:
         #: Whatever was handed to fixs.driver(), and nothing else: this module
         #: never goes looking for a cell. Deciding one is in the loop is the
         #: caller's, so passing a function IS the declaration and there is no
-        #: flag here to disagree with it. fixs.xil.exchange is one such
-        #: function, for the simulated cell; a rig's own is another.
+        #: flag here to disagree with it. A wrapper around fixs.xil.dynosim() is
+        #: one such function, for the simulated cell; a rig's own is another.
         self._exchange = self._EXCHANGE
         self.benchInLoop = self._exchange is not None
         #: Ticks the cell did not answer usefully. Counted here, not asked of
@@ -819,8 +820,8 @@ def driver(exchange=None, usercontrol=None, **options):
     dyno reached comes back. Return None on a tick it could not answer and the
     reference passes through untouched; those are counted and reported.
 
-    Omit it and nothing is in the loop. For the simulated cell, pass
-    ``fixs.xil.exchange``; for yours, pass yours::
+    Omit it and nothing is in the loop. For the simulated cell, wrap
+    ``fixs.xil.dynosim().exchange(vref, aref, dt)``; for yours, pass yours::
 
         Controller = fixs.driver(exchange)
 

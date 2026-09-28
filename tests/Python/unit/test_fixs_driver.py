@@ -108,7 +108,7 @@ def test_the_simulated_dyno_is_passed_in_like_any_other(scenario):
     bench = xil.dynosim(vehicle={'mass_kg': 900.0})
 
     def exchange(vref, dt):
-        return bench.exchange(vref, dt)
+        return bench.exchange(vref, 0.0, dt)
 
     d = _build(driver(exchange))
     assert d.benchInLoop is True

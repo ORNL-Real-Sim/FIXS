@@ -94,7 +94,7 @@ def test_the_bench_holds_the_speed_it_is_given():
     d = fixsxil.dynosim()
     try:
         for _ in range(400):                    # 20 s at the CARLA step
-            got = d.exchange(15.0, 0.05)
+            got = d.exchange(15.0, 0.0, 0.05)
         assert got == pytest.approx(15.0, abs=0.05)
         assert d.misses == 0
 
@@ -199,7 +199,7 @@ def test_a_light_bench_reaches_its_reference_far_sooner():
     try:
         def stepsTo(d, target):
             for n in range(1, 2001):
-                if d.exchange(target, 0.05) >= 0.95 * target:
+                if d.exchange(target, 0.0, 0.05) >= 0.95 * target:
                     return n
             return None
         nHeavy, nLight = stepsTo(heavy, 10.0), stepsTo(light, 10.0)
@@ -285,3 +285,31 @@ def test_the_envelope_ramps_rather_than_clamping():
         worst = max(worst, (v - p) / 0.1)
         p = v
     assert worst < 2.0, worst
+
+
+# -- openpilot's hold: slow and not asked to accelerate means brake -----------
+
+HOLD = {'stop_speed_mps': 0.3, 'stop_accel_mps2': 0.1}
+
+
+def test_the_hold_is_off_by_default():
+    a, b = fixsxil.dynosim(), fixsxil.dynosim()
+    for _ in range(40):
+        assert a.exchange(0.15, 0.0, 0.05) == b.exchange(0.15, 1.0, 0.05)
+
+
+def test_the_hold_keeps_a_slow_small_command_at_rest():
+    d = fixsxil.dynosim(driver=HOLD)
+    assert max(d.exchange(0.15, 0.0, 0.05) for _ in range(60)) == 0.0
+
+
+def test_the_hold_lets_go_when_asked_to_accelerate():
+    d = fixsxil.dynosim(driver=HOLD)
+    assert [d.exchange(0.15, 1.5, 0.05) for _ in range(60)][-1] > 0.1
+
+
+def test_the_hold_only_applies_while_slow():
+    d = fixsxil.dynosim(driver=HOLD)
+    for _ in range(200):
+        d.exchange(1.0, 1.5, 0.05)
+    assert d.exchange(1.0, 0.0, 0.05) > 0.9

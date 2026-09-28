@@ -39,7 +39,7 @@ import fixs
 # dyno = fixs.xil.dynosim(vehicle={'mass_kg': 2100.0})   # or your own rig
 #
 # def exchange(vref, dt):
-#     return dyno.exchange(vref, dt)                  # a speed in, reached out
+#     return dyno.exchange(vref, 0.0, dt)             # speed and accel in, reached out
 
 
 # --------------------------------------------------------------------------- #
@@ -51,7 +51,7 @@ import fixs
 #  the one that names it.
 #
 #  A DYNAMOMETER STILL WORKS: uncomment the block above too and call it inside
-#  my_control, wherever you want it -- `target = dyno.exchange(target, dt)`.
+#  my_control, wherever you want it -- `target = dyno.exchange(target, 0.0, dt)`.
 #  What you cannot do is pass BOTH to fixs.driver(): replacing the driving
 #  leaves no point in the tick for an exchange to be called from, so that is
 #  refused rather than silently ignored.

@@ -4,7 +4,7 @@
 
     if fixs.xil.enabled():
         dyno = fixs.xil.dynosim(vehicle={'mass_kg': 2100.0})
-        vRef = dyno.exchange(vRef, dt)
+        vRef = dyno.exchange(vRef, aRef, dt)
 
 FIXS ships the simulated dyno and nothing else. Which dyno answers a run is
 the application's choice: ``Transport: udp`` means it talks to a rig of its
@@ -47,16 +47,20 @@ class _Dyno:
         self.link = LocalLink()
         self.misses = 0
 
-    def exchange(self, speed, dt, steer=0.0):
-        """(float, float) -> float -- step the bench once by dt, return its speed."""
-        self.link.send_reference(speed, steer)
+    def exchange(self, vref, aref, dt):
+        """Step the bench once by dt and return the speed it reached.
+
+        vref is the speed command (m/s); aref the acceleration command (m/s^2),
+        read only by the robot driver's hold (``stop_speed_mps``/``stop_accel_mps2``).
+        """
+        self.link.send_reference(vref)
         reference = self.link.recv_reference()
-        self.sim.step(reference[0] if reference else 0.0, dt)
+        self.sim.step(reference[0] if reference else 0.0, dt, a_ref=aref)
         self.link.send_measurement(self.sim.speed)
         got = self.link.recv_measurement()
         if got is None:
             self.misses += 1
-            return speed
+            return vref
         return got[0]
 
     def age(self):
