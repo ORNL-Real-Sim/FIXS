@@ -36,7 +36,7 @@ import fixs
 # --------------------------------------------------------------------------- #
 # import fixs.xil
 #
-# dyno = fixs.xil.dyno(vehicle={'mass_kg': 2100.0})   # or your own rig
+# dyno = fixs.xil.dynosim(vehicle={'mass_kg': 2100.0})   # or your own rig
 #
 # def exchange(vref, dt):
 #     return dyno.exchange(vref, dt)                  # a speed in, reached out

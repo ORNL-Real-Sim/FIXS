@@ -121,7 +121,7 @@ VehicleSubscription:
 | VehicleSubscription | list | [] | Same schema as the application-layer subscriptions. |
 | SignalSubscription | list | [] | Signal subscriptions for XIL. |
 | DetectorSubscription | list | [] | Detector subscriptions for XIL. |
-| Transport | string | inprocess | `inprocess`: FIXS's simulated dyno (`fixs.xil.dyno()`). `udp`: the application talks to its own rig at the first VehicleSubscription's ip; FIXS opens no socket. `tcp`: reserved. |
+| Transport | string | inprocess | `inprocess`: FIXS's simulated dyno (`fixs.xil.dynosim()`). `udp`: the application talks to its own rig at the first VehicleSubscription's ip and port; FIXS opens no socket. `tcp`: reserved. |
 
 When the application layer is disabled but XIL is enabled, the interface automatically reuses the XIL vehicle subscriptions to seed outbound traffic.
 

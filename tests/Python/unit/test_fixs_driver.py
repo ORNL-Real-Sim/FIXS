@@ -105,7 +105,7 @@ def test_the_simulated_dyno_is_passed_in_like_any_other(scenario):
     """The bench is built with its parameters, and the exchange is a function
     the caller writes -- the same two lines a rig owner replaces."""
     from CommonLib.fixs import xil
-    bench = xil.dyno(vehicle={'mass_kg': 900.0})
+    bench = xil.dynosim(vehicle={'mass_kg': 900.0})
 
     def exchange(vref, dt):
         return bench.exchange(vref, dt)

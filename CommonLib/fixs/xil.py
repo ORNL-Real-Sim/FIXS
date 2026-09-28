@@ -2,18 +2,18 @@
 
     import fixs.xil
 
-    dyno = fixs.xil.dyno()          # a DynoSim for Transport: inprocess, else None
+    dyno = fixs.xil.dynosim()       # None unless XilSetup.EnableXil
     if dyno is not None:
         vRef = dyno.exchange(vRef, dt)
 
-FIXS ships the simulated dyno and nothing else. ``Transport: udp`` or ``tcp``
-names a wire the application speaks itself, to the address in
-``fixs.config.get('xil')['ip']``; FIXS opens no socket for it.
+FIXS ships the simulated dyno and nothing else. Which dyno answers a run is
+the application's choice: ``Transport: udp`` means it talks to a rig of its
+own, at ``fixs.config.get('xil')['ip']`` and ``['port']``.
 """
 
 from . import config
 
-__all__ = ['enabled', 'dyno']
+__all__ = ['enabled', 'dynosim']
 
 
 def enabled(configPath=None):
@@ -24,15 +24,15 @@ def enabled(configPath=None):
     return bool(config.get('xil', configPath)['enable_xil'])
 
 
-def dyno(configPath=None, vehicle=None, dyno=None, driver=None):
-    """The simulated dyno for ``Transport: inprocess``, else None.
+def dynosim(configPath=None, vehicle=None, dyno=None, driver=None):
+    """The simulated dyno this scenario describes, or None unless EnableXil.
 
     Vehicle, dyno and robot-driver parameters come from ``XilSetup.Vehicle``,
     ``Dyno`` and ``Driver``; any given here win over the yaml. CommonLib.xil
     refuses a parameter it does not know, so a typo fails the run.
     """
     xil = config.get('xil', configPath)
-    if not xil['enable_xil'] or xil['transport'] != 'inprocess':
+    if not xil['enable_xil']:
         return None
     return _Dyno(vehicle=dict(xil['vehicle'] or {}, **(vehicle or {})),
                  dyno=dict(xil['dyno'] or {}, **(dyno or {})),
@@ -40,7 +40,7 @@ def dyno(configPath=None, vehicle=None, dyno=None, driver=None):
 
 
 class _Dyno:
-    """The simulated bench. ``exchange`` sends a speed and returns the one reached."""
+    """The simulated bench. ``exchange`` steps it once and returns the speed reached."""
 
     def __init__(self, vehicle=None, dyno=None, driver=None):
         from CommonLib.xil.driver import RobotDriver
@@ -48,7 +48,6 @@ class _Dyno:
         from CommonLib.xil.link import LocalLink
         from CommonLib.xil.vehicle import Vehicle
 
-        self.transport = 'inprocess'
         self.sim = DynoSim(Vehicle(**(vehicle or {})), Dyno(**(dyno or {})),
                            RobotDriver(**(driver or {})))
         self.link = LocalLink()
