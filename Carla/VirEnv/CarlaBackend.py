@@ -691,6 +691,9 @@ class CarlaBackend(IVirEnvBackend):
             return kNoHandle
         self._egoActor = actor
         self._egoActor.set_simulate_physics(True)     # full PhysX: tire contact, dynamics
+        # The autobox starts in neutral and will not leave it below ~15% throttle.
+        # One tick in first gear fixes that; the autobox then keeps first through stops.
+        self._egoActor.apply_control(carla.VehicleControl(manual_gear_shift=True, gear=1))
         self._egoAwaitingSnapshot = True             # no pose until CARLA ticks
         print('L0 ego spawned: %s actor %d (physics ON)' % (blueprintId, actor.id))
         return int(actor.id)
