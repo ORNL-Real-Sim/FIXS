@@ -283,7 +283,7 @@ def _options(config, overrides=None):
     wrote after the controller's path overrides both -- because the scenario
     is the thing an operator edits without touching code."""
     over = dict(overrides or {})
-    known = {'shape', 'loop', 'tuning', 'limits', 'idealSpeedTracking'}
+    known = {'shape', 'loop', 'tuning', 'limits', 'idealSpeedTracking', 'firstGear'}
     unknown = set(over) - known
     if unknown:
         raise TypeError('fixs.driver(): unknown option(s) %s -- known: %s'
@@ -313,6 +313,7 @@ def _options(config, overrides=None):
                         % type(opt.limits).__name__)
     opt.idealSpeedTracking = bool(
         over.get('idealSpeedTracking', IDEAL_SPEED_TRACKING))
+    opt.firstGear = bool(over.get('firstGear', False))
     return opt
 
 
@@ -334,6 +335,10 @@ class Controller:
         #: How close it comes to a bar or a leader. Policy, not tuning.
         self.limits = opt.limits
         self.idealSpeedTracking = opt.idealSpeedTracking
+        #: Put the ego in first gear on the first step: CARLA's autobox leaves a
+        #: spawned car in neutral below ~15% throttle, so a creeping pedal never moves it.
+        self.firstGear = opt.firstGear
+        self._inGear = False
         self.dt = float(config.get('CarlaTimeStep') or 0.1)
         self.fallbackSpeed = float(config.get('EgoTargetSpeed') or 8.33)
         self.useAdvisory = USE_ADVISORY
@@ -478,6 +483,13 @@ class Controller:
 
         if self.passive:
             self._controlPassive(ego)
+            return
+
+        if self.firstGear and not self._inGear:
+            # No pedal command this step, so the host does not overwrite the gear.
+            carla.ego.apply_control(carla.VehicleControl(manual_gear_shift=True, gear=1))
+            self._inGear = True
+            self.steps += 1
             return
 
         if self.agent is None:

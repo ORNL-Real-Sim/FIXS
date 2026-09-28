@@ -575,3 +575,10 @@ def test_nothing_invents_a_speed_the_eco_controller_did_not_ask_for(passive):
         ego = _passiveEgo(speedDesired=advisory)
         d.control(ego, 0.1)
         assert ego.speedDesired == pytest.approx(advisory, abs=1e-12), advisory
+
+
+@pytest.mark.parametrize('scenario', [False], indirect=True)
+def test_first_gear_is_opt_in(scenario):
+    """CARLA's autobox leaves a spawned car in neutral below ~15% throttle."""
+    assert _build(driver(lambda v, dt: v)).firstGear is False
+    assert _build(driver(lambda v, dt: v, firstGear=True)).firstGear is True
