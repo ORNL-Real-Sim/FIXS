@@ -3723,10 +3723,10 @@ def main():
                     help=argparse.SUPPRESS)   # deprecated: see --carla-tick
     ap.add_argument("--quality-level", choices=["Low", "Medium", "High", "Epic"], default=None,
                     help="CARLA render quality; Low is much faster on heavy maps")
-    # CARLA window WxH, saved to carla.json "carla_res" for later runs. Hidden
-    # from --help for now.
     ap.add_argument("--carla-res", type=_res_arg, default=None, metavar="WxH",
-                    help=argparse.SUPPRESS)
+                    help="CARLA window size, e.g. 1920x1080 (default 1280x720). "
+                         "Saved to carla.json carla_res, so later runs keep it. No "
+                         "effect with --carla-headless, which opens no window.")
     ap.add_argument("--fast", action="store_true",
                     help="do not pace the co-sim to real time (run as fast as "
                          "possible). Written to CarlaSetup.RealtimePacing, so it "
@@ -3860,7 +3860,15 @@ def main():
                          "Use after creating the env setup asked for, or to move off one "
                          "picked by mistake; every entry point follows carla.json, so "
                          "this changes them all at once")
-    ap.add_argument("--render-offscreen", action="store_true", help="headless CARLA")
+    # --carla-headless / --sumo-headless: one spelling for "no window" on both
+    # simulators. The old names stay as hidden aliases so existing scripts and
+    # docs keep working; saved profiles and the peer protocol key on the dest
+    # (render_offscreen, sumo_gui), never on the flag, so neither is affected.
+    ap.add_argument("--carla-headless", dest="render_offscreen", action="store_true",
+                    help="CARLA with no window. It still renders on the GPU "
+                         "(-RenderOffScreen), so cameras and sensors keep working.")
+    ap.add_argument("--render-offscreen", dest="render_offscreen", action="store_true",
+                    help=argparse.SUPPRESS)
     ap.add_argument("--no-spectator", action="store_true",
                     help="do not auto-frame the CARLA spectator on the scene")
     ap.add_argument("--spectator-all", action="store_true",
@@ -3869,11 +3877,15 @@ def main():
                     help="frame this junction id (default: the busiest intersection)")
     # Tri-state for the same reason as --step-length: the one-click launchers always
     # pass --sumo-gui, so a plain store_true would make "headless" unsaveable in a
-    # run profile. None = not specified, fill from the profile.
+    # run profile. None = not specified, fill from the profile. --sumo-gui must stay
+    # the FIRST action on this dest: argparse takes a shared dest's default from the
+    # first action registered, and the store_false ones below default to True.
     ap.add_argument("--sumo-gui", dest="sumo_gui", action="store_true", default=None,
                     help="run SUMO with its GUI (default)")
+    ap.add_argument("--sumo-headless", dest="sumo_gui", action="store_false",
+                    help="run SUMO without its GUI")
     ap.add_argument("--no-sumo-gui", dest="sumo_gui", action="store_false",
-                    help="run SUMO headless")
+                    help=argparse.SUPPRESS)
     ap.add_argument("--engine", choices=["py", "cpp"], default=None,
                     help="which VirEnvCore drives the FIXS-native stack: "
                          "py=Carla/VirEnv/mainVirCarla.py (the Python core), "

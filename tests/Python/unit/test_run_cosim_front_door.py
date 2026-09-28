@@ -313,3 +313,57 @@ def test_answer_is_written_back_to_sys_argv(tty, monkeypatch):
     tty += ["1600x900"]
     _parser().parse_args()
     assert sys.argv[1:] == ["--carla-res", "1600x900", "--sumo-only"]
+
+
+# --------------------------------------------------------------------------- #
+# The real engine parser: headless names, their old aliases, --carla-res
+# --------------------------------------------------------------------------- #
+@pytest.fixture
+def engine_parser(monkeypatch):
+    """The parser main() builds, taken at its first parse_args call - nothing
+    in main() runs before it. No terminal, so nothing is asked."""
+    class _Got(Exception):
+        pass
+    box = {}
+
+    def _grab(self, *a, **k):
+        box["ap"] = self
+        raise _Got
+    monkeypatch.setattr(run_cosim._Parser, "parse_args", _grab)
+    with pytest.raises(_Got):
+        run_cosim.main()
+    monkeypatch.undo()
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False, raising=False)
+    return box["ap"]
+
+
+@pytest.mark.parametrize("argv, want", [
+    ([], False),
+    (["--carla-headless"], True),
+    (["--render-offscreen"], True),             # old name, still accepted
+])
+def test_carla_headless_and_its_old_name(engine_parser, argv, want):
+    assert engine_parser.parse_args(argv).render_offscreen is want
+
+
+@pytest.mark.parametrize("argv, want", [
+    ([], None),                                 # unset: the saved profile decides
+    (["--sumo-gui"], True),
+    (["--sumo-headless"], False),
+    (["--no-sumo-gui"], False),                 # old name, still accepted
+    (["--sumo-gui", "--sumo-headless"], False), # the launchers pass --sumo-gui first
+])
+def test_sumo_headless_and_its_old_name(engine_parser, argv, want):
+    assert engine_parser.parse_args(argv).sumo_gui is want
+
+
+def test_help_shows_the_new_names_only(engine_parser):
+    text = engine_parser.format_help()
+    for shown in ("--carla-headless", "--sumo-headless", "--carla-res WxH"):
+        assert shown in text
+    for hidden in ("--render-offscreen", "--no-sumo-gui"):
+        assert hidden not in text
+
+
+def test_carla_res_parses(engine_parser):
+    assert engine_parser.parse_args(["--carla-res", "1920X1080"]).carla_res == "1920x1080"
