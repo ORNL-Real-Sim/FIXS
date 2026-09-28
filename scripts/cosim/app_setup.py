@@ -32,8 +32,10 @@ SKIP_DIRS = {"FIXS", ".git", "__pycache__", "node_modules", ".venv", "venv",
 # The front door is not an application. Skipping the FIXS/ directory is not
 # enough: FIXS.bat and FIXS.sh sit at the repo root beside the launchers we DO
 # want, and offering "1) FIXS" as the thing to run is both wrong and the kind of
-# wrong someone accepts because it is the only option on the list.
-SKIP_STEMS = {"fixs"}
+# wrong someone accepts because it is the only option on the list. run_cosim is
+# the per-repo front door FIXS.bat replaces, and sits at the root the same way
+# while a repo migrates.
+SKIP_STEMS = {"fixs", "run_cosim"}
 SCAN_DEPTH = 4          # deep enough for projects/<name>/<variant>/, shallow enough to be quick
 
 

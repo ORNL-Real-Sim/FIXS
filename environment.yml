@@ -26,6 +26,12 @@ dependencies:
   - vs2015_runtime
   - vc14_runtime
   - pip
+  - pip:
+      # The FIXS window (run_cosim --gui / FIXS.bat --gui, #78). From PyPI, not
+      # conda-forge's pyside6, which drags in the whole qt6-main (~300 MB):
+      # Essentials is the Widgets subset the window uses. An env built before this
+      # line gets it on its first --gui, which installs exactly this.
+      - PySide6-Essentials
   # No carla, traci or sumolib here on purpose. The release zip strips *.whl from
   # Carla/ (scripts/dispatch/8_create_zip.ps1), so a wheel path in this spec makes
   # `conda env create -f environment.yml` fail on every machine that consumes a
