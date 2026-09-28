@@ -578,7 +578,16 @@ def test_nothing_invents_a_speed_the_eco_controller_did_not_ask_for(passive):
 
 
 @pytest.mark.parametrize('scenario', [False], indirect=True)
-def test_first_gear_is_opt_in(scenario):
+def test_start_in_gear_is_opt_in_and_set_before_building(scenario, monkeypatch):
     """CARLA's autobox leaves a spawned car in neutral below ~15% throttle."""
-    assert _build(driver(lambda v, dt: v)).firstGear is False
-    assert _build(driver(lambda v, dt: v, firstGear=True)).firstGear is True
+    import CommonLib.fixs._driver as drv
+    monkeypatch.setattr(drv, '_DEFAULTS', {})
+    assert _build(driver(lambda v, dt: v)).startInGear is False
+    fixs.driver.set(startInGear=True)
+    assert _build(driver(lambda v, dt: v)).startInGear is True
+    assert _build(driver(lambda v, dt: v, startInGear=False)).startInGear is False
+
+
+def test_driver_set_refuses_an_unknown_option():
+    with pytest.raises(TypeError):
+        fixs.driver.set(startInGera=True)

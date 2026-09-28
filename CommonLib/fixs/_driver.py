@@ -277,17 +277,32 @@ _NO_LEADER = -1.0
 
 
 
+#: The options fixs.driver(**options) and fixs.driver.set(**options) take.
+_OPTION_NAMES = frozenset({'shape', 'loop', 'tuning', 'limits', 'idealSpeedTracking',
+                           'startInGear'})
+#: Set by fixs.driver.set(); every driver built afterwards starts from these.
+_DEFAULTS = {}
+
+
+def setDefaults(**defaults):
+    """fixs.driver.set(name=value): options for every driver built after this call."""
+    unknown = set(defaults) - _OPTION_NAMES
+    if unknown:
+        raise TypeError('fixs.driver.set(): unknown option(s) %s -- known: %s'
+                        % (', '.join(sorted(unknown)), ', '.join(sorted(_OPTION_NAMES))))
+    _DEFAULTS.update(defaults)
+
+
 def _options(config, overrides=None):
     """Three layers, nearest the run wins: the module constants below are the
     defaults, fixs.driver(**options) overrides them, and what the SCENARIO
     wrote after the controller's path overrides both -- because the scenario
     is the thing an operator edits without touching code."""
     over = dict(overrides or {})
-    known = {'shape', 'loop', 'tuning', 'limits', 'idealSpeedTracking', 'firstGear'}
-    unknown = set(over) - known
+    unknown = set(over) - _OPTION_NAMES
     if unknown:
         raise TypeError('fixs.driver(): unknown option(s) %s -- known: %s'
-                        % (', '.join(sorted(unknown)), ', '.join(sorted(known))))
+                        % (', '.join(sorted(unknown)), ', '.join(sorted(_OPTION_NAMES))))
 
     p = argparse.ArgumentParser(prog='fixs.driver', add_help=False)
     p.add_argument('--command-shape', choices=('speed', 'pedals'),
@@ -313,7 +328,7 @@ def _options(config, overrides=None):
                         % type(opt.limits).__name__)
     opt.idealSpeedTracking = bool(
         over.get('idealSpeedTracking', IDEAL_SPEED_TRACKING))
-    opt.firstGear = bool(over.get('firstGear', False))
+    opt.startInGear = bool(over.get('startInGear', False))
     return opt
 
 
@@ -337,7 +352,7 @@ class Controller:
         self.idealSpeedTracking = opt.idealSpeedTracking
         #: Put the ego in first gear on the first step: CARLA's autobox leaves a
         #: spawned car in neutral below ~15% throttle, so a creeping pedal never moves it.
-        self.firstGear = opt.firstGear
+        self.startInGear = opt.startInGear
         self._inGear = False
         self.dt = float(config.get('CarlaTimeStep') or 0.1)
         self.fallbackSpeed = float(config.get('EgoTargetSpeed') or 8.33)
@@ -485,7 +500,7 @@ class Controller:
             self._controlPassive(ego)
             return
 
-        if self.firstGear and not self._inGear:
+        if self.startInGear and not self._inGear:
             # No pedal command this step, so the host does not overwrite the gear.
             carla.ego.apply_control(carla.VehicleControl(manual_gear_shift=True, gear=1))
             self._inGear = True
@@ -847,8 +862,9 @@ def driver(exchange=None, usercontrol=None, **options):
     scenario still says which FILE -- FIXS has nothing to import otherwise --
     but nothing inside it has to be spelled a particular way.
 
-    ``options`` override the module defaults, and the scenario's own
-    ``--command-shape`` still wins over both, being nearer the run.
+    ``options`` override the module defaults and anything given to
+    ``fixs.driver.set()`` before this call; the scenario's own
+    ``--command-shape`` still wins over all of them, being nearer the run.
     """
     for name, fn in (('exchange', exchange), ('usercontrol', usercontrol)):
         if fn is not None and not callable(fn):
@@ -865,7 +881,7 @@ def driver(exchange=None, usercontrol=None, **options):
                dict(_EXCHANGE=staticmethod(exchange) if exchange else None,
                     _USERCONTROL=staticmethod(usercontrol) if usercontrol
                     else None,
-                    _OPTIONS=dict(options)))
+                    _OPTIONS=dict(_DEFAULTS, **options)))
     _BUILT.append(cls)
     return cls
 

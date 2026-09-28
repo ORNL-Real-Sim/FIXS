@@ -113,6 +113,15 @@ def driver(exchange=None, **options):
     return _driver(exchange, **options)
 
 
+def _driverSet(**options):
+    """fixs.driver.set(startInGear=True): options for every driver built after this call."""
+    from CommonLib.fixs._driver import setDefaults
+    setDefaults(**options)
+
+
+driver.set = _driverSet
+
+
 #: Full-lock front road-wheel angle [rad]. `steerAngleDesired` is an ANGLE on
 #: the wire, where a CARLA agent's VehicleControl.steer is normalised [-1, 1];
 #: the plant divides by this same constant, so multiplying by it here makes the
