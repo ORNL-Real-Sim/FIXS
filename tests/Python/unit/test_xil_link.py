@@ -106,6 +106,13 @@ def test_local_carries_each_direction_separately():
     assert link.recv_measurement() == pytest.approx((16.2, 2.5))
 
 
+def test_local_rounds_to_the_float32_the_wire_carries():
+    """So an inprocess run and a run over the wire see the same numbers."""
+    link = LocalLink()
+    link.send_reference(0.1)
+    assert link.recv_reference()[0] == unpack(pack(0.1))[0] != 0.1
+
+
 def test_the_newest_value_wins():
     link = LocalLink()
     for v in (1.0, 2.0, 3.0):
@@ -178,35 +185,6 @@ def test_udp_keeps_only_the_newest_of_a_burst():
     finally:
         sim.close()
         dyno.close()
-
-
-def test_udp_recv_wait_returns_the_answer_to_this_send():
-    """drain, send, recv_wait: a stale queued answer must not pass for this one."""
-    ref, meas = free_udp_port(), free_udp_port()
-    sim = UdpLink('simulator', reference_port=ref, measurement_port=meas)
-    dyno = UdpLink('dyno', reference_port=ref, measurement_port=meas)
-    try:
-        dyno.send_measurement(9.0)              # stale, from "last tick"
-        time.sleep(0.05)
-        sim.drain()
-        sim.send_reference(1.0)
-        assert dyno.recv_wait(1.0)[0] == pytest.approx(1.0)
-        dyno.send_measurement(2.0)
-        assert sim.recv_wait(1.0)[0] == pytest.approx(2.0)
-    finally:
-        sim.close()
-        dyno.close()
-
-
-def test_udp_recv_wait_gives_up_after_its_timeout():
-    link = UdpLink('simulator', reference_port=free_udp_port(),
-                   measurement_port=free_udp_port())
-    try:
-        t0 = time.monotonic()
-        assert link.recv_wait(0.2) is None
-        assert 0.15 <= time.monotonic() - t0 < 1.0
-    finally:
-        link.close()
 
 
 def test_an_unknown_end_is_rejected():

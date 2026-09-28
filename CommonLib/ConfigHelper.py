@@ -89,9 +89,8 @@ class ConfigHelper:
         xil_node = config.get("XilSetup", {})
         self.Xil_setup["EnableXil"] = self.parserFlag(xil_node, "EnableXil", False)
         self.Xil_setup["VehicleSubscription"] = self.parseVehicleSubscription(xil_node, "VehicleSubscription", [])
-        # How the XIL plant is reached. 'inprocess' simulates it here (no
-        # hardware, and the same code path as a cell), 'udp' and 'tcp' put it on
-        # the wire at the VehicleSubscription's ip and port.
+        # 'inprocess': FIXS's simulated dyno. 'udp': the application talks to its
+        # own rig at the VehicleSubscription's ip. 'tcp': reserved, not built yet.
         self.Xil_setup["Transport"] = self.parserString(xil_node, "Transport", "inprocess").strip().lower()
         if self.Xil_setup["Transport"] not in ("inprocess", "udp", "tcp"):
             raise SystemExit(

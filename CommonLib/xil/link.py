@@ -22,7 +22,6 @@ and "fall back to your own reference" are both right somewhere, so the link does
 not choose.
 """
 
-import select
 import socket
 import struct
 import time
@@ -49,10 +48,7 @@ class LocalLink(object):
     """Both ends in one process. No latency, no loss, no jitter.
 
     The baseline: whatever a UDP run does differently from this is transport.
-    So values go through the same 8-byte packet the wire carries: float32. At
-    full precision the ~1e-7 rounding alone, fed back through the closed loop,
-    grew to metres of ego position within 200 s against an otherwise identical
-    udp run.
+    Values pass through the same float32 packet the wire carries.
     """
 
     def __init__(self, clock=time.monotonic):
@@ -130,44 +126,6 @@ class UdpLink(object):
             except ValueError:
                 continue                        # short packet, not ours
         return self._last
-
-    def drain(self):
-        """Discard whatever is already queued, so it cannot pass for the answer
-        to the next send."""
-        while True:
-            try:
-                self._rx.recvfrom(64)
-            except (BlockingIOError, OSError):
-                return
-
-    def recv_wait(self, timeout):
-        """Block until a packet arrives and return the newest, or None if none
-        arrives within ``timeout`` s. Lockstep is drain(), send(), recv_wait().
-
-        A socket error counts as nothing arrived: Windows reports an ICMP
-        port-unreachable from an earlier send as a reset on this socket.
-        """
-        deadline = self._clock() + timeout
-        while True:
-            left = deadline - self._clock()
-            if left <= 0:
-                return None
-            try:
-                ready, _, _ = select.select([self._rx], [], [], left)
-            except OSError:
-                return None
-            if not ready:
-                return None
-            try:
-                data, _ = self._rx.recvfrom(64)
-            except (BlockingIOError, OSError):
-                continue
-            try:
-                self._last = unpack(data)
-            except ValueError:
-                continue                        # short packet, not ours
-            self._stamp = self._clock()
-            return self.recv()                  # a streaming cell may have sent more
 
     def age(self):
         return None if self._stamp is None else self._clock() - self._stamp

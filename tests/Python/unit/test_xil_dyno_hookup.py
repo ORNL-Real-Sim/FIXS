@@ -5,8 +5,8 @@ to. What is worth testing is not the bench -- test_xil_dyno.py does that -- but
 the three things the hookup can get wrong without failing:
 
   - a scenario that declares no bench must hand back None, not a default one,
-  - a scenario that declares one must reach the endpoint IT names,
-  - a bench that never answers must not invent motion.
+  - only Transport: inprocess builds one; udp and tcp are the application's,
+  - the address a udp application talks to is the one the yaml names.
 
 And one refusal: a dynamometer in the controller's loop is not a plant that
 owns the ego, so EnableXil with Dynamics anything but virenv is two different
@@ -73,24 +73,26 @@ def test_enablexil_false_means_no_bench(tmp_path):
     assert fixsxil.dyno(write(tmp_path, dict(xilOn(), EnableXil=False))) is None
 
 
-@pytest.mark.parametrize("transport", ["inprocess", "udp", "tcp"])
-def test_each_transport_builds(tmp_path, transport):
-    d = fixsxil.dyno(write(tmp_path, xilOn(transport), name=transport + ".yaml"))
+def test_inprocess_builds_the_simulated_dyno(tmp_path):
+    d = fixsxil.dyno(write(tmp_path, xilOn('inprocess')))
     try:
-        assert d.transport == transport
-        assert (d.sim is not None) == (transport == 'inprocess')
+        assert d.transport == 'inprocess' and d.sim is not None
     finally:
         d.close()
 
 
-def test_the_endpoint_comes_from_the_subscription(tmp_path):
-    """Not a constant here: the yaml says where the cell is."""
-    port = 5399
-    d = fixsxil.dyno(write(tmp_path, xilOn('udp', port=port)))
-    try:
-        assert d.link._peer[1] == port or d.link._peer[0] == '127.0.0.1'
-    finally:
-        d.close()
+@pytest.mark.parametrize("transport", ["udp", "tcp"])
+def test_a_wire_transport_is_the_applications(tmp_path, transport):
+    """FIXS opens no socket for it, and still reports the bench as in the loop."""
+    path = write(tmp_path, xilOn(transport), name=transport + ".yaml")
+    assert fixsxil.dyno(path) is None
+    assert fixsxil.enabled(path) is True
+
+
+def test_the_rig_address_comes_from_the_subscription(tmp_path):
+    xil = fixs.config.get('xil', write(tmp_path, xilOn('udp', ip='192.168.140.24', port=4420)))
+    assert xil['transport'] == 'udp'
+    assert (xil['ip'], xil['port']) == ('192.168.140.24', 4420)
 
 
 def test_an_unknown_transport_is_refused(tmp_path):
@@ -119,20 +121,6 @@ def test_inprocess_bench_holds_the_speed_it_is_given(tmp_path):
         road = sim.dyno.resistance(15.0)
         assert sum(state.axle_torque) == pytest.approx(
             road * sim.vehicle.wheel_radius_m, rel=0.02)
-    finally:
-        d.close()
-
-
-def test_a_silent_bench_gives_the_reference_straight_back(tmp_path):
-    """No answer must not become no motion, and must not become invented
-    motion either. The reference returns unchanged -- the run behaves as though
-    no bench were attached -- and the miss is counted, because a run that ends
-    with a large count did not test what it claims to have tested."""
-    d = fixsxil.dyno(write(tmp_path, xilOn('tcp', port=5398)))
-    try:
-        assert d.exchange(12.0, 0.05) == pytest.approx(12.0)
-        assert d.misses == 1
-        assert d.age() is None
     finally:
         d.close()
 

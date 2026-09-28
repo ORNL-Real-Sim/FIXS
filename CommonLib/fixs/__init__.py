@@ -1079,7 +1079,7 @@ def __getattr__(name):
     # side, which a client that is not driving an ego has no reason to load, and
     # sumo reads scenario files a controller may never touch. Bound into the
     # module afterwards, so the cost is once and later lookups are ordinary.
-    if name in ('sumo', 'carla'):
+    if name in ('sumo', 'carla', 'config'):
         import importlib
         module = importlib.import_module(f'{__name__}.{name}')
         globals()[name] = module
