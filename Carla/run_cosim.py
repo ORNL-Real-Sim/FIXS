@@ -1933,13 +1933,117 @@ class _Parser(argparse.ArgumentParser):
     wrapping over twelve lines - and then one sentence saying what was actually
     wrong. Forgetting a value for --sumocfg should not answer with every flag the
     engine has; it buries the one line that matters and it is the same dump the
-    wrapper's --help exists to avoid. Say what is wrong, then where to look."""
+    wrapper's --help exists to avoid. Say what is wrong, then where to look.
+
+    And when someone is there to answer, a missing or unusable VALUE is not worth
+    ending the run over: `--carla-res` on its own, or `--carla-res big`, asks for
+    the value instead - type it, Enter to run without the option, Q to quit. Every
+    option that takes exactly one value gets this, so there is no list to keep in
+    step with add_argument. A script (no terminal) still gets the error and exit 2,
+    and so does --serve, for the reason in _interactive: nobody is expected at
+    this keyboard. Only VALUE problems are asked about - an unknown flag is still
+    an error, because there is no single answer to ask for."""
+
+    _asking = False
+
+    def parse_args(self, args=None, namespace=None):
+        argv = list(sys.argv[1:] if args is None else args)
+        # _interactive() needs parsed args, which do not exist yet: same rule,
+        # read off the raw command line.
+        if not (sys.stdin.isatty() and "--serve" not in argv):
+            return super().parse_args(argv, namespace)
+        filled = False
+        while True:
+            self._asking = True
+            try:
+                parsed = super().parse_args(argv, namespace)
+            except _AskValue as ask:
+                self._asking = False
+                argv = _ask_value(argv, ask)
+                if argv is None:
+                    self.error(ask.message)
+                filled = True
+                continue
+            finally:
+                self._asking = False
+            break
+        # The engine re-execs under the configured python with sys.argv, so an
+        # answer that stayed in the local list would be asked for a second time.
+        if filled and args is None:
+            sys.argv[1:] = argv
+        return parsed
 
     def error(self, message):
+        if self._asking:
+            ask = self._value_problem(message)
+            if ask is not None:
+                raise ask
         sys.stderr.write(f"\n[cosim] {message}\n\n"
                          f"        run_cosim --help          the common options\n"
                          f"        run_cosim.py --help       every engine option\n")
         sys.exit(2)
+
+    def _value_problem(self, message):
+        """An _AskValue if `message` is argparse rejecting the value of an option
+        that takes exactly one, else None. argparse names the option in the
+        message ("argument --carla-res: expected one argument"); aliases come
+        joined by '/'."""
+        m = re.match(r"argument (\S+): (.*)$", message, re.S)
+        if not m:
+            return None
+        names = set(m.group(1).split("/"))
+        for action in self._actions:
+            if names & set(action.option_strings):
+                if action.nargs is not None:      # flags, and optional-value options
+                    return None
+                return _AskValue(action, m.group(2), message)
+        return None
+
+
+class _AskValue(Exception):
+    """_Parser.error() found a missing or unusable value it may ask for."""
+
+    def __init__(self, action, detail, message):
+        super().__init__(message)
+        self.action, self.detail, self.message = action, detail, message
+
+
+def _ask_value(argv, ask):
+    """argv with the problem value replaced by the user's answer - or with the
+    option dropped, on Enter - or None to quit. Also None when the option cannot
+    be found as typed (an abbreviation, say): the plain error is then the honest
+    answer."""
+    missing = ask.detail == "expected one argument"
+    opts = ask.action.option_strings
+    at = span = None
+    for i, tok in enumerate(argv):
+        nxt = argv[i + 1] if i + 1 < len(argv) else None
+        if tok in opts:
+            if missing and (nxt is None or nxt.startswith("-")):
+                at, span = i, 1
+                break
+            if not missing and nxt is not None:
+                at, span = i, 2
+                break
+        elif not missing and any(tok.startswith(o + "=") for o in opts):
+            at, span = i, 1
+            break
+    if at is None:
+        return None
+    flag = argv[at].split("=", 1)[0]
+    if ask.action.choices:
+        hint = "one of: " + ", ".join(str(c) for c in ask.action.choices)
+    else:
+        hint = ask.action.metavar or ask.action.dest.upper()
+    print(f"\n[cosim] {flag}: {'needs a value' if missing else ask.detail}")
+    print(f"        Type it ({hint}), press Enter to run without {flag}, or Q to quit.")
+    try:
+        ans = input(f"  {flag} ").strip()
+    except EOFError:
+        return None
+    if ans.lower() == "q":
+        return None
+    return argv[:at] + ([flag, ans] if ans else []) + argv[at + span:]
 
 
 # Tried on a Linux desktop when neither $VISUAL/$EDITOR nor the text/plain default
@@ -3619,9 +3723,10 @@ def main():
                     help=argparse.SUPPRESS)   # deprecated: see --carla-tick
     ap.add_argument("--quality-level", choices=["Low", "Medium", "High", "Epic"], default=None,
                     help="CARLA render quality; Low is much faster on heavy maps")
-    # CARLA window WxH, saved to carla.json "carla_res" for later runs. Hidden
-    # from --help for now.
-    ap.add_argument("--carla-res", type=_res_arg, default=None, help=argparse.SUPPRESS)
+    ap.add_argument("--carla-res", type=_res_arg, default=None, metavar="WxH",
+                    help="CARLA window size, e.g. 1920x1080 (default 1280x720). "
+                         "Saved to carla.json carla_res, so later runs keep it. No "
+                         "effect with --carla-headless, which opens no window.")
     ap.add_argument("--fast", action="store_true",
                     help="do not pace the co-sim to real time (run as fast as "
                          "possible). Written to CarlaSetup.RealtimePacing, so it "
@@ -3755,7 +3860,15 @@ def main():
                          "Use after creating the env setup asked for, or to move off one "
                          "picked by mistake; every entry point follows carla.json, so "
                          "this changes them all at once")
-    ap.add_argument("--render-offscreen", action="store_true", help="headless CARLA")
+    # --carla-headless / --sumo-headless: one spelling for "no window" on both
+    # simulators. The old names stay as hidden aliases so existing scripts and
+    # docs keep working; saved profiles and the peer protocol key on the dest
+    # (render_offscreen, sumo_gui), never on the flag, so neither is affected.
+    ap.add_argument("--carla-headless", dest="render_offscreen", action="store_true",
+                    help="CARLA with no window. It still renders on the GPU "
+                         "(-RenderOffScreen), so cameras and sensors keep working.")
+    ap.add_argument("--render-offscreen", dest="render_offscreen", action="store_true",
+                    help=argparse.SUPPRESS)
     ap.add_argument("--no-spectator", action="store_true",
                     help="do not auto-frame the CARLA spectator on the scene")
     ap.add_argument("--spectator-all", action="store_true",
@@ -3764,11 +3877,15 @@ def main():
                     help="frame this junction id (default: the busiest intersection)")
     # Tri-state for the same reason as --step-length: the one-click launchers always
     # pass --sumo-gui, so a plain store_true would make "headless" unsaveable in a
-    # run profile. None = not specified, fill from the profile.
+    # run profile. None = not specified, fill from the profile. --sumo-gui must stay
+    # the FIRST action on this dest: argparse takes a shared dest's default from the
+    # first action registered, and the store_false ones below default to True.
     ap.add_argument("--sumo-gui", dest="sumo_gui", action="store_true", default=None,
                     help="run SUMO with its GUI (default)")
+    ap.add_argument("--sumo-headless", dest="sumo_gui", action="store_false",
+                    help="run SUMO without its GUI")
     ap.add_argument("--no-sumo-gui", dest="sumo_gui", action="store_false",
-                    help="run SUMO headless")
+                    help=argparse.SUPPRESS)
     ap.add_argument("--engine", choices=["py", "cpp"], default=None,
                     help="which VirEnvCore drives the FIXS-native stack: "
                          "py=Carla/VirEnv/mainVirCarla.py (the Python core), "
