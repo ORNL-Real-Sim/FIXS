@@ -26,7 +26,8 @@ class RobotDriver(object):
 
     def __init__(self, kp=0.45, ki=0.25, max_throttle=1.0, max_brake=1.0,
                  standstill_ref_mps=0.05, standstill_brake=0.3,
-                 max_accel_mps2=None, max_decel_mps2=None):
+                 max_accel_mps2=None, max_decel_mps2=None,
+                 stop_speed_mps=0.0, stop_accel_mps2=0.0):
         self.kp = kp
         self.ki = ki
         self.max_throttle = max_throttle
@@ -53,6 +54,10 @@ class RobotDriver(object):
         self._ramp = None
         self.standstill_ref_mps = standstill_ref_mps
         self.standstill_brake = standstill_brake
+        #: openpilot's hold: brake while slower than stop_speed_mps and asked for
+        #: less than stop_accel_mps2 (openpilot: 0.3 and 0.1). 0.0 is off.
+        self.stop_speed_mps = stop_speed_mps
+        self.stop_accel_mps2 = stop_accel_mps2
         self.integral = 0.0
         self.pedal = 0.0
 
@@ -66,10 +71,19 @@ class RobotDriver(object):
         self.pedal = 0.0
         self._ramp = None
 
-    def step(self, v_ref, v_measured, dt):
-        """Returns (throttle, brake), each in [0, 1], never both positive."""
+    def step(self, v_ref, v_measured, dt, a_ref=None):
+        """Returns (throttle, brake), each in [0, 1], never both positive.
+
+        ``a_ref`` is the acceleration command, read only by the hold below.
+        """
         if dt <= 0.0:
             raise ValueError('dt must be positive')
+
+        if a_ref is not None and v_measured < self.stop_speed_mps \
+                and a_ref < self.stop_accel_mps2:
+            self.integral = 0.0
+            self.pedal = -self.standstill_brake
+            return 0.0, min(self.max_brake, self.standstill_brake)
 
         # THE ENVELOPE. A RAMPED setpoint, advanced from its own last value --
         # not the incoming reference clamped to the measured speed.

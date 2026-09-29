@@ -113,6 +113,15 @@ def driver(exchange=None, **options):
     return _driver(exchange, **options)
 
 
+def _driverSet(**options):
+    """fixs.driver.set(startInGear=True): options for every driver built after this call."""
+    from CommonLib.fixs._driver import setDefaults
+    setDefaults(**options)
+
+
+driver.set = _driverSet
+
+
 #: Full-lock front road-wheel angle [rad]. `steerAngleDesired` is an ANGLE on
 #: the wire, where a CARLA agent's VehicleControl.steer is normalised [-1, 1];
 #: the plant divides by this same constant, so multiplying by it here makes the
@@ -1079,7 +1088,7 @@ def __getattr__(name):
     # side, which a client that is not driving an ego has no reason to load, and
     # sumo reads scenario files a controller may never touch. Bound into the
     # module afterwards, so the cost is once and later lookups are ordinary.
-    if name in ('sumo', 'carla'):
+    if name in ('sumo', 'carla', 'config'):
         import importlib
         module = importlib.import_module(f'{__name__}.{name}')
         globals()[name] = module

@@ -308,6 +308,13 @@ def _select_package(name, package_url, precooked=False, inside=("xodr", "fbx")):
         print("[import] If you don't have it yet, download it (browser is fine - "
               "you need access to the release):")
         print(f"             {package_url}")
+    # Asked BEFORE the dialog, not after it. A GUI window is still a prompt: with
+    # nobody expected at the keyboard it sits on the desktop and the caller hangs
+    # on it - a script, or a test whose ensure_map fell through to a real import,
+    # blocked until someone found the window and cancelled it.
+    if not sys.stdin.isatty():
+        sys.exit(f"[import] non-interactive session: pass --package-dir with the "
+                 f"downloaded {what}.")
     start = _browse_start_dir()
     try:
         import tkinter as tk
@@ -337,9 +344,6 @@ def _select_package(name, package_url, precooked=False, inside=("xodr", "fbx")):
             return path
     except Exception as exc:  # no display / no tkinter
         print(f"[import] file picker unavailable ({exc}); type the path instead.")
-    if not sys.stdin.isatty():
-        sys.exit(f"[import] non-interactive session: pass --package-dir with the "
-                 f"downloaded {what}.")
     # _prompt, not input: isatty() is unreliable through some Windows shells, so the
     # guard above can let a closed stdin through. A source build never noticed - the
     # zip-or-folder question above absorbed the EOF first - but a precooked pick asks

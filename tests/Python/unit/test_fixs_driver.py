@@ -105,10 +105,10 @@ def test_the_simulated_dyno_is_passed_in_like_any_other(scenario):
     """The bench is built with its parameters, and the exchange is a function
     the caller writes -- the same two lines a rig owner replaces."""
     from CommonLib.fixs import xil
-    bench = xil.dyno(vehicle={'mass_kg': 900.0})
+    bench = xil.dynosim(vehicle={'mass_kg': 900.0})
 
     def exchange(vref, dt):
-        return bench.exchange(vref, dt)
+        return bench.exchange(vref, 0.0, dt)
 
     d = _build(driver(exchange))
     assert d.benchInLoop is True
@@ -575,3 +575,19 @@ def test_nothing_invents_a_speed_the_eco_controller_did_not_ask_for(passive):
         ego = _passiveEgo(speedDesired=advisory)
         d.control(ego, 0.1)
         assert ego.speedDesired == pytest.approx(advisory, abs=1e-12), advisory
+
+
+@pytest.mark.parametrize('scenario', [False], indirect=True)
+def test_start_in_gear_is_opt_in_and_set_before_building(scenario, monkeypatch):
+    """CARLA's autobox leaves a spawned car in neutral below ~15% throttle."""
+    import CommonLib.fixs._driver as drv
+    monkeypatch.setattr(drv, '_DEFAULTS', {})
+    assert _build(driver(lambda v, dt: v)).startInGear is False
+    fixs.driver.set(startInGear=True)
+    assert _build(driver(lambda v, dt: v)).startInGear is True
+    assert _build(driver(lambda v, dt: v, startInGear=False)).startInGear is False
+
+
+def test_driver_set_refuses_an_unknown_option():
+    with pytest.raises(TypeError):
+        fixs.driver.set(startInGera=True)
