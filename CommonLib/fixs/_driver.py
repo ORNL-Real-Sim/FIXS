@@ -21,9 +21,10 @@ is the glue, and it is the whole of what this module asks for.
 
 Pass nothing and nothing is in the loop. This module never goes looking for a
 dyno -- deciding one is there belongs to the caller, so passing a function IS
-the declaration. For the simulated dyno, pass the one FIXS already has::
+the declaration. For the simulated dyno, wrap the one FIXS already has::
 
-    Controller = fixs.driver(fixs.xil.exchange)
+    dyno = fixs.xil.dynosim()
+    Controller = fixs.driver(lambda vref, dt: dyno.exchange(vref, 0.0, dt))
 
 which is a function like any other and holds no privilege over yours.
 
@@ -276,17 +277,32 @@ _NO_LEADER = -1.0
 
 
 
+#: The options fixs.driver(**options) and fixs.driver.set(**options) take.
+_OPTION_NAMES = frozenset({'shape', 'loop', 'tuning', 'limits', 'idealSpeedTracking',
+                           'startInGear'})
+#: Set by fixs.driver.set(); every driver built afterwards starts from these.
+_DEFAULTS = {}
+
+
+def setDefaults(**defaults):
+    """fixs.driver.set(name=value): options for every driver built after this call."""
+    unknown = set(defaults) - _OPTION_NAMES
+    if unknown:
+        raise TypeError('fixs.driver.set(): unknown option(s) %s -- known: %s'
+                        % (', '.join(sorted(unknown)), ', '.join(sorted(_OPTION_NAMES))))
+    _DEFAULTS.update(defaults)
+
+
 def _options(config, overrides=None):
     """Three layers, nearest the run wins: the module constants below are the
     defaults, fixs.driver(**options) overrides them, and what the SCENARIO
     wrote after the controller's path overrides both -- because the scenario
     is the thing an operator edits without touching code."""
     over = dict(overrides or {})
-    known = {'shape', 'loop', 'tuning', 'limits', 'idealSpeedTracking'}
-    unknown = set(over) - known
+    unknown = set(over) - _OPTION_NAMES
     if unknown:
         raise TypeError('fixs.driver(): unknown option(s) %s -- known: %s'
-                        % (', '.join(sorted(unknown)), ', '.join(sorted(known))))
+                        % (', '.join(sorted(unknown)), ', '.join(sorted(_OPTION_NAMES))))
 
     p = argparse.ArgumentParser(prog='fixs.driver', add_help=False)
     p.add_argument('--command-shape', choices=('speed', 'pedals'),
@@ -312,6 +328,7 @@ def _options(config, overrides=None):
                         % type(opt.limits).__name__)
     opt.idealSpeedTracking = bool(
         over.get('idealSpeedTracking', IDEAL_SPEED_TRACKING))
+    opt.startInGear = bool(over.get('startInGear', False))
     return opt
 
 
@@ -333,6 +350,10 @@ class Controller:
         #: How close it comes to a bar or a leader. Policy, not tuning.
         self.limits = opt.limits
         self.idealSpeedTracking = opt.idealSpeedTracking
+        #: Put the ego in first gear on the first step: CARLA's autobox leaves a
+        #: spawned car in neutral below ~15% throttle, so a creeping pedal never moves it.
+        self.startInGear = opt.startInGear
+        self._inGear = False
         self.dt = float(config.get('CarlaTimeStep') or 0.1)
         self.fallbackSpeed = float(config.get('EgoTargetSpeed') or 8.33)
         self.useAdvisory = USE_ADVISORY
@@ -358,8 +379,8 @@ class Controller:
         #: Whatever was handed to fixs.driver(), and nothing else: this module
         #: never goes looking for a cell. Deciding one is in the loop is the
         #: caller's, so passing a function IS the declaration and there is no
-        #: flag here to disagree with it. fixs.xil.exchange is one such
-        #: function, for the simulated cell; a rig's own is another.
+        #: flag here to disagree with it. A wrapper around fixs.xil.dynosim() is
+        #: one such function, for the simulated cell; a rig's own is another.
         self._exchange = self._EXCHANGE
         self.benchInLoop = self._exchange is not None
         #: Ticks the cell did not answer usefully. Counted here, not asked of
@@ -369,31 +390,9 @@ class Controller:
         #: What the bench last achieved. None until it has answered once.
         self.vDyno = None
 
-        # EVERYTHING THAT DOES NOT NEED THE EGO IS BUILT HERE, not in _build.
-        #
-        # _build runs on the first controlled tick. With a warm-up that tick is
-        # also the one where the whole network arrives in CARLA at once, so it
-        # is the single worst tick in the run to add work to -- and a bench in
-        # the loop feels it as a freeze the instant it starts being commanded.
-        # Measured inside that tick on MLK eco-driving: BehaviorAgent(...)
-        # 0.734 s, of which ~0.58 s was its own world.get_map(), plus 0.157 s
-        # for the route snap. FIXS#373.
-        #
-        # This constructor runs at bridge start-up, right before the bridge
-        # blocks in recv for the whole warm-up, so the same work costs nothing.
-        # The agent itself still cannot be built here: it is constructed on
-        # carla.ego, and the traffic simulator has not inserted the ego yet.
-        # Only when a bridge is actually behind this module. The law below is
-        # exercised on its own -- tests construct the driver with no backend
-        # registered -- and carla.map REFUSES rather than inventing a world, so
-        # asking unconditionally would make the driver unusable without CARLA.
-        # None is what BasicAgent already treats as "make your own", so the
-        # no-bridge path is exactly the old behaviour.
-        #: ... and not on a passive rung, where there is no agent to hand them
-        #: to. _build never runs there (control() returns before it), so the map
-        #: and the planner would be built, paid for, and never read. FIXS#373
-        #: moved this work off the first controlled tick because it cost 0.73 s
-        #: there; on this rung it costs that at start-up for nothing at all.
+        # Map and route planner are built at start-up, not on the first
+        # controlled tick (FIXS#373). Skipped without a bridge (unit tests) and
+        # on a passive rung, which has no agent to use them.
         self._map, self._grp = None, None
         if not self.passive and carla.available():
             self._map = carla.map      # FIXS caches it; the agent reuses it
@@ -499,6 +498,13 @@ class Controller:
 
         if self.passive:
             self._controlPassive(ego)
+            return
+
+        if self.startInGear and not self._inGear:
+            # No pedal command this step, so the host does not overwrite the gear.
+            carla.ego.apply_control(carla.VehicleControl(manual_gear_shift=True, gear=1))
+            self._inGear = True
+            self.steps += 1
             return
 
         if self.agent is None:
@@ -841,8 +847,8 @@ def driver(exchange=None, usercontrol=None, **options):
     dyno reached comes back. Return None on a tick it could not answer and the
     reference passes through untouched; those are counted and reported.
 
-    Omit it and nothing is in the loop. For the simulated cell, pass
-    ``fixs.xil.exchange``; for yours, pass yours::
+    Omit it and nothing is in the loop. For the simulated cell, wrap
+    ``fixs.xil.dynosim().exchange(vref, aref, dt)``; for yours, pass yours::
 
         Controller = fixs.driver(exchange)
 
@@ -856,8 +862,9 @@ def driver(exchange=None, usercontrol=None, **options):
     scenario still says which FILE -- FIXS has nothing to import otherwise --
     but nothing inside it has to be spelled a particular way.
 
-    ``options`` override the module defaults, and the scenario's own
-    ``--command-shape`` still wins over both, being nearer the run.
+    ``options`` override the module defaults and anything given to
+    ``fixs.driver.set()`` before this call; the scenario's own
+    ``--command-shape`` still wins over all of them, being nearer the run.
     """
     for name, fn in (('exchange', exchange), ('usercontrol', usercontrol)):
         if fn is not None and not callable(fn):
@@ -874,7 +881,7 @@ def driver(exchange=None, usercontrol=None, **options):
                dict(_EXCHANGE=staticmethod(exchange) if exchange else None,
                     _USERCONTROL=staticmethod(usercontrol) if usercontrol
                     else None,
-                    _OPTIONS=dict(options)))
+                    _OPTIONS=dict(_DEFAULTS, **options)))
     _BUILT.append(cls)
     return cls
 

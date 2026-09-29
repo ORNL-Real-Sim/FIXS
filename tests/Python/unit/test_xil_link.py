@@ -106,6 +106,13 @@ def test_local_carries_each_direction_separately():
     assert link.recv_measurement() == pytest.approx((16.2, 2.5))
 
 
+def test_local_rounds_to_the_float32_the_wire_carries():
+    """So an inprocess run and a run over the wire see the same numbers."""
+    link = LocalLink()
+    link.send_reference(0.1)
+    assert link.recv_reference()[0] == unpack(pack(0.1))[0] != 0.1
+
+
 def test_the_newest_value_wins():
     link = LocalLink()
     for v in (1.0, 2.0, 3.0):

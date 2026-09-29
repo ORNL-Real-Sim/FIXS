@@ -48,6 +48,7 @@ class LocalLink(object):
     """Both ends in one process. No latency, no loss, no jitter.
 
     The baseline: whatever a UDP run does differently from this is transport.
+    Values pass through the same float32 packet the wire carries.
     """
 
     def __init__(self, clock=time.monotonic):
@@ -60,7 +61,7 @@ class LocalLink(object):
 
     # simulator end -------------------------------------------------------
     def send_reference(self, speed, steer=0.0):
-        self._to_dyno = ((float(speed), float(steer)), self._clock())
+        self._to_dyno = (unpack(pack(speed, steer)), self._clock())
 
     def recv_measurement(self):
         return self._to_sim[0] if self._to_sim else None
@@ -70,7 +71,7 @@ class LocalLink(object):
 
     # dyno end ------------------------------------------------------------
     def send_measurement(self, speed, steer=0.0):
-        self._to_sim = ((float(speed), float(steer)), self._clock())
+        self._to_sim = (unpack(pack(speed, steer)), self._clock())
 
     def recv_reference(self):
         return self._to_dyno[0] if self._to_dyno else None
