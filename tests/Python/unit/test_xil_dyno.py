@@ -311,6 +311,36 @@ def test_reset_empties_the_delay_line():
     assert driver.step(20.0, 0.0, 0.05) == (0.0, 0.0)
 
 
+def test_the_actuator_gets_the_delayed_command_and_has_the_last_word():
+    seen = []
+
+    def half(thr, brk, dt):
+        seen.append((thr, brk, dt))
+        return 0.5 * thr, brk
+
+    plain = RobotDriver()
+    late = RobotDriver(delay_s=0.05, actuator=half)
+    sent = [plain.step(20.0, 0.0, 0.05) for _ in range(3)]
+    got = [late.step(20.0, 0.0, 0.05) for _ in range(3)]
+    assert seen == [(0.0, 0.0, 0.05)] + [c + (0.05,) for c in sent[:2]]
+    assert got == [(0.0, 0.0)] + [(0.5 * t, b) for t, b in sent[:2]]
+
+
+def test_reset_resets_the_actuator_if_it_can():
+    class Lag(object):
+        resets = 0
+
+        def __call__(self, thr, brk, dt):
+            return thr, brk
+
+        def reset(self):
+            self.resets += 1
+
+    lag = Lag()
+    DynoSim(driver=RobotDriver(actuator=lag)).reset()
+    assert lag.resets == 1
+
+
 def test_a_delayed_driver_still_settles_on_the_reference():
     sim = DynoSim(driver=RobotDriver(delay_s=0.2))
     for _ in range(int(60.0 / 0.05)):
