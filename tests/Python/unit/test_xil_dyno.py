@@ -294,6 +294,30 @@ def test_separate_throttle_and_brake_ceilings():
     assert thr == pytest.approx(0.25)
 
 
+def test_a_delay_applies_the_command_of_that_long_ago():
+    plain, late = RobotDriver(), RobotDriver(delay_s=0.1)
+    sent = [plain.step(20.0, 0.0, 0.05) for _ in range(6)]
+    got = [late.step(20.0, 0.0, 0.05) for _ in range(6)]
+    assert got[:2] == [(0.0, 0.0)] * 2
+    assert got[2:] == sent[:4]
+    assert late.pedal == plain.pedal
+
+
+def test_reset_empties_the_delay_line():
+    driver = RobotDriver(delay_s=0.1)
+    for _ in range(5):
+        driver.step(20.0, 0.0, 0.05)
+    driver.reset()
+    assert driver.step(20.0, 0.0, 0.05) == (0.0, 0.0)
+
+
+def test_a_delayed_driver_still_settles_on_the_reference():
+    sim = DynoSim(driver=RobotDriver(delay_s=0.2))
+    for _ in range(int(60.0 / 0.05)):
+        state = sim.step(15.0, 0.05)
+    assert state.speed == pytest.approx(15.0, abs=0.05)
+
+
 def test_the_bench_can_fail_to_reach_the_reference():
     """The gap between asked and achieved is the point of having a plant."""
     sim = DynoSim()

@@ -15,6 +15,8 @@ matters when the bench is asked to PREDICT hardware, not when it is used to buil
 a coupling.
 """
 
+from collections import deque
+
 
 class RobotDriver(object):
     """PI on speed error, producing one pedal split into throttle and brake.
@@ -27,7 +29,7 @@ class RobotDriver(object):
     def __init__(self, kp=0.45, ki=0.25, max_throttle=1.0, max_brake=1.0,
                  standstill_ref_mps=0.05, standstill_brake=0.3,
                  max_accel_mps2=None, max_decel_mps2=None,
-                 stop_speed_mps=0.0, stop_accel_mps2=0.0):
+                 stop_speed_mps=0.0, stop_accel_mps2=0.0, delay_s=0.0):
         self.kp = kp
         self.ki = ki
         self.max_throttle = max_throttle
@@ -58,8 +60,14 @@ class RobotDriver(object):
         #: less than stop_accel_mps2 (openpilot: 0.3 and 0.1). 0.0 is off.
         self.stop_speed_mps = stop_speed_mps
         self.stop_accel_mps2 = stop_accel_mps2
+        #: Transport delay between the robot's command and the pedal, in s; 0.0 is
+        #: off. Held per step, so it resolves to whole steps of the caller's dt.
+        self.delay_s = delay_s
         self.integral = 0.0
         self.pedal = 0.0
+        self._clock = 0.0
+        self._sent = deque()
+        self._applied = (0.0, 0.0)
 
     #: How far the ramp may sit from the measured speed. Anti-windup for the
     #: setpoint itself: without it, a ramp advancing past a vehicle that cannot
@@ -70,15 +78,30 @@ class RobotDriver(object):
         self.integral = 0.0
         self.pedal = 0.0
         self._ramp = None
+        self._clock = 0.0
+        self._sent.clear()
+        self._applied = (0.0, 0.0)
 
     def step(self, v_ref, v_measured, dt, a_ref=None):
         """Returns (throttle, brake), each in [0, 1], never both positive.
 
         ``a_ref`` is the acceleration command, read only by the hold below.
+        With ``delay_s`` set, this is the command of ``delay_s`` ago, and
+        (0, 0) until there is one; ``pedal`` stays the command just made.
         """
         if dt <= 0.0:
             raise ValueError('dt must be positive')
+        command = self._command(v_ref, v_measured, dt, a_ref)
+        if self.delay_s <= 0.0:
+            return command
+        self._sent.append((self._clock, command))
+        due = self._clock - self.delay_s + 1e-9
+        self._clock += dt
+        while self._sent and self._sent[0][0] <= due:
+            self._applied = self._sent.popleft()[1]
+        return self._applied
 
+    def _command(self, v_ref, v_measured, dt, a_ref):
         if a_ref is not None and v_measured < self.stop_speed_mps \
                 and a_ref < self.stop_accel_mps2:
             self.integral = 0.0
