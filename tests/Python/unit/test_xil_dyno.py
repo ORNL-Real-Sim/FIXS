@@ -348,6 +348,44 @@ def test_a_delayed_driver_still_settles_on_the_reference():
     assert state.speed == pytest.approx(15.0, abs=0.05)
 
 
+def test_an_unknown_mode_is_rejected():
+    with pytest.raises(ValueError):
+        RobotDriver(mode='torque')
+
+
+def test_accel_mode_needs_an_acceleration_command():
+    with pytest.raises(ValueError):
+        RobotDriver(mode='accel').step(5.0, 0.0, 0.05)
+
+
+def test_accel_mode_tracks_a_constant_acceleration():
+    sim = DynoSim(driver=RobotDriver(mode='accel'))
+    speeds = [sim.step(0.0, 0.05, a_ref=1.0).speed for _ in range(160)]
+    assert speeds[-1] == pytest.approx(8.0, abs=0.3)
+    assert (speeds[-1] - speeds[-81]) / 4.0 == pytest.approx(1.0, abs=0.02)
+
+
+def test_accel_mode_ignores_the_speed_reference():
+    a, b = RobotDriver(mode='accel'), RobotDriver(mode='accel')
+    for k in range(20):
+        v = 0.1 * k
+        assert a.step(0.0, v, 0.05, a_ref=0.5) == b.step(30.0, v, 0.05, a_ref=0.5)
+
+
+def test_accel_mode_caps_the_command_at_the_envelope():
+    sim = DynoSim(driver=RobotDriver(mode='accel', max_accel_mps2=1.8))
+    speeds = [sim.step(0.0, 0.05, a_ref=5.0).speed for _ in range(160)]
+    assert (speeds[-1] - speeds[-81]) / 4.0 == pytest.approx(1.8, abs=0.05)
+
+
+def test_accel_mode_holds_the_brake_at_rest_when_not_asked_to_move():
+    driver = RobotDriver(mode='accel')
+    for _ in range(20):
+        thr, brk = driver.step(0.0, 0.0, 0.05, a_ref=0.0)
+    assert thr == 0.0 and brk == pytest.approx(0.3)
+    assert driver.integral == 0.0
+
+
 def test_the_bench_can_fail_to_reach_the_reference():
     """The gap between asked and achieved is the point of having a plant."""
     sim = DynoSim()
