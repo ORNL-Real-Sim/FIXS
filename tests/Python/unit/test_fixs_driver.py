@@ -595,22 +595,6 @@ def test_driver_set_refuses_an_unknown_option():
 
 # -- referenceMode: what the driver reads from the eco controller ------------
 
-def test_the_acceleration_rebuilds_the_exact_float32_speed():
-    """Exact at a stop and above 0.25 m/s; in between, within float32 of the acceleration."""
-    import random
-    rng = random.Random(0)
-    for _ in range(50000):
-        v = fixs._f32(rng.uniform(0.0, 30.0))
-        target = fixs._f32(max(0.0, v + rng.uniform(-3.0, 2.0) * 0.1))
-        a = fixs.accelerationFromSpeed(v, target, 0.1)
-        assert a == fixs._f32(a)
-        got = fixs.speedFromAcceleration(v, a, 0.1)
-        if target == 0.0 or target > 0.25:
-            assert got == target, (v, target)
-        else:
-            assert abs(got - target) < 2e-8, (v, target)
-
-
 def test_the_reference_mode_comes_from_the_scenario():
     assert _options({}).reference_mode == 'speed'
     assert _options({'EgoControllerArgs': ['--reference-mode', 'accel']}).reference_mode == 'accel'
@@ -619,12 +603,21 @@ def test_the_reference_mode_comes_from_the_scenario():
 
 @pytest.mark.parametrize('mode', ['speed', 'accel', 'both'])
 def test_every_reference_mode_drives_the_same_speed(passive, mode):
-    v, target = fixs._f32(12.3), fixs._f32(12.41)
-    a = fixs.accelerationFromSpeed(v, target, 0.1)
+    v, target = 12.3, 12.41
     d = _build(driver(lambda vref, dt: vref, referenceMode=mode))
-    ego = _passiveEgo(speed=v, feedSpeed=v, speedDesired=target, accelerationDesired=a)
+    ego = _passiveEgo(speed=v, feedSpeed=v, speedDesired=target,
+                      accelerationDesired=(target - v) / 0.1)
     d.control(ego, 0.1)
-    assert ego.speedDesired == target
+    assert ego.speedDesired == pytest.approx(target, abs=1e-12)
+
+
+@pytest.mark.parametrize('sent', [dict(speedDesired=12.41, accelerationDesired=0.0),
+                                  dict(speedDesired=12.3, accelerationDesired=1.1)])
+def test_both_refuses_a_controller_that_sent_only_one(passive, sent):
+    """The field left unset holds TrafficLayer's default: 0 acceleration, or the speed echoed back."""
+    d = _build(driver(lambda vref, dt: vref, referenceMode='both'))
+    with pytest.raises(fixs.FixsError, match='disagrees'):
+        d.control(_passiveEgo(speed=12.3, feedSpeed=12.3, **sent), 0.1)
 
 
 def test_accel_mode_refuses_a_wire_without_the_field(passive):

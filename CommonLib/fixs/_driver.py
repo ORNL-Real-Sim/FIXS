@@ -67,7 +67,7 @@ import argparse
 import inspect
 import math
 
-from . import FixsError, speedFromAcceleration   # noqa: E402
+from . import FixsError                 # noqa: E402
 from .. import fixs as _fixs            # noqa: E402
 from . import carla as carla            # noqa: E402
 # CARLA's vendored agents: importing the package puts them on sys.path.
@@ -115,13 +115,16 @@ IDEAL_SPEED_TRACKING = True
 #:            Fix the lag (lead term) before selecting this.
 PEDAL_LOOP = 'speed'
 
-#: What the driver reads from the eco controller: 'speed' (speedDesired),
-#: 'accel' (accelerationDesired) or 'both'. The one not read is rebuilt from
-#: the feed's speed, so 'speed' and 'accel' drive identically.
+#: What the upstream controller sends, and so what the driver reads: 'speed'
+#: (speedDesired), 'accel' (accelerationDesired) or 'both'. The one not sent is
+#: rebuilt from the feed's speed; 'both' checks that the two agree.
 REFERENCE_MODE = 'speed'
 
 #: The eco controller's step [s]: speedDesired = feedSpeed + accelerationDesired * FEED_STEP.
 FEED_STEP = 0.1
+
+#: 'both': how far [m/s^2] accelerationDesired may sit from (speedDesired - feedSpeed) / FEED_STEP.
+BOTH_TOLERANCE = 1e-3
 
 
 class Tuning(object):
@@ -469,11 +472,19 @@ class Controller:
                             "VehicleMessageField" % self.referenceMode)
         if self.referenceMode == 'accel':
             aref = float(ego.accelerationDesired)
-            vref = speedFromAcceleration(v, aref, self.feedStep)
+            vref = v + aref * self.feedStep
         else:
             vref = float(getattr(ego, 'speedDesired', 0.0) or 0.0)
-            aref = (float(ego.accelerationDesired) if self.referenceMode == 'both'
-                    else (vref - v) / self.feedStep)
+            aref = (vref - v) / self.feedStep
+            if self.referenceMode == 'both':
+                sent = float(ego.accelerationDesired)
+                # A field the upstream controller left unset holds TrafficLayer's default, so the pair disagrees.
+                if abs(sent - aref) > BOTH_TOLERANCE:
+                    raise FixsError(
+                        "referenceMode='both': accelerationDesired %.4f disagrees with "
+                        "(speedDesired - feedSpeed) / feedStep = %.4f m/s^2. Does the upstream "
+                        "controller send both, with a %.3f s step?" % (sent, aref, self.feedStep))
+                aref = sent
         self.feedVref, self.feedAref = vref, aref
         return vref
 
