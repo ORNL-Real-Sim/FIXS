@@ -80,6 +80,7 @@ import dataclasses
 import math
 import os
 import socket
+import struct
 import sys
 import time as _time
 import typing
@@ -96,7 +97,7 @@ __all__ = [
     'emit', 'transport', 'commandKind',
     'Vehicle', 'MAX_STEER_RAD',
     'Shutdown', 'FixsError', 'NotConnected', 'ProtocolError',
-    'driver',
+    'driver', 'accelerationFromSpeed', 'speedFromAcceleration',
 ]
 
 
@@ -120,6 +121,33 @@ def _driverSet(**options):
 
 
 driver.set = _driverSet
+
+
+_F32 = struct.Struct('<f')
+
+
+def _f32(x):
+    """x rounded to the wire's float32."""
+    return _F32.unpack(_F32.pack(x))[0]
+
+
+def speedFromAcceleration(speed, accelerationDesired, step):
+    """(m/s, m/s^2, s) -> m/s: speed + accelerationDesired * step, at the wire's float32, never below 0."""
+    return max(0.0, _f32(speed + accelerationDesired * step))
+
+
+def accelerationFromSpeed(speed, speedDesired, step):
+    """(m/s, m/s, s) -> m/s^2: the float32 accelerationDesired that
+    speedFromAcceleration turns back into speedDesired exactly, or the nearest
+    one where the float32 wire has none (a speed between 0 and ~0.25 m/s)."""
+    target = _f32(speedDesired)
+    a = _f32((target - speed) / step)
+    ulp = 2.0 ** (math.frexp(a)[1] - 24) if a else 2.0 ** -149
+    for k in (0, 1, -1, 2, -2, 3, -3):
+        b = _f32(a + k * ulp)
+        if speedFromAcceleration(speed, b, step) == target:
+            return b
+    return a
 
 
 #: Full-lock front road-wheel angle [rad]. `steerAngleDesired` is an ANGLE on

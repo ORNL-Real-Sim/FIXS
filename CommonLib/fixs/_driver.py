@@ -67,7 +67,7 @@ import argparse
 import inspect
 import math
 
-from . import FixsError                 # noqa: E402
+from . import FixsError, speedFromAcceleration   # noqa: E402
 from .. import fixs as _fixs            # noqa: E402
 from . import carla as carla            # noqa: E402
 # CARLA's vendored agents: importing the package puts them on sys.path.
@@ -472,7 +472,7 @@ class Controller:
                             "VehicleMessageField" % self.referenceMode)
         if self.referenceMode == 'accel':
             aref = float(ego.accelerationDesired)
-            vref = v + aref * self.feedStep
+            vref = speedFromAcceleration(v, aref, self.feedStep)
         else:
             vref = float(getattr(ego, 'speedDesired', 0.0) or 0.0)
             aref = (vref - v) / self.feedStep
