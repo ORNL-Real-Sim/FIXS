@@ -540,8 +540,23 @@ SUMO_CONVENTION = {
 }
 
 
-def resolve_sumo_args(app, app_owns_scenario=False):
-    """[(flag, value, origin)] for this run: contract over app over convention.
+def parse_sumo_args(text):
+    """'--time-to-teleport -1 --no-warnings' -> {'--time-to-teleport': '-1', '--no-warnings': ''}.
+
+    A token is a flag's value unless it starts with '--', so negative numbers pass."""
+    toks = [t.strip('"') for t in shlex.split(text or "", posix=False)]
+    out, i = {}, 0
+    while i < len(toks):
+        flag, value = toks[i], ""
+        if i + 1 < len(toks) and not toks[i + 1].startswith("--"):
+            value, i = toks[i + 1], i + 1
+        out[flag] = value
+        i += 1
+    return out
+
+
+def resolve_sumo_args(app, app_owns_scenario=False, cli=None):
+    """[(flag, value, origin)] for this run: contract over --sumo-args over app over convention.
 
     An app deviates through apps.json `sumo_args` - tracked, reviewed next to the app
     declaration, and valid on every map that app runs against. A null value drops a
@@ -569,6 +584,12 @@ def resolve_sumo_args(app, app_owns_scenario=False):
             print(f"[cosim] app '{app.get('id')}': {flag} dropped (sumo_args: null)")
             continue
         args[flag] = (str(value), f"app {app.get('id')}")
+    for flag, value in parse_sumo_args(cli).items():
+        if flag in SUMO_CONTRACT:
+            print(f"[cosim] --sumo-args sets {flag}; ignoring it - that one is the "
+                  f"FIXS contract.")
+            continue
+        args[flag] = (value, "--sumo-args")
     for flag, (value, why) in SUMO_CONTRACT.items():
         args[flag] = (value() if callable(value) else value, f"contract: {why}")
     return [(f, v, o) for f, (v, o) in sorted(args.items())]
@@ -581,7 +602,7 @@ def print_sumo_args(origins):
 
 
 def sumo_launch_cmd(sumocfg, traci_port, num_clients, gui, autostart, app=None,
-                    app_owns_scenario=False):
+                    app_owns_scenario=False, cli=None):
     """The SUMO command line - ONE builder, used by BOTH bridges.
 
     Three kinds of argument, and that is the whole story:
@@ -601,8 +622,8 @@ def sumo_launch_cmd(sumocfg, traci_port, num_clients, gui, autostart, app=None,
            "--remote-port", str(traci_port),
            "--num-clients", str(num_clients)]
     origins = []
-    for flag, value, origin in resolve_sumo_args(app, app_owns_scenario):
-        cmd += [flag, value]
+    for flag, value, origin in resolve_sumo_args(app, app_owns_scenario, cli):
+        cmd += [flag, value] if value != "" else [flag]
         origins.append((flag, value, origin))
     if gui:
         cmd += ["--start", "true" if autostart else "false"]
@@ -1412,7 +1433,7 @@ def run_native_stack(config_yaml, sumocfg, tl_table, cfg, args, app=None,
         # drift apart in what they hand SUMO (they did: see sumo_launch_cmd).
         sumo_cmd, sumo_origins = sumo_launch_cmd(sumocfg, traci_port, num_clients,
                                                  args.sumo_gui, sumo_autostart, app,
-                                                 app_owns_scenario)
+                                                 app_owns_scenario, args.sumo_args)
         # SUMO blocks until ALL num_clients TraCI clients have connected and called
         # setOrder. TrafficLayer is one of them; anything above 1 means you are
         # attaching your own second client, so say so rather than looking hung.
@@ -1624,7 +1645,7 @@ def run_python_bridge(config_yaml, sumocfg, tl_table, tls_manager, no_net_offset
 
     sumo_cmd, sumo_origins = sumo_launch_cmd(sumocfg, traci_port, num_clients,
                                              args.sumo_gui, sumo_autostart, app,
-                                             app_owns_scenario)
+                                             app_owns_scenario, args.sumo_args)
     print(f"[SUMO] {' '.join(sumo_cmd)}")
     print_sumo_args(sumo_origins)
     sumo = _spawn("SUMO", sumo_cmd)
@@ -1779,6 +1800,43 @@ def wait_for_port(host, port, timeout=180, proc=None, cfg=None):
     return False
 
 
+# Server options no app or flag may change: the RPC port is the one the scenario yaml
+# dials, and -game is what runs the source editor as a server.
+CARLA_CONTRACT = ("-carla-rpc-port", "-game")
+
+
+def parse_carla_args(text):
+    """'-quality-level=Low -RenderOffScreen' -> {'-quality-level': 'Low', '-RenderOffScreen': ''}."""
+    out = {}
+    for tok in shlex.split(text or "", posix=False):
+        option, sep, value = tok.strip('"').partition("=")
+        out[option] = value if sep else ""
+    return out
+
+
+def resolve_carla_args(cmd, app=None, cli=None):
+    """(cmd, origins): the server command with apps.json carla_args, then --carla-args, laid over it.
+
+    Merged by option name, ignoring case, because Unreal reads the FIRST copy of a
+    repeated option: appending would leave run_cosim's own value in force."""
+    origins = []
+    layers = [((app or {}).get("carla_args") or {}, f"app {(app or {}).get('id')}"),
+              (parse_carla_args(cli), "--carla-args")]
+    for extra, origin in layers:
+        for option, value in extra.items():
+            if option.lower() in CARLA_CONTRACT:
+                print(f"[cosim] {origin} sets {option}; ignoring it - FIXS owns that one.")
+                continue
+            cmd = [t for t in cmd if t.split("=", 1)[0].lower() != option.lower()]
+            if value is None:
+                origins.append((option, f"{origin}: dropped"))
+                continue
+            token = option if value == "" else f"{option}={value}"
+            cmd.append(token)
+            origins.append((token, origin))
+    return cmd, origins
+
+
 def _carla_command(cfg, port, render_offscreen, quality_level=None, level=None):
     """Build the server launch command for a packaged build or source editor."""
     if cfg["mode"] == "packaged":
@@ -1834,9 +1892,12 @@ def _res_arg(text):
 
 
 def launch_carla(cfg, port=2000, render_offscreen=False, quality_level=None, level=None,
-                 leash=True):
-    cmd = _carla_command(cfg, port, render_offscreen, quality_level, level)
+                 app=None, carla_args=None, leash=True):
+    cmd, origins = resolve_carla_args(
+        _carla_command(cfg, port, render_offscreen, quality_level, level), app, carla_args)
     print(f"[CARLA] launching ({cfg['mode']}): {' '.join(cmd)}")
+    for token, origin in origins:
+        print(f"[cosim]   ->   {token}".ljust(52) + f"[{origin}]")
     if not leash:
         # Outlives the caller: for a script that only boots CARLA for others to use.
         return subprocess.Popen(cmd, stdin=subprocess.DEVNULL)
@@ -4295,6 +4356,16 @@ def main():
                     help=argparse.SUPPRESS)   # deprecated: see --carla-tick
     ap.add_argument("--quality-level", choices=["Low", "Medium", "High", "Epic"], default=None,
                     help="CARLA render quality; Low is much faster on heavy maps")
+    # Pass-through, laid over apps.json carla_args / sumo_args by option name. Also read
+    # from COSIM_CARLA_ARGS / COSIM_SUMO_ARGS, which is how run_cosim.bat forwards a
+    # value that itself starts with '-'.
+    ap.add_argument("--carla-args", default=os.environ.get("COSIM_CARLA_ARGS") or None,
+                    metavar="ARGS",
+                    help='options for the CARLA server run_cosim launches, e.g. '
+                         '--carla-args="-quality-level=Low"')
+    ap.add_argument("--sumo-args", default=os.environ.get("COSIM_SUMO_ARGS") or None,
+                    metavar="ARGS",
+                    help='options for SUMO, e.g. --sumo-args="--time-to-teleport -1"')
     ap.add_argument("--carla-res", type=_res_arg, default=None, metavar="WxH",
                     help="CARLA window size, e.g. 1920x1080 (default 1280x720). "
                          "Saved to carla.json carla_res, so later runs keep it. No "
@@ -5533,7 +5604,8 @@ def main():
                              f"--no-launch to use what is running.")
             _tell_peer(ctl_sock, "launch", "starting the CARLA server")
             carla_proc = launch_carla(cfg, args.carla_port, args.render_offscreen,
-                                      args.quality_level, target_level)
+                                      args.quality_level, target_level,
+                                      app=app, carla_args=args.carla_args)
             if not wait_for_port(args.carla_host, args.carla_port,
                                  proc=carla_proc, cfg=cfg):
                 sys.exit("[cosim] CARLA never became reachable; not starting the "

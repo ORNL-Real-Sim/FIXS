@@ -1417,3 +1417,43 @@ def test_parse_selection_accepts(answer, expected):
 def test_parse_selection_rejects(answer):
     """None means re-ask. Nothing here may be guessed at: the next step deletes."""
     assert import_map.parse_selection(answer, 5) is None
+
+# ------------------------------------- pass-through: carla_args / sumo_args
+
+def test_carla_args_override_by_option_name(tmp_path):
+    """An app's -quality-level replaces run_cosim's, case-insensitively, and --carla-args wins."""
+    root = str(tmp_path / "carla")
+    _make_packaged(root)
+    cfg = {"mode": "packaged", "carla_root": root}
+    base = run_cosim._carla_command(cfg, 2000, render_offscreen=False, quality_level="Epic")
+    app = {"id": "a", "carla_args": {"-Quality-Level": "Low", "-benchmark": ""}}
+    cmd, origins = run_cosim.resolve_carla_args(base, app, "-quality-level=Medium -fps=20")
+    assert [c for c in cmd if c.lower().startswith("-quality-level")] == ["-quality-level=Medium"]
+    assert "-benchmark" in cmd and "-fps=20" in cmd
+    assert ("-fps=20", "--carla-args") in origins
+
+
+def test_carla_args_null_drops_and_contract_is_kept(tmp_path):
+    root = str(tmp_path / "carla")
+    _make_packaged(root)
+    cfg = {"mode": "packaged", "carla_root": root}
+    base = run_cosim._carla_command(cfg, 2000, render_offscreen=False)
+    app = {"id": "a", "carla_args": {"-windowed": None, "-carla-rpc-port": "3000"}}
+    cmd, _ = run_cosim.resolve_carla_args(base, app, None)
+    assert "-windowed" not in cmd
+    assert "-carla-rpc-port=2000" in cmd and "-carla-rpc-port=3000" not in cmd
+
+
+def test_sumo_args_from_the_command_line():
+    """--sumo-args lands over the app's sumo_args; negative values and bare flags parse."""
+    assert run_cosim.parse_sumo_args("--time-to-teleport -1 --no-warnings") == {
+        "--time-to-teleport": "-1", "--no-warnings": ""}
+    app = {"id": "a", "sumo_args": {"--time-to-teleport": "150"}}
+    got = {f: (v, o) for f, v, o in run_cosim.resolve_sumo_args(
+        app, cli="--time-to-teleport -1 --step-length 1")}
+    assert got["--time-to-teleport"] == ("-1", "--sumo-args")
+    assert got["--step-length"][1].startswith("contract")
+    cmd, _ = run_cosim.sumo_launch_cmd("x.sumocfg", 1337, 1, False, True, app,
+                                       cli="--no-warnings")
+    assert "--no-warnings" in cmd and cmd[cmd.index("--no-warnings") + 1:][:1] != [""]
+
