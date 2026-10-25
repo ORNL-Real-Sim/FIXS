@@ -265,11 +265,23 @@ public:
 	int shouldSendVehicle(std::string vehicleId, double simTime);
 
 private:
-	// SumoSetup.EnableGuiFollow: track the vehicle each time it (re)enters the network.
-	void followInGui();
-	bool guiFollowing_ = false;
-	bool guiZoomSet_ = false;
-	bool guiFollowUnavailable_ = false;
+	// ViewSetup sumo views: the first one drives sumo-gui's own view, the rest are added views.
+	struct GuiViewState_t {
+		const ViewDef_t* def = nullptr;
+		std::string viewId;
+		bool following = false;
+		bool zoomSet = false;
+		bool failed = false;
+		double giveUpAt = -1.0;      // added view: sim time to stop waiting for sumo-gui to create it
+		double nextTry = -1.0;
+	};
+	void followInGui(double simTime);
+	const double kGuiViewWaitS = 10.0;
+	const double kGuiViewRetryS = 0.5;
+	bool guiViewsInit_ = false;
+	bool guiUnavailable_ = false;
+	std::string guiMainView_;
+	std::vector<GuiViewState_t> guiViews_;
 
 	void parserSumoSubscription(libsumo::TraCIResults VehDataSubscribeTraciResults, std::string vehId, VehFullData_t& CurVehData);
 
