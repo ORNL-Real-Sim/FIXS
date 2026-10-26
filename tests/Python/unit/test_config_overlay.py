@@ -46,6 +46,23 @@ def test_run_config_is_a_merged_copy_the_config_parser_reads(tmp_path, monkeypat
     assert h.Carla_setup["SpectatorHeight"] == 75.0
 
 
+def test_in_a_run_the_copy_is_in_the_run_dir_and_the_run_record_names_it(tmp_path, monkeypatch):
+    import hashlib
+    from types import SimpleNamespace
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    monkeypatch.setattr(run_cosim, "_RUN", SimpleNamespace(dir=str(run_dir), id="demo-1", lease={}))
+    src = tmp_path / "config_demo.yaml"
+    src.write_text(BASE, encoding="utf-8")
+    out = run_cosim.write_run_config(str(src), OVERLAY, "demo")
+    assert os.path.dirname(out) == str(run_dir / "overlay")
+    run_cosim._record_run(str(src), out)
+    rec = json.loads((run_dir / run_cosim.RUN_RECORD).read_text(encoding="utf-8"))
+    assert rec["user_yaml"] == str(src) and rec["stack_yaml"] == out
+    assert rec["stack_yaml_sha256"] == hashlib.sha256(open(out, "rb").read()).hexdigest()
+    assert (run_dir / run_cosim.STACK_YAML_COPY).read_text(encoding="utf-8") == open(out, encoding="utf-8").read()
+
+
 def test_overlay_rides_on_the_scenario_report(tmp_path, monkeypatch):
     handoff = tmp_path / "handoff.json"
     monkeypatch.setenv("FIXS_HANDOFF", str(handoff))
