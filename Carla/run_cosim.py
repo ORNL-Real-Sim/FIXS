@@ -886,15 +886,56 @@ def _lease_ports(info):
     return ports
 
 
-def _slot_busy(found, k, keep_carla, with_carla):
+def _udp_bound():
+    """{port: pid} for every bound UDP port, from one read of the socket table."""
+    out = {}
+    try:
+        if platform.system() == "Windows":
+            raw = subprocess.check_output(["netstat", "-ano", "-p", "udp"],
+                                          text=True, stderr=subprocess.DEVNULL)
+            for line in raw.splitlines():
+                p = line.split()
+                if len(p) >= 4 and p[0].upper() == "UDP":
+                    try:
+                        out.setdefault(int(p[1].rsplit(":", 1)[1]), int(p[-1]))
+                    except (IndexError, ValueError):
+                        continue
+        else:
+            raw = subprocess.check_output(["lsof", "-nP", "-iUDP", "-F", "pn"],
+                                          text=True, stderr=subprocess.DEVNULL)
+            pid = None
+            for line in raw.splitlines():
+                if line.startswith("p"):
+                    pid = int(line[1:])
+                elif line.startswith("n") and pid is not None:
+                    try:
+                        out.setdefault(int(line.split("->")[0].rsplit(":", 1)[1]), pid)
+                    except ValueError:
+                        continue
+    except Exception:                                        # noqa: BLE001
+        pass
+    return out
+
+
+def _holder(pid, owners):
+    """'name (pid N) of run X' or '... of no FIXS run, so FIXS will not stop it'."""
+    hit = owners.of(pid)
+    name = owners.name(pid) or _process_name(pid) or "?"
+    whose = (f"run {hit[0].id}" if hit is not None else
+             "no FIXS run, so FIXS will not stop it")
+    return f"{name} (pid {pid}) of {whose}", hit
+
+
+def _slot_busy(found, k, keep_carla, with_carla, auto=False):
     """Why slot k cannot be used by this run, or None."""
     wanted = port_slots.bound_ports(found, k, keep_carla, with_carla)
-    if any(p > 65535 for _l, p in wanted):
+    udp = port_slots.udp_ports(found, k)
+    if any(p > 65535 for _l, p in wanted) or any((p or 0) > 65535 for p in udp.values()):
         return "its ports would be above 65535"
     runs = [r for r in run_registry.scan() if r.alive and (_RUN is None or r.id != _RUN.id)]
     holder = run_registry.slot_holder(k, runs)
     if holder is not None:
-        return f"used by run {holder.id}"
+        return f"it is used by run {holder.id}"
     mine = {p for _l, p in wanted}
     for info in runs:
         if "slot" in info.lease:
@@ -902,25 +943,45 @@ def _slot_busy(found, k, keep_carla, with_carla):
         clash = sorted(mine & _lease_ports(info))
         if clash:
             return f"port {clash[0]} is used by run {info.id}"
+    owners = run_registry.Ownership(runs)
     table = _listeners()
     for label, port in wanted:
-        pid = table.get(port)
-        if pid:
-            owners = run_registry.Ownership(runs)
-            hit = owners.of(pid)
-            name = owners.name(pid) or _process_name(pid) or "?"
-            whose = (f"run {hit[0].id}" if hit is not None else
-                     "no FIXS run, so FIXS will not stop it")
-            return f"port {port} ({label}) is held by {name} (pid {pid}) of {whose}"
+        if table.get(port):
+            return f"port {port} ({label}) is held by {_holder(table[port], owners)[0]}"
+    if not udp and int(k) >= 1:
+        base = port_slots.block_base(k)
+        bound = _udp_bound()
+        for off in ("dyno", "reply"):
+            port = base + port_slots.OFFSETS[off]
+            if bound.get(port):
+                return (f"UDP port {port} (this slot's dyno) is held by "
+                        f"{_holder(bound[port], owners)[0]}")
+    if udp:
+        bound = _udp_bound()
+        if bound.get(udp["reply"]):
+            return (f"UDP port {udp['reply']} (the dyno's replies) is held by "
+                    f"{_holder(bound[udp['reply']], owners)[0]}")
+        if _dyno_is_local(found) and udp.get("dyno"):
+            pid = bound.get(udp["dyno"])
+            if pid and _holder(pid, owners)[1] is not None:
+                return f"UDP port {udp['dyno']} (the dyno) is held by {_holder(pid, owners)[0]}"
+            if auto and not pid:
+                return (f"no dyno is listening on UDP {udp['dyno']}; start "
+                        f"`udp_dyno_server.py --slot {k}` first to run there")
     return None
+
+
+def _dyno_is_local(found):
+    ip = found.get("dyno_ip")
+    return not ip or _is_local_host(ip)
 
 
 _LEASE_KEYS = {"SUMO TraCI": "traci", "TrafficLayer bridge": "bridge", "CARLA RPC": "carla",
                "Traffic Manager": "tm", "app": "app", "XIL": "xil"}
 
 
-def _lease_port_names(ports):
-    """{traci: 20100, app: 20130, app_2: 20131, ...} for the lease, from bound_ports()."""
+def _lease_port_names(ports, udp=None):
+    """{traci: 20100, app: 20130, app_2: 20131, dyno: 20170, ...} for the lease."""
     out = {}
     for label, port in ports:
         key = _LEASE_KEYS.get(label)
@@ -930,43 +991,119 @@ def _lease_port_names(ports):
         while name in out:
             name, n = f"{key}_{n}", n + 1
         out[name] = port
+    for key, port in (udp or {}).items():
+        if port:
+            out["dyno_reply" if key == "reply" else "dyno"] = port
     return out
 
 
+def _slot_arg(text):
+    """argparse type for --slot: 'auto' or a slot number."""
+    if str(text).strip().lower() == "auto":
+        return "auto"
+    try:
+        k = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected 'auto' or a slot number, got {text!r}")
+    if not 0 <= k <= port_slots.MAX_SLOT:
+        raise argparse.ArgumentTypeError(f"slots are 0..{port_slots.MAX_SLOT}, not {k}")
+    return k
+
+
 def _claim_slot(args, config_yaml):
-    """Hold a port slot for this run: --slot N, else the first free one from 0."""
+    """Hold this run's port slot: the yaml's own ports (no flag), --slot N, or the
+    first free one (--slot auto). A busy slot is refused, never shifted unasked."""
     if args.serve or args.carla_only or args.peer or args.standalone_bridge:
-        if args.slot:
+        if args.slot not in (None, 0):
             sys.exit("[cosim] --slot is not supported with --serve, --carla-only, --peer "
                      "or --standalone-bridge; those run on the yaml's own ports.")
         return
     keep_carla = bool(args.no_launch or args.carla_port)
     found = _yaml_found(config_yaml)
-    slots = [args.slot] if args.slot is not None else range(0, port_slots.MAX_SLOT + 1)
+    auto = args.slot == "auto"
+    rig = None
+    if found.get("xil_udp") and not _dyno_is_local(found):
+        rig = (f"the rig at {found['dyno_ip']} answers on {found.get('dyno')}/"
+               f"{port_slots.DYNO_REPLY_PORT}; run it on the default ports, without --slot")
+        if isinstance(args.slot, int) and args.slot >= 1:
+            sys.exit(f"[cosim] cannot run on port slot {args.slot}: {rig}.")
+    if auto and rig is None:
+        slots = range(0, port_slots.MAX_SLOT + 1)
+    else:
+        slots = [args.slot if isinstance(args.slot, int) else 0]
     k, held, skipped = run_registry.claim_slot(
         run_registry.locks_root(_RUN),
-        lambda s: _slot_busy(found, s, keep_carla, not args.no_launch), slots)
+        lambda s: _slot_busy(found, s, keep_carla, not args.no_launch, auto=auto), slots)
+    for i, (s, why) in enumerate(skipped):
+        if why == "claimed by another run":
+            holder = run_registry.slot_holder(s)
+            skipped[i] = (s, f"it is used by run {holder.id}" if holder else why)
     if k is None:
-        if args.slot is not None:
-            sys.exit(f"[cosim] slot {args.slot} is not free: {skipped[0][1]}.\n"
-                     f"        FIXS does not stop processes it does not own. Wait for "
-                     f"it, stop it, or leave out --slot to take the next free slot.")
-        sys.exit(f"[cosim] no free port slot on this machine (0..{port_slots.MAX_SLOT}); "
-                 f"`run_cosim --list` shows what holds them.")
-    _SLOT.update(k=k, held=held, keep_carla=keep_carla)
+        why = skipped[0][1] if skipped else "?"
+        if rig is not None:
+            sys.exit(f"[cosim] port slot 0 is not free: {why}.\n"
+                     f"        A UDP rig cannot follow a slot: {rig}, once slot 0 is free.")
+        if auto:
+            sys.exit(f"[cosim] no free port slot on this machine (0..{port_slots.MAX_SLOT}); "
+                     f"slot 0: {why}. `run_cosim --list` shows what holds them.")
+        if args.slot is None:
+            sys.exit(f"[cosim] the ports in {os.path.basename(config_yaml or 'the yaml')} "
+                     f"(port slot 0) are not free: {why}.\n"
+                     f"        FIXS does not stop processes it does not own. Wait for it "
+                     f"or stop it, or pass `--slot auto` to run this co-sim on the next "
+                     f"free port block.")
+        sys.exit(f"[cosim] port slot {args.slot} is not free: {why}.\n"
+                 f"        FIXS does not stop processes it does not own. Wait for it, stop "
+                 f"it, or pass `--slot auto` to take the next free slot.")
+    _SLOT.update(k=k, held=held, keep_carla=keep_carla, found=found)
     ports = port_slots.bound_ports(found, k, keep_carla, not args.no_launch)
+    udp = port_slots.udp_ports(found, k)
     for s, why in skipped[:4]:
         print(f"[cosim] port slot {s} is busy: {why}.")
     if len(skipped) > 4:
         print(f"[cosim] ... and {len(skipped) - 4} more busy slots.")
     if k or skipped:
-        print(f"[cosim] port slot {k}: " + ", ".join(f"{l} {p}" for l, p in ports))
+        print(f"[cosim] port slot {k}: " + ", ".join(f"{l} {p}" for l, p in ports)
+              + (f", UDP dyno {udp['dyno']} / reply {udp['reply']}" if udp else ""))
     if _RUN is not None:
         _RUN.lease["slot"] = k
-        _RUN.set_ports(**_lease_port_names(ports))
+        _RUN.set_ports(**_lease_port_names(ports, udp))
         os.environ["FIXS_RUN_DIR"] = _RUN.dir
         os.environ["FIXS_RUN_ID"] = _RUN.id
     os.environ["FIXS_SLOT"] = str(k)
+
+
+RUN_RECORD = "fixs_run.json"
+STACK_YAML_COPY = "stack_config.yaml"
+
+
+def _record_run(user_yaml, stack_yaml):
+    """Write this run's slot, ports and a copy of the yaml the stack reads into the run
+    dir (fixs_run.json + stack_config.yaml), for the app to keep with its results."""
+    if _RUN is None or not stack_yaml or not os.path.isfile(stack_yaml):
+        return
+    import hashlib
+    try:
+        shutil.copyfile(stack_yaml, os.path.join(_RUN.dir, STACK_YAML_COPY))
+        with open(stack_yaml, "rb") as f:
+            digest = hashlib.sha256(f.read()).hexdigest()
+        record = {"run": _RUN.id, "slot": _SLOT["k"], "host": socket.gethostname(),
+                  "user": _RUN.lease.get("user"), "created": _RUN.lease.get("created"),
+                  "fixs": _fixs_version(), "app": _RUN.lease.get("app"),
+                  "ports": dict(_RUN.lease.get("ports") or {}),
+                  "user_yaml": os.path.abspath(user_yaml) if user_yaml else None,
+                  "stack_yaml": os.path.abspath(stack_yaml),
+                  "stack_yaml_copy": STACK_YAML_COPY, "stack_yaml_sha256": digest}
+        run_registry._write_json_atomic(os.path.join(_RUN.dir, RUN_RECORD), record)
+    except OSError as exc:
+        print(f"[cosim] could not write the run record ({exc}).")
+
+
+def _stack_yaml(config_yaml):
+    """_slot_yaml(), recorded in the run dir."""
+    stack = _slot_yaml(config_yaml)
+    _record_run(config_yaml, stack)
+    return stack
 
 
 def _slot_yaml(config_yaml):
@@ -4199,10 +4336,11 @@ def main():
                     metavar="runs",
                     help="list the co-sim runs on this machine (live and dead), their "
                          "ports and children, and who holds the default ports, then exit")
-    ap.add_argument("--slot", type=int, default=None, metavar="N",
-                    help="run on port slot N: 0 is the scenario yaml's own ports, N >= 1 "
-                         "moves every port to %d + %d*N. Default: the first free slot, "
-                         "so a run started while another holds slot 0 takes slot 1"
+    ap.add_argument("--slot", type=_slot_arg, default=None, metavar="auto|N",
+                    help="run on another port block, for co-sims side by side (e.g. "
+                         "several agents). Without it a run uses the scenario yaml's own "
+                         "ports (slot 0) and refuses if they are busy. auto: the first "
+                         "free slot; N: slot N, which moves every port to %d + %d*N"
                          % (port_slots.SLOT_BASE, port_slots.SLOT_STRIDE))
     ap.add_argument("--stop", default=None, metavar="RUN_ID",
                     help="stop one run by its id (from --list) and what it started, "
@@ -4326,8 +4464,6 @@ def main():
     # args.reimport as the plain bool it has always been.
     args.reimport_path = args.reimport if isinstance(args.reimport, str) else None
     args.reimport = bool(args.reimport)
-    if args.slot is not None and not 0 <= args.slot <= port_slots.MAX_SLOT:
-        sys.exit(f"[cosim] --slot takes 0..{port_slots.MAX_SLOT}, not {args.slot}.")
 
     # Resolved before anything reads the endpoint, so --doctor, --version and the
     # run itself all see one setting rather than two spellings of it.
@@ -4799,7 +4935,7 @@ def main():
         # The yaml this run will hand TrafficLayer. Known already for a config that
         # was chosen (--config, or the one the profile remembers); a first run that
         # GENERATES a per-map config has none yet, and the app falls back to its own.
-        app_proc, app_sumocfg = start_app(app, _slot_yaml(args.config or setup.get("config")),
+        app_proc, app_sumocfg = start_app(app, _stack_yaml(args.config or setup.get("config")),
                                           sumo_only=args.sumo_only,
                                           sumocfg=args.sumocfg or map_sumocfg)
 
@@ -5156,7 +5292,7 @@ def main():
 
     # From here the stack reads the slot's copy; the profile keeps the user's yaml.
     user_config_yaml = config_yaml
-    config_yaml = _slot_yaml(config_yaml)
+    config_yaml = _stack_yaml(config_yaml)
     if config_yaml != user_config_yaml and not cli_port:
         args.carla_port = read_carla_endpoint(config_yaml)[1] or args.carla_port
 

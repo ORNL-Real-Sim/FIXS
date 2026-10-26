@@ -147,18 +147,6 @@ def test_keep_carla_leaves_the_rpc_port(rung2, tmp_path):
     assert doc["CarlaSetup"]["CarlaClientPort"] == 20140
 
 
-def test_a_udp_dyno_keeps_its_port(tmp_path):
-    src = tmp_path / "udp.yaml"
-    src.write_text(RUNG2.replace("  EnableXil: false\n",
-                                 "  EnableXil: true\n  Transport: udp\n")
-                   .replace("port: [4420]", "port: [5010]"), encoding="utf-8")
-    dst = str(tmp_path / "out.yaml")
-    m = ps.write_slot_yaml(str(src), dst, 1, "r")
-    assert 5010 not in m
-    doc = yaml.safe_load(open(dst, encoding="utf-8"))
-    assert doc["XilSetup"]["VehicleSubscription"][0]["port"] == [5010]
-
-
 def test_a_traffic_only_yaml_has_no_carla_ports(tmp_path):
     src = tmp_path / "sumo.yaml"
     src.write_text(RUNG2.split("CarlaSetup:")[0].replace("port: [4440]", "port: [4430]"),
@@ -262,7 +250,7 @@ def test_claim_slot_takes_the_next_slot_past_a_foreign_holder(registry, rung2,
     monkeypatch.setattr(run_cosim, "_listeners", lambda: {1337: foreign.pid})
     try:
         run_cosim._begin_run({"id": "eco"}, rung2, None)
-        run_cosim._claim_slot(_args(), rung2)
+        run_cosim._claim_slot(_args(slot="auto"), rung2)
         assert run_cosim._SLOT["k"] == 1
         out = capsys.readouterr().out
         assert "port slot 0 is busy" in out and str(foreign.pid) in out
@@ -322,7 +310,7 @@ def test_a_run_of_an_older_fixs_blocks_the_slot_its_yaml_uses(registry, rung2, m
     old = rr.Run.start(app_id="eco", config=rung2)    # no "slot" in its lease
     try:
         run_cosim._begin_run({"id": "eco"}, rung2, None)
-        run_cosim._claim_slot(_args(), rung2)
+        run_cosim._claim_slot(_args(slot="auto"), rung2)
         assert run_cosim._SLOT["k"] == 1
     finally:
         run_cosim._SLOT["held"].release()
@@ -390,3 +378,172 @@ def test_profile_writes_are_whole_and_leave_no_temp(tmp_path, monkeypatch):
     doc = run_profile.load_doc()
     assert set(doc["setups"]) == {"a", "b"} and doc["last"] == "b"
     assert sorted(os.listdir(tmp_path)) == ["run_profiles.json", "run_profiles.json.lock"]
+
+
+# --------------------------------------------------------------------------- #
+# explicit slots, the UDP dyno, the run record
+# --------------------------------------------------------------------------- #
+def test_no_flag_refuses_a_busy_slot_zero_and_names_the_holder(registry, rung2, monkeypatch):
+    monkeypatch.setattr(run_cosim, "_listeners", lambda: {})
+    other = rr.Run.start(app_id="eco")
+    other.update(slot=0)
+    try:
+        run_cosim._begin_run({"id": "eco"}, rung2, None)
+        with pytest.raises(SystemExit) as exc:
+            run_cosim._claim_slot(_args(), rung2)
+        msg = str(exc.value.code)
+        assert f"used by run {other.id}" in msg and "--slot auto" in msg
+        assert run_cosim._SLOT["k"] == 0 and run_cosim._SLOT["held"] is None
+    finally:
+        run_cosim._RUN.close()
+        other.close()
+
+
+def test_no_flag_refuses_a_foreign_holder_of_a_yaml_port(registry, rung2, monkeypatch):
+    foreign = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    monkeypatch.setattr(run_cosim, "_listeners", lambda: {4440: foreign.pid})
+    try:
+        run_cosim._begin_run({"id": "eco"}, rung2, None)
+        with pytest.raises(SystemExit) as exc:
+            run_cosim._claim_slot(_args(), rung2)
+        msg = str(exc.value.code)
+        assert "port 4440" in msg and str(foreign.pid) in msg and "--slot auto" in msg
+        assert foreign.poll() is None
+    finally:
+        run_cosim._RUN.close()
+        foreign.kill()
+        foreign.wait(timeout=10)
+
+
+def test_slot_arg():
+    assert run_cosim._slot_arg("auto") == "auto" and run_cosim._slot_arg("AUTO") == "auto"
+    assert run_cosim._slot_arg("3") == 3
+    import argparse
+    for bad in ("x", "-1", str(ps.MAX_SLOT + 1)):
+        with pytest.raises(argparse.ArgumentTypeError):
+            run_cosim._slot_arg(bad)
+
+
+def _udp_yaml(tmp_path, ip="127.0.0.1"):
+    src = tmp_path / "rung6.yaml"
+    src.write_text(RUNG2.replace("  EnableXil: false\n", "  EnableXil: true\n  Transport: udp\n")
+                   .replace("port: [4420]", "port: [5010]")
+                   .replace('    ip: ["127.0.0.1"]\n    port: [5010]',
+                            f'    ip: ["{ip}"]\n    port: [5010]'), encoding="utf-8")
+    return str(src)
+
+
+def test_the_udp_dyno_follows_the_slot(tmp_path):
+    src = _udp_yaml(tmp_path)
+    f = ps.discover(src)
+    assert f["xil_udp"] and f["dyno"] == 5010 and f["dyno_ip"] == "127.0.0.1"
+    assert ps.udp_ports(f, 0) == {"dyno": 5010, "reply": 5011}
+    assert ps.udp_ports(f, 2) == {"dyno": 20270, "reply": 20271}
+    dst = str(tmp_path / "o.yaml")
+    m = ps.write_slot_yaml(src, dst, 2, "r")
+    assert m[5010] == 20270
+    doc = yaml.safe_load(open(dst, encoding="utf-8"))
+    assert doc["XilSetup"]["VehicleSubscription"][0]["port"] == [20270]
+
+
+def test_the_controllers_reply_port_follows_fixs_slot(monkeypatch):
+    from CommonLib.xil.link import slotPorts
+    import CommonLib.fixs.xil as fxil
+    assert slotPorts(0) == (5010, 5011) and slotPorts(3) == (20370, 20371)
+    for k in (0, 1, 7):
+        base = ps.block_base(k)
+        want = (5010, 5011) if k == 0 else (base + ps.OFFSETS["dyno"], base + ps.OFFSETS["reply"])
+        assert slotPorts(k) == want
+    monkeypatch.delenv("FIXS_SLOT", raising=False)
+    assert fxil.replyPort() == 5011
+    monkeypatch.setenv("FIXS_SLOT", "4")
+    assert fxil.replyPort() == 20471
+
+
+def test_a_bound_reply_port_makes_the_slot_busy(registry, tmp_path, monkeypatch):
+    src = _udp_yaml(tmp_path)
+    foreign = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    monkeypatch.setattr(run_cosim, "_listeners", lambda: {})
+    monkeypatch.setattr(run_cosim, "_udp_bound", lambda: {5011: foreign.pid, 20170: 1})
+    try:
+        f = ps.discover(src)
+        why = run_cosim._slot_busy(f, 0, False, True)
+        assert "UDP port 5011" in why and str(foreign.pid) in why
+    finally:
+        foreign.kill()
+        foreign.wait(timeout=10)
+
+
+def test_auto_lands_where_a_stand_in_dyno_listens(registry, tmp_path, monkeypatch):
+    src = _udp_yaml(tmp_path)
+    stand_in = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    monkeypatch.setattr(run_cosim, "_listeners", lambda: {})
+    monkeypatch.setattr(run_cosim, "_udp_bound", lambda: {20270: stand_in.pid})
+    try:
+        run_cosim._begin_run({"id": "eco"}, src, None)
+        run_cosim._claim_slot(_args(slot="auto"), src)
+        assert run_cosim._SLOT["k"] == 2
+        assert run_cosim._RUN.lease["ports"]["dyno"] == 20270
+        assert run_cosim._RUN.lease["ports"]["dyno_reply"] == 20271
+    finally:
+        if run_cosim._SLOT["held"]:
+            run_cosim._SLOT["held"].release()
+        run_cosim._RUN.close()
+        stand_in.kill()
+        stand_in.wait(timeout=10)
+
+
+def test_a_remote_rig_is_refused_off_slot_zero(registry, tmp_path, monkeypatch):
+    src = _udp_yaml(tmp_path, ip="192.168.140.24")
+    monkeypatch.setattr(run_cosim, "_listeners", lambda: {})
+    monkeypatch.setattr(run_cosim, "_udp_bound", lambda: {})
+    monkeypatch.setattr(run_cosim, "_is_local_host", lambda h: h in ("127.0.0.1", "localhost"))
+    other = rr.Run.start(app_id="eco")
+    other.update(slot=0)
+    try:
+        run_cosim._begin_run({"id": "eco"}, src, None)
+        for slot in (2, "auto"):
+            with pytest.raises(SystemExit) as exc:
+                run_cosim._claim_slot(_args(slot=slot), src)
+            assert "the rig at 192.168.140.24 answers on 5010/5011" in str(exc.value.code)
+            assert "without --slot" in str(exc.value.code)
+        other.close()
+        run_cosim._claim_slot(_args(), src)            # slot 0 with the rig: as today
+        assert run_cosim._SLOT["k"] == 0
+    finally:
+        if run_cosim._SLOT["held"]:
+            run_cosim._SLOT["held"].release()
+        run_cosim._RUN.close()
+        other.close()
+
+
+@pytest.mark.parametrize("auto", [False, True])
+def test_the_run_record_names_slot_ports_and_the_yaml_read(registry, rung2, monkeypatch, auto):
+    import json
+    monkeypatch.setattr(run_cosim, "_listeners", lambda: {1337: 1} if auto else {})
+    monkeypatch.setattr(run_cosim.run_registry.Ownership, "of", lambda self, pid: None)
+    try:
+        run_cosim._begin_run({"id": "eco"}, rung2, None)
+        run_cosim._claim_slot(_args(slot="auto" if auto else None), rung2)
+        stack = run_cosim._stack_yaml(rung2)
+        rec = json.load(open(os.path.join(run_cosim._RUN.dir, run_cosim.RUN_RECORD)))
+        assert rec["slot"] == (1 if auto else 0) and rec["run"] == run_cosim._RUN.id
+        assert rec["user_yaml"] == os.path.abspath(rung2)
+        assert rec["stack_yaml"] == os.path.abspath(stack)
+        assert (stack == rung2) is (not auto)
+        assert rec["ports"]["traci"] == (20100 if auto else 1337)
+        copy = os.path.join(run_cosim._RUN.dir, rec["stack_yaml_copy"])
+        assert open(copy, encoding="utf-8").read() == open(stack, encoding="utf-8").read()
+    finally:
+        if run_cosim._SLOT["held"]:
+            run_cosim._SLOT["held"].release()
+        run_cosim._RUN.close()
+
+
+def test_a_slot_with_a_dyno_waiting_is_not_taken_by_another_rung(registry, rung2, monkeypatch):
+    monkeypatch.setattr(run_cosim, "_listeners", lambda: {})
+    monkeypatch.setattr(run_cosim, "_udp_bound", lambda: {20170: 1})
+    monkeypatch.setattr(run_cosim.run_registry.Ownership, "of", lambda self, pid: None)
+    f = ps.discover(rung2)
+    assert "UDP port 20170" in run_cosim._slot_busy(f, 1, False, True)
+    assert run_cosim._slot_busy(f, 2, False, True) is None

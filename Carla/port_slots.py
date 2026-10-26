@@ -6,11 +6,11 @@ binds into the block at SLOT_BASE + SLOT_STRIDE * k:
     +0  SUMO TraCI           +40     TrafficLayer bridge
     +20 XIL (tcp)            +50..52 CARLA RPC, streaming, secondary
     +30 app subscribers      +60     Traffic Manager
+                             +70/+71 UDP dyno (XilSetup port) / the controller's reply port
 
 and writes the result to a copy in the run's dir; the source yaml is never edited.
-A UDP dyno (XilSetup.Transport: udp) is an endpoint outside the stack and keeps its
-port. Relative output paths (DataLogPath, ViewSetup Record) get the run id as their
-last dir, so two runs of one yaml do not write the same files.
+Relative output paths (DataLogPath, ViewSetup Record) get the run id as their last
+dir, so two runs of one yaml do not write the same files.
 """
 import os
 import re
@@ -18,7 +18,9 @@ import re
 SLOT_BASE = 20000
 SLOT_STRIDE = 100
 MAX_SLOT = 50
-OFFSETS = {"traci": 0, "xil": 20, "app": 30, "bridge": 40, "carla": 50, "tm": 60}
+OFFSETS = {"traci": 0, "xil": 20, "app": 30, "bridge": 40, "carla": 50, "tm": 60,
+           "dyno": 70, "reply": 71}
+DYNO_REPLY_PORT = 5011              # CommonLib/xil/link.py MEASUREMENT_PORT
 _GROUP_WIDTH = 10
 
 DEFAULT_TRACI = 1337
@@ -80,8 +82,20 @@ def discover(path=None, doc=None):
     app = [p for p in _subscription_ports(doc.get("ApplicationSetup"))
            + _ports_of(sim.get("WarmUpServePorts")) if p not in taken]
     found["app"] = list(dict.fromkeys(app))
-    found["xil_udp"] = str(xil.get("Transport") or "").strip().lower() == "udp"
+    found["xil_udp"] = (bool(xil.get("EnableXil"))
+                        and str(xil.get("Transport") or "").strip().lower() == "udp")
     xil_ports = [] if found["xil_udp"] else _subscription_ports(xil)
+    found["dyno"], found["dyno_ip"] = None, None
+    if found["xil_udp"]:
+        dyno_ports = _subscription_ports(xil)
+        if len(dyno_ports) > 1:
+            raise SlotError(f"XilSetup lists {len(dyno_ports)} UDP dyno ports; a slot has one")
+        found["dyno"] = dyno_ports[0] if dyno_ports else None
+        for sub in (v for vals in xil.values() if isinstance(vals, list) for v in vals):
+            if isinstance(sub, dict) and sub.get("ip"):
+                ip = sub["ip"]
+                found["dyno_ip"] = str(ip[0] if isinstance(ip, list) else ip)
+                break
     found["xil"] = [p for p in dict.fromkeys(xil_ports)
                     if p not in taken and p not in found["app"]]
     return found
@@ -98,6 +112,8 @@ def port_map(found, k, keep_carla=False):
             mapping[found[role]] = base + OFFSETS[role]
     if found.get("carla") and not keep_carla:
         mapping[found["carla"]] = base + OFFSETS["carla"]
+    if found.get("dyno"):
+        mapping[found["dyno"]] = base + OFFSETS["dyno"]
     for role in ("app", "xil"):
         ports = found.get(role) or []
         if len(ports) > _GROUP_WIDTH:
@@ -106,6 +122,16 @@ def port_map(found, k, keep_carla=False):
         for i, p in enumerate(ports):
             mapping.setdefault(p, base + OFFSETS[role] + i)
     return mapping
+
+
+def udp_ports(found, k):
+    """{"dyno": port, "reply": port} of a UDP dyno rung on slot k, else {}."""
+    if not found.get("xil_udp"):
+        return {}
+    if int(k) == 0:
+        return {"dyno": found.get("dyno"), "reply": DYNO_REPLY_PORT}
+    base = block_base(k)
+    return {"dyno": base + OFFSETS["dyno"], "reply": base + OFFSETS["reply"]}
 
 
 def bound_ports(found, k, keep_carla=False, with_carla=True):
@@ -213,7 +239,7 @@ def write_slot_yaml(src, dst, k, run_id, keep_carla=False):
     except yaml.YAMLError as exc:
         raise SlotError(f"the remapped yaml does not parse: {exc}") from exc
     want = {role: mapping.get(found[role], found[role])
-            for role in ("traci", "bridge", "carla", "tm") if found.get(role)}
+            for role in ("traci", "bridge", "carla", "tm", "dyno") if found.get(role)}
     for role, port in want.items():
         if after.get(role) != port:
             raise SlotError(f"{role} port is {after.get(role)} after the rewrite, "
