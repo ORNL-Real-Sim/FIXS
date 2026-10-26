@@ -29,7 +29,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 
 from CommonLib.ConfigHelper import ConfigHelper                          # noqa: E402
 from CommonLib.VehDataMsgDefs import VehData                             # noqa: E402
-from CommonLib.VirEnv.DataLogger import DataLogger                       # noqa: E402
+from CommonLib.VirEnv.DataLogger import DataLogger, perRunPath           # noqa: E402
 from CommonLib.VirEnv.EgoDriver import EgoDriver                         # noqa: E402
 from CommonLib.VirEnv.FixsProtocol import kFeedPeriodS, onFeedBoundary   # noqa: E402
 from CommonLib.VirEnv.EgoControllerHost import (                        # noqa: E402
@@ -802,7 +802,7 @@ def _openDataLog(config):
         return dataLog
     path = dls['DataLogPath']
     if not path or path == 'auto':
-        path = os.path.join('_datalog', 'vircarla.csv')
+        path = perRunPath(os.path.join('_datalog', 'vircarla.csv'))
     if dataLog.open(path, dls['DataLogFields']):
         print('DataLogger -> %s (FIXS/SUMO-VISSIM wire convention)' % dataLog.path())
     else:

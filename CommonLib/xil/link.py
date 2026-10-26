@@ -30,6 +30,17 @@ _PACKET = struct.Struct('<2f')
 PACKET_SIZE = _PACKET.size                  # 8
 REFERENCE_PORT = 5010                       # simulator -> dyno
 MEASUREMENT_PORT = 5011                     # dyno -> simulator
+# Port slot k >= 1 (run_cosim --slot) moves both into its block: 20000 + 100k + 70 / + 71.
+_SLOT_BASE, _SLOT_STRIDE, _SLOT_DYNO = 20000, 100, 70
+
+
+def slotPorts(slot=0):
+    """(reference_port, measurement_port) for a run on port slot `slot`."""
+    slot = int(slot or 0)
+    if slot <= 0:
+        return REFERENCE_PORT, MEASUREMENT_PORT
+    base = _SLOT_BASE + _SLOT_STRIDE * slot + _SLOT_DYNO
+    return base, base + 1
 
 
 def pack(speed, steer=0.0):

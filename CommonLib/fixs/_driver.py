@@ -394,8 +394,9 @@ class Controller:
         #: read as 'never'.
         from CommonLib.VirEnv.EgoControllerHost import currentDynamics
         self.passive = currentDynamics() == 'traffic'
+        from CommonLib.VirEnv.DataLogger import perRunPath
         self.log = _openLog(
-            config.get('EgoControllerLog', '_datalog/agent_embedded.csv'),
+            config.get('EgoControllerLog', perRunPath('_datalog/agent_embedded.csv')),
             'fixs.driver shape=%s loop=%s reference=%s %s %s exchange=%s'
             % (self.shape, self.loop, self.referenceMode, self.tuning, self.limits,
                getattr(self._EXCHANGE, '__name__', 'none')))

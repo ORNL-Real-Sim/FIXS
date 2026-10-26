@@ -253,6 +253,35 @@ the extra render pass on the CARLA server, which shows up in the bridge's
 cameras. At shutdown the bridge prints each camera's callback, draw and encode cost.
 Closing a camera window removes that camera unless it is also recording.
 
+## Port slots: several co-sims on one machine
+
+The ports in a scenario yaml are the ports a run uses. A person running one co-sim
+passes no flag: `run_cosim` uses the yaml's ports as written (port slot 0) and, if
+another run or any other program holds one of them, refuses up front and names the
+holder. A run against a physical rig (`XilSetup.Transport: udp` with a non-local ip)
+only ever runs this way.
+
+Co-sims run side by side (for example several AI agents on one machine) pass
+`--slot auto`, which takes the first free slot, or `--slot N` for one slot. Slot
+k >= 1 moves every port the run uses into the block at `20000 + 100*k`, in a copy of
+the yaml written to the run's dir; the yaml itself is never edited:
+
+| offset | port |
+|---|---|
+| +0 | `SimulationSetup.TrafficSimulatorPort` (SUMO TraCI) |
+| +20 | `XilSetup` subscription ports (tcp) |
+| +30 | `ApplicationSetup` subscription ports and `WarmUpServePorts` |
+| +40 | `CarlaSetup.CarlaClientPort` (TrafficLayer bridge) |
+| +50..+52 | `CarlaSetup.CarlaServerPort` (CARLA RPC, streaming, secondary) |
+| +60 | `CarlaSetup.TrafficManagerPort` |
+| +70 / +71 | UDP dyno (`XilSetup` port, `Transport: udp`) / the controller's reply port (`fixs.xil.replyPort()`) |
+
+On slot k >= 1, relative `DataLogSetup.DataLogPath` and `ViewSetup` `Record` paths get the
+run id as their last folder. Every run (slot 0 included) writes `fixs_run.json` (slot,
+ports, the yaml the stack read and its sha256) and `stack_config.yaml` (a copy of that
+yaml) into its run dir, `FIXS_RUN_DIR`, for the application to keep with its results.
+`run_cosim --list` shows each run's slot and ports.
+
 ## Vehicle Message Field Specifications
 
 This is the full list of available vehicle message fields that can be specified in `VehicleMessageField`:

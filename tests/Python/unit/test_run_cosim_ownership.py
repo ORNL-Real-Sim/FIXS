@@ -140,9 +140,58 @@ def test_begin_run_refuses_a_leftover_of_this_app(registry, orphan, monkeypatch)
                         [(orphan, "python.exe", "python apps/eco/controller.py")])
     try:
         with pytest.raises(SystemExit) as exc:
-            run_cosim._begin_run({"id": "eco"}, None, None)
+            run_cosim._begin_run({"id": "eco", "launch": "controller.py --x 1"}, None, None)
         assert "outside any FIXS run" in str(exc.value.code)
         assert rr.process_start(orphan) is not None
+    finally:
+        if run_cosim._RUN is not None:
+            run_cosim._RUN.close()
+
+
+@pytest.mark.parametrize("cmd", [
+    r"python C:\repo\apps\eco\udp_dyno_server.py",
+    "python apps/eco/tools/plot.py",
+    r"python C:\repo\FIXS\Carla\run_cosim.py --app eco --config C:\repo\apps\eco\x.yaml",
+])
+def test_begin_run_lets_another_script_of_the_app_run(registry, orphan, monkeypatch,
+                                                      capsys, cmd):
+    monkeypatch.setattr(run_cosim, "_cosim_leftovers",
+                        lambda app_id=None, include_carla=False:
+                        [(orphan, "python.exe", cmd)])
+    try:
+        run_cosim._begin_run({"id": "eco", "launch": "controller.py"}, None, None)
+        assert run_cosim._RUN is not None
+        assert "left alone" not in capsys.readouterr().out
+        assert rr.process_start(orphan) is not None
+    finally:
+        if run_cosim._RUN is not None:
+            run_cosim._RUN.close()
+
+
+def test_begin_run_refuses_the_launch_script_by_its_full_path(registry, orphan, monkeypatch):
+    monkeypatch.setattr(run_cosim, "_cosim_leftovers",
+                        lambda app_id=None, include_carla=False:
+                        [(orphan, "python.exe",
+                          r"C:\py\python.exe C:\repo\apps\eco\controller.py")])
+    try:
+        with pytest.raises(SystemExit) as exc:
+            run_cosim._begin_run({"id": "eco", "launch": "controller.py"}, None, None)
+        assert "outside any FIXS run" in str(exc.value.code)
+    finally:
+        if run_cosim._RUN is not None:
+            run_cosim._RUN.close()
+
+
+def test_a_bridge_reading_a_staged_app_yaml_is_not_the_app(registry, orphan, monkeypatch,
+                                                           capsys):
+    cmd = ("python FIXS/Carla/VirEnv/mainVirCarla.py -f "
+           r"C:\Users\u\.fixs\apps\eco\config.yaml")
+    monkeypatch.setattr(run_cosim, "_cosim_leftovers",
+                        lambda app_id=None, include_carla=False:
+                        [(orphan, "python.exe", cmd)])
+    try:
+        run_cosim._begin_run({"id": "eco", "launch": "config.yaml"}, None, None)
+        assert "left alone" in capsys.readouterr().out
     finally:
         if run_cosim._RUN is not None:
             run_cosim._RUN.close()
@@ -206,8 +255,7 @@ def test_list_shows_runs_and_who_holds_the_ports(registry, sleeper, monkeypatch,
     run = rr.Run.start(app_id="eco", ports={"traci": 1337})
     try:
         run.add_child("SUMO", sleeper)
-        monkeypatch.setattr(run_cosim, "_pid_on_port",
-                            lambda port: sleeper.pid if port == 1337 else None)
+        monkeypatch.setattr(run_cosim, "_listeners", lambda: {1337: sleeper.pid})
         assert run_cosim.run_list() == 0
         out = capsys.readouterr().out
         assert f"LIVE  {run.id}" in out

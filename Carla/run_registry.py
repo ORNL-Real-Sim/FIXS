@@ -650,12 +650,18 @@ def _write_json_atomic(path, data):
     os.replace(tmp, path)
 
 
-def _read_json(path):
-    try:
-        with open(path, encoding="utf-8") as f:
-            return json.load(f)
-    except (OSError, ValueError):
-        return None
+def _read_json(path, tries=5):
+    for attempt in range(tries):
+        try:
+            with open(path, encoding="utf-8") as f:
+                return json.load(f)
+        except FileNotFoundError:
+            return None
+        except (OSError, ValueError):
+            # Windows: a reader can land in the middle of the writer's os.replace.
+            if attempt + 1 < tries:
+                time.sleep(0.02)
+    return None
 
 
 def _user():
@@ -879,6 +885,96 @@ class Ownership:
 
     def name(self, pid):
         return process_name(pid, self._snap)
+
+
+# --------------------------------------------------------------------------- #
+# port slots and map locks: held by the same OS lock as a lease
+# --------------------------------------------------------------------------- #
+SLOTS_DIR = ".slots"
+MAPS_DIR = ".maps"
+
+
+def locks_root(run=None):
+    """Where slot and map locks live: beside the run's lease, else the first writable
+    registry dir. None if nothing is writable."""
+    if run is not None:
+        return os.path.dirname(run.dir)
+    root, _fell_back = _writable_registry()
+    return root
+
+
+class Held:
+    """A lock this process holds until release() or exit."""
+
+    def __init__(self, name, lock):
+        self.name, self._lock = name, lock
+
+    def release(self):
+        if self._lock is not None:
+            self._lock.release()
+            self._lock = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.release()
+
+
+def claim_slot(root, busy, slots):
+    """Hold the first slot in `slots` whose lock is free and for which busy(k) is
+    falsy. busy(k) returns why slot k cannot be used, or None.
+
+    Returns (k, Held or None, [(k, why)] skipped); k is None if every slot was taken."""
+    skipped = []
+    d = os.path.join(root, SLOTS_DIR) if root else None
+    if d:
+        try:
+            _makedirs_shared(d)
+        except OSError:
+            d = None
+    for k in slots:
+        held = None
+        if d:
+            lock = FileLock(os.path.join(d, f"slot-{int(k)}.lock"))
+            if not lock.acquire():
+                skipped.append((k, "claimed by another run"))
+                continue
+            held = Held(f"slot {k}", lock)
+        why = busy(k)
+        if why:
+            if held:
+                held.release()
+            skipped.append((k, why))
+            continue
+        return k, held, skipped
+    return None, None, skipped
+
+
+def slot_holder(k, runs=None):
+    """The live RunInfo whose lease records slot k, or None."""
+    for info in scan() if runs is None else runs:
+        if info.alive and info.lease.get("slot") == k:
+            return info
+    return None
+
+
+def map_lock(root, name, log=print, poll=1.0):
+    """Block until this process holds the lock for map `name`; returns a Held."""
+    slug = re.sub(r"[^A-Za-z0-9_.-]+", "_", name or "map").strip("_.") or "map"
+    d = os.path.join(root, MAPS_DIR)
+    _makedirs_shared(d)
+    lock = FileLock(os.path.join(d, f"{slug}.lock"))
+    said = False
+    while not lock.acquire():
+        if not said and log is not None:
+            log(f"[cosim] another run is preparing map '{name}'; waiting for it to "
+                f"finish before this one touches it ...")
+            said = True
+        time.sleep(poll)
+    if said and log is not None:
+        log(f"[cosim] map '{name}' is free again; continuing.")
+    return Held(f"map {name}", lock)
 
 
 def stop_run(run_id, log=print, grace=15.0):
