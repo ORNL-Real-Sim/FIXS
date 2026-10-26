@@ -46,6 +46,15 @@ def test_run_config_is_a_merged_copy_the_config_parser_reads(tmp_path, monkeypat
     assert h.Carla_setup["SpectatorHeight"] == 75.0
 
 
+def test_lists_of_scalars_stay_inline_for_the_line_based_checks(tmp_path, monkeypatch):
+    monkeypatch.setattr(app_catalog, "app_root", lambda: str(tmp_path))
+    src = tmp_path / "config_demo.yaml"
+    src.write_text(BASE + "  CarlaClientPort: 4440\nVehicleSubscription:\n  - type: ego\n    port: [4440]\n",
+                   encoding="utf-8")
+    text = open(run_cosim.write_run_config(str(src), OVERLAY, "demo"), encoding="utf-8").read()
+    assert "port: [4440]" in text and "InterestedIds: [ego]" in text
+
+
 def test_in_a_run_the_copy_is_in_the_run_dir_and_the_run_record_names_it(tmp_path, monkeypatch):
     import hashlib
     from types import SimpleNamespace
