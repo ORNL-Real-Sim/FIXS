@@ -42,6 +42,7 @@ import urllib.request
 
 import app_catalog
 import carla_env_setup as env
+import port_slots
 import run_profile
 import run_registry
 
@@ -799,15 +800,22 @@ def _begin_run(app=None, config_yaml=None, carla_port=None):
     leftovers = _cosim_leftovers(app_id)
     owners = run_registry.Ownership()
     ghosts, unowned = [], []
-    marks = ()
+    script = _app_script_marks(app)
+    app_marks = ()
     if app_id:
-        marks = (f"apps/{app_id}/".lower(), f"apps\\{app_id}\\".lower())
+        app_marks = (f"apps/{app_id}/".lower(), f"apps\\{app_id}\\".lower())
     for pid, pname, cmd in leftovers:
         if owners.of(pid) is not None:
             continue
         stem = pname.lower()[:-4] if pname.lower().endswith(".exe") else pname.lower()
-        is_app = stem in _INTERPRETERS and any(m in (cmd or "").lower() for m in marks)
-        (ghosts if is_app else unowned).append((pid, pname))
+        c = (cmd or "").lower()
+        if stem in _INTERPRETERS and any(m in c for m in app_marks) \
+                and not any(s in c for s in _STACK_CMDS):
+            # Another script of the app (a dyno server, a plotter) is not its controller.
+            if any(m in c for m in script):
+                ghosts.append((pid, pname))
+            continue
+        unowned.append((pid, pname))
     if ghosts:
         sys.exit("[cosim] '" + app_id + "' is already running outside any FIXS run: "
                  + ", ".join(f"{n} (pid {p})" for p, n in ghosts)
@@ -818,6 +826,197 @@ def _begin_run(app=None, config_yaml=None, carla_port=None):
         print("[cosim] note: co-sim processes that no FIXS run owns are running and "
               "are left alone: " + ", ".join(f"{n} (pid {p})" for p, n in unowned)
               + ". `run_cosim --cleanup --all` stops them.")
+
+
+# This run's port slot: 0 is the yaml as written, k >= 1 the block port_slots maps it to.
+_SLOT = {"k": 0, "held": None, "keep_carla": False}
+
+
+def _listeners():
+    """{port: pid} for every listening TCP port, from one read of the socket table."""
+    out = {}
+    try:
+        if platform.system() == "Windows":
+            raw = subprocess.check_output(["netstat", "-ano", "-p", "tcp"],
+                                          text=True, stderr=subprocess.DEVNULL)
+            for line in raw.splitlines():
+                p = line.split()
+                if len(p) >= 5 and p[3].upper() == "LISTENING":
+                    try:
+                        out.setdefault(int(p[1].rsplit(":", 1)[1]), int(p[-1]))
+                    except (IndexError, ValueError):
+                        continue
+        else:
+            raw = subprocess.check_output(["lsof", "-nP", "-iTCP", "-sTCP:LISTEN", "-F", "pn"],
+                                          text=True, stderr=subprocess.DEVNULL)
+            pid = None
+            for line in raw.splitlines():
+                if line.startswith("p"):
+                    pid = int(line[1:])
+                elif line.startswith("n") and pid is not None:
+                    try:
+                        out.setdefault(int(line.rsplit(":", 1)[1]), pid)
+                    except ValueError:
+                        continue
+    except Exception:                                        # noqa: BLE001
+        pass
+    return out
+
+
+def _yaml_found(config_yaml):
+    """port_slots.discover() for a yaml, or the generated config's defaults."""
+    if config_yaml and os.path.isfile(config_yaml):
+        try:
+            return port_slots.discover(config_yaml)
+        except Exception as exc:                             # noqa: BLE001
+            print(f"[cosim] could not read the ports of {config_yaml} ({exc}); "
+                  f"assuming the defaults.")
+    return port_slots.discover(doc={"CarlaSetup": {}})
+
+
+def _lease_ports(info):
+    """Every port a live run of another FIXS (one with no slot in its lease) may bind."""
+    ports = {v for v in (info.lease.get("ports") or {}).values() if isinstance(v, int)}
+    cfg = info.lease.get("config")
+    if cfg and os.path.isfile(cfg):
+        try:
+            ports.update(p for _l, p in port_slots.bound_ports(port_slots.discover(cfg), 0))
+        except Exception:                                    # noqa: BLE001
+            pass
+    return ports
+
+
+def _slot_busy(found, k, keep_carla, with_carla):
+    """Why slot k cannot be used by this run, or None."""
+    wanted = port_slots.bound_ports(found, k, keep_carla, with_carla)
+    if any(p > 65535 for _l, p in wanted):
+        return "its ports would be above 65535"
+    runs = [r for r in run_registry.scan() if r.alive and (_RUN is None or r.id != _RUN.id)]
+    holder = run_registry.slot_holder(k, runs)
+    if holder is not None:
+        return f"used by run {holder.id}"
+    mine = {p for _l, p in wanted}
+    for info in runs:
+        if "slot" in info.lease:
+            continue
+        clash = sorted(mine & _lease_ports(info))
+        if clash:
+            return f"port {clash[0]} is used by run {info.id}"
+    table = _listeners()
+    for label, port in wanted:
+        pid = table.get(port)
+        if pid:
+            owners = run_registry.Ownership(runs)
+            hit = owners.of(pid)
+            name = owners.name(pid) or _process_name(pid) or "?"
+            whose = (f"run {hit[0].id}" if hit is not None else
+                     "no FIXS run, so FIXS will not stop it")
+            return f"port {port} ({label}) is held by {name} (pid {pid}) of {whose}"
+    return None
+
+
+_LEASE_KEYS = {"SUMO TraCI": "traci", "TrafficLayer bridge": "bridge", "CARLA RPC": "carla",
+               "Traffic Manager": "tm", "app": "app", "XIL": "xil"}
+
+
+def _lease_port_names(ports):
+    """{traci: 20100, app: 20130, app_2: 20131, ...} for the lease, from bound_ports()."""
+    out = {}
+    for label, port in ports:
+        key = _LEASE_KEYS.get(label)
+        if key is None:
+            continue
+        name, n = key, 2
+        while name in out:
+            name, n = f"{key}_{n}", n + 1
+        out[name] = port
+    return out
+
+
+def _claim_slot(args, config_yaml):
+    """Hold a port slot for this run: --slot N, else the first free one from 0."""
+    if args.serve or args.carla_only or args.peer or args.standalone_bridge:
+        if args.slot:
+            sys.exit("[cosim] --slot is not supported with --serve, --carla-only, --peer "
+                     "or --standalone-bridge; those run on the yaml's own ports.")
+        return
+    keep_carla = bool(args.no_launch or args.carla_port)
+    found = _yaml_found(config_yaml)
+    slots = [args.slot] if args.slot is not None else range(0, port_slots.MAX_SLOT + 1)
+    k, held, skipped = run_registry.claim_slot(
+        run_registry.locks_root(_RUN),
+        lambda s: _slot_busy(found, s, keep_carla, not args.no_launch), slots)
+    if k is None:
+        if args.slot is not None:
+            sys.exit(f"[cosim] slot {args.slot} is not free: {skipped[0][1]}.\n"
+                     f"        FIXS does not stop processes it does not own. Wait for "
+                     f"it, stop it, or leave out --slot to take the next free slot.")
+        sys.exit(f"[cosim] no free port slot on this machine (0..{port_slots.MAX_SLOT}); "
+                 f"`run_cosim --list` shows what holds them.")
+    _SLOT.update(k=k, held=held, keep_carla=keep_carla)
+    ports = port_slots.bound_ports(found, k, keep_carla, not args.no_launch)
+    for s, why in skipped[:4]:
+        print(f"[cosim] port slot {s} is busy: {why}.")
+    if len(skipped) > 4:
+        print(f"[cosim] ... and {len(skipped) - 4} more busy slots.")
+    if k or skipped:
+        print(f"[cosim] port slot {k}: " + ", ".join(f"{l} {p}" for l, p in ports))
+    if _RUN is not None:
+        _RUN.lease["slot"] = k
+        _RUN.set_ports(**_lease_port_names(ports))
+        os.environ["FIXS_RUN_DIR"] = _RUN.dir
+        os.environ["FIXS_RUN_ID"] = _RUN.id
+    os.environ["FIXS_SLOT"] = str(k)
+
+
+def _slot_yaml(config_yaml):
+    """The yaml this run's stack reads: config_yaml itself on slot 0, else its copy
+    remapped to the slot in the run dir."""
+    k = _SLOT["k"]
+    if not k or not config_yaml or not os.path.isfile(config_yaml):
+        return config_yaml
+    run_id = _RUN.id if _RUN is not None else f"slot{k}"
+    where = _RUN.dir if _RUN is not None else os.path.join(
+        app_catalog.app_root(), "RealSim_tmp", f"slot{k}_{os.getpid()}")
+    dst = os.path.join(where, os.path.basename(config_yaml))
+    try:
+        port_slots.write_slot_yaml(config_yaml, dst, k, run_id,
+                                   keep_carla=_SLOT["keep_carla"])
+    except port_slots.SlotError as exc:
+        sys.exit(f"[cosim] cannot move {os.path.basename(config_yaml)} to port slot "
+                 f"{k}: {exc}.\n        Run it alone, or with --slot 0.")
+    return dst
+
+
+_MAPS_HELD = {}
+
+
+def _hold_map(name):
+    """Hold map `name`'s lock until _drop_maps(), waiting while another run has it."""
+    if not name or name in _MAPS_HELD:
+        return
+    root = run_registry.locks_root(_RUN)
+    if root:
+        _MAPS_HELD[name] = run_registry.map_lock(root, name, log=print)
+
+
+def _drop_maps():
+    for held in _MAPS_HELD.values():
+        held.release()
+    _MAPS_HELD.clear()
+
+
+def _app_script_marks(app):
+    """Command-line fragments that name the app's own launch script, lowercased:
+    apps/<id>/<first token of launch>, with either separator."""
+    if not app or not app.get("launch"):
+        return ()
+    import shlex
+    parts = shlex.split(app["launch"], posix=(os.name != "nt"))
+    if not parts:
+        return ()
+    rel = f"apps/{app.get('dir') or app['id']}/{parts[0]}".replace("\\", "/").lower()
+    return (rel, rel.replace("/", "\\"))
 
 
 def _port_refusal(port, label, pid, name, hit, carla=False):
@@ -885,7 +1084,8 @@ def start_app(app, config_yaml=None, timeout=HANDOFF_TIMEOUT_S, sumo_only=False,
                  f"not there; not running the stack without its controller.")
     # RealSim_tmp, not %TEMP%: it is gitignored, and it is already where the
     # TrafficLayer logs go, so a run that goes wrong has everything in one place.
-    handoff_dir = os.path.join(app_catalog.app_root(), "RealSim_tmp")
+    handoff_dir = (_RUN.dir if _RUN is not None
+                   else os.path.join(app_catalog.app_root(), "RealSim_tmp"))
     os.makedirs(handoff_dir, exist_ok=True)
     handoff = os.path.join(handoff_dir, f"handoff_{app['id']}_{os.getpid()}.json")
     if os.path.isfile(handoff):
@@ -1804,9 +2004,10 @@ def run_list():
         owner = lease.get("owner") or {}
         state = "LIVE " if info.alive else "STALE"
         ports = ", ".join(f"{k} {v}" for k, v in (lease.get("ports") or {}).items()) or "-"
+        slot = f"  slot {lease['slot']}" if "slot" in lease else ""
         print(f"  {state} {info.id}  app {lease.get('app') or '-'}  user "
               f"{lease.get('user') or '?'}  pid {owner.get('pid', '?')}  up "
-              f"{_ago(info.created_age_s())}  ports {ports}")
+              f"{_ago(info.created_age_s())}{slot}  ports {ports}")
         prog = lease.get("last_progress") or {}
         if prog.get("what"):
             print(f"         last progress: {prog['what']} ({prog.get('at', '?')})")
@@ -1825,8 +2026,9 @@ def run_list():
             if isinstance(v, int):
                 ports.setdefault(v, k)
     print("[cosim] ports:")
+    table = _listeners()
     for port in sorted(ports):
-        pid = _pid_on_port(port)
+        pid = table.get(port)
         if not pid:
             print(f"  {port:>5} {ports[port]:<20} free")
             continue
@@ -2045,6 +2247,24 @@ def _interactive(args):
     So: pass this value down. isatty() is the DEFAULT for `interactive`, never the
     authority."""
     return sys.stdin.isatty() and not getattr(args, "serve", False)
+
+
+def _stdin_is_console():
+    """True if stdin is a terminal someone types into. On Windows NUL is a character
+    device, so isatty() alone is also True for `< NUL`."""
+    try:
+        if not sys.stdin.isatty():
+            return False
+        if platform.system() != "Windows":
+            return True
+        import ctypes
+        import msvcrt
+        mode = ctypes.c_ulong()
+        handle = msvcrt.get_osfhandle(sys.stdin.fileno())
+        return bool(ctypes.windll.kernel32.GetConsoleMode(ctypes.c_void_p(handle),
+                                                          ctypes.byref(mode)))
+    except (AttributeError, OSError, ValueError):
+        return False
 
 
 def _ask(prompt, default=None):
@@ -2520,8 +2740,14 @@ def set_yaml_scalar(path, section, key, value, comment=None):
         print(f"[cosim] {os.path.basename(path)} did not set {key}; adding it.")
 
     try:
-        with open(path, "w", encoding="utf-8", newline="") as f:
+        with open(path, encoding="utf-8-sig") as f:
+            if f.readlines() == lines:
+                return True
+        # Replaced whole, so a run reading this yaml never sees half of it.
+        tmp = f"{path}.{os.getpid()}.tmp"
+        with open(tmp, "w", encoding="utf-8", newline="") as f:
             f.writelines(lines)
+        os.replace(tmp, path)
     except OSError as exc:
         print(f"[cosim] cannot write {path} ({exc}).")
         return False
@@ -3973,6 +4199,11 @@ def main():
                     metavar="runs",
                     help="list the co-sim runs on this machine (live and dead), their "
                          "ports and children, and who holds the default ports, then exit")
+    ap.add_argument("--slot", type=int, default=None, metavar="N",
+                    help="run on port slot N: 0 is the scenario yaml's own ports, N >= 1 "
+                         "moves every port to %d + %d*N. Default: the first free slot, "
+                         "so a run started while another holds slot 0 takes slot 1"
+                         % (port_slots.SLOT_BASE, port_slots.SLOT_STRIDE))
     ap.add_argument("--stop", default=None, metavar="RUN_ID",
                     help="stop one run by its id (from --list) and what it started, "
                          "then exit")
@@ -4095,6 +4326,8 @@ def main():
     # args.reimport as the plain bool it has always been.
     args.reimport_path = args.reimport if isinstance(args.reimport, str) else None
     args.reimport = bool(args.reimport)
+    if args.slot is not None and not 0 <= args.slot <= port_slots.MAX_SLOT:
+        sys.exit(f"[cosim] --slot takes 0..{port_slots.MAX_SLOT}, not {args.slot}.")
 
     # Resolved before anything reads the endpoint, so --doctor, --version and the
     # run itself all see one setting rather than two spellings of it.
@@ -4379,6 +4612,9 @@ def main():
                 repo=repo, tag=(ent or {}).get("release"),
                 asset=(ent or {}).get("asset"))
         if sumo_dir is None and (picked_local or picked_tag):
+            _hold_map(target_map)
+            sumo_dir = import_map.map_sumo_dir(target_map)
+        if sumo_dir is None and (picked_local or picked_tag):
             bundle = picked_local
             if not bundle and picked_tag:
                 bundle = import_map.download_release_zip(
@@ -4434,14 +4670,16 @@ def main():
     # discard the app, map and local pick just chosen. config/config_scope are NOT
     # passed: they are resolved after the import, and `setup` already carries
     # whatever the previous run knew, which is the right thing to come back to.
-    run_profile.save_partial(setup_name, {**setup,
-                                          "app": app["id"] if app else None,
-                                          "map": target_map,
-                                          "map_origin": map_origin,
-                                          "map_local": picked_local,
-                                          "sumo_gui": bool(args.sumo_gui)},
-                             "map import")
-    _CHECKPOINT["name"] = setup_name
+    # A scripted run says everything on its command line, so it leaves the saved setups alone.
+    if _interactive(args) and _stdin_is_console():
+        run_profile.save_partial(setup_name, {**setup,
+                                              "app": app["id"] if app else None,
+                                              "map": target_map,
+                                              "map_origin": map_origin,
+                                              "map_local": picked_local,
+                                              "sumo_gui": bool(args.sumo_gui)},
+                                 "map import")
+        _CHECKPOINT["name"] = setup_name
     # Where this map's CARLA half came from. Only a LOCAL pick needs it: a
     # release download already stamps .source_sha, and a pick has no
     # equivalent - which is why a hand-picked map carries no origin at all
@@ -4556,14 +4794,18 @@ def main():
     # holds no port and would answer TrafficLayer instead of ours) is reaped first.
     _begin_run(app, args.config or setup.get("config"),
                None if (args.no_launch or args.sumo_only) else args.carla_port)
+    _claim_slot(args, args.config or setup.get("config"))
     if app and app.get("launch"):
         # The yaml this run will hand TrafficLayer. Known already for a config that
         # was chosen (--config, or the one the profile remembers); a first run that
         # GENERATES a per-map config has none yet, and the app falls back to its own.
-        app_proc, app_sumocfg = start_app(app, args.config or setup.get("config"),
+        app_proc, app_sumocfg = start_app(app, _slot_yaml(args.config or setup.get("config")),
                                           sumo_only=args.sumo_only,
                                           sumocfg=args.sumocfg or map_sumocfg)
 
+    # One run at a time downloads, cooks, installs or places props into a map.
+    if not args.no_launch and cfg is not None and cfg.get("mode") in ("source", "packaged"):
+        _hold_map(target_map)
     # Same condition as the preflight above, resumed. Split rather than moved so the
     # app can start between the two: everything above this line only DECIDES what the
     # import will do, everything below it acts on that decision, and the app has to
@@ -4573,6 +4815,9 @@ def main():
         # scenario - so check what is actually still missing before touching it.
         if sumo_dir is None:
             sumo_dir = cached_sumo_dir(target_map)
+        if resolved is None and not args.reimport:
+            resolved = import_map.resolve_cooked_map(cfg["carla_root"], target_map,
+                                                     mode="source")
 
         # download_release_zip caches under ~/.fixs/maps; open_bundle splits it.
         carla_src = None
@@ -4659,6 +4904,7 @@ def main():
     # `client` never reaches here - that mode has no local CARLA to install into,
     # and the map is the remote server's business.
     if not args.no_launch and cfg is not None and cfg.get("mode") == "packaged":
+        _hold_map(target_map)
         resolved = None if args.reimport else \
             import_map.resolve_cooked_map(cfg["carla_root"], target_map, mode="packaged")
         if resolved is not None:
@@ -4763,6 +5009,9 @@ def main():
         # half only - so it is not a bundle to open; fall through to the picker.
         local_bundle = None if (picked_local or '').lower().endswith('.tar.gz') \
             else picked_local
+        if sumo_dir is None and (local_bundle or picked_tag):
+            _hold_map(target_map)
+            sumo_dir = cached_sumo_dir(target_map)
         if sumo_dir is None and (local_bundle or picked_tag):
             zip_path = local_bundle or import_map.download_release_zip(
                 repo, picked_tag, cache_name=target_map,
@@ -4905,6 +5154,12 @@ def main():
         set_yaml_scalar(config_yaml, "CarlaSetup", "CarlaServerIP", wire)
         set_yaml_scalar(config_yaml, "CarlaSetup", "CarlaServerPort", args.carla_port)
 
+    # From here the stack reads the slot's copy; the profile keeps the user's yaml.
+    user_config_yaml = config_yaml
+    config_yaml = _slot_yaml(config_yaml)
+    if config_yaml != user_config_yaml and not cli_port:
+        args.carla_port = read_carla_endpoint(config_yaml)[1] or args.carla_port
+
     # Client mode means "no CARLA on this machine", so an endpoint pointing back
     # at this machine cannot be satisfied by anything. Caught here rather than at
     # connect time because the failure would otherwise surface as a bare RPC
@@ -4941,7 +5196,7 @@ def main():
         "map": target_map,
         "map_origin": map_origin,
         "map_local": picked_local,
-        "config": config_yaml,
+        "config": user_config_yaml,
         "config_scope": config_scope,
         "sumo_gui": bool(args.sumo_gui),
     })
@@ -4952,7 +5207,8 @@ def main():
     # half the CARLA clock without either file looking wrong.
     for stale in ("engine", "carla_host", "carla_port", "step_length"):
         setup.pop(stale, None)
-    run_profile.save(setup_name, setup)
+    if _interactive(args) and _stdin_is_console():
+        run_profile.save(setup_name, setup)
     args.map = target_map
 
     # TL + sign placement (source build only; idempotent via markers). Runs after
@@ -5037,6 +5293,7 @@ def main():
         print("[cosim]   (that machine needs carla.json in 'source' mode; the Linux "
               "and Windows paths are the same command.)")
 
+    _drop_maps()
     if args.prep_only:
         print(f"[cosim] --prep-only: '{target_map}' imported + prepped (TLs/signs); not launching.")
         return 0

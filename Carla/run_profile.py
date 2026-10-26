@@ -54,8 +54,10 @@ Explicit CLI flags outrank a saved setup: the caller applies a slot only when th
 corresponding flag was not given, so `run_cosim --map atlanta` changes exactly that
 one thing and prompts for nothing.
 """
+import contextlib
 import json
 import os
+import time
 from datetime import datetime
 
 import app_catalog
@@ -184,14 +186,45 @@ def load_doc():
 
 
 def save_doc(doc):
+    """Write the store whole, so a reader never sees half a file."""
     path = profiles_path()
+    tmp = f"{path}.{os.getpid()}.tmp"
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(doc, f, indent=2)
             f.write("\n")
+        for _ in range(20):
+            try:
+                os.replace(tmp, path)
+                break
+            except PermissionError:
+                time.sleep(0.05)                # a reader has it open (Windows)
+        else:
+            os.replace(tmp, path)
     except OSError as exc:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
         print(f"[cosim] could not save the run setup ({exc}); this run is not remembered.")
+
+
+@contextlib.contextmanager
+def _store_lock():
+    """Serialise read-modify-write of the store between processes; best effort."""
+    import run_registry
+    lock = run_registry.FileLock(profiles_path() + ".lock")
+    try:
+        os.makedirs(os.path.dirname(profiles_path()), exist_ok=True)
+        got = lock.acquire(retries=100, wait=0.05)
+    except OSError:
+        got = False
+    try:
+        yield
+    finally:
+        if got:
+            lock.release()
 
 
 def save(name, rec):
@@ -199,13 +232,14 @@ def save(name, rec):
 
     Clears `partial`: arriving here means every stage a checkpoint was standing in
     for has completed, so the record stops advertising itself as unfinished."""
-    doc = load_doc()
     rec = dict(rec)
     rec.pop("partial", None)
     rec["updated"] = datetime.now().isoformat(timespec="seconds")
-    doc["setups"][name] = rec
-    doc["last"] = name
-    save_doc(doc)
+    with _store_lock():
+        doc = load_doc()
+        doc["setups"][name] = rec
+        doc["last"] = name
+        save_doc(doc)
     return rec
 
 
@@ -222,23 +256,25 @@ def save_partial(name, rec, stage):
 
     `stage` names what had not finished, and is shown in the list: "map import"
     reads as a thing to retry, where a bare "incomplete" reads as corruption."""
-    doc = load_doc()
     rec = dict(rec)
     rec["partial"] = stage
     rec["updated"] = datetime.now().isoformat(timespec="seconds")
-    doc["setups"][name] = rec
-    doc["last"] = name
-    save_doc(doc)
+    with _store_lock():
+        doc = load_doc()
+        doc["setups"][name] = rec
+        doc["last"] = name
+        save_doc(doc)
     return rec
 
 
 def delete(name):
-    doc = load_doc()
-    if doc["setups"].pop(name, None) is not None:
-        if doc.get("last") == name:
-            doc["last"] = None
-        save_doc(doc)
-        return True
+    with _store_lock():
+        doc = load_doc()
+        if doc["setups"].pop(name, None) is not None:
+            if doc.get("last") == name:
+                doc["last"] = None
+            save_doc(doc)
+            return True
     return False
 
 
