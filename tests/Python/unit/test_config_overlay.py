@@ -84,6 +84,22 @@ def test_overlay_rides_on_the_scenario_report(tmp_path, monkeypatch):
     assert answer == {"sumocfg": str(cfg.resolve()), "configOverlay": OVERLAY}
 
 
+def test_overlay_calls_merge(tmp_path, monkeypatch):
+    handoff = tmp_path / "handoff.json"
+    monkeypatch.setenv("FIXS_HANDOFF", str(handoff))
+    monkeypatch.setattr(fixs, "_handoffExtra", {})
+    fixs.launch.overlayConfig({"SimulationSetup": {"SimulationEndTime": 29500}})
+    fixs.launch.overlayConfig(OVERLAY)
+    fixs.launch.overlayConfig({"CarlaSetup": {"SpectatorHeight": 60}})
+    cfg = tmp_path / "s.sumocfg"
+    cfg.write_text("<configuration/>", encoding="utf-8")
+    build._report(cfg)
+    got = json.loads(handoff.read_text(encoding="utf-8"))["configOverlay"]
+    assert got["SimulationSetup"] == {"SimulationEndTime": 29500}
+    assert got["CarlaSetup"] == {"RealtimePacing": True, "SpectatorHeight": 60}
+    assert got["ViewSetup"] == OVERLAY["ViewSetup"]
+
+
 def test_no_overlay_reports_the_scenario_only(tmp_path, monkeypatch):
     handoff = tmp_path / "handoff.json"
     monkeypatch.setenv("FIXS_HANDOFF", str(handoff))

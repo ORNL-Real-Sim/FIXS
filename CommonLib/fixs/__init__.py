@@ -544,10 +544,11 @@ class _Launch:
         mappings merge, anything else replaces. It goes to run_cosim with the scenario
         that ``fixs.sumo.scenario()`` reports, so call this first. run_cosim merges it
         into a copy for this run only; ``configPath`` still names the chosen yaml.
+        Each call merges into the earlier ones, by the same rule.
         """
         if not isinstance(overlay, dict):
             raise TypeError('overlayConfig takes a dict of yaml sections')
-        _handoffExtra['configOverlay'] = overlay
+        _handoffExtra['configOverlay'] = _mergedOverlay(_handoffExtra.get('configOverlay', {}), overlay)
 
     def __repr__(self):
         if not self.supervised:
@@ -562,6 +563,14 @@ launch = _Launch()
 
 # Extra fields for the FIXS_HANDOFF report, e.g. launch.overlayConfig()'s.
 _handoffExtra = {}
+
+
+def _mergedOverlay(base, overlay):
+    out = dict(base)
+    for key, val in overlay.items():
+        out[key] = (_mergedOverlay(out[key], val)
+                    if isinstance(val, dict) and isinstance(out.get(key), dict) else val)
+    return out
 
 
 class _VehicleView(_View):
