@@ -13,7 +13,7 @@ own, at ``fixs.config.get('xil')['ip']`` and ``['port']``.
 
 from . import config
 
-__all__ = ['enabled', 'dynosim']
+__all__ = ['enabled', 'dynosim', 'replyPort']
 
 
 def enabled(configPath=None):
@@ -22,6 +22,17 @@ def enabled(configPath=None):
     True for every transport, including a rig the application talks to itself.
     """
     return bool(config.get('xil', configPath)['enable_xil'])
+
+
+def replyPort():
+    """The UDP port a rig's answers come back to for this run -> int.
+
+    5011 on the default ports; on port slot k >= 1 (FIXS_SLOT, set by run_cosim)
+    the slot's own, next to the dyno port the slot gives XilSetup.
+    """
+    import os
+    from CommonLib.xil.link import slotPorts
+    return slotPorts(os.environ.get('FIXS_SLOT') or 0)[1]
 
 
 def dynosim(vehicle=None, dyno=None, driver=None):
