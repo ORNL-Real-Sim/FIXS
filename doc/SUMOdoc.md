@@ -202,13 +202,41 @@ What the script's own calls mean under FIXS:
 | `traci.load()`, `setOrder()` | Refused: FIXS owns the session. |
 | `*.subscribe()` | Refused: the FIXS feed already is the subscription. Read it from `fixs.vehicle`. |
 
-Calls are answered only while the script holds a tick, i.e. after
-`traci.simulationStep()`; TrafficLayer serves them while it waits for this client.
+Calls are answered only while the script holds a tick; TrafficLayer serves them
+while it waits for this client. A call made before the first `traci.simulationStep()`
+first waits for FIXS's first tick.
 Every call is a round trip inside the lockstep, as it is with plain TraCI, so
 per-tick state is cheaper read from the FIXS feed. Values come back as TraCI's own
 doubles; the FIXS feed carries float32. Under VISSIM, or a TrafficLayer built with
 `ENABLE_LIBSUMO`, there is no TraCI connection to relay onto and TrafficLayer
 refuses the setting at startup.
+
+### Porting a TraCI script, step by step
+
+1. **Change the import** to `import fixs.sumo.traci as traci`. Keep `traci.start()`,
+   the step loop and the calls as they are.
+2. **Remove subscriptions.** Replace `*.subscribe()` and `getSubscriptionResults()` with
+   the matching `get*()` calls, or read the FIXS feed (`fixs.vehicle`, `fixs.trafficlight`).
+3. **Write the scenario yaml.** Start from a working SUMO config and add
+   `SumoSetup.EnableTraciRelay: true`. The script is still a FIXS client, so keep an
+   `ApplicationSetup.VehicleSubscription` with its port: that is how TrafficLayer
+   knows to wait for it each tick. The feed is sent too; the script may ignore it.
+4. **Move SUMO's options out of `traci.start()`.** FIXS starts SUMO and only the `-c`
+   file is taken from `cmd`, so flags such as `--seed` or `--time-to-teleport` belong
+   where the launcher reads them (FIXS_Applications: apps.json `sumo_args`).
+5. **Keep the script fed through warm-up** if it counts ticks or tracks state from
+   the first step, as a plain TraCI script sees every step from SUMO's begin time: list
+   its port in `SimulationSetup.WarmUpServePorts`. Otherwise its first step is the first
+   tick after warm-up.
+6. **Let FIXS end the run.** When TrafficLayer stops, the next call raises
+   `traci.exceptions.FatalTraCIError`, as native TraCI does when SUMO closes.
+
+The script then reads SUMO's own values, so its results equal the same script on
+plain TraCI. A controller written against the FIXS feed sees float32 instead and can
+differ from the TraCI version by that rounding. Worked example:
+[FIXS_Applications `apps/mlk_eco_driving`](https://github.com/ORNL-Real-Sim/FIXS_Applications/tree/dev/apps/mlk_eco_driving),
+app `mlk_eco_driving_traci`: `eco_driving_mpr_SUMO_MLK_traci.py` (plain TraCI) and
+`eco_driving_mpr_SUMO_MLK_traci_fixs.py` (the same file, import changed).
 
 ## Performance & TraCI transport (libtraci vs libsumo)
 
