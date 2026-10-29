@@ -1,0 +1,52 @@
+name: PR milestone
+
+# A PR's milestone follows its base branch: dev_v0.9.0 -> 0.9.0.
+# workflow_dispatch backfills every open or merged PR by the same rule.
+
+on:
+  # _target so fork PRs get a write token; the job never checks out PR code.
+  pull_request_target:
+    types: [opened, reopened, edited]
+    branches: ['dev_v*']
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  milestone:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set milestone from base branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          BASE: ${{ github.event.pull_request.base.ref }}
+          CURRENT: ${{ github.event.pull_request.milestone.title }}
+        run: |
+          set -euo pipefail
+          declare -A ms
+          while IFS=$'\t' read -r title num; do ms["$title"]=$num; done < <(
+            gh api "repos/$REPO/milestones?state=all&per_page=100" --paginate --jq '.[] | [.title, .number] | @tsv')
+
+          if [ -n "$PR" ]; then
+            list=$(printf '%s\t%s\t%s' "$PR" "$BASE" "$CURRENT")
+          else
+            list=$(gh api "repos/$REPO/pulls?state=all&per_page=100" --paginate --jq \
+              '.[] | select(.base.ref | startswith("dev_v")) | select(.state == "open" or .merged_at != null)
+                   | [.number, .base.ref, (.milestone.title // "")] | @tsv')
+          fi
+
+          while IFS=$'\t' read -r n base cur; do
+            [ -z "$n" ] && continue
+            want=${base#dev_v}
+            if [ -z "${ms[$want]:-}" ]; then
+              echo "::warning::#$n: base $base has no milestone '$want'"
+              continue
+            fi
+            [ "$cur" = "$want" ] && continue
+            gh api -X PATCH "repos/$REPO/issues/$n" -F milestone="${ms[$want]}" --silent
+            echo "#$n: $base -> $want (was '${cur:--}')"
+          done <<< "$list"

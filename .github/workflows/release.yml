@@ -12,6 +12,13 @@ name: Release (public core)
 #
 # On pull requests it builds + packages only (NO publish) as a build gate.
 #
+#   detect ──> build-publish (Windows) ──┐
+#         └──> linux-bundle  (Linux) ────┴──> build (gate) ──> publish (push only)
+#
+# `build` is the one check branch protection requires: it passes only when BOTH
+# platforms built, or detect said there was nothing to build. `publish` waits for
+# it and recreates the rolling release with both zips at once (#376, #408).
+#
 # The build runs the real dispatch flow with RS_FIXS_AUTOMATION, so the licensed
 # toolchain steps (VISSIM 3, CarMaker 5a, dSPACE 5b, MEX 6) are skipped. On the
 # 0.9.0 train VirtualEnvironment (step 4) is SDK-free (#174), so it builds on the
@@ -41,32 +48,34 @@ on:
   push:
     branches: [main, 'dev_v*', 'beta_v*']
 
+# One run per ref at a time. Two pushes close together used to run side by side
+# and both recreate the same rolling release, so whichever published LAST won -
+# possibly the older commit. Pushes now queue (a newer queued push replaces an
+# older queued one, which is fine: the rolling release only wants the newest).
+# On a PR a new push makes the running build moot, so that one is cancelled. #408.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: write        # create/update the rolling release + tag on publish
-  pull-requests: read    # the changes job lists the PR's changed files via the API
+  pull-requests: read    # the detect step lists the PR's changed files via the API
 
 jobs:
-  # One build decision for BOTH platforms. It lived inside build-publish, which
-  # left linux-bundle two choices: wait for the whole Windows build to borrow the
-  # answer (the publish gap, see linux-bundle), or build unconditionally -- a full
-  # Linux compile for a PR that only touches tests/ (#318). As its own job it is
-  # API-only, no checkout, so both builds wait seconds for it and still run in
-  # parallel with each other.
-  changes:
-    name: Detect build-relevant changes
+  # One answer to "does this change need a build?", read by BOTH platforms. It
+  # used to be a step inside the Windows job, so the Linux job could only read it
+  # by waiting for the whole Windows build (#376) - and when that wait was dropped,
+  # Linux built on every PR, including ones with nothing to build (#408). A job of
+  # its own costs a few seconds and both builds still start together.
+  #
+  # Decide BEFORE checking out: the PR's file list comes from the API, which needs
+  # no working tree. This gate once ran after a fetch-depth:0 checkout and a PR
+  # with nothing to build paid 1183 s (19.7 min, run 31040679954) to skip. #191.
+  detect:
     runs-on: ubuntu-latest
     outputs:
       should_build: ${{ steps.detect.outputs.should_build }}
     steps:
-      # Decide BEFORE checking out. This gate used to run AFTER a fetch-depth:0
-      # checkout, so a PR with nothing to build still paid the full ~1 GB clone
-      # first - measured at 1183 s (19.7 min) on run 31040679954, which then went
-      # on to skip the build. The PR's file list comes from the API instead, which
-      # needs no working tree, so a no-op PR now costs seconds.
-      #
-      # The build jobs still RUN either way (only their steps are gated), so their
-      # checks keep reporting green without relying on branch protection treating
-      # a skipped job as a pass. Pushes always build. #191.
       - name: Detect build-relevant changes
         id: detect
         shell: bash
@@ -83,8 +92,6 @@ jobs:
 
           # release.yml defines THIS build, so a change to it must still build -
           # otherwise a change to the build pipeline would never test itself.
-          # check_source_lists.py is a .py the ignore-list below would drop, but
-          # linux-bundle EXECUTES it as a guard, so a change to it is a build input.
           if echo "$files" | grep -qE '^\.github/workflows/release\.yml$|^scripts/check_source_lists\.py$'; then
             echo "The pipeline or one of its guards changed -> build to validate it."
             echo "should_build=true" >> "$GITHUB_OUTPUT"; exit 0
@@ -101,12 +108,10 @@ jobs:
           #                          here - building validates nothing about it.
           #                          pytest is the right gate for Python (#57).
           #   environment.yml        copied into the zip only (8_create_zip.ps1:110);
-          #                          checked by python-env.yml (#248), not a C++ compile
+          #                          a real env check is #248, not a C++ compile
+          #   scripts/update_fixs.* is NOT ignored: the install steps below run it.
           # NOTE: ^scripts/ must NOT be ignored wholesale - scripts/dispatch/** IS
-          # the build system, and generate_version.ps1 stamps the version. Nor
-          # scripts/update_fixs.* (ignored until #273): the build now installs its
-          # fresh zip with them, and every app on a channel runs them, so a change
-          # to the installer is exactly the change that must reach that check.
+          # the build system, and generate_version.ps1 stamps the version.
           ignore='^doc/|^tests/|^\.github/|^\.vscode/|\.md$|\.py$|^LICENSE$|^\.gitignore$|^\.gitattributes$|^environment\.yml$'
           relevant=$(echo "$files" | grep -vE "$ignore" || true)
           if [ -z "$relevant" ]; then
@@ -118,15 +123,24 @@ jobs:
           fi
 
   build-publish:
+    # Named for what it used to do; it builds Windows and no longer publishes
+    # (that is the `publish` job). Kept because branch protection requires a check
+    # by this name until it is switched to `build` - renaming it first would leave
+    # every PR waiting on a check that never reports. #408.
+    #
     # windows-2022 = VS 2022 (v17), matching the generator dispatch derives from
     # dependencies.yaml. windows-latest ships VS 2026 (v18), incompatible.
     runs-on: windows-2022
-    needs: changes
-    # Consumed by linux-publish below, so the two platforms land on ONE release
-    # under ONE channel tag rather than each resolving it separately.
+    needs: detect
+    # The channel, resolved once here, is what `publish` names the release and
+    # both zips after, so the two platforms land under ONE tag.
     outputs:
-      publish:      ${{ steps.channel.outputs.publish }}
-      tag:          ${{ steps.channel.outputs.tag }}
+      publish: ${{ steps.channel.outputs.publish }}
+      tag:     ${{ steps.channel.outputs.tag }}
+      title:   ${{ steps.channel.outputs.title }}
+    # The job RUNS either way and only its steps are gated, so it reports green on
+    # a PR with nothing to build without anyone relying on a skipped job counting
+    # as a pass.
     steps:
       # fetch-depth: 0 is mandatory - `git describe --match 'v[0-9]*'` (below, and
       # in generate_version.ps1) needs every commit and tag to find the nearest
@@ -140,7 +154,7 @@ jobs:
       #   sparse-checkout    -> HEAD is 231 MiB, but tests/ (197 MiB) and doc/
       #                         (21 MiB) are 218 MiB of that and are never read by
       #                         scripts/dispatch/dispatch.bat or 8_create_zip.ps1 -
-      #                         the same two directories the changes job above
+      #                         the same two directories the detect step above
       #                         already ignores. Measured: excluding them takes the
       #                         working tree from 231 MiB to 13 MiB. (CommonLib/
       #                         YAMLMatlab/Tests is NOT affected - it lives under
@@ -149,7 +163,7 @@ jobs:
       #                         "include these", not "everything except these".
       # Mirrors the fix PR #240 applied to bundle-guard.yml (24 min -> 1 s there).
       - name: Checkout (full history for git describe; blobs on demand)
-        if: needs.changes.outputs.should_build == 'true'
+        if: needs.detect.outputs.should_build == 'true'
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -162,7 +176,7 @@ jobs:
           submodules: false
 
       - name: Add MSBuild to PATH
-        if: needs.changes.outputs.should_build == 'true'
+        if: needs.detect.outputs.should_build == 'true'
         uses: microsoft/setup-msbuild@v2
 
       # Speed: yaml-cpp is vendored and rebuilt (Release+Debug) from source every
@@ -172,7 +186,7 @@ jobs:
       # Gated too: with the checkout skipped there is no working tree, so
       # hashFiles() would resolve to an empty string and poison the cache key.
       - name: Cache yaml-cpp build
-        if: needs.changes.outputs.should_build == 'true'
+        if: needs.detect.outputs.should_build == 'true'
         uses: actions/cache@v4
         with:
           path: CommonLib/yaml-cpp/build
@@ -186,7 +200,7 @@ jobs:
       # and nothing publishes.
       - name: Resolve release channel
         id: channel
-        if: needs.changes.outputs.should_build == 'true'
+        if: needs.detect.outputs.should_build == 'true'
         shell: pwsh
         run: '& scripts/dispatch/release_channel.ps1 -Ref "${{ github.ref }}"'
 
@@ -212,23 +226,24 @@ jobs:
       # the PUBLIC VirCarlaEnv exe. Fetch it from the public fixs-native-deps
       # release (prebuilt, gh-free), cached by dependencies.yaml so it downloads
       # at most once per deps version. On a cache hit fetch_native_deps skips;
-      # dispatch step 4c then builds VirCarlaEnv against it. OPTIONAL: if no deps
-      # release is published yet this soft-warns and VirCarlaEnv is simply absent
-      # from the zip - it never fails the build. #109.
+      # dispatch step 4c then builds VirCarlaEnv against it. REQUIRED here, though
+      # optional on a developer box: the bundle ships the Carla co-sim, so a
+      # release without VirCarlaEnv.exe is incomplete. It used to soft-warn, and
+      # VirCarlaEnv went missing from every bundle without anyone noticing. #380.
       - name: Cache libcarla (native deps)
-        if: needs.changes.outputs.should_build == 'true'
+        if: needs.detect.outputs.should_build == 'true'
         uses: actions/cache@v4
         with:
           path: CommonLib/libcarla
           key: libcarla-${{ runner.os }}-${{ hashFiles('dependencies.yaml') }}
       - name: Fetch libcarla (prebuilt) for the VirCarlaEnv build
-        if: needs.changes.outputs.should_build == 'true'
+        if: needs.detect.outputs.should_build == 'true'
         shell: pwsh
         run: |
           & scripts/dispatch/fetch_native_deps.ps1 -Component carla -Mode prebuilt
           if ($LASTEXITCODE -ne 0) {
-            Write-Host "::warning::libcarla prebuilt fetch failed (no fixs-native-deps release yet?) - VirCarlaEnv will be skipped."
-            exit 0
+            Write-Host "::error::libcarla prebuilt fetch failed - VirCarlaEnv cannot build without it. Check that the libcarla asset for dependencies.yaml's CARLA version is published on the fixs-native-deps release."
+            exit 1
           }
 
       # libsumo (~127 MB) is REQUIRED, not optional like libcarla: since #238 it
@@ -239,13 +254,13 @@ jobs:
       # fails with a clear message instead of a link error 10 minutes later.
       # Cached on dependencies.yaml so it downloads at most once per deps version.
       - name: Cache libsumo (native deps)
-        if: needs.changes.outputs.should_build == 'true'
+        if: needs.detect.outputs.should_build == 'true'
         uses: actions/cache@v4
         with:
           path: CommonLib/libsumo
           key: libsumo-${{ runner.os }}-${{ hashFiles('dependencies.yaml') }}
       - name: Fetch libsumo (prebuilt, required)
-        if: needs.changes.outputs.should_build == 'true'
+        if: needs.detect.outputs.should_build == 'true'
         shell: pwsh
         run: |
           & scripts/dispatch/fetch_native_deps.ps1 -Component sumo
@@ -259,7 +274,7 @@ jobs:
       # by 8_create_zip.ps1 through dispatch step 8. Empty on PRs, where the
       # script falls back to the commit-traceable git describe name.
       - name: Build + package (proprietary steps skipped; VE.lib builds on 0.9.0)
-        if: needs.changes.outputs.should_build == 'true'
+        if: needs.detect.outputs.should_build == 'true'
         shell: cmd
         env:
           RS_FIXS_VERSION_LABEL: ${{ steps.channel.outputs.tag }}
@@ -280,7 +295,7 @@ jobs:
       # PR builds still pack public-core with a warning - bundle-guard already
       # makes that PR unmergeable (#191).
       - name: Overlay proprietary bundle (Binaries-<key>)
-        if: needs.changes.outputs.should_build == 'true'
+        if: needs.detect.outputs.should_build == 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -336,7 +351,7 @@ jobs:
           Write-Host "All $($manifest.file_count) bundle files present in $($zip.Name)."
 
       - name: Sanity-check the packaged zip
-        if: needs.changes.outputs.should_build == 'true'
+        if: needs.detect.outputs.should_build == 'true'
         shell: pwsh
         env:
           CHANNEL_TAG: ${{ steps.channel.outputs.tag }}
@@ -368,6 +383,17 @@ jobs:
             Write-Error "TrafficLayer.exe missing from build/ - public core did not build."
             exit 1
           }
+          # Read the ZIP, not build/: the zip is what ships, and its lacking
+          # the file is how #380 went unnoticed.
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $z = [System.IO.Compression.ZipFile]::OpenRead($zip.FullName)
+          try { $entries = $z.Entries | ForEach-Object { $_.FullName -replace '\\', '/' } }
+          finally { $z.Dispose() }
+          if ($entries -notcontains 'VirCarlaEnv.exe') {
+            Write-Error "VirCarlaEnv.exe missing from $($zip.Name) - the C++ Carla bridge did not build or was not packaged (#380)."
+            exit 1
+          }
+          Write-Host "VirCarlaEnv.exe present in $($zip.Name)."
           if ($names -contains 'VirtualEnvironment.lib') {
             Write-Host "VirtualEnvironment.lib present (SDK-free CI build - expected on the 0.9.0 train)."
           } else {
@@ -381,7 +407,7 @@ jobs:
       # cover the download and the checksum; this one is what keeps a zip that
       # cannot install off the channel.
       - name: Install the packed zip as a consumer would (update_fixs.ps1 -Zip)
-        if: needs.changes.outputs.should_build == 'true'
+        if: needs.detect.outputs.should_build == 'true'
         shell: pwsh
         env:
           # PR builds have no channel; any tag will do, it is only stamped and read back.
@@ -395,28 +421,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit 1 }
 
       - name: Upload packaged zip as a workflow artifact (inspect on PRs)
-        if: needs.changes.outputs.should_build == 'true'
+        if: needs.detect.outputs.should_build == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: fixs-build-zip
           path: build/fixs-build-*.zip
           if-no-files-found: warn
-
-      # Publish to the channel resolved above (ONE tag: the release IS the
-      # version stamp). -Target $GITHUB_SHA anchors the release+tag to the exact
-      # commit built - without it gh defaults a new tag to the default branch
-      # (main), which had wrongly pinned the alpha release to main.
-      # A branch with no channel simply doesn't reach this step.
-      - name: Publish rolling prerelease to the branch's channel
-        if: steps.channel.outputs.publish == 'true' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish))
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CHANNEL_TAG: ${{ steps.channel.outputs.tag }}
-          CHANNEL_TITLE: ${{ steps.channel.outputs.title }}
-        run: |
-          & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dispatch\publish_release.ps1 `
-              -Tag $env:CHANNEL_TAG -Title $env:CHANNEL_TITLE -Rolling -Target $env:GITHUB_SHA
 
       # Keep the old loud behaviour for a hand-dispatched publish from a branch
       # that has no channel: skipping silently would look like a successful
@@ -447,34 +457,19 @@ jobs:
   # measured by running both across all three. The jammy/noble legs in
   # linux-build.yml stay a COMPILE gate; their artifacts must never ship.
   # ===========================================================================
-  # Needs `changes`, NOT build-publish. This used to wait on build-publish purely
-  # to borrow two strings from it -- should_build for a gate, and the channel tag
-  # for the zip's name -- and paid for them with the entire Windows build in
-  # wall-clock before this one started. That ordering is what opens the publish gap: build-publish RECREATES
-  # the rolling release (delete + create is how the tag is re-pointed), which
-  # drops every asset and re-adds only the Windows zip, so the release carries no
-  # Linux bundle until this job has built one and linux-publish has uploaded it.
-  # Measured at 1m45s on 2026-09-22, and a Linux `run_cosim.sh --update-fixs`
-  # landing in that window fails outright with "no build bundle for linux-x86_64".
-  #
-  # Running in parallel makes the Linux zip ready BEFORE build-publish finishes
-  # (~1.5 min against ~3), so the gap shrinks to the seconds linux-publish needs
-  # to upload. Closing it entirely means publishing both zips in one
-  # `gh release create`, which moves the publish out of the Windows build job --
-  # a bigger change that wants a Windows run to trust.
-  #
-  # The build gate comes from the `changes` job instead, shared with build-publish
-  # (one copy of the detection logic) and done in seconds, so the parallelism
-  # above is kept. Steps are gated, not the job, for the same reason as
-  # build-publish: the check still reports green on a PR with nothing to build.
+  # Needs `detect` only, NOT build-publish. It once waited on the whole Windows
+  # build to borrow should_build and the channel tag, and that ordering opened a
+  # 1m45s window after every push where the release had no Linux bundle (#376).
+  # Both builds now start as soon as detect answers; the channel name is applied
+  # at publish time.
   linux-bundle:
     name: Linux bundle (focal)
+    needs: detect
+    if: needs.detect.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     container: ubuntu:20.04
-    needs: changes
     steps:
       - name: Install toolchain
-        if: needs.changes.outputs.should_build == 'true'
         run: |
           export DEBIAN_FRONTEND=noninteractive
           apt-get update -qq
@@ -484,28 +479,23 @@ jobs:
             build-essential cmake ninja-build git ca-certificates curl unzip zip python3
 
       - uses: actions/checkout@v4
-        if: needs.changes.outputs.should_build == 'true'
         with:
           fetch-depth: 0        # git describe needs tags for the version stamp
           submodules: false     # ProprietaryFiles is private and not needed here
 
       # git refuses to run in a checkout owned by another uid (container vs runner).
       - name: Trust the workspace
-        if: needs.changes.outputs.should_build == 'true'
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Guard - MSBuild and CMake TU lists agree
-        if: needs.changes.outputs.should_build == 'true'
         run: python3 scripts/check_source_lists.py
 
       - name: Fetch native deps (prebuilt libtraci + libcarla)
-        if: needs.changes.outputs.should_build == 'true'
         run: |
           ./scripts/fetch_native_deps.sh
           ./scripts/fetch_native_deps.sh --component carla
 
       - name: Build
-        if: needs.changes.outputs.should_build == 'true'
         run: |
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build -j "$(nproc)"
@@ -518,19 +508,17 @@ jobs:
       # focal provides -- the check that catches a build environment which IS
       # 20.04 but carries a newer libstdc++.
       # No --version: the packer derives the label from `git describe`, as the
-      # Windows side does. The CHANNEL name is not known here any more -- that
-      # is build-publish's output, and this job no longer waits for it -- so
-      # linux-publish renames the file to the channel before uploading. The tag
-      # still has exactly one source of truth.
+      # Windows side does. The CHANNEL name is not known here -- that is
+      # build-publish's output, and this job does not wait for it -- so `publish`
+      # renames the file to the channel before uploading. The tag still has
+      # exactly one source of truth.
       - name: Pack the Linux bundle
-        if: needs.changes.outputs.should_build == 'true'
         run: ./scripts/dispatch/pack_linux_bundle.sh --out-dir dist
 
       # The Linux half of build-publish's pre-publish install (#273), on the same
       # focal image the bundle targets. linux-publish needs this job, so a bundle
       # that cannot install is never uploaded.
       - name: Install the packed zip as a consumer would (update_fixs.sh --zip)
-        if: needs.changes.outputs.should_build == 'true'
         run: |
           zip="$(ls dist/fixs-build-*-linux-x86_64.zip)"
           root="$RUNNER_TEMP/consumer"; mkdir -p "$root"
@@ -538,52 +526,95 @@ jobs:
           bash scripts/check_fixs_install.sh "$root/FIXS" pr-build
 
       - name: Upload bundle as a workflow artifact (inspect on PRs)
-        if: needs.changes.outputs.should_build == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: fixs-build-zip-linux
           path: dist/fixs-build-*-linux-x86_64.zip
           if-no-files-found: error
 
-  # Separate job because the ubuntu:20.04 container has no gh CLI, and adding
-  # GitHub's apt repo to a build container to upload one file is worse than a
-  # second job on the runner image, which ships gh.
+  # ===========================================================================
+  # The check branch protection requires (#408). Windows and Linux are separate
+  # jobs, and until this existed only the Windows one could block a merge: a PR
+  # that broke the Linux build showed a red X and merged anyway.
   #
-  # Runs AFTER build-publish has created/updated the release, so this only ever
-  # adds an asset to a tag that already exists.
-  linux-publish:
-    name: Publish Linux bundle
-    needs: [build-publish, linux-bundle]
-    if: needs.build-publish.outputs.publish == 'true' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish))
+  # `!cancelled()` so it still runs - and fails - when a build failed or was
+  # skipped; a required check that is itself skipped would read as a pass. Linux
+  # may be skipped only when detect said there was nothing to build. Windows
+  # always runs (its steps are gated, not the job), so it must succeed.
+  # ===========================================================================
+  build:
+    needs: [detect, build-publish, linux-bundle]
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
+      - name: Both platforms built, or neither needed to
+        env:
+          DETECT:       ${{ needs.detect.result }}
+          SHOULD_BUILD: ${{ needs.detect.outputs.should_build }}
+          WINDOWS:      ${{ needs.build-publish.result }}
+          LINUX:        ${{ needs.linux-bundle.result }}
+        run: |
+          echo "detect=$DETECT should_build=$SHOULD_BUILD windows=$WINDOWS linux=$LINUX"
+          [ "$DETECT" = success ] || { echo "::error::change detection: $DETECT"; exit 1; }
+          [ "$WINDOWS" = success ] || { echo "::error::Windows build: $WINDOWS"; exit 1; }
+          want=skipped; [ "$SHOULD_BUILD" = true ] && want=success
+          [ "$LINUX" = "$want" ] || { echo "::error::Linux build: $LINUX (expected $want)"; exit 1; }
+
+  # Both bundles in ONE `gh release create`, after the gate (#376 step 2). The
+  # rolling tag is re-pointed by deleting and recreating the release, which drops
+  # every asset; when each platform published from its own job, the release sat
+  # with the Windows zip alone until the Linux upload landed, and a failed Linux
+  # build left it with no Linux zip at all. Now neither platform publishes unless
+  # both built. What remains is the few seconds between the delete and the
+  # create, inherent to re-pointing a tag this way.
+  #
+  # windows-2022 because publish_release.ps1 has only ever run under Windows
+  # PowerShell; moving it to pwsh on Linux is a change to make with a run to show.
+  publish:
+    name: Publish release
+    needs: [build, build-publish]
+    if: needs.build-publish.outputs.publish == 'true' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish))
+    runs-on: windows-2022
+    steps:
+      # The script and the commit it writes into the release notes; no build tree.
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/dispatch
+          submodules: false
+
+      # publish_release.ps1 takes the newest fixs-build-*.zip in build/ as the
+      # main asset, so the Linux zip goes to dist/, where that glob cannot pick it.
+      - uses: actions/download-artifact@v4
+        with:
+          name: fixs-build-zip
+          path: build
       - uses: actions/download-artifact@v4
         with:
           name: fixs-build-zip-linux
           path: dist
 
-      - name: Upload to the channel release
+      - name: Publish both bundles to the branch's channel
+        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
           CHANNEL_TAG: ${{ needs.build-publish.outputs.tag }}
+          CHANNEL_TITLE: ${{ needs.build-publish.outputs.title }}
         run: |
-          zip="$(ls dist/fixs-build-*-linux-x86_64.zip)"
-          # The bundle was packed before the channel was known, so it carries the
-          # git-derived label. Name it after the channel it is being published to,
-          # so the two platforms' assets on one release agree -- a consumer picks
-          # between them on the platform suffix and reads the rest as the version.
-          want="dist/fixs-build-${CHANNEL_TAG}-linux-x86_64.zip"
-          if [ "$zip" != "$want" ]; then
-              echo "renaming $(basename "$zip") -> $(basename "$want")"
-              mv "$zip" "$want"
-          fi
-          # The sidecar update_fixs.{sh,ps1} verify the download against (#204).
-          (cd dist && sha256sum "$(basename "$want")" > "$(basename "$want").sha256")
-          cat "$want.sha256"
-          echo "Uploading $(basename "$want") to $CHANNEL_TAG"
-          # --clobber replaces only these asset names; the Windows bundle on the
-          # same rolling release is untouched.
-          gh release upload "$CHANNEL_TAG" "$want" "$want.sha256" --repo "$GITHUB_REPOSITORY" --clobber
+          # The Linux bundle was packed before the channel was known, so it carries
+          # the git-derived label. Name it after the channel it is published to, so
+          # both assets on one release agree -- a consumer picks between them on the
+          # platform suffix and reads the rest as the version.
+          $linux = Get-ChildItem dist -Filter 'fixs-build-*-linux-x86_64.zip' | Select-Object -First 1
+          if (-not $linux) { Write-Error "No Linux bundle in the fixs-build-zip-linux artifact."; exit 1 }
+          $want = "fixs-build-$env:CHANNEL_TAG-linux-x86_64.zip"
+          if ($linux.Name -ne $want) {
+            Write-Host "renaming $($linux.Name) -> $want"
+            Rename-Item $linux.FullName $want
+          }
+          & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dispatch\publish_release.ps1 `
+              -Tag $env:CHANNEL_TAG -Title $env:CHANNEL_TITLE -Rolling -Target $env:GITHUB_SHA `
+              -Asset (Join-Path dist $want)
+          exit $LASTEXITCODE
 
   # ===========================================================================
   # After the publish: install from the channel exactly as an app's --update-fixs
@@ -593,7 +624,7 @@ jobs:
   # ===========================================================================
   install-check-windows:
     name: Install the published release (Windows)
-    needs: build-publish
+    needs: [build-publish, publish]
     if: needs.build-publish.outputs.publish == 'true' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish))
     runs-on: windows-2022
     steps:
@@ -613,7 +644,7 @@ jobs:
 
   install-check-linux:
     name: Install the published release (Linux)
-    needs: [build-publish, linux-publish]
+    needs: [build-publish, publish]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -651,7 +682,7 @@ jobs:
   # does, whatever RTD's webhook makes of a tag that was deleted and recreated.
   docs-publish:
     name: Rebuild the channel's docs on Read the Docs
-    needs: build-publish
+    needs: [build-publish, publish]
     if: needs.build-publish.outputs.publish == 'true' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish))
     runs-on: ubuntu-latest
     steps:

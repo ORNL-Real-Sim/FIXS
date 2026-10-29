@@ -14,8 +14,10 @@ name: Bundle guard
 # status check in the branch protection rules. (#191)
 
 on:
+  # Globbed like release.yml, so a new train or tier is covered the day its
+  # branch exists; a literal list left PRs to dev_v0.10.0 unguarded. #408.
   pull_request:
-    branches: [dev, dev_v0.9.0, main]
+    branches: [dev, main, 'dev_v*', 'beta_v*']
 
 jobs:
   bundle-guard:

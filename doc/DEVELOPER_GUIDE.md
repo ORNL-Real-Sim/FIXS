@@ -270,14 +270,6 @@ and the release CI.
 
 ## Setup Scripts
 
-### `checkRequirements.ps1` / `runCheckRequirements.bat`
-PowerShell script to verify installation requirements and dependencies. Checks for required software installations (Visual Studio, CMake, MATLAB, etc.).
-
-**Usage:**
-```batch
-runCheckRequirements.bat
-```
-
 ### `env.check.py`
 Python environment validation script. Verifies that required Python packages and software dependencies are properly installed.
 

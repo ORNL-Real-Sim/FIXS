@@ -191,7 +191,7 @@ try {
 # ====================================
 
 # Define expected components for each category
-$ExpectedCore = @('TrafficLayer.exe', 'VirtualEnvironment.lib')
+$ExpectedCore = @('TrafficLayer.exe', 'VirtualEnvironment.lib', 'VirCarlaEnv.exe')
 $ExpectedVissim = @('DriverModel_RealSim.dll', 'DriverModel_RealSim_legacy.dll')
 
 $CountCore = 0
@@ -294,6 +294,9 @@ if ($SumoVer) { [void]$sb.AppendLine("  libsumo:            (from SUMO $SumoVer)
 $line = Get-FileStatusLine (Join-Path $BuildDir 'TrafficLayer.exe') 'TrafficLayer.exe'
 if ($line) { [void]$sb.AppendLine($line) }
 $line = Get-FileStatusLine (Join-Path $BuildDir 'VirtualEnvironment.lib') 'VirtualEnvironment.lib'
+if ($line) { [void]$sb.AppendLine($line) }
+# Named even when absent, so a bundle states it lacks the Carla bridge (#380).
+$line = Get-FileStatusLine (Join-Path $BuildDir 'VirCarlaEnv.exe') 'VirCarlaEnv.exe' 'Not built - see step 4c in build.log'
 if ($line) { [void]$sb.AppendLine($line) }
 
 [void]$sb.AppendLine()

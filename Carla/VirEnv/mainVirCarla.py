@@ -29,7 +29,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 
 from CommonLib.ConfigHelper import ConfigHelper                          # noqa: E402
 from CommonLib.VehDataMsgDefs import VehData                             # noqa: E402
-from CommonLib.VirEnv.DataLogger import DataLogger                       # noqa: E402
+from CommonLib.VirEnv.DataLogger import DataLogger, perRunPath           # noqa: E402
 from CommonLib.VirEnv.EgoDriver import EgoDriver                         # noqa: E402
 from CommonLib.VirEnv.FixsProtocol import kFeedPeriodS, onFeedBoundary   # noqa: E402
 from CommonLib.VirEnv.EgoControllerHost import (                        # noqa: E402
@@ -40,6 +40,7 @@ from CommonLib.VirEnv.VirEnvCore import VirEnvCore                       # noqa:
 if __package__:
     from .BridgeHelper import BridgeHelper
     from .CarlaBackend import CarlaBackend
+    from .CarlaViews import CarlaViews, ROLE_PREFIX
 else:
     # Run as a plain script (python Carla/VirEnv/mainVirCarla.py). Put the PARENT
     # of this package on sys.path and import through the package, rather than
@@ -48,6 +49,7 @@ else:
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from VirEnv.BridgeHelper import BridgeHelper
     from VirEnv.CarlaBackend import CarlaBackend
+    from VirEnv.CarlaViews import CarlaViews, ROLE_PREFIX
 
 #: Must match the EgoDriver client's DriveCommand steer scaling.
 kMaxSteerRad = 0.7
@@ -114,11 +116,14 @@ def clearStaleActors(world, verbose):
     so ``get_actors()`` would miss the zombies without the tick this does first.
     """
     world.tick()
-    stale = list(world.get_actors().filter('vehicle.*'))
+    actors = world.get_actors()
+    stale = list(actors.filter('vehicle.*'))
+    stale += [a for a in actors.filter('sensor.camera.rgb')
+              if a.attributes.get('role_name', '').startswith(ROLE_PREFIX)]
     for a in stale:
         a.destroy()
     if stale:
-        print('Cleared %d stale vehicle actor(s) from a prior run.' % len(stale))
+        print('Cleared %d stale vehicle/view actor(s) from a prior run.' % len(stale))
 
 
 def applySyncSettings(world, carlaStep, verbose):
@@ -156,6 +161,9 @@ def main(argv=None):
     ap.add_argument('-t', '--tls', dest='tlsPath', default='',
                     help='traffic-light table csv (junctionId,linkId,x,y,z,heading)')
     args = ap.parse_args(argv)
+    # Redirected to a file, stdout is block-buffered and run_cosim's terminate() would discard the tail.
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(line_buffering=True)
 
     config = ConfigHelper()
     config.getConfig(args.configPath)
@@ -167,6 +175,10 @@ def main(argv=None):
     os.environ['FIXS_CONFIG_YAML'] = os.path.abspath(args.configPath)
     cs = config.Carla_setup
     egoCfg = config.Ego_setup          # the ego, once (FIXS#305)
+    # XilSetup.SpeedTo*: xil -- the ego's speedDesired carries the bench's speed to TrafficLayer
+    xilSpeedWanted = 'xil' in (config.Xil_setup['SpeedToTraffic'], config.Xil_setup['SpeedToApplication'])
+    if xilSpeedWanted:
+        from CommonLib.fixs import _driver as _fixsDriver
     verbose = cs['EnableVerboseLog']
 
     feed, carlaStep, poseRefresh = resolveCadence(cs)
@@ -283,7 +295,41 @@ def main(argv=None):
                   "as ego.speedDesired and the traffic simulator integrates it. "
                   "No physics ego is spawned.")
     lastAdvisory = cs['EgoTargetSpeed']
-    cellSpeed = None          # what the cell last commanded (cellOnTraffic only)
+    views = CarlaViews(world, config.View_setup['Views'], carlaStep)
+    for v in config.View_setup['Views']:
+        if v['Simulator'] == 'carla' and v['Type'] == 'spectator' and not v['Implied']:
+            print("ViewSetup '%s': the CARLA window follows '%s' (%s)" % (
+                v['Name'], v['Target'], 'BEV %g m' % v['Height'] if v['Enable'] else 'off'))
+
+    def _viewActor(target):
+        if virEnvOwnsEgo and target == egoId:
+            return backend.egoActor()
+        h = core.mappedVehicles().get(target)
+        return None if h is None else backend.actorOf(h)
+
+    def _hudSample(target):
+        """The HUD's values for ``target`` at the frame just ticked; None where there is no data."""
+        out = {}
+        rec = core.Msg_c.VehDataRecv_um.get(target)
+        valid = core.Msg_c.vehicle_msg_field_valid
+        if rec is not None:
+            if valid.get('speed'):
+                out['speed'] = rec.speed
+            if valid.get('signalLightColor') and valid.get('signalLightDistance'):
+                out['signalColor'] = rec.signalLightColor
+                out['signalDistance'] = rec.signalLightDistance
+            if valid.get('speedDesired'):
+                out['advisory'] = rec.speedDesired
+        # A physics ego: its measured speed and the control PhysX applied, from this tick's snapshot.
+        if virEnvOwnsEgo and target == egoId and backend.egoActor() is not None:
+            ego = backend.egoActor()
+            vel = ego.get_velocity()
+            ctl = ego.get_control()
+            out['speed'] = math.sqrt(vel.x * vel.x + vel.y * vel.y)
+            out['throttle'], out['brake'] = ctl.throttle, ctl.brake
+        return out
+    cellSpeed = None         # what the cell last commanded (cellOnTraffic only)
+    xilSpeedSeen = False
 
     try:
         # Checked here rather than inside the bring-up, so a missing route fails
@@ -322,6 +368,8 @@ def main(argv=None):
         phase = {k: 0.0 for k in
                  ("fixs recv", "orchestrate", "flush batch", "world.tick",
                   "z audit", "readback+send", "pacing sleep")}
+        if views.active():
+            phase["views"] = 0.0
 
         while simTime < simEndTime:
             # ---- core: recv (only on the feed boundary) -> spawn / pose (batch)
@@ -458,13 +506,22 @@ def main(argv=None):
                             spectator.id,
                             _spectatorTransform(tf, spectatorHeight, spectatorAlignYaw))
 
+            if views.active():
+                _t0 = time.monotonic()
+                views.update(_viewActor, simTime)
+                phase["views"] += time.monotonic() - _t0
+
             _t0 = time.monotonic()
             backend.flushBatch()   # one acknowledged apply: vehicles + camera
             phase["flush batch"] += time.monotonic() - _t0
             _t0 = time.monotonic()
-            world.tick()               # advance Carla one sub-step
+            frameId = world.tick()     # advance Carla one sub-step
             backend.noteWorldTicked()  # every actor now has a snapshot
             phase["world.tick"] += time.monotonic() - _t0
+            if views.wantsHud():
+                _t0 = time.monotonic()
+                views.sampleHud(frameId, _hudSample)
+                phase["views"] += time.monotonic() - _t0
 
             # SUMO <-> CARLA elevation audit, once per exchange. Here rather than
             # inside setVehiclePose because it asks whether the two MAPS agree,
@@ -489,6 +546,13 @@ def main(argv=None):
                         # target is verifiable.
                         d.speed = es.speed
                         d.speedDesired = lastAdvisory
+                        if xilSpeedWanted:
+                            # the bench's speed; the measured one until the bench first answers
+                            vDyno = getattr(_fixsDriver._instance, 'vDyno', None)
+                            d.speedDesired = es.speed if vDyno is None else vDyno
+                            if vDyno is not None and not xilSpeedSeen:
+                                xilSpeedSeen = True
+                                print("XilSetup.SpeedTo*: the bench's speed reaches TrafficLayer from t=%.2f" % simTime)
                         d.positionX, d.positionY, d.positionZ = es.x, es.y, es.z
                         d.heading = es.heading
                         d.grade = es.grade
@@ -622,9 +686,11 @@ def main(argv=None):
             dataLog.close()
         if poseLog is not None:
             poseLog.close()
+        views.close()
         if virEnvOwnsEgo:
             backend.destroyEgo()
     finally:
+        views.close()
         core.shutdown()
         settings = world.get_settings()
         if settings.synchronous_mode:
@@ -736,7 +802,7 @@ def _openDataLog(config):
         return dataLog
     path = dls['DataLogPath']
     if not path or path == 'auto':
-        path = os.path.join('_datalog', 'vircarla.csv')
+        path = perRunPath(os.path.join('_datalog', 'vircarla.csv'))
     if dataLog.open(path, dls['DataLogFields']):
         print('DataLogger -> %s (FIXS/SUMO-VISSIM wire convention)' % dataLog.path())
     else:

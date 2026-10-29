@@ -200,3 +200,170 @@ def test_ask_returns_only_what_was_picked(monkeypatch):
     rec = {"app": "mlk_eco_driving", "map": "mlk_no_signal", "config_scope": "map"}
     assert run_profile.ask("s", rec, interactive=True, can_switch=False) == {"app"}
     assert run_profile.cascade(rec, {"app"}) == {"app", "map", "config"}
+
+
+# --------------------------------------------------------------------------- #
+# A missing or unusable option value is asked for, not fatal
+# --------------------------------------------------------------------------- #
+def _parser():
+    """A few options of each kind the engine has: a typed value, a choice, a
+    flag, an optional value. The mechanism is generic, so these stand in for all."""
+    ap = run_cosim._Parser()
+    ap.add_argument("--carla-res", type=run_cosim._res_arg, metavar="WxH")
+    ap.add_argument("--quality-level", choices=["Low", "Epic"])
+    ap.add_argument("--sumo-only", action="store_true")
+    ap.add_argument("--reimport", nargs="?", const=True, default=False)
+    return ap
+
+
+@pytest.fixture
+def tty(monkeypatch):
+    """A person at the keyboard, answering in order; the answers left over are
+    kept so a test can see how many questions were asked."""
+    answers = []
+
+    def _input(prompt=""):
+        if not answers:
+            raise EOFError
+        return answers.pop(0)
+
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True, raising=False)
+    monkeypatch.setattr("builtins.input", _input)
+    return answers
+
+
+def test_missing_value_is_asked_for(tty):
+    tty += ["1600x900"]
+    args = _parser().parse_args(["--carla-res", "--sumo-only"])
+    assert (args.carla_res, args.sumo_only) == ("1600x900", True)
+
+
+def test_missing_value_at_the_end_is_asked_for(tty):
+    tty += ["960X540"]
+    assert _parser().parse_args(["--sumo-only", "--carla-res"]).carla_res == "960x540"
+
+
+def test_bad_value_is_asked_again_until_it_parses(tty):
+    tty += ["huge", "1280x720"]
+    assert _parser().parse_args(["--carla-res", "big"]).carla_res == "1280x720"
+    assert tty == []
+
+
+def test_bad_equals_value_is_replaced(tty):
+    tty += ["1280x720"]
+    assert _parser().parse_args(["--carla-res=big"]).carla_res == "1280x720"
+
+
+def test_bad_choice_is_asked_for(tty):
+    tty += ["Epic"]
+    assert _parser().parse_args(["--quality-level", "Ultra"]).quality_level == "Epic"
+
+
+def test_enter_runs_without_the_option(tty):
+    tty += [""]
+    args = _parser().parse_args(["--carla-res", "--sumo-only"])
+    assert (args.carla_res, args.sumo_only) == (None, True)
+
+
+@pytest.mark.parametrize("answer", ["q", "Q"])
+def test_q_quits_with_the_usual_error(tty, answer):
+    tty += [answer]
+    with pytest.raises(SystemExit) as e:
+        _parser().parse_args(["--carla-res"])
+    assert e.value.code == 2
+
+
+def test_eof_quits(tty):
+    with pytest.raises(SystemExit) as e:
+        _parser().parse_args(["--carla-res"])
+    assert e.value.code == 2
+
+
+def test_no_terminal_is_still_an_error(tty, monkeypatch):
+    """A script gets exit 2 exactly as before - nothing is asked."""
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False, raising=False)
+    tty += ["1600x900"]
+    with pytest.raises(SystemExit) as e:
+        _parser().parse_args(["--carla-res"])
+    assert e.value.code == 2 and tty == ["1600x900"]
+
+
+def test_serve_is_never_asked(tty):
+    """--serve has a terminal but nobody at it (see _interactive)."""
+    ap = _parser()
+    ap.add_argument("--serve", action="store_true")
+    tty += ["1600x900"]
+    with pytest.raises(SystemExit):
+        ap.parse_args(["--serve", "--carla-res"])
+    assert tty == ["1600x900"]
+
+
+def test_unknown_flag_is_still_an_error(tty):
+    """Only VALUE problems are asked about; an unknown flag has no one answer."""
+    tty += ["x"]
+    with pytest.raises(SystemExit):
+        _parser().parse_args(["--carla-rez", "1280x720"])
+    assert tty == ["x"]
+
+
+def test_answer_is_written_back_to_sys_argv(tty, monkeypatch):
+    """The engine re-execs with sys.argv: the answer must be in it, or the child
+    asks again."""
+    monkeypatch.setattr(sys, "argv", ["run_cosim.py", "--carla-res", "--sumo-only"])
+    tty += ["1600x900"]
+    _parser().parse_args()
+    assert sys.argv[1:] == ["--carla-res", "1600x900", "--sumo-only"]
+
+
+# --------------------------------------------------------------------------- #
+# The real engine parser: headless names, their old aliases, --carla-res
+# --------------------------------------------------------------------------- #
+@pytest.fixture
+def engine_parser(monkeypatch):
+    """The parser main() builds, taken at its first parse_args call - nothing
+    in main() runs before it. No terminal, so nothing is asked."""
+    class _Got(Exception):
+        pass
+    box = {}
+
+    def _grab(self, *a, **k):
+        box["ap"] = self
+        raise _Got
+    monkeypatch.setattr(run_cosim._Parser, "parse_args", _grab)
+    with pytest.raises(_Got):
+        run_cosim.main()
+    monkeypatch.undo()
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False, raising=False)
+    return box["ap"]
+
+
+@pytest.mark.parametrize("argv, want", [
+    ([], False),
+    (["--carla-headless"], True),
+    (["--render-offscreen"], True),             # old name, still accepted
+])
+def test_carla_headless_and_its_old_name(engine_parser, argv, want):
+    assert engine_parser.parse_args(argv).render_offscreen is want
+
+
+@pytest.mark.parametrize("argv, want", [
+    ([], None),                                 # unset: the saved profile decides
+    (["--sumo-gui"], True),
+    (["--sumo-headless"], False),
+    (["--no-sumo-gui"], False),                 # old name, still accepted
+    (["--sumo-gui", "--sumo-headless"], False), # the launchers pass --sumo-gui first
+])
+def test_sumo_headless_and_its_old_name(engine_parser, argv, want):
+    assert engine_parser.parse_args(argv).sumo_gui is want
+
+
+def test_help_shows_the_new_names_only(engine_parser):
+    text = engine_parser.format_help()
+    for shown in ("--carla-headless", "--sumo-headless", "--carla-res WxH"):
+        assert shown in text
+    for hidden in ("--render-offscreen", "--no-sumo-gui"):
+        assert hidden not in text
+
+
+def test_carla_res_parses(engine_parser):
+    assert engine_parser.parse_args(["--carla-res", "1920X1080"]).carla_res == "1920x1080"
