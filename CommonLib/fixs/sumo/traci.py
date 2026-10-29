@@ -55,6 +55,7 @@ class _RelayConnection(object):
             raise FatalTraCIError(_REFUSED[cmdID])
         if _isSubscribe(cmdID, varID):
             raise FatalTraCIError(_SUBSCRIBE)
+        _firstTickForEarlyCall()
         status, body = _relay.request(cmdID, -1 if varID is None else varID,
                                       '' if objID is None else objID,
                                       self._pack(format, *values))
@@ -80,10 +81,29 @@ for _d in _DOMAINS:
     _d._setConnection(_conn)
 
 
+# True from start() until the first simulationStep(): a call in that window pulls FIXS's
+# first tick early, and that step then consumes it instead of advancing again.
+_beforeFirstStep = False
+_firstTickPulled = False
+
+
+def _firstTickForEarlyCall():
+    global _firstTickPulled
+    fixs = _fixs()
+    if _beforeFirstStep and not _firstTickPulled and not getattr(fixs, '_armed', False):
+        try:
+            fixs.recv()
+        except fixs.Shutdown:
+            raise FatalTraCIError("Connection closed by SUMO.")
+        _firstTickPulled = True
+
+
 def _connect():
+    global _beforeFirstStep, _firstTickPulled
     fixs = _fixs()
     if getattr(fixs, '_sock', None) is None:
         fixs.connect()
+    _beforeFirstStep, _firstTickPulled = True, False
 
 
 def start(cmd, port=None, numRetries=None, label="default", verbose=False,
@@ -104,14 +124,20 @@ def init(port=8813, numRetries=None, host="localhost", label="default", proc=Non
 
 
 def _startedVersion():
-    # No tick is held until the first simulationStep(), as no step has run after a native
-    # start(), so the server cannot be asked yet. traci.getVersion() asks it after that.
+    # Answered without a round trip, so start() does not wait for FIXS's first tick.
     return _traci.constants.TRACI_VERSION, "SUMO via FIXS"
 
 
 def simulationStep(step=0.):
     """Hand the held tick back to FIXS and wait for the next one, or until `step` seconds."""
+    global _beforeFirstStep, _firstTickPulled
     fixs = _fixs()
+    if _beforeFirstStep:
+        _beforeFirstStep = False
+        if _firstTickPulled:
+            _firstTickPulled = False
+            if not step or fixs.sim.time >= step - 1e-9:
+                return
     try:
         while True:
             if getattr(fixs, '_armed', False):
@@ -129,6 +155,7 @@ def close(wait=True):
 
 
 def getVersion():
+    _firstTickForEarlyCall()
     status, body = _relay.request(0x00, -1, '', b'')
     if status != _relay.TRACI_OK:
         raise FatalTraCIError(body.decode('utf8', 'replace'))

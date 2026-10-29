@@ -207,6 +207,29 @@ def test_first_step_only_receives_later_steps_hand_the_tick_back(monkeypatch):
     assert ticks.calls == ["connect", "recv", "send", "recv", "send", "recv"]
 
 
+def test_a_call_before_the_first_step_pulls_the_first_tick_which_that_step_then_consumes(monkeypatch):
+    # while traci.simulation.getMinExpectedNumber() > 0: traci.simulationStep()
+    ticks = FakeTicks(monkeypatch, [28800.1, 28800.2])
+    reply = bytes([10, 0xbb, 0x7d]) + struct.pack("!i", 0) + bytes([0x09]) + struct.pack("!i", 42)
+    shim.start(["sumo"])
+    FIXS._sock.toRead = response(_relay.TRACI_OK, reply)
+    assert shim.simulation.getMinExpectedNumber() == 42
+    shim.simulationStep()
+    assert FIXS.sim.time == 28800.1
+    shim.simulationStep()
+    assert FIXS.sim.time == 28800.2
+    assert ticks.calls == ["connect", "recv", "send", "recv"]
+
+
+def test_a_call_after_the_first_step_without_a_held_tick_still_names_simulationStep(monkeypatch):
+    FakeTicks(monkeypatch, [1.0])
+    shim.start(["sumo"])
+    shim.simulationStep()
+    FIXS._armed = False
+    with pytest.raises(_relay.RelayUnavailable, match="simulationStep"):
+        shim.vehicle.getSpeed("ego")
+
+
 def test_step_to_a_target_time_advances_until_it_is_reached(monkeypatch):
     ticks = FakeTicks(monkeypatch, [10.0, 10.1, 10.2, 10.3])
     shim.start(["sumo"])
