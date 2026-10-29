@@ -220,7 +220,9 @@ refuses the setting at startup.
 3. **Write the scenario yaml.** Start from a working SUMO config and add
    `SumoSetup.EnableTraciRelay: true`. The script is still a FIXS client, so keep an
    `ApplicationSetup.VehicleSubscription` with its port: that is how TrafficLayer
-   knows to wait for it each tick. The feed is sent too; the script may ignore it.
+   knows to wait for it each tick. Subscribe only the ego by id: the script reads SUMO
+   through the relay, and an `all` subscription makes TrafficLayer collect and send
+   every vehicle each tick for a feed the script never reads.
 4. **Move SUMO's options out of `traci.start()`.** FIXS starts SUMO and only the `-c`
    file is taken from `cmd`, so flags such as `--seed` or `--time-to-teleport` belong
    where the launcher reads them (FIXS_Applications: apps.json `sumo_args`).
