@@ -7,6 +7,7 @@
 #include <cstring>
 
 #include "TrafficHelper.h"
+#include "TraciRelay.h"
 #include "PlatformCompat.h"
 #ifdef _WIN32
 #include "DSProxyMode.h"
@@ -646,6 +647,22 @@ int main(int argc, char* argv[]) {
 		// Configure SUMO library path for runtime DLL loading
 		ConfigureSumoLibraryPath(Config_c);
 	}
+
+	if (Config_c.SumoSetup.EnableTraciRelay) {
+		if (ENABLE_VISSIM) {
+			printf("ERROR: SumoSetup.EnableTraciRelay needs SUMO; this run drives VISSIM.\n");
+			exit(-1);
+		}
+		if (!fixs::traciRelayAvailable()) {
+			printf("ERROR: SumoSetup.EnableTraciRelay needs a libtraci build; this one embeds libsumo.\n");
+			exit(-1);
+		}
+		Sock_c.TraciRelayHandler = [](const TraciRequest_t& req) {
+			return fixs::executeTraci(req.cmdID, req.varID, req.objID, req.payload);
+		};
+		printf("TraCI relay: enabled (clients may use 'import fixs.sumo.traci as traci')\n");
+	}
+
 	if (Config_c.SimulationSetup.EnableVerboseLog) {
 		ENABLE_VERBOSE = true;
 		printf("Verbose logging: Enabled\n");

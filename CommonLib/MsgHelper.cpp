@@ -753,3 +753,75 @@ void MsgHelper::depackDetectorData(char* buffer, int msgSize, TlsDetector_t* Det
 
 	*DetectorData = make_tuple(signalId, signalName, DetAll_v);
 }
+
+#ifndef RS_DSPACE
+namespace {
+template <typename T> void putField(T value, char* buffer, int* iByte) {
+	if (buffer) memcpy(buffer + *iByte, (char*)&value, sizeof(T));
+	*iByte += sizeof(T);
+}
+void putBytes(const void* data, int len, char* buffer, int* iByte) {
+	if (buffer && len > 0) memcpy(buffer + *iByte, data, len);
+	*iByte += len;
+}
+template <typename T> T getField(const char* buffer, int* iByte) {
+	T value;
+	memcpy(&value, buffer + *iByte, sizeof(T));
+	*iByte += sizeof(T);
+	return value;
+}
+}  // namespace
+
+void MsgHelper::packTraciRequest(const TraciRequest_t& req, const unsigned char* chunk, int chunkLen,
+                                 bool more, char* buffer, int* iByte) {
+	// uint16 size | uint8 type | uint8 cmdID | int16 varID | uint8 idLen | id | uint8 more | uint32 len | chunk
+	const int initByte = *iByte;
+	*iByte += sizeof(uint16_t);
+	putField<uint8_t>((uint8_t)fixs::kMsgTraciRequest, buffer, iByte);
+	putField<uint8_t>(req.cmdID, buffer, iByte);
+	putField<int16_t>(req.varID, buffer, iByte);
+	putField<uint8_t>((uint8_t)req.objID.size(), buffer, iByte);
+	putBytes(req.objID.data(), (int)req.objID.size(), buffer, iByte);
+	putField<uint8_t>(more ? 1 : 0, buffer, iByte);
+	putField<uint32_t>((uint32_t)chunkLen, buffer, iByte);
+	putBytes(chunk, chunkLen, buffer, iByte);
+	int sizeAt = initByte;
+	putField<uint16_t>((uint16_t)(*iByte - initByte), buffer, &sizeAt);
+}
+
+void MsgHelper::depackTraciRequest(char* buffer, int bodySize, TraciRequest_t* req, bool* more) {
+	// bodySize excludes the 3-byte record header, as for the other depack*() functions.
+	int iByte = 0;
+	req->cmdID = getField<uint8_t>(buffer, &iByte);
+	req->varID = getField<int16_t>(buffer, &iByte);
+	const uint8_t idLen = getField<uint8_t>(buffer, &iByte);
+	req->objID.assign(buffer + iByte, idLen);
+	iByte += idLen;
+	*more = getField<uint8_t>(buffer, &iByte) != 0;
+	const uint32_t chunkLen = getField<uint32_t>(buffer, &iByte);
+	if (chunkLen > 0 && iByte + (int)chunkLen <= bodySize) {
+		const unsigned char* c = (const unsigned char*)(buffer + iByte);
+		req->payload.insert(req->payload.end(), c, c + chunkLen);
+	}
+}
+
+void MsgHelper::packTraciResponse(uint8_t status, const unsigned char* chunk, int chunkLen,
+                                  bool more, char* buffer, int* iByte) {
+	// uint16 size | uint8 type | uint8 status | uint8 more | uint32 len | chunk
+	const int initByte = *iByte;
+	*iByte += sizeof(uint16_t);
+	putField<uint8_t>((uint8_t)fixs::kMsgTraciResponse, buffer, iByte);
+	putField<uint8_t>(status, buffer, iByte);
+	putField<uint8_t>(more ? 1 : 0, buffer, iByte);
+	putField<uint32_t>((uint32_t)chunkLen, buffer, iByte);
+	putBytes(chunk, chunkLen, buffer, iByte);
+	int sizeAt = initByte;
+	putField<uint16_t>((uint16_t)(*iByte - initByte), buffer, &sizeAt);
+}
+
+int MsgHelper::traciResponseRecordSize(int chunkLen) {
+	int iByte = 0;
+	packTraciResponse(0, nullptr, chunkLen, false, nullptr, &iByte);
+	return iByte;
+}
+#endif

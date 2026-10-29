@@ -395,6 +395,10 @@ BUILT_LIB="$SUMO_SRC/bin/libtracicpp.so"
 mkdir -p "$LIBSUMO_DIR/bin"
 # Headers from the SAME checkout we just linked against, so the two cannot drift.
 cp "$SUMO_SRC/src/libsumo/"*.h "$LIBSUMO_DIR/"
+# TraciRelay.cpp compiles tcpip::Storage itself; config.h stands in for SUMO's generated one.
+mkdir -p "$LIBSUMO_DIR/foreign/tcpip"
+cp "$SUMO_SRC/src/foreign/tcpip/storage.h" "$SUMO_SRC/src/foreign/tcpip/storage.cpp" "$LIBSUMO_DIR/foreign/tcpip/"
+echo "/* Stands in for SUMO's generated config.h; foreign/tcpip/storage.cpp reads none of it. */" > "$LIBSUMO_DIR/config.h"
 cp "$BUILT_LIB" "$LIBSUMO_DIR/bin/"
 
 # --- verify -------------------------------------------------------------------

@@ -9,6 +9,10 @@
 
 #include <cstdint>   // #65: uint8_t in sendData(); don't rely on a transitive include
 #include "MsgHelper.h"
+#ifndef RS_DSPACE
+#include <functional>
+#include "TraciRelay.h"
+#endif
 
 #ifndef WIN32
 	#include <sys/types.h>
@@ -182,12 +186,27 @@ public:
 
 	void socketShutdown();
 
-	// recv data 
+#ifndef RS_DSPACE
+	// Answers relayed TraCI requests inside recvData. Unset, every request is refused.
+	std::function<fixs::TraciResult(const TraciRequest_t&)> TraciRelayHandler;
+#endif
+
+	// Reads one data message. A relayed TraCI request on the way is answered before it returns.
 	int recvData(int sock, int* simState, float* simTime, MsgHelper& Msg_c);
-		
+	// Reads exactly one message, whatever it carries.
+	int recvMessage(int sock, int* simState, float* simTime, MsgHelper& Msg_c);
+
 	// send data
 	int sendData(int sock, int iClient, float simTimeSend, uint8_t simStateSend, MsgHelper Msg_c);
 
+#ifndef RS_DSPACE
+	// One reply message: the header, then as many kMsgTraciResponse records as the body needs.
+	int sendTraciResponse(int sock, uint8_t simStateSend, float simTimeSend,
+	                      const fixs::TraciResult& result, MsgHelper& Msg_c);
+	int answerRelayed(int sock, uint8_t simStateSend, float simTimeSend, MsgHelper& Msg_c);
+	std::vector<TraciRequest_t> relayed_;   // complete requests read by the last recvMessage
+	TraciRequest_t relayPending_;           // a request whose later records are still to come
+#endif
 
 	void printSocketErrorMessage(int errorCode);
 
@@ -205,6 +224,9 @@ public:
 	//
 	// Never holds a whole message -- only one chunk at a time.
 	char txBuf[TX_CHUNK_SIZE];
+
+	// An unknown data record is skipped; this makes that visible once rather than every tick.
+	bool warnedUnknownRecord = false;
 
 	int NSERVER = 0;
 	int NCLIENT = 0;

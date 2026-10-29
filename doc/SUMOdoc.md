@@ -11,6 +11,7 @@ realsimxil@gmail.com
     * [Preceding Vehicle](#preceding-vehicle)
     * [Multiple Clients](#multiple-clients)
 * [SumoSetup in config.yaml](#sumosetup-in-configyaml)
+* [A TraCI script as a FIXS client: fixs.sumo.traci](#a-traci-script-as-a-fixs-client-fixssumotraci)
 * [Performance & TraCI transport (libtraci vs libsumo)](#performance--traci-transport-libtraci-vs-libsumo)
 
 ## Simulation Setups
@@ -168,6 +169,46 @@ SumoSetup:
     SpeedMode: 32
 ```
 The SpeedMode is an integer defines behavior of SetSpeed command of SUMO TraCI API. More parameters can be included in SumoSetup for future releases.
+
+## A TraCI script as a FIXS client: fixs.sumo.traci
+
+A script that already drives SUMO through TraCI joins a FIXS co-simulation by
+changing its import:
+
+```diff
+-import traci
++import fixs.sumo.traci as traci
+```
+
+Everything else stays: `traci.start(...)`, the `traci.simulationStep()` loop, the
+`traci.vehicle.*` / `traci.lane.*` / `traci.trafficlight.*` calls, `traci.close()`.
+Unlike the *Multiple Clients* setup above, this is not a second TraCI client: there
+is still one connection to SUMO, TrafficLayer's, and each call runs on it.
+
+Enable it in the scenario's yaml. It is experimental, so it is off by default:
+
+```yaml
+SumoSetup:
+    EnableTraciRelay: true
+```
+
+What the script's own calls mean under FIXS:
+
+| call | under FIXS |
+| --- | --- |
+| `traci.start(cmd)` | Reports `cmd`'s `-c` file as this run's scenario (the same handoff `fixs.sumo.scenario()` uses), then connects. SUMO is started by FIXS, so the rest of `cmd` does not reach it; put run options in apps.json `sumo_args`. |
+| `traci.simulationStep()` | Hands the current tick back to FIXS and waits for the next one. FIXS's warm-up runs before the first step returns. |
+| `traci.close()` | `fixs.close()`. |
+| `traci.load()`, `setOrder()` | Refused: FIXS owns the session. |
+| `*.subscribe()` | Refused: the FIXS feed already is the subscription. Read it from `fixs.vehicle`. |
+
+Calls are answered only while the script holds a tick, i.e. after
+`traci.simulationStep()`; TrafficLayer serves them while it waits for this client.
+Every call is a round trip inside the lockstep, as it is with plain TraCI, so
+per-tick state is cheaper read from the FIXS feed. Values come back as TraCI's own
+doubles; the FIXS feed carries float32. Under VISSIM, or a TrafficLayer built with
+`ENABLE_LIBSUMO`, there is no TraCI connection to relay onto and TrafficLayer
+refuses the setting at startup.
 
 ## Performance & TraCI transport (libtraci vs libsumo)
 

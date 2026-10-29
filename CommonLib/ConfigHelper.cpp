@@ -626,6 +626,12 @@ int ConfigHelper::parseConfig(string configName) {
 	else {
 		SumoSetup.EgoKeepRoute = 6;
 	}
+	if (node["EnableTraciRelay"]) {
+		SumoSetup.EnableTraciRelay = parserFlag(node, "EnableTraciRelay");
+	}
+	else {
+		SumoSetup.EnableTraciRelay = false;
+	}
 	if (node["EnableAutoLaunch"]) {
 		SumoSetup.EnableAutoLaunch = parserFlag(node, "EnableAutoLaunch");
 	}

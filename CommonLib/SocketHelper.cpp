@@ -928,6 +928,81 @@ static int sendExact(int sock, const char* buf, int n) {
 }
 
 int SocketHelper::recvData(int sock, int* simState, float* simTime, MsgHelper& Msg_c) {
+	for (;;) {
+		const int rc = recvMessage(sock, simState, simTime, Msg_c);
+#ifndef RS_DSPACE
+		if (rc >= 0 && !relayed_.empty()) {
+			// The peer waits for these answers before it can send its data message.
+			if (answerRelayed(sock, (uint8_t)*simState, *simTime, Msg_c) < 0) {
+				return -1;
+			}
+			continue;
+		}
+#endif
+		return rc;
+	}
+}
+
+#ifndef RS_DSPACE
+int SocketHelper::answerRelayed(int sock, uint8_t simStateSend, float simTimeSend, MsgHelper& Msg_c) {
+	std::vector<TraciRequest_t> requests;
+	requests.swap(relayed_);
+	for (size_t i = 0; i < requests.size(); i++) {
+		fixs::TraciResult result;
+		if (TraciRelayHandler) {
+			result = TraciRelayHandler(requests[i]);
+		}
+		else {
+			const std::string why =
+				"this TrafficLayer is not relaying TraCI. It is off by default: set "
+				"SumoSetup.EnableTraciRelay: true in config.yaml (SUMO, libtraci builds only).";
+			result.status = fixs::kTraciRefused;
+			result.body.assign(why.begin(), why.end());
+		}
+		if (sendTraciResponse(sock, simStateSend, simTimeSend, result, Msg_c) < 0) {
+			return -1;
+		}
+	}
+	return 0;
+}
+
+int SocketHelper::sendTraciResponse(int sock, uint8_t simStateSend, float simTimeSend,
+                                    const fixs::TraciResult& result, MsgHelper& Msg_c) {
+	const int bodySize = (int)result.body.size();
+	const int nRecords = bodySize <= fixs::kTraciRspChunk
+	                     ? 1 : (bodySize + fixs::kTraciRspChunk - 1) / fixs::kTraciRspChunk;
+	auto chunkLen = [&](int i) {
+		return i == nRecords - 1 ? bodySize - i * fixs::kTraciRspChunk : fixs::kTraciRspChunk;
+	};
+
+	uint32_t totalMsgSize = (uint32_t)Msg_c.msgHeaderSize;
+	for (int i = 0; i < nRecords; i++) {
+		totalMsgSize += (uint32_t)Msg_c.traciResponseRecordSize(chunkLen(i));
+	}
+
+	int txLen = 0;
+	Msg_c.packHeader(simStateSend, simTimeSend, totalMsgSize, txBuf, &txLen);
+	for (int i = 0; i < nRecords; i++) {
+		const int len = chunkLen(i);
+		if (txLen + Msg_c.traciResponseRecordSize(len) > TX_CHUNK_SIZE) {
+			if (sendExact(sock, txBuf, txLen) < 0) {
+				return -1;
+			}
+			txLen = 0;
+		}
+		Msg_c.packTraciResponse(result.status,
+		                        bodySize > 0 ? result.body.data() + i * fixs::kTraciRspChunk : nullptr,
+		                        len, i != nRecords - 1, txBuf, &txLen);
+	}
+	if (txLen > 0 && sendExact(sock, txBuf, txLen) < 0) {
+		fprintf(stderr, "sendTraciResponse: send() failed\n");
+		return -1;
+	}
+	return 0;
+}
+#endif
+
+int SocketHelper::recvMessage(int sock, int* simState, float* simTime, MsgHelper& Msg_c) {
 	// this function will receive all possible data
 
 	//int recvStatus = 0;
@@ -1050,6 +1125,36 @@ int SocketHelper::recvData(int sock, int* simState, float* simTime, MsgHelper& M
 		case 3:
 			Msg_c.depackDetectorData(recvEachDataBuf, recvSize, &iDetData);
 			Msg_c.DetDataRecv_um[get<1>(iDetData)] = iDetData;
+			break;
+#ifndef RS_DSPACE
+		case fixs::kMsgTraciRequest: {
+			bool more = false;
+			Msg_c.depackTraciRequest(recvEachDataBuf, bodySize, &relayPending_, &more);
+			if (!more) {
+				relayed_.push_back(relayPending_);
+				relayPending_ = TraciRequest_t();
+			}
+			break;
+		}
+#endif
+		default:
+#ifndef RS_DSPACE
+			// The peer of an unknown RPC record is waiting on it, so it gets an answer rather than silence.
+			if (iMsgTypeRecv >= fixs::kMsgRpcFirst) {
+				fixs::TraciResult unsupported;
+				const std::string why = "this TrafficLayer does not support RPC record type " +
+					std::to_string((int)iMsgTypeRecv) + "; are both ends the same FIXS version?";
+				unsupported.body.assign(why.begin(), why.end());
+				if (sendTraciResponse(sock, simStateRecv, simTimeRecv, unsupported, Msg_c) < 0) {
+					return -1;
+				}
+				break;
+			}
+#endif
+			if (!warnedUnknownRecord) {
+				warnedUnknownRecord = true;
+				printf("WARNING: skipping unknown record type %d\n", (int)iMsgTypeRecv);
+			}
 			break;
 		}
 

@@ -71,6 +71,7 @@ silently ignored.
 | SumoConfigFile | string | `""` | Path to `.sumocfg` used when auto-launching. Relative paths resolved against config file directory. |
 | NumClients | int | 1 | Number of SUMO clients negotiated during auto-launch. |
 | RuntimeLibraryPath | string | `""` | Optional override for the SUMO runtime directory (DLL/.so path). |
+| EnableTraciRelay | bool | false | Lets a client run TraCI commands on TrafficLayer's connection through `import fixs.sumo.traci as traci`. SUMO with a libtraci build only; rejected at startup otherwise. Experimental, so off by default — see `SUMOdoc.md`. |
 | EnableGuiFollow | bool | false | sumo-gui tracks `GuiCenteredViewId` whenever it is in the network, the counterpart of `CarlaSetup.EnableSpectatorFollow`. No effect on headless `sumo`; TrafficLayer prints one line and carries on. |
 | GuiCenteredViewId | string | `"ego"` | Vehicle id sumo-gui follows. |
 | GuiZoom | double | 600 | sumo-gui zoom (%) set when following starts; changing it in the GUI afterwards is kept. |

@@ -252,6 +252,9 @@ struct SumoSetup_t {
 	// https://sumo.dlr.de/docs/TraCI/Change_Vehicle_State.html#move_to_xy
 	int EgoKeepRoute;
 
+	// Lets a client run TraCI commands on TrafficLayer's connection (`import fixs.sumo.traci`). Off by default.
+	bool EnableTraciRelay;
+
 	// Auto-launch SUMO configuration
 	bool EnableAutoLaunch;
 	std::string SumoConfigFile;
