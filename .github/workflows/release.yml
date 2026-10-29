@@ -258,7 +258,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: CommonLib/libsumo
-          key: libsumo-${{ runner.os }}-${{ hashFiles('dependencies.yaml') }}
+          key: libsumo-tcpip-${{ runner.os }}-${{ hashFiles('dependencies.yaml') }}
       - name: Fetch libsumo (prebuilt, required)
         if: needs.detect.outputs.should_build == 'true'
         shell: pwsh

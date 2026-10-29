@@ -254,13 +254,15 @@ SUMO_TAG="v$(echo "$SUMO_VERSION" | tr . _)"
 
 LIBSUMO_DIR="$REPO_ROOT/$SUMO_LOCATION"
 SENTINEL="$LIBSUMO_DIR/bin/libtracicpp.so"
+# TrafficLayer compiles tcpip::Storage from this source, so an install without it is incomplete.
+TCPIP_SRC="$LIBSUMO_DIR/foreign/tcpip/storage.cpp"
 
 echo "libsumo/libtraci $SUMO_VERSION ($MODE mode)"
 echo "  install location: $SUMO_LOCATION (from dependencies.yaml)"
 
 # --- already there? -----------------------------------------------------------
 LIB_READY=0
-if [ -f "$SENTINEL" ] && [ "$FORCE" -eq 0 ]; then
+if [ -f "$SENTINEL" ] && [ -f "$TCPIP_SRC" ] && [ "$FORCE" -eq 0 ]; then
     note "already present at $SENTINEL (use --force to rebuild)"
     LIB_READY=1
 fi
@@ -276,6 +278,7 @@ if [ "$MODE" = "prebuilt" ] && [ "$LIB_READY" -eq 0 ]; then
     get_asset "$ASSET" "$(dirname "$LIBSUMO_DIR")"
 
     [ -f "$SENTINEL" ] || die "$ASSET did not contain bin/libtracicpp.so"
+    [ -f "$TCPIP_SRC" ] || die "$ASSET did not contain foreign/tcpip/storage.cpp; republish it with scripts/pack_native_deps.sh --component sumo --publish"
     if command -v ldd >/dev/null 2>&1 && ldd "$SENTINEL" 2>/dev/null | grep -q 'not found'; then
         ldd "$SENTINEL" | grep 'not found' >&2
         die "libsumo loadability check failed"
