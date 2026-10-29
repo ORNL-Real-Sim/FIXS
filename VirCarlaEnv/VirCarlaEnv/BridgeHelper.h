@@ -93,7 +93,8 @@ public:
 
     static carla::geom::Location map_location_Carla_to_Sumo(const carla::geom::Location& in_carla_location);
 
-    static std::string map_Sumo_vClass_to_Carla_blueprintId(const std::string& vclass);
+    static std::string map_Sumo_vClass_to_Carla_blueprintId(const std::string& vclass,
+                                                            const std::string& vehId);
 
     static std::unordered_map<std::string, std::unordered_map<int, TrafficLight>> readTrafficLightTable(const std::string& filename);
 

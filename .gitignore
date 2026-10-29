@@ -59,8 +59,6 @@ CommonLib/*.a
 # Single-header amalgamation - not used in any source file
 CommonLib/ryml_all.hpp
 
-CommonLib/libevent/build/*
-CommonLib/libevent/out/build/*
 CommonLib/yaml-cpp/build/*
 CommonLib/yaml-cpp/out/build/*
 # Native C++ deps - NOT committed (#109, #238). Acquired at setup time by

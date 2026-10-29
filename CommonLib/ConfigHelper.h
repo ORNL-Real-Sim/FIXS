@@ -103,6 +103,12 @@ struct XilSetup_t {
 
 	Subscription_t DetectorSubscription;
 
+	// The ego speed SUMO is given: virenv (the virtual environment's) | xil (the bench's)
+	std::string SpeedToTraffic;
+
+	// The ego speed applications receive: traffic (the traffic simulator's) | xil (the bench's)
+	std::string SpeedToApplication;
+
 };
 
 
@@ -222,14 +228,16 @@ struct SumoSetup_t {
 
 	int SpeedMode;
 
-	// SUMO's lane-change mode for the vehicles FIXS drives, as
-	// Vehicle::setLaneChangeMode takes it. -1 leaves SUMO's own default (597,
-	// every motive on) untouched, which is what every scenario got before this
-	// existed. 512 is strategic changes only: the vehicle still reaches the lane
-	// its next turn needs, but never changes lane by choice -- the setting for
-	// comparing against a driver that holds one lane, such as a CARLA agent
-	// steering a fixed route polyline.
+	// Vehicle::setLaneChangeMode for the vehicles FIXS drives. -1 leaves SUMO's
+	// default; 512 = strategic changes only (follows its route, never by choice).
 	int LaneChangeMode;
+
+	// true only when the yaml has SpeedMode; the absent default 0 turns most checks off.
+	bool SpeedModeConfigured;
+
+	// Give the ego the configured SpeedMode/LaneChangeMode when it enters the
+	// network, even if no client commands it. Default false.
+	bool EgoModesOnEntry;
 
 	int ExecutionOrder;
 
@@ -249,6 +257,12 @@ struct SumoSetup_t {
 	std::string SumoConfigFile;
 	int NumClients;
 	std::string RuntimeLibraryPath;
+
+	// sumo-gui tracks GuiCenteredViewId at GuiZoom (%) while it is in the network,
+	// the counterpart of CarlaSetup.EnableSpectatorFollow. No effect on headless sumo.
+	bool EnableGuiFollow;
+	std::string GuiCenteredViewId;
+	double GuiZoom;
 };
 
 // VISSIM DrivingSimulatorProxy.dll coupling (issue #158, Stage A).
@@ -334,6 +348,37 @@ struct DataLogSetup_t {
 	std::vector<std::string> DataLogFields;      // VehFullData fields; empty = default core set
 };
 
+// One entry of ViewSetup.Views, with every default resolved. Mirrors the view
+// dicts ConfigHelper.py builds; see doc/ConfigSetup.md for the schema.
+struct ViewDef_t {
+	std::string Name;
+	std::string Simulator;              // carla | sumo
+	std::string Type;                   // carla: spectator|bev|chase|driver; sumo: follow|fixed
+	std::string Target;                 // vehicle id
+	bool Enable = true;
+	bool Implied = false;               // built from the CarlaSetup/SumoSetup legacy keys
+	std::vector<int> Size;              // camera window [w, h] px
+	double Fov = 90.0;
+	double SensorTick = 0.0;
+	std::vector<double> Offset;         // camera mount in the target's frame [x fwd, y right, z up] m
+	double Pitch = 0.0;                 // camera mount pitch, deg
+	double Height = 50.0;               // spectator/bev height above the target, m
+	bool AlignYaw = false;              // spectator: rotate with the target's heading
+	double Zoom = 600.0;                // sumo follow zoom, %
+	std::vector<double> Boundary;       // sumo fixed [xmin, ymin, xmax, ymax]
+	bool Display = true;                // carla camera: show it in a window
+	std::string Record;                 // carla camera: video path (.mp4 | .avi); empty = off
+	std::vector<std::string> Overlay;   // carla camera HUD: signal | speed | pedals | advisory
+	std::string OverlayUnits = "mph";   // mph | kmh
+	double OverlaySpeedMax = 40.0;      // dial full scale, in OverlayUnits
+};
+
+struct ViewSetup_t {
+	// Always holds one carla spectator and at least one sumo view: absent from
+	// the list, they are implied by the legacy keys.
+	std::vector<ViewDef_t> Views;
+};
+
 class ConfigHelper
 {
 public:
@@ -344,10 +389,13 @@ public:
 	// Flag to suppress "Will use X as default" messages during config parsing
 	bool SuppressDefaultMessages = true;
 
-	bool parserFlag(YAML::Node node, std::string name);
-	std::string parserString(YAML::Node node, std::string name);
-	double parserDouble(YAML::Node node, std::string name);
-	int parserInteger(YAML::Node node, std::string name);
+	// A missing key returns the default instead of throwing, as ConfigHelper.py's
+	// node.get(name, default) does. An unguarded call on an absent section
+	// (e.g. no XilSetup) used to kill TrafficLayer silently at startup (#214).
+	bool parserFlag(YAML::Node node, std::string name, bool defaultValue = false);
+	std::string parserString(YAML::Node node, std::string name, std::string defaultValue = "");
+	double parserDouble(YAML::Node node, std::string name, double defaultValue = 0.0);
+	int parserInteger(YAML::Node node, std::string name, int defaultValue = 0);
 	void parserIntegerVector(YAML::Node node, std::string name, std::vector<int>& outIntegerVector);
 	void parserStringVector(YAML::Node node, std::string name, std::vector<std::string>& outStringVector);
 
@@ -380,6 +428,7 @@ public:
 	CarlaSetup_t CarlaSetup;
 	VissimSetup_t VissimSetup;
 	DataLogSetup_t DataLogSetup;
+	ViewSetup_t ViewSetup;
 
 
 
@@ -411,6 +460,10 @@ private:
 	void popErrorMessageBox(std::string message, std::string title);
 
 	void extractSubscriptionAttributes(YAML::Node attnode, std::string type, std::string att, SubAttMap_t& attMap);
+
+	void parseViewSetup(YAML::Node viewNode);
+	ViewDef_t viewDefaults(const std::string& name, const std::string& sim, const std::string& type,
+		YAML::Node node, bool implied);
 
 };
 

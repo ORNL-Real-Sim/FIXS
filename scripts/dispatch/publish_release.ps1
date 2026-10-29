@@ -7,6 +7,7 @@
 #   publish_release.ps1                               # rolling "latest" release
 #   publish_release.ps1 -Tag v0.9.0-alpha -Rolling    # rolling named prerelease
 #   publish_release.ps1 -Tag v0.8.0                   # fixed versioned release
+#   publish_release.ps1 -Tag v0.9.0-alpha -Rolling -Asset distixs-build-v0.9.0-alpha-linux-x86_64.zip
 #
 # CI does not hardcode any of these: it resolves the branch's channel with
 # release_channel.ps1 and passes -Tag/-Title from that.
@@ -25,7 +26,11 @@ param(
     # Release title. CI passes the one resolved by release_channel.ps1 so channel
     # naming lives in exactly one place; when omitted this falls back to the same
     # convention, for hand-run publishes.
-    [string]$Title
+    [string]$Title,
+    # More files for the SAME release, uploaded by the same `gh release create`.
+    # CI passes the Linux bundle here: publishing it from a separate job after the
+    # release was recreated left the release without it for minutes (#376).
+    [string[]]$Asset = @()
 )
 
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
@@ -40,14 +45,30 @@ if ($ZipFiles.Count -eq 0) {
 $ZipPath = $ZipFiles[0].FullName
 $ZipName = $ZipFiles[0].Name
 Write-Host "Publishing: $ZipName"
+foreach ($a in $Asset) {
+    if (-not (Test-Path -LiteralPath $a)) {
+        Write-Error "Asset not found: $a"
+        exit 1
+    }
+    Write-Host "  + $(Split-Path -Leaf $a)"
+}
+$assetNames = (@($ZipName) + @($Asset | ForEach-Object { Split-Path -Leaf $_ })) -join ', '
 
 # Checksum sidecar, in sha256sum's "<hex>  <name>" form, which update_fixs.ps1
 # and update_fixs.sh verify every download against (#204). Written as plain
 # ASCII: Windows PowerShell's Set-Content would prepend a BOM to the hex.
-$ZipSha = (Get-FileHash $ZipPath -Algorithm SHA256).Hash.ToLower()
-$ShaPath = "$ZipPath.sha256"
-[System.IO.File]::WriteAllText($ShaPath, "$ZipSha  $ZipName`n", [System.Text.Encoding]::ASCII)
-Write-Host "SHA-256: $ZipSha"
+# One per asset, the main zip and every -Asset alike.
+$ShaPaths = @()
+$shaNotes = @()
+foreach ($f in @($ZipPath) + @($Asset | ForEach-Object { (Resolve-Path -LiteralPath $_).Path })) {
+    $name = Split-Path -Leaf $f
+    $sha = (Get-FileHash $f -Algorithm SHA256).Hash.ToLower()
+    [System.IO.File]::WriteAllText("$f.sha256", "$sha  $name`n", [System.Text.Encoding]::ASCII)
+    $ShaPaths += "$f.sha256"
+    $shaNotes += "- SHA-256 ${name}: $sha"
+    Write-Host "SHA-256 ${name}: $sha"
+}
+$shaNotes = $shaNotes -join "`n"
 
 # Check gh CLI is available
 if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
@@ -73,8 +94,8 @@ FIXS Build - $date
 
 - Branch: $branch
 - Commit: $commit ($msg)
-- Zip: $ZipName
-- SHA-256: $ZipSha
+- Zip: $assetNames
+$shaNotes
 "@
 
 # Anchor releases to the built commit; without --target a new tag defaults to
@@ -96,7 +117,7 @@ if ($Rolling -or $Tag -eq 'latest') {
     if (-not $Title) {
         $Title = if ($Tag -eq 'latest') { 'Latest Dev Build' } else { "Rolling build: $Tag" }
     }
-    gh release create $Tag $ZipPath $ShaPath @targetArgs `
+    gh release create $Tag $ZipPath @Asset @ShaPaths @targetArgs `
         --prerelease `
         --title $Title `
         --notes $notes
@@ -112,7 +133,7 @@ if ($Rolling -or $Tag -eq 'latest') {
     }
 
     if (-not $Title) { $Title = "FIXS $Tag" }
-    gh release create $Tag $ZipPath $ShaPath @targetArgs `
+    gh release create $Tag $ZipPath @Asset @ShaPaths @targetArgs `
         --title $Title `
         --notes $notes
 }

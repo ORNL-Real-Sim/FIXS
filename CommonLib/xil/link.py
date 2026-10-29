@@ -30,6 +30,17 @@ _PACKET = struct.Struct('<2f')
 PACKET_SIZE = _PACKET.size                  # 8
 REFERENCE_PORT = 5010                       # simulator -> dyno
 MEASUREMENT_PORT = 5011                     # dyno -> simulator
+# Port slot k >= 1 (run_cosim --slot) moves both into its block: 20000 + 100k + 70 / + 71.
+_SLOT_BASE, _SLOT_STRIDE, _SLOT_DYNO = 20000, 100, 70
+
+
+def slotPorts(slot=0):
+    """(reference_port, measurement_port) for a run on port slot `slot`."""
+    slot = int(slot or 0)
+    if slot <= 0:
+        return REFERENCE_PORT, MEASUREMENT_PORT
+    base = _SLOT_BASE + _SLOT_STRIDE * slot + _SLOT_DYNO
+    return base, base + 1
 
 
 def pack(speed, steer=0.0):
@@ -48,6 +59,7 @@ class LocalLink(object):
     """Both ends in one process. No latency, no loss, no jitter.
 
     The baseline: whatever a UDP run does differently from this is transport.
+    Values pass through the same float32 packet the wire carries.
     """
 
     def __init__(self, clock=time.monotonic):
@@ -60,7 +72,7 @@ class LocalLink(object):
 
     # simulator end -------------------------------------------------------
     def send_reference(self, speed, steer=0.0):
-        self._to_dyno = ((float(speed), float(steer)), self._clock())
+        self._to_dyno = (unpack(pack(speed, steer)), self._clock())
 
     def recv_measurement(self):
         return self._to_sim[0] if self._to_sim else None
@@ -70,7 +82,7 @@ class LocalLink(object):
 
     # dyno end ------------------------------------------------------------
     def send_measurement(self, speed, steer=0.0):
-        self._to_sim = ((float(speed), float(steer)), self._clock())
+        self._to_sim = (unpack(pack(speed, steer)), self._clock())
 
     def recv_reference(self):
         return self._to_dyno[0] if self._to_dyno else None
