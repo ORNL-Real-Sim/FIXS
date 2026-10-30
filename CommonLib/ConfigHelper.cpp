@@ -162,7 +162,7 @@ int ConfigHelper::parseConfig(string configName) {
 		SimulationSetup.EnableVerboseLog = false;
 		if (!SuppressDefaultMessages) printf("\nWill disable verbose log as default!\n");
 	}
-	SimulationSetup.TimingReport = node["TimingReport"] ? parserFlag(node, "TimingReport") : false;
+	SimulationSetup.EnableTimingReport = node["EnableTimingReport"] ? parserFlag(node, "EnableTimingReport") : false;
 	// SubEgoOnly (FIXS #158 Stage B+). Default true preserves legacy FIXS
 	// DriverModel behavior; set to false in the par-file to enable the
 	// per-tick send/recv path that the DSProxy + DriverModel relay needs.

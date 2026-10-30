@@ -1057,7 +1057,7 @@ int main(int argc, char* argv[]) {
 	double xilStep = 0;   // the traffic simulator's step, read once it is connected
 
 	fixs::TickTiming tickTiming;
-	tickTiming.report = Config_c.SimulationSetup.TimingReport;
+	tickTiming.report = Config_c.SimulationSetup.EnableTimingReport;
 
 	//while (simTime <= tSimuEnd && ii < nT) {
 	while (!g_shutdown.shutdownRequested) {

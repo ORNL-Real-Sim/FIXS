@@ -60,7 +60,7 @@ class ConfigHelper:
         simulation_node = config.get("SimulationSetup", {})
         self.simulation_setup["EnableRealSim"] = self.parserFlag(simulation_node, "EnableRealSim", True)
         self.simulation_setup["EnableVerboseLog"] = self.parserFlag(simulation_node, "EnableVerboseLog", False)
-        self.simulation_setup["TimingReport"] = self.parserFlag(simulation_node, "TimingReport", False)
+        self.simulation_setup["EnableTimingReport"] = self.parserFlag(simulation_node, "EnableTimingReport", False)
         self.simulation_setup["SimulationEndTime"] = self.parserDouble(simulation_node, "SimulationEndTime", 90000)
         self.simulation_setup["EnableExternalDynamics"] = self.parserFlag(simulation_node, "EnableExternalDynamics", False)
         self.simulation_setup["SelectedTrafficSimulator"] = self.parserString(simulation_node, "SelectedTrafficSimulator", "SUMO")

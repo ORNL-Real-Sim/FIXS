@@ -36,7 +36,7 @@ struct SimulationSetup_t {
 	bool EnableVerboseLog;
 
 	// Prints TrafficLayer's per-tick wall time, by phase and by client, every 10 s of sim time.
-	bool TimingReport = false;
+	bool EnableTimingReport = false;
 
 	// FIXS DriverModel "ego only" mode (issue #158 Stage B+).
 	//   true  (default, legacy):  DriverModel does per-vehicle send/recv

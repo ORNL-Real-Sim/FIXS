@@ -14,7 +14,7 @@ public:
 	using clock = std::chrono::steady_clock;
 	enum Phase { Step, ReadSim, Clients, WriteSim, Other, kPhases };
 
-	bool report = false;          // SimulationSetup.TimingReport: print every reportPeriod of sim time
+	bool report = false;          // SimulationSetup.EnableTimingReport: print every reportPeriod of sim time
 	double reportPeriod = 10.0;   // sim seconds
 	double warnShare = 0.10;      // relayed calls above this share of the tick warn once per client
 
@@ -106,7 +106,7 @@ private:
 			       "relayed TraCI calls per tick from the client on port %d (t=%.1f-%.1f), and that "
 			       "client waits on each one. Every relayed call is a round trip through TrafficLayer "
 			       "to SUMO; per-tick state is cheaper read from the FIXS feed (fixs.vehicle, "
-			       "fixs.trafficlight). SimulationSetup.TimingReport: true prints the full breakdown.\n",
+			       "fixs.trafficlight). SimulationSetup.EnableTimingReport: true prints the full breakdown.\n",
 			       relay, tick, 100.0 * relay / tick, c.second.relayCalls / w.ticks, c.first, w.t0, w.t1);
 		}
 	}
