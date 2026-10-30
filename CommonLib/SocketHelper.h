@@ -189,6 +189,9 @@ public:
 #ifndef RS_DSPACE
 	// Answers relayed TraCI requests inside recvData. Unset, every request is refused.
 	std::function<fixs::TraciResult(const TraciRequest_t&)> TraciRelayHandler;
+	// Running totals of relayed requests answered and the wall time spent answering them.
+	long long RelayCalls = 0;
+	double RelayMs = 0;
 #endif
 
 	// Reads one data message. A relayed TraCI request on the way is answered before it returns.

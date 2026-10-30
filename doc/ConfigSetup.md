@@ -10,6 +10,7 @@ The Real-Sim interface is configured through YAML files (for example `config.yam
 | --- | --- | --- | --- |
 | EnableRealSim | bool | true | Master switch for the interface. |
 | EnableVerboseLog | bool | false | Enables detailed logging in TrafficLayer and companion tools. |
+| TimingReport | bool | false | TrafficLayer prints one line every 10 s of simulation time: wall ms per tick, the real-time factor, the split into SUMO step / reading SUMO / clients / writing SUMO, and each client's share with its relayed TraCI calls. A whole-run line follows at the end. Off, TrafficLayer still warns once per client whose relayed TraCI calls take more than 10% of the tick. |
 | SimulationEndTime | double | 90000 | End time (seconds). Large default keeps the session open until external shutdown. |
 | EnableExternalDynamics | bool | false | When true, SUMO speed updates use `setPreviousSpeed` so acceleration limits are respected. |
 | VehicleMessageField | string list | All supported fields | Controls which vehicle fields are exchanged. Provide a subset if bandwidth is a concern. Must include `id`, `speed`, and one of `speedDesired` or `accelerationDesired`. |

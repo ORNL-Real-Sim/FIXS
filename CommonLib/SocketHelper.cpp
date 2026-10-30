@@ -3,6 +3,8 @@
 // windows.h order, and PlatformCompat.h pulls only windows.h.
 #include "PlatformCompat.h"
 
+#include <chrono>
+
 using namespace std;
 
 // The convention is that, Server always provide service to the Client. 
@@ -948,6 +950,7 @@ int SocketHelper::answerRelayed(int sock, uint8_t simStateSend, float simTimeSen
 	std::vector<TraciRequest_t> requests;
 	requests.swap(relayed_);
 	for (size_t i = 0; i < requests.size(); i++) {
+		const auto t0 = std::chrono::steady_clock::now();
 		fixs::TraciResult result;
 		if (TraciRelayHandler) {
 			result = TraciRelayHandler(requests[i]);
@@ -962,6 +965,8 @@ int SocketHelper::answerRelayed(int sock, uint8_t simStateSend, float simTimeSen
 		if (sendTraciResponse(sock, simStateSend, simTimeSend, result, Msg_c) < 0) {
 			return -1;
 		}
+		RelayCalls++;
+		RelayMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
 	}
 	return 0;
 }

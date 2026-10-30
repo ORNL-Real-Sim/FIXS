@@ -206,7 +206,10 @@ Calls are answered only while the script holds a tick; TrafficLayer serves them
 while it waits for this client. A call made before the first `traci.simulationStep()`
 first waits for FIXS's first tick.
 Every call is a round trip inside the lockstep, as it is with plain TraCI, so
-per-tick state is cheaper read from the FIXS feed. Values come back as TraCI's own
+per-tick state is cheaper read from the FIXS feed. TrafficLayer warns once when a
+client's relayed calls take more than 10% of the tick, and
+`SimulationSetup.TimingReport: true` prints where each tick's time goes, per client.
+Values come back as TraCI's own
 doubles; the FIXS feed carries float32. Under VISSIM, or a TrafficLayer built with
 `ENABLE_LIBSUMO`, there is no TraCI connection to relay onto and TrafficLayer
 refuses the setting at startup.
