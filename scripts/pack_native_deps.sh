@@ -194,6 +194,7 @@ pack_sumo() {
     # --- stage, exactly mirroring the Windows layout --------------------------
     mkdir -p "$STAGE/libsumo/bin"
     cp "$src_dir"/*.h                "$STAGE/libsumo/"
+    cp -r "$src_dir/foreign"         "$STAGE/libsumo/"
     cp "$src_dir/bin/libtracicpp.so" "$STAGE/libsumo/bin/"
 
     # --- verify BEFORE publishing ---------------------------------------------

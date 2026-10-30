@@ -10,6 +10,7 @@ The Real-Sim interface is configured through YAML files (for example `config.yam
 | --- | --- | --- | --- |
 | EnableRealSim | bool | true | Master switch for the interface. |
 | EnableVerboseLog | bool | false | Enables detailed logging in TrafficLayer and companion tools. |
+| EnableTimingReport | bool | false | TrafficLayer prints one line every 10 s of simulation time: wall ms per tick, the real-time factor, the split into SUMO step / reading SUMO / clients / writing SUMO, and each client's share with its relayed TraCI calls. A whole-run line follows at the end. Off, TrafficLayer still warns once per client whose relayed TraCI calls take more than 10% of the tick. |
 | SimulationEndTime | double | 90000 | End time (seconds). Large default keeps the session open until external shutdown. |
 | EnableExternalDynamics | bool | false | When true, SUMO speed updates use `setPreviousSpeed` so acceleration limits are respected. |
 | VehicleMessageField | string list | All supported fields | Controls which vehicle fields are exchanged. Provide a subset if bandwidth is a concern. Must include `id`, `speed`, and one of `speedDesired` or `accelerationDesired`. |
@@ -71,6 +72,7 @@ silently ignored.
 | SumoConfigFile | string | `""` | Path to `.sumocfg` used when auto-launching. Relative paths resolved against config file directory. |
 | NumClients | int | 1 | Number of SUMO clients negotiated during auto-launch. |
 | RuntimeLibraryPath | string | `""` | Optional override for the SUMO runtime directory (DLL/.so path). |
+| EnableTraciRelay | bool | false | Lets a client run TraCI commands on TrafficLayer's connection through `import fixs.sumo.traci as traci`. SUMO with a libtraci build only; rejected at startup otherwise. Experimental, so off by default — see `SUMOdoc.md`. |
 | EnableGuiFollow | bool | false | sumo-gui tracks `GuiCenteredViewId` whenever it is in the network, the counterpart of `CarlaSetup.EnableSpectatorFollow`. No effect on headless `sumo`; TrafficLayer prints one line and carries on. |
 | GuiCenteredViewId | string | `"ego"` | Vehicle id sumo-gui follows. |
 | GuiZoom | double | 600 | sumo-gui zoom (%) set when following starts; changing it in the GUI afterwards is kept. |

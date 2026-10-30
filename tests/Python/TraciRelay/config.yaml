@@ -1,0 +1,24 @@
+# Live check of the TraCI relay: SUMO on the probe's net, TrafficLayer, and relay_client.py.
+
+SimulationSetup:
+    EnableFIXS: true
+    SelectedTrafficSimulator: 'SUMO'
+    TrafficSimulatorIP: "127.0.0.1"
+    TrafficSimulatorPort: 1337
+    VehicleMessageField: [id, type, speed, speedDesired, positionX, positionY, linkId, laneId]
+
+SumoSetup:
+    EnableAutoLaunch: false     # run_relay_test.ps1 starts SUMO itself
+    EnableTraciRelay: true
+
+ApplicationSetup:
+    EnableApplicationLayer: true
+    VehicleSubscription:
+    -   type: ego
+        attribute: {id: ['ego'], radius: [0]}
+        ip: ['127.0.0.1']
+        port: [2444]
+
+XilSetup:
+    EnableXil: false
+    VehicleSubscription:

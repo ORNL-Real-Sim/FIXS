@@ -546,6 +546,26 @@ try {
         }
     }
 
+    # TraciRelay.cpp compiles tcpip::Storage itself; the subpath matches <foreign/tcpip/storage.h>.
+    $foreignDest = Join-Path $destDir "foreign\tcpip"
+    New-Item -ItemType Directory -Force -Path $foreignDest | Out-Null
+    foreach ($file in @("storage.h", "storage.cpp")) {
+        $sourceFile = Join-Path $sumoDir "src\foreign\tcpip\$file"
+        Write-Host "  Copying foreign/tcpip/$file..." -NoNewline
+        if (Test-Path $sourceFile) {
+            Copy-Item -Path $sourceFile -Destination (Join-Path $foreignDest $file) -Force
+            Write-Host " OK" -ForegroundColor Green
+            $successCount++
+        } else {
+            Write-Host " NOT FOUND" -ForegroundColor Red
+            Write-Host "    Expected at: $sourceFile" -ForegroundColor Yellow
+            $failCount++
+        }
+    }
+    # storage.h includes <config.h> from SUMO's build tree; it reads none of its macros.
+    Set-Content -Path (Join-Path $destDir "config.h") -Encoding ascii `
+        -Value "/* Stands in for SUMO's generated config.h; foreign/tcpip/storage.cpp reads none of it. */"
+
     $totalFiles = $requiredFiles.Count + $headerFiles.Count
     Write-Host "`nCopy Summary:" -ForegroundColor Cyan
     Write-Host "  Success: $successCount / $totalFiles" -ForegroundColor Green

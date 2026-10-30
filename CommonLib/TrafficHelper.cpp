@@ -1768,6 +1768,7 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 				for (int iD = 0; iD < detAreaAllId_v.size(); iD++) {
 					if (detAreaAllId_v[iD].find(it) != std::string::npos) {
 						SUMO_TRACI_NAMESPACE::LaneArea::subscribe(detAreaAllId_v[iD], detSubscribeList, 0, tSimuEnd);
+						ownDetectorId_us.insert(detAreaAllId_v[iD]);
 					}
 				}
 			}
@@ -1785,11 +1786,15 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 		std::shared_ptr<libsumo::TraCIInt> tempIntPtr;
 
 		for (auto& it : DetSubscribeRaw) {
+			auto count = it.second.find(libsumo::LAST_STEP_VEHICLE_NUMBER);
+			if (!ownDetectorId_us.count(it.first) || count == it.second.end()) {
+				continue;
+			}
 			DetectorData_t curDet;
 
 			curDet.id = 0;
 			curDet.name = it.first;
-			tempIntPtr = static_pointer_cast<libsumo::TraCIInt> (it.second[libsumo::LAST_STEP_VEHICLE_NUMBER]);
+			tempIntPtr = static_pointer_cast<libsumo::TraCIInt> (count->second);
 			if (tempIntPtr->value > 0) {
 				curDet.state = 1;
 			}
@@ -1823,11 +1828,13 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 			if (!Config_c->SubscriptionSignalList.subAllSignalFlag) {
 				for (auto it : Config_c->SubscriptionSignalList.signalId_v) {
 					SUMO_TRACI_NAMESPACE::TrafficLight::subscribe(it.c_str(), sigSubscribeList, 0, tSimuEnd);
+					ownSignalId_us.insert(it);
 				}
 			}
 			else {
 				for (auto it : sigAllId_v) {
 					SUMO_TRACI_NAMESPACE::TrafficLight::subscribe(it.c_str(), sigSubscribeList, 0, tSimuEnd);
+					ownSignalId_us.insert(it);
 				}
 			}
 
@@ -1845,11 +1852,15 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 
 		int idx = 0;
 		for (auto& it : SigSubscribeRaw) {
+			auto state = it.second.find(libsumo::TL_RED_YELLOW_GREEN_STATE);
+			if (!ownSignalId_us.count(it.first) || state == it.second.end()) {
+				continue;
+			}
 			TrafficLightData_t curSig;
 
 			curSig.id = idx++;
 			curSig.name = it.first;
-			tempStringPtr = static_pointer_cast<libsumo::TraCIString> (it.second[libsumo::TL_RED_YELLOW_GREEN_STATE]);
+			tempStringPtr = static_pointer_cast<libsumo::TraCIString> (state->second);
 			curSig.state = tempStringPtr->value;
 
 			Msg_c.TlsDataRecv_um[curSig.name] = curSig;

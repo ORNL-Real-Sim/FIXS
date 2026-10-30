@@ -307,6 +307,10 @@ private:
 	SignalSubscriptionFlags_t SignalSubscriptionFlags;
 	DetectorSubscriptionFlags_t DetectorSubscriptionFlags;
 
+	// What TrafficLayer subscribed itself; a relayed script's subscriptions share libtraci's results.
+	std::unordered_set<std::string> ownSignalId_us;
+	std::unordered_set<std::string> ownDetectorId_us;
+
 	const double SUB_CONT_TIME_THLD = 1; // has to be in for 10 seconds
 
 	const double SIM_STEP = 0.1;

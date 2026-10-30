@@ -60,6 +60,7 @@ class ConfigHelper:
         simulation_node = config.get("SimulationSetup", {})
         self.simulation_setup["EnableRealSim"] = self.parserFlag(simulation_node, "EnableRealSim", True)
         self.simulation_setup["EnableVerboseLog"] = self.parserFlag(simulation_node, "EnableVerboseLog", False)
+        self.simulation_setup["EnableTimingReport"] = self.parserFlag(simulation_node, "EnableTimingReport", False)
         self.simulation_setup["SimulationEndTime"] = self.parserDouble(simulation_node, "SimulationEndTime", 90000)
         self.simulation_setup["EnableExternalDynamics"] = self.parserFlag(simulation_node, "EnableExternalDynamics", False)
         self.simulation_setup["SelectedTrafficSimulator"] = self.parserString(simulation_node, "SelectedTrafficSimulator", "SUMO")
@@ -78,6 +79,8 @@ class ConfigHelper:
         self.Sumo_setup["LaneChangeMode"] = sumo_node.get("LaneChangeMode", -1)
         # Apply the configured modes to the ego on network entry even if no client commands it.
         self.Sumo_setup["EgoModesOnEntry"] = self.parserFlag(sumo_node, "EgoModesOnEntry", False)
+        # Lets a client run TraCI commands on TrafficLayer's connection; parity with ConfigHelper.cpp.
+        self.Sumo_setup["EnableTraciRelay"] = self.parserFlag(sumo_node, "EnableTraciRelay", False)
         # Consumed by run_cosim.py (not the C++ engine): whether it launches SUMO
         # itself, or waits for the user to start it. Parity with SumoSetup.AutoStart
         # in ConfigHelper.cpp. Default true.

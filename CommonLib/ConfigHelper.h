@@ -35,6 +35,9 @@ struct SimulationSetup_t {
 
 	bool EnableVerboseLog;
 
+	// Prints TrafficLayer's per-tick wall time, by phase and by client, every 10 s of sim time.
+	bool EnableTimingReport = false;
+
 	// FIXS DriverModel "ego only" mode (issue #158 Stage B+).
 	//   true  (default, legacy):  DriverModel does per-vehicle send/recv
 	//                             inside the MOVE_DRIVER callback when the
@@ -251,6 +254,9 @@ struct SumoSetup_t {
 	// keepRoute bitmask for the mirror's moveToXY, for every ego owner (#305).
 	// https://sumo.dlr.de/docs/TraCI/Change_Vehicle_State.html#move_to_xy
 	int EgoKeepRoute;
+
+	// Lets a client run TraCI commands on TrafficLayer's connection (`import fixs.sumo.traci`). Off by default.
+	bool EnableTraciRelay;
 
 	// Auto-launch SUMO configuration
 	bool EnableAutoLaunch;

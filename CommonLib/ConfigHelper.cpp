@@ -162,6 +162,7 @@ int ConfigHelper::parseConfig(string configName) {
 		SimulationSetup.EnableVerboseLog = false;
 		if (!SuppressDefaultMessages) printf("\nWill disable verbose log as default!\n");
 	}
+	SimulationSetup.EnableTimingReport = node["EnableTimingReport"] ? parserFlag(node, "EnableTimingReport") : false;
 	// SubEgoOnly (FIXS #158 Stage B+). Default true preserves legacy FIXS
 	// DriverModel behavior; set to false in the par-file to enable the
 	// per-tick send/recv path that the DSProxy + DriverModel relay needs.
@@ -625,6 +626,12 @@ int ConfigHelper::parseConfig(string configName) {
 	}
 	else {
 		SumoSetup.EgoKeepRoute = 6;
+	}
+	if (node["EnableTraciRelay"]) {
+		SumoSetup.EnableTraciRelay = parserFlag(node, "EnableTraciRelay");
+	}
+	else {
+		SumoSetup.EnableTraciRelay = false;
 	}
 	if (node["EnableAutoLaunch"]) {
 		SumoSetup.EnableAutoLaunch = parserFlag(node, "EnableAutoLaunch");

@@ -7,6 +7,8 @@
 #include <cstring>
 
 #include "TrafficHelper.h"
+#include "TraciRelay.h"
+#include "TickTiming.h"
 #include "PlatformCompat.h"
 #ifdef _WIN32
 #include "DSProxyMode.h"
@@ -646,6 +648,22 @@ int main(int argc, char* argv[]) {
 		// Configure SUMO library path for runtime DLL loading
 		ConfigureSumoLibraryPath(Config_c);
 	}
+
+	if (Config_c.SumoSetup.EnableTraciRelay) {
+		if (ENABLE_VISSIM) {
+			printf("ERROR: SumoSetup.EnableTraciRelay needs SUMO; this run drives VISSIM.\n");
+			exit(-1);
+		}
+		if (!fixs::traciRelayAvailable()) {
+			printf("ERROR: SumoSetup.EnableTraciRelay needs a libtraci build; this one embeds libsumo.\n");
+			exit(-1);
+		}
+		Sock_c.TraciRelayHandler = [](const TraciRequest_t& req) {
+			return fixs::executeTraci(req.cmdID, req.varID, req.objID, req.payload);
+		};
+		printf("TraCI relay: enabled (clients may use 'import fixs.sumo.traci as traci')\n");
+	}
+
 	if (Config_c.SimulationSetup.EnableVerboseLog) {
 		ENABLE_VERBOSE = true;
 		printf("Verbose logging: Enabled\n");
@@ -1038,10 +1056,14 @@ int main(int argc, char* argv[]) {
 	const bool XIL_SPEED = Config_c.XilSetup.SpeedToTraffic == "xil" || Config_c.XilSetup.SpeedToApplication == "xil";
 	double xilStep = 0;   // the traffic simulator's step, read once it is connected
 
+	fixs::TickTiming tickTiming;
+	tickTiming.report = Config_c.SimulationSetup.EnableTimingReport;
+
 	//while (simTime <= tSimuEnd && ii < nT) {
 	while (!g_shutdown.shutdownRequested) {
 
 		PERF_TIC("main_loop");
+		tickTiming.beginTick();
 
 		///****************************************************
 		// RUN one-step simulation
@@ -1074,6 +1096,7 @@ int main(int argc, char* argv[]) {
 			}
 		}
 		PERF_TOC("traffic_step");
+		tickTiming.lap(fixs::TickTiming::Step);
 #ifdef ENABLE_PERF_TIMING
 		// Log number of vehicles received from traffic simulator
 		PERF_LOG("t=%.2f vehicles_in_network=%d\n", simTime, (int)MsgServer_c.VehDataRecv_um.size());
@@ -1238,6 +1261,7 @@ int main(int argc, char* argv[]) {
 			g_shutdown.shutdownRequested = true;
 			break;
 		}
+		tickTiming.lap(fixs::TickTiming::ReadSim);
 
 		///****************************************************
 		// Traffic Layer =====>>>>> Clients (Controller, Vehicle Simulator, Models)
@@ -1273,6 +1297,9 @@ int main(int argc, char* argv[]) {
 					//MsgClient_c.VehDataSend_um[Sock_c.clientSock[iC]] = MsgServer_c.VehDataRecvAll_v;
 
 					int curPort = selfServerPortUserInput[iC];
+					const auto clientT0 = fixs::TickTiming::clock::now();
+					const long long relayCalls0 = Sock_c.RelayCalls;
+					const double relayMs0 = Sock_c.RelayMs;
 
 					MsgClient_c.VehDataSend_um[actualClientSock[iC]] = {};
 					MsgClient_c.TlsDataSend_um[actualClientSock[iC]] = {};
@@ -1442,6 +1469,7 @@ int main(int argc, char* argv[]) {
 						g_shutdown.shutdownRequested = true;
 						break;
 					}
+					tickTiming.client(curPort, clientT0, Sock_c.RelayMs - relayMs0, Sock_c.RelayCalls - relayCalls0);
 					// drop client-returned ids SUMO doesn't know, EXCEPT Carla-owned ids
 					// (injected via the send path, so absent from SUMO until first inject).
 					if (!ENABLE_VEH_SIMULATOR) {
@@ -1500,6 +1528,7 @@ int main(int argc, char* argv[]) {
 			break;
 		}
 
+		tickTiming.lap(fixs::TickTiming::Clients);
 		if (ENABLE_TIMING) {
 			StartingTime = std::chrono::steady_clock::now();
 		}
@@ -1549,6 +1578,7 @@ int main(int argc, char* argv[]) {
 			g_shutdown.shutdownRequested = true;
 			break;
 		}
+		tickTiming.lap(fixs::TickTiming::WriteSim);
 
 		///****************************************************
 		// go to next step
@@ -1559,10 +1589,12 @@ int main(int argc, char* argv[]) {
 
 		ii = ii + 1;
 
+		tickTiming.endTick(simTime);
 		PERF_TOC("main_loop");
 
 	}
 
+	tickTiming.finish();
 	PERF_SHUTDOWN();
 
 	// Perform graceful cleanup after main loop exits
