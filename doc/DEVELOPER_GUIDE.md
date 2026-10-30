@@ -115,7 +115,7 @@ This section documents known rough edges in the codebase for contributors.
 
 ### Build System
 - **Script numbering in `scripts/dispatch/`** — Scripts were renumbered in PR #135 but individual component scripts (4a, 4b, 5, 6) don't follow a clean linear sequence.
-- **`generate_version.ps1`** — Now called by `dispatch.bat` (added in PR #135), but requires git tags to be present; will produce a fallback version string if no tags exist.
+- **`generate_version.ps1`** — Called by `dispatch.bat`. The version comes from the `VERSION` file; bump it when cutting a new `dev_vX.Y.Z` (CI enforces the match).
 
 ### Tests
 - **No CI** — Python unit tests under `tests/Python/unit/` run locally but there is no GitHub Actions workflow to run them automatically. Tracked in issue [#57](https://github.com/ORNL-Real-Sim/FIXS/issues/57).

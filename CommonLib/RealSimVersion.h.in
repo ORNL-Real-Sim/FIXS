@@ -1,7 +1,7 @@
 #ifndef REALSIM_VERSION_H
 #define REALSIM_VERSION_H
 
-// Auto-generated from git tags - DO NOT EDIT MANUALLY
+// Auto-generated from VERSION and git - DO NOT EDIT MANUALLY
 // Generated at: @GENERATION_TIME@
 
 #define REALSIM_VERSION_MAJOR   @VERSION_MAJOR@
