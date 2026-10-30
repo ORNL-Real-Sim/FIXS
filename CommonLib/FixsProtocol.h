@@ -66,6 +66,10 @@ static constexpr int kTraciOk      = 0;   // body: the reply, positioned as trac
 static constexpr int kTraciError   = 1;   // body: SUMO's own error text
 static constexpr int kTraciRefused = 2;   // body: why FIXS does not relay this command
 
+// varID of a kMsgTraciRequest that is a relayed subscription, not a TraCI command.
+// cmdID CMD_SUBSCRIBE_*_VARIABLE: place or drop one; cmdID CMD_SIMSTEP: this tick's results.
+static constexpr int kTraciSubscriptionVar = -2;
+
 // Largest payload per record, so record plus header stays within MAX_RECORD_SIZE.
 static constexpr int kTraciReqChunk = 7800;   // header is at most 267 bytes
 static constexpr int kTraciRspChunk = 8000;   // header is 9 bytes

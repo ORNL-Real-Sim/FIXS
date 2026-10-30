@@ -118,16 +118,63 @@ def test_refusal_is_FatalTraCIError(held):
         shim.vehicle.getSpeed("ego")
 
 
-@pytest.mark.parametrize("cmdID", [0x7F, 0x03, 0x01, 0x02])
+@pytest.mark.parametrize("cmdID", [0x7F, 0x03, 0x01, 0x02, 0x7E])
 def test_owned_commands_never_reach_the_wire(held, cmdID):
     with pytest.raises(traci_mod.FatalTraCIError):
         shim._conn._sendCmd(cmdID, None, None)
     assert held.sent == b""
 
 
-def test_subscribe_is_refused_before_the_wire_and_points_at_the_feed(held):
-    with pytest.raises(traci_mod.FatalTraCIError, match="fixs.vehicle"):
-        shim.vehicle.subscribe("ego", [0x40])
+def speed_block(value, objID="ego"):
+    # A RESPONSE_SUBSCRIBE_VEHICLE_VARIABLE block: VAR_SPEED, status OK, TYPE_DOUBLE, value.
+    body = (bytes([0xe4]) + struct.pack("!i", len(objID)) + objID.encode() + bytes([1, 0x40, 0x00, 0x0b]) +
+            struct.pack("!d", value))
+    return b"\x00" + struct.pack("!i", 5 + len(body)) + body
+
+
+@pytest.fixture
+def no_subscriptions():
+    yield
+    shim._conn._subscribed = False
+    for results in shim._conn._subscriptionMapping.values():
+        results.reset()
+
+
+def test_subscribe_places_it_through_trafficlayer_and_reads_the_first_answer(held, no_subscriptions):
+    held.toRead = response(_relay.TRACI_OK, speed_block(12.5))
+    shim.vehicle.subscribeLeader("ego", 50.0)
+    cmd, var, obj, payload, _ = decode(held.sent)
+    assert (cmd, var, obj) == (0xd4, _relay.TRACI_SUBSCRIPTION_VAR, "ego")
+    begin, end, n, varID, hasParam = struct.unpack_from("!ddBBB", payload)
+    assert (n, varID, hasParam) == (1, 0x68, 1)
+    assert payload[struct.calcsize("!ddBBB"):] == struct.pack("!Bd", 0x0b, 50.0)
+    assert shim.vehicle.getSubscriptionResults("ego") == {0x40: 12.5}
+
+
+def test_each_step_replaces_the_results_with_trafficlayers_answer(held, no_subscriptions):
+    held.toRead = response(_relay.TRACI_OK, speed_block(1.0))
+    shim.vehicle.subscribe("ego", [0x40])
+    held.sent = b""
+    held.toRead = response(_relay.TRACI_OK, struct.pack("!i", 1) + speed_block(2.0, "car"))
+    shim._conn._refreshSubscriptions()
+    assert decode(held.sent)[:4] == (0x02, _relay.TRACI_SUBSCRIPTION_VAR, "", b"")
+    assert shim.vehicle.getAllSubscriptionResults() == {"car": {0x40: 2.0}}
+
+
+def test_no_subscription_costs_no_round_trip(held, no_subscriptions):
+    shim._conn._refreshSubscriptions()
+    assert held.sent == b""
+
+
+def test_context_subscribe_is_refused_before_the_wire(held):
+    with pytest.raises(traci_mod.FatalTraCIError, match="context subscriptions"):
+        shim.vehicle.subscribeContext("ego", 0xa4, 50.0, [0x40])
+    assert held.sent == b""
+
+
+def test_multi_value_parameter_is_refused_before_the_wire(held, no_subscriptions):
+    with pytest.raises(traci_mod.FatalTraCIError, match="parameter"):
+        shim.vehicle.subscribe("ego", [0x68], parameters={0x68: ("dd", 1.0, 2.0)})
     assert held.sent == b""
 
 

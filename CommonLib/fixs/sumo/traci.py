@@ -8,14 +8,20 @@ payload) traci already produced, and TrafficLayer runs it on its libtraci connec
     traci.simulationStep()  hands the held tick back to FIXS and waits for the next one
     traci.close()           fixs.close()
 
-Not relayed, because FIXS owns them: load, setOrder, and subscriptions (the FIXS
-feed is the subscription). Needs SumoSetup.EnableTraciRelay: true.
+subscribe() places a SUMO subscription through TrafficLayer, and each
+simulationStep() brings its results back in one call, as native traci's step does.
+Not relayed: load and setOrder, which FIXS owns, and context subscriptions.
+Needs SumoSetup.EnableTraciRelay: true.
 """
+import struct
+
 import os
 
 import traci as _traci
+import traci.constants as tc
 from traci.connection import Connection as _Connection
 from traci.domain import DOMAINS as _DOMAINS
+from traci.domain import SubscriptionResults as _SubscriptionResults
 from traci.exceptions import FatalTraCIError, TraCIException
 from traci.storage import Storage as _Storage
 
@@ -28,9 +34,11 @@ _REFUSED = {
     0x01: 'load() is not relayed: it would reload the network under a running co-simulation.',
     0x02: 'a raw CMD_SIMSTEP is not relayed: TrafficLayer owns the clock. '
           'traci.simulationStep() advances it through FIXS.',
+    0x7E: 'subscription filters are not relayed: they apply to context subscriptions.',
 }
-_SUBSCRIBE = ('subscriptions are not relayed: the FIXS feed is the subscription. Read the '
-              'vehicles and fields the config names from fixs.vehicle, which is already here.')
+_CONTEXT = ('context subscriptions are not relayed: subscribe each object with subscribe(), '
+            'or read the vehicles the config names from fixs.vehicle.')
+_RAW_SUBSCRIBE = "a raw subscription command is not relayed: use the domain's subscribe()."
 
 
 def _fixs():
@@ -54,7 +62,7 @@ class _RelayConnection(object):
         if cmdID in _REFUSED:
             raise FatalTraCIError(_REFUSED[cmdID])
         if _isSubscribe(cmdID, varID):
-            raise FatalTraCIError(_SUBSCRIBE)
+            raise FatalTraCIError(_RAW_SUBSCRIBE)
         _firstTickForEarlyCall()
         status, body = _relay.request(cmdID, -1 if varID is None else varID,
                                       '' if objID is None else objID,
@@ -65,20 +73,74 @@ class _RelayConnection(object):
             raise FatalTraCIError(body.decode('utf8', 'replace'))
         return _Storage(body)
 
-    def _subscribe(self, *args, **kwargs):
-        raise FatalTraCIError(_SUBSCRIBE)
+    _readSubscription = _Connection._readSubscription
+    _getSubscriptionResults = _Connection._getSubscriptionResults
+
+    def __init__(self):
+        self._subscriptionMapping = {}
+        self._subscribed = False
+
+    def _subscribe(self, cmdID, begin, end, objID, varIDs, parameters):
+        payload = struct.pack("!ddB", begin, end, len(varIDs))
+        for v in varIDs:
+            param = parameters.get(v) if parameters is not None else None
+            payload += struct.pack("!BB", v, param is not None)
+            if param is not None:
+                payload += self._pack(*_paramFormat(param))
+        status, body = self._request(cmdID, _relay.TRACI_SUBSCRIPTION_VAR, objID, payload)
+        self._subscribed = True
+        if varIDs:
+            objectID, response = self._readSubscription(_Storage(body))
+            if response - cmdID != 16 or objectID != objID:
+                raise FatalTraCIError("Received answer %02x,%s for subscription command %02x,%s." % (
+                    response, objectID, cmdID, objID))
 
     def _subscribeContext(self, *args, **kwargs):
-        raise FatalTraCIError(_SUBSCRIBE)
+        raise FatalTraCIError(_CONTEXT)
 
-    def _getSubscriptionResults(self, *args, **kwargs):
-        raise FatalTraCIError(_SUBSCRIBE)
+    def _refreshSubscriptions(self):
+        """This tick's subscription results, read the way native traci reads its step answer."""
+        for results in self._subscriptionMapping.values():
+            results.reset()
+        if not self._subscribed:
+            return
+        status, body = self._request(tc.CMD_SIMSTEP, _relay.TRACI_SUBSCRIPTION_VAR, '', b'')
+        result = _Storage(body)
+        for _ in range(result.readInt()):
+            self._readSubscription(result)
+
+    def _request(self, cmdID, varID, objID, payload):
+        _firstTickForEarlyCall()
+        status, body = _relay.request(cmdID, varID, objID, payload)
+        if status == _relay.TRACI_ERROR:
+            raise TraCIException(body.decode('utf8', 'replace'), cmdID, None)
+        if status != _relay.TRACI_OK:
+            raise FatalTraCIError(body.decode('utf8', 'replace'))
+        return status, body
+
+
+def _paramFormat(param):
+    """A subscription parameter as (format, value): one typed int, double or string."""
+    if isinstance(param, tuple):
+        if len(param) != 2 or param[0] not in ("i", "d", "s"):
+            raise FatalTraCIError("subscription parameter %r is not relayed: one int, double "
+                                  "or string per variable is." % (param,))
+        return param
+    if isinstance(param, int):
+        return "i", param
+    if isinstance(param, float):
+        return "d", param
+    return "s", param
 
 
 _conn = _RelayConnection()
 # The real traci's domain singletons, so any `import traci` in this process is relayed too.
 for _d in _DOMAINS:
     _d._setConnection(_conn)
+    # As traci's Domain._register does for a connection of its own.
+    _results = _SubscriptionResults(_d._retValFunc)
+    for _id in (_d._subscribeResponseID, _d._contextResponseID, _d._cmdGetID):
+        _conn._subscriptionMapping[_id] = _results
 
 
 # True from start() until the first simulationStep(): a call in that window pulls FIXS's
@@ -137,6 +199,7 @@ def simulationStep(step=0.):
         if _firstTickPulled:
             _firstTickPulled = False
             if not step or fixs.sim.time >= step - 1e-9:
+                _conn._refreshSubscriptions()
                 return
     try:
         while True:
@@ -144,6 +207,7 @@ def simulationStep(step=0.):
                 fixs.send()
             fixs.recv()
             if not step or fixs.sim.time >= step - 1e-9:
+                _conn._refreshSubscriptions()
                 return
     except fixs.Shutdown:
         # What native traci raises when SUMO ends the run.

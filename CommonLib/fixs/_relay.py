@@ -17,6 +17,9 @@ TRACI_OK = 0
 TRACI_ERROR = 1
 TRACI_REFUSED = 2
 
+# varID of a relayed subscription, which is not a TraCI command (FixsProtocol.h).
+TRACI_SUBSCRIPTION_VAR = -2
+
 REQ_CHUNK = 7800
 MAX_RECORD_SIZE = 8192
 

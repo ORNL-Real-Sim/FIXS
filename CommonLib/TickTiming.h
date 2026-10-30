@@ -105,8 +105,9 @@ private:
 			printf("WARNING: TrafficLayer spent %.1f ms of each %.1f ms tick (%.0f%%) answering %.0f "
 			       "relayed TraCI calls per tick from the client on port %d (t=%.1f-%.1f), and that "
 			       "client waits on each one. Every relayed call is a round trip through TrafficLayer "
-			       "to SUMO; per-tick state is cheaper read from the FIXS feed (fixs.vehicle, "
-			       "fixs.trafficlight). SimulationSetup.EnableTimingReport: true prints the full breakdown.\n",
+			       "to SUMO; per-tick state is cheaper read by subscription (traci.*.subscribe()), "
+			       "which returns with each step. SimulationSetup.EnableTimingReport: true prints the "
+			       "full breakdown.\n",
 			       relay, tick, 100.0 * relay / tick, c.second.relayCalls / w.ticks, c.first, w.t0, w.t1);
 		}
 	}

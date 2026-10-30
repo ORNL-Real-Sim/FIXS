@@ -200,13 +200,16 @@ What the script's own calls mean under FIXS:
 | `traci.simulationStep()` | Hands the current tick back to FIXS and waits for the next one. FIXS's warm-up runs before the first step returns. |
 | `traci.close()` | `fixs.close()`. |
 | `traci.load()`, `setOrder()` | Refused: FIXS owns the session. |
-| `*.subscribe()` | Refused: the FIXS feed already is the subscription. Read it from `fixs.vehicle`. |
+| `*.subscribe()`, `subscribeLeader()`, `getSubscriptionResults()` | As in TraCI: TrafficLayer places the subscription in SUMO, and each `traci.simulationStep()` brings every result back in one call. A variable whose answer libtraci cannot carry (a list of compounds, such as `getNextTLS`) is refused at `subscribe()`; read it with its getter. |
+| `*.subscribeContext()`, subscription filters | Refused: subscribe each object, or read the FIXS feed. |
+| `*.unsubscribe()` | Stops the results reaching the script. The SUMO subscription stays, since TrafficLayer may subscribe the same object itself. |
 
 Calls are answered only while the script holds a tick; TrafficLayer serves them
 while it waits for this client. A call made before the first `traci.simulationStep()`
 first waits for FIXS's first tick.
-Every call is a round trip inside the lockstep, as it is with plain TraCI, so
-per-tick state is cheaper read from the FIXS feed. TrafficLayer warns once when a
+Every getter is a round trip inside the lockstep, as it is with plain TraCI, and the
+relay makes each one cost about twice as much, so read per-step state by
+subscription. TrafficLayer warns once when a
 client's relayed calls take more than 10% of the tick, and
 `SimulationSetup.EnableTimingReport: true` prints where each tick's time goes, per client.
 Values come back as TraCI's own
@@ -218,8 +221,9 @@ refuses the setting at startup.
 
 1. **Change the import** to `import fixs.sumo.traci as traci`. Keep `traci.start()`,
    the step loop and the calls as they are.
-2. **Remove subscriptions.** Replace `*.subscribe()` and `getSubscriptionResults()` with
-   the matching `get*()` calls, or read the FIXS feed (`fixs.vehicle`, `fixs.trafficlight`).
+2. **Read per-step state by subscription.** Variable subscriptions work as in TraCI;
+   context subscriptions do not, so subscribe each object instead. A script that reads
+   with getters runs unchanged, but each getter is a relayed round trip.
 3. **Write the scenario yaml.** Start from a working SUMO config and add
    `SumoSetup.EnableTraciRelay: true`. The script is still a FIXS client, so keep an
    `ApplicationSetup.VehicleSubscription` with its port: that is how TrafficLayer
