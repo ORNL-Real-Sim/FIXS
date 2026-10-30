@@ -92,7 +92,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0        # git describe needs tags for RealSimVersion.h
-          filter: blob:none     # full history, but only HEAD's file contents
+          # Full history, but only HEAD's file contents; focal's git 2.25 cannot fetch with a filter.
+          filter: ${{ matrix.slug != 'focal' && 'blob:none' || '' }}
           submodules: false     # ProprietaryFiles is private and not needed here
 
       # git refuses to run in a checkout owned by another uid (container vs runner).
