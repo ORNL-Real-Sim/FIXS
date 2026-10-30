@@ -1,18 +1,7 @@
 name: Python env (environment.yml)
 
-# Builds the conda env from environment.yml ALONE and runs the Python side in it
-# (#248). environment.yml is what every consumer builds from - carla_env_setup
-# offers to create it, FIXS_Applications derives its env from it - and two broken
-# specs shipped with CI green: shapely missing (#236, traffic-light sync silently
-# off) and a wheel path the release zip strips (#221, `conda env create` failed on
-# every published release). Nothing ever ran the command.
-#
-# Windows, not Linux: the spec pins vs2015_runtime / vc14_runtime, which
-# conda-forge publishes for win-64 only, so it does not resolve on linux-64.
-#
-# No path filter, on purpose. release.yml skips its build when a PR touches only
-# .py / environment.yml / tests/, and still reports green - so a Python-only PR
-# ran nothing at all. This job exists for exactly those PRs.
+# Builds the env from environment.yml alone and runs the shipped Python in it.
+# No path filter: release.yml skips Python-only PRs, and those are the ones this is for.
 
 on:
   workflow_dispatch:
@@ -23,8 +12,12 @@ on:
 
 jobs:
   env:
-    name: env from environment.yml + unit tests
-    runs-on: windows-2022
+    name: env from environment.yml + unit tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
     defaults:
       run:
         shell: bash -el {0}
@@ -37,48 +30,38 @@ jobs:
             tests/Python
             environment.yml
 
-      # Miniforge: conda-forge only, and no Anaconda terms-of-service plugin to
-      # stop a non-interactive create on the spec's `defaults` channel.
+      # Miniforge: no Anaconda terms-of-service prompt on the spec's `defaults` channel.
       - uses: conda-incubator/setup-miniconda@v3
         with:
           miniforge-version: latest
           environment-file: environment.yml
           activate-environment: realsim
 
-      # The engine's own list of what a co-sim interpreter must import, read from
-      # carla_env_setup rather than copied here, minus what the spec leaves out
-      # on purpose: carla (never in CHECKED_MODULES - ensure_carla installs it)
-      # and the SUMO clients, which environment.yml's trailing comment says are
-      # installed after the env exists. Where they should come from is #221.
+      # carla_env_setup's own list; carla is not in it (ensure_carla installs it).
       - name: The env imports what the co-sim needs
         run: |
           python - <<'EOF'
           import importlib, sys
           sys.path.insert(0, "Carla")
           import carla_env_setup as s
-          want = [m for m in s.CHECKED_MODULES if m not in s.SUMO_MODULES]
           bad = []
-          for m in want:
+          for m in s.CHECKED_MODULES:
               try:
                   importlib.import_module(m)
               except Exception as e:
                   bad.append(f"{m}: {e!r}")
-          print("checked:", ", ".join(want))
-          print("left to #221:", ", ".join(s.SUMO_MODULES))
+          print("checked:", ", ".join(s.CHECKED_MODULES))
           if bad:
               sys.exit("cannot import:\n  " + "\n  ".join(bad))
           EOF
 
-      # Excludes the vendored C++ trees: yaml-cpp carries googletest's Python 2
-      # scripts, which FIXS never runs. No slashes in the pattern - MSYS bash
-      # rewrites a slash-bearing argument before python sees it.
+      # -W error fails on invalid escape sequences; -f recompiles what the step above cached.
+      # No slashes in -x: MSYS bash rewrites them on Windows.
       - name: Byte-compile the shipped Python
-        run: python -m compileall -q -x 'yaml-cpp|libsumo|libcarla' Carla CommonLib
+        run: python -W error -m compileall -f -q -x 'yaml-cpp|libsumo|libcarla' Carla CommonLib
 
-      # What a consumer's env has once setup finishes: carla_env_setup.ensure_carla
-      # adds the PyPI client right after creating the env from the spec, and the
-      # unit tests import it (CommonLib/fixs/_driver.py -> carla_agents).
-      - name: Add the carla client, as ensure_carla does
+      # As carla_env_setup.ensure_carla does after the env exists; the unit tests import it.
+      - name: Add the carla client
         run: python -m pip install carla==0.9.15
 
       - name: Unit tests
