@@ -488,9 +488,15 @@ Anything that changes **how the traffic behaves** comes from one table in `run_c
 (`SUMO_CONTRACT` / `SUMO_CONVENTION`), injected on the SUMO command line for both
 bridges and printed with each flag's origin. The map's `.sumocfg` is used as it ships
 and never edited: it is app-independent, so a co-sim requirement does not belong in it.
-Precedence is `contract > app sumo_args > convention > the map's cfg`, and an app
-deviates via `sumo_args` in `apps.json`. Nothing is generated or cached: the flags are
+Precedence is `contract > --sumo-args > app sumo_args > convention > the map's cfg`,
+and an app deviates via `sumo_args` in `apps.json`. Nothing is generated or cached: the flags are
 passed and printed, so what a run gave SUMO is in its own log.
+
+The CARLA server gets the same treatment: `carla_args` in `apps.json` (e.g.
+`{"-quality-level": "Low"}`), then `--carla-args "..."`, replace run_cosim's own
+options by name. `null` drops one, `""` passes a bare one, and `-carla-rpc-port` /
+`-game` stay FIXS's. The front doors forward both flags through `COSIM_CARLA_ARGS` /
+`COSIM_SUMO_ARGS`, since their values start with `-`.
 
 `--start` is passed explicitly as `true`/`false` rather than omitted, because omitting
 it does not turn it off &mdash; a cfg declaring `<start value="t"/>` (roosevelt's does)

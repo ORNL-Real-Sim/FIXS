@@ -95,3 +95,11 @@ def test_missing_py_starts_nothing(tmp_path):
     """A launch that names a file that is not there must not become a spawn."""
     app = _app(tmp_path, "absent.py", name=None)
     assert app_catalog.launch_command(app, root=str(tmp_path)) == (None, None)
+
+def test_carla_args_survive_normalization_and_bad_keys_are_dropped(capsys):
+    app = app_catalog._normalize_app(
+        {"id": "a", "carla_args": {"-quality-level": "Low", "quality": "Low", "-windowed": None}})
+    assert app["carla_args"] == {"-quality-level": "Low", "-windowed": None}
+    seen = capsys.readouterr()
+    assert "quality" in seen.out + seen.err
+
