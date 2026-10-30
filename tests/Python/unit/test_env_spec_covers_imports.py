@@ -1,17 +1,5 @@
-"""Every third-party import in the Python FIXS ships must be in environment.yml.
-
-#378: Carla/carla_agents' global_route_planner imports networkx, environment.yml
-did not list it, and an env built from the spec could not import BasicAgent or
-BehaviorAgent at all -- mainVirCarla exited at startup and run_cosim stopped the
-whole stack. The declaration existed, in requirements.txt (#305) -- a file that
-no install path read -- and nothing compared the two manifests. That file is gone
-(#221), so this is now the only thing standing between an import and a manifest.
-
-This walks the shipped Python instead, so the check is against what the code
-actually imports rather than against a second hand-written list.
-
-    python -m pytest tests/Python/unit/test_env_spec_covers_imports.py
-"""
+"""Every third-party import in the shipped Python must be declared in both
+environment.yml (conda) and pyproject.toml (uv), and the two must agree."""
 from __future__ import annotations
 
 import ast
@@ -33,16 +21,9 @@ SKIP_DIRS = {"__pycache__", ".git", "yaml-cpp", "libsumo", "libcarla",
 #: import name -> the distribution that provides it, where they differ.
 DIST = {"yaml": "pyyaml", "cv2": "opencv-python", "PIL": "pillow"}
 
-#: Imports that environment.yml deliberately does not carry, and why.
+#: Imports neither spec carries, and why.
 EXEMPT = {
-    # environment.yml says so in its own trailing comment: a wheel path in the
-    # spec breaks `conda env create` on every machine consuming a release, so
-    # carla_env_setup.ensure_carla() installs these after the env exists.
     "carla": "installed by carla_env_setup.ensure_carla()",
-    "traci": "installed by carla_env_setup.ensure_carla()",
-    "sumolib": "installed by carla_env_setup.ensure_carla()",
-    # Unreal Editor's embedded interpreter. These scripts are launched by
-    # UE4Editor -ExecutePythonScript and never run under the realsim env.
     "unreal": "provided by the Unreal Editor, not pip-installable",
 }
 
@@ -76,24 +57,12 @@ def _declared_pyproject():
 
 
 #: environment.yml entries that are conda's business, not packages uv installs.
-CONDA_ONLY = {"python", "pip", "vs2015_runtime", "vc14_runtime"}
-
-#: pyproject.toml entries environment.yml leaves out (they are on PyPI, and uv has
-#: no reason to defer them the way the conda spec does).
-UV_ONLY = {"traci", "sumolib"}
+CONDA_ONLY = {"python", "pip"}
 
 
 def _local_names():
     """Top-level names that resolve inside this repo rather than site-packages.
-
-    Broad on purpose. Entry points put both the repo root and CommonLib/ on
-    sys.path, so `import ConfigHelper` and `from Carla.carla_agents import ...`
-    are both top-level, and a .py inside a package directory is reachable either
-    way. The cost is that a repo module named like a real package hides it from
-    this scan -- CommonLib/fixs/carla.py hides carla, Carla/sumo/ hides sumo.
-    Both are in EXEMPT anyway, but a future collision would pass silently, so
-    prefer a repo module name that no distribution uses.
-    """
+    A repo module named like a real package hides that package from the scan."""
     out = set()
     for dirpath, dirnames, filenames in os.walk(ROOT):
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
@@ -165,12 +134,8 @@ def test_every_shipped_import_is_declared_in_pyproject():
 
 
 def test_pyproject_and_environment_yml_declare_the_same_env():
-    """Two specs for one env: a package added to one and not the other is how
-    the uv env and the conda env would start to differ."""
     yml = _declared() - CONDA_ONLY
     uv = _declared_pyproject()
-    assert UV_ONLY <= uv, f"pyproject.toml no longer declares {sorted(UV_ONLY - uv)}"
-    uv -= UV_ONLY
     assert yml == uv, (f"only in environment.yml: {sorted(yml - uv)}; "
                        f"only in pyproject.toml: {sorted(uv - yml)}")
 
