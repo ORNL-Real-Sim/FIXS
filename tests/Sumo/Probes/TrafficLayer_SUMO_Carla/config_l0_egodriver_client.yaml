@@ -15,7 +15,7 @@
 #                                     --[4440]--> VirCarlaEnv (apply + readback)
 #   Carla ego --[VirCarlaEnv readback]--> TrafficLayer --moveToXY--> SUMO 'ego'
 #
-# Run: run_sumo_carla_l0_egodriver_client.bat
+# Run: run_sumo_carla.bat l0_egodriver_client
 # =============================================================================
 
 SimulationSetup:

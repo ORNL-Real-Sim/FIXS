@@ -27,14 +27,14 @@ path (Carla reads the ego pose/velocity back and publishes it to FIXS — the
 
 ## Run it
 
-One-time: copy `Carla\carla.env.example` → `Carla\carla.env` and edit it for your
-box (UE4_ROOT, CARLA_UPROJECT = your `C:\src_git\Carla_0915\…`, PY with carla 0.9.15).
-
-**One-click:** double-click **`run_sumo_carla_demo.bat`**. It brings CARLA up from
-the source build (`Carla\launch_carla.bat` `-game`), waits for RPC, loads
-`simple_loop.xodr` as the world (`Carla\load_opendrive_world.py` — no map package,
-coordinate-matched), then launches SUMO + TrafficLayer + VirCarlaEnv. If CARLA is
-already running with the world loaded, `set SKIP_CARLA=1` to skip those steps.
+**One-click:** double-click **`run_sumo_carla.bat`**, or give it a variant —
+`demo` (default), `l0_tm`, `l0_egodriver`, `l0_egodriver_client`, `l0_elevation`,
+`l2`. It starts the CARLA this machine is configured for (`~/.fixs/carla.json`,
+the same one `run_cosim` uses — set it up once with `run_cosim` or
+`Carla/carla_env_setup.py`), loads the variant's road as the world
+(`Carla/load_opendrive_world.py --launch` — no map package, coordinate-matched to
+SUMO), then launches SUMO + TrafficLayer + the Python bridge. If CARLA is already
+running with the road loaded, `set SKIP_CARLA=1` to skip that step.
 
 **Headless self-check:** `python verify_sumo_carla.py` — runs the stack, records
 `_logs/*.log`, and reasons about the bridge's decisions (connected to CARLA,
@@ -56,15 +56,16 @@ only one **built** from this tree: it no longer falls back to the committed
 `tests/SumoCarla/VirCarlaEnv.exe`, which dates from June — before #266 and everything since —
 so a PASS on it said nothing about the code in the tree. Since `VirCarlaEnv` does
 not compile today (#380), that fallback was the only bridge this check could run.
-The one-click demo `.bat`s below still use the C++ bridge.
+`run_sumo_carla.bat` follows the same rule: Python bridge by default, a built
+`VirCarlaEnv.exe` only with `RS_BRIDGE=cpp`.
 
-Stop order: **close VirCarlaEnv → close SUMO → Ctrl+C TrafficLayer → close CARLA.**
+Stop order: **close the bridge → close SUMO → Ctrl+C TrafficLayer → close CARLA.**
 
 ## Files
 
 | File | Purpose |
 | --- | --- |
-| `run_sumo_carla_demo.bat` | **One-click launcher** (CARLA + world → SUMO → TrafficLayer → VirCarlaEnv), via `../../../../Carla/` tooling |
+| `run_sumo_carla.bat [variant]` | **One-click launcher** for every variant (CARLA + road → SUMO → TrafficLayer → bridge) |
 | `verify_sumo_carla.py` | **Headless self-check** — records `_logs/*.log`, reasons PASS/FAIL/SKIP |
 | `config.yaml` | TrafficLayer config: `SelectedTrafficSimulator: SUMO` + `CarlaSetup`, ego `ego`, Carla client on port 440, **verbose on** |
 | `traffic_light_table.csv` | TLS map header (junction_id,link_id,x,y,z,heading). **Header-only** — SimpleLoop has no signals; the bridge now tolerates this (see below) |

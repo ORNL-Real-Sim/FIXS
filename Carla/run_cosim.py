@@ -1833,9 +1833,13 @@ def _res_arg(text):
     return f"{res[0]}x{res[1]}"
 
 
-def launch_carla(cfg, port=2000, render_offscreen=False, quality_level=None, level=None):
+def launch_carla(cfg, port=2000, render_offscreen=False, quality_level=None, level=None,
+                 leash=True):
     cmd = _carla_command(cfg, port, render_offscreen, quality_level, level)
     print(f"[CARLA] launching ({cfg['mode']}): {' '.join(cmd)}")
+    if not leash:
+        # Outlives the caller: for a script that only boots CARLA for others to use.
+        return subprocess.Popen(cmd, stdin=subprocess.DEVNULL)
     return _spawn("CARLA", cmd, new_session=platform.system() != "Windows")
 
 

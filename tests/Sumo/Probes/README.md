@@ -8,7 +8,7 @@ later VirEnvCore consolidation has a green baseline to refactor against.
 | Probe | Traffic | Virtual env | One-click | Status |
 | --- | --- | --- | --- | --- |
 | [TrafficLayer_SUMO_CMoffice](TrafficLayer_SUMO_CMoffice/) | SUMO | CarMaker office | `run_sumo_cm_demo.bat` | scaffold (not yet run) |
-| [TrafficLayer_SUMO_Carla](TrafficLayer_SUMO_Carla/) | SUMO | Carla | `run_sumo_carla_demo.bat` | scaffold (not yet run) |
+| [TrafficLayer_SUMO_Carla](TrafficLayer_SUMO_Carla/) | SUMO | Carla | `run_sumo_carla.bat [variant]` | scaffold (not yet run) |
 | [../../Vissim/Probes/TrafficLayer_DSProxy_CMoffice](../../Vissim/Probes/TrafficLayer_DSProxy_CMoffice/) | VISSIM (DSProxy) | CarMaker office | `run_cm_office_demo.bat` | ✅ verified (#168) |
 
 The point of the matrix: the **CarMaker side is identical** between the SUMO-CM
