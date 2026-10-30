@@ -2086,7 +2086,7 @@ def _is_carla_process(name):
 
 _INTERPRETERS = ("python", "pythonw", "python3", "py")
 _STACK_NAMES = ("trafficlayer", "vircarlaenv", "sumo", "sumo-gui")
-_STACK_CMDS = ("virenv/mainvircarla.py", "virenv\mainvircarla.py",
+_STACK_CMDS = ("virenv/mainvircarla.py", "virenv\\mainvircarla.py",
                "run_synchronization.py")
 
 
@@ -2122,7 +2122,7 @@ def _running_processes():
 def _cosim_leftovers(app_id=None, include_carla=False):
     """[(pid, name, cmdline)] from an earlier co-sim. Never us or our parent."""
     if app_id:
-        marks = (f"apps/{app_id}/", f"apps\{app_id}\\")
+        marks = (f"apps/{app_id}/", f"apps\\{app_id}\\")
     else:
         try:
             root = os.path.join(app_catalog.app_root(), "apps").lower()
