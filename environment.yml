@@ -24,7 +24,7 @@ dependencies:
     # Carla/VirEnv/CarlaViews.py camera windows and recordings, CarlaHud.py.
     - opencv-python
     - pillow
-    # Same floor as pyproject.toml: the SUMO version in dependencies.yaml.
-    - traci>=1.22
-    - sumolib>=1.22
+    # Pinned to the SUMO version in dependencies.yaml, as pyproject.toml is.
+    - traci==1.22.0
+    - sumolib==1.22.0
   # No carla: carla_env_setup.ensure_carla() installs the client matching the CARLA in use.

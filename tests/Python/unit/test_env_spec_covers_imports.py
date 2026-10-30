@@ -176,6 +176,20 @@ def test_the_sumo_clients_are_pinned_to_the_manifest():
                                       "sumolib==" + want]
 
 
+def _spec_pins(path, pkg):
+    """Every version `pkg` is pinned to with == in the file at `path`."""
+    with open(os.path.join(ROOT, path), encoding="utf-8") as f:
+        return re.findall(rf"\b{pkg}==([0-9][0-9.]*)", f.read())
+
+
+def test_both_specs_pin_the_sumo_clients_to_the_manifest():
+    want = _setup().sumo_version()
+    for path in ("environment.yml", "pyproject.toml"):
+        for pkg in ("traci", "sumolib"):
+            assert _spec_pins(path, pkg) == [want], (
+                f"{path} pins {pkg} to {_spec_pins(path, pkg)}; dependencies.yaml says {want}")
+
+
 def test_the_pin_follows_the_manifest_rather_than_a_constant(tmp_path, monkeypatch):
     """A hardcoded version is how requirements.txt drifted. Bump the manifest and
     the pin must move with it -- otherwise this test passes on a coincidence."""

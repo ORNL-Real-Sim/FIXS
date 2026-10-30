@@ -58,8 +58,8 @@ requires-dist = [
     { name = "pytest" },
     { name = "pyyaml" },
     { name = "shapely" },
-    { name = "sumolib", specifier = ">=1.22" },
-    { name = "traci", specifier = ">=1.22" },
+    { name = "sumolib", specifier = "==1.22.0" },
+    { name = "traci", specifier = "==1.22.0" },
 ]
 
 [[package]]
@@ -354,11 +354,11 @@ wheels = [
 
 [[package]]
 name = "sumolib"
-version = "1.27.1"
+version = "1.22.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/92/9e/fc02e2202b93ecfa3559afa972a5ac50c644a50c51412bdb52f9f76e279e/sumolib-1.27.1.tar.gz", hash = "sha256:0ceaeeb5c9913d8e38e998263e33702c1ed43829d9f961bb3a591d94fbe87018", size = 142135, upload-time = "2026-06-25T09:50:50.978Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d7/6f/efae14870acce20d7cab4171fde1378a1df3d8379307e02b4dde4a6922db/sumolib-1.22.0.tar.gz", hash = "sha256:55f5578bea6c9dd960790f8e89c87913f23514111472feac1d747bd0d891013e", size = 93643, upload-time = "2025-02-05T09:26:35.191Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/67/1f/216675079166eec8ae21b22db31e35d524799d26df1eadcc8746053586ba/sumolib-1.27.1-py2.py3-none-any.whl", hash = "sha256:2cc63e75de8db9219ab1a742a4f8870d1d2199881dcc006a0afbcdbb1e463796", size = 236203, upload-time = "2026-06-25T09:50:49.816Z" },
+    { url = "https://files.pythonhosted.org/packages/6a/bf/686c7577d9baaaec105ed75e7a245b79c7640cef570075f643a64dd80ae6/sumolib-1.22.0-py3-none-any.whl", hash = "sha256:22a1b0ecdaf2fa6a99df8ce0dfff50fbe56fd571002db70f5d2a1feb6b8a6d2c", size = 150909, upload-time = "2025-02-05T09:26:31.484Z" },
 ]
 
 [[package]]
@@ -372,14 +372,14 @@ wheels = [
 
 [[package]]
 name = "traci"
-version = "1.27.1"
+version = "1.22.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "sumolib" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/24/63/3b0b1405396f12d977fbe50fe77196a6f8896143ecd75f85283bfdac42af/traci-1.27.1.tar.gz", hash = "sha256:9f5ccc66e02db316c078a3b010fea1c40510f0cb8434a2155bfe6248e9058787", size = 103403, upload-time = "2026-06-25T09:50:59.876Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/fa/98/fec9616a11d66b2f516affec513035d657ea0b44c8a6060b3b4d10c01181/traci-1.22.0.tar.gz", hash = "sha256:ed5651b7e58bde3ed086ced8e5dc5cc8fb5dd5f951cf3b0d10a635678a7718f1", size = 94596, upload-time = "2025-02-05T09:26:37.017Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/61/26/59f5b3ebdf57efbc45a89d47e95fdbe0d7349cb52e13be1d37722e97413e/traci-1.27.1-py2.py3-none-any.whl", hash = "sha256:b4f4fb1cd145461c318aa62df16cfd48494a46631a8c3b62348b901def670c9e", size = 138897, upload-time = "2026-06-25T09:50:58.734Z" },
+    { url = "https://files.pythonhosted.org/packages/39/37/385dc7473230e0ef3a43d5437e1d727ebdf8a8cc500791becae87f533e2b/traci-1.22.0-py3-none-any.whl", hash = "sha256:7d18009eb45bc56409a0edf7c5e5bae477a72c5d022d0da0739f611dcf9bba77", size = 126362, upload-time = "2025-02-05T09:26:33.112Z" },
 ]
 
 [[package]]

@@ -27,9 +27,9 @@ dependencies = [
     "opencv-python",
     "pillow",
     # On PyPI, so unlike carla there is no reason to leave them to a later step.
-    # Floor = the SUMO version FIXS builds against (dependencies.yaml).
-    "traci>=1.22",
-    "sumolib>=1.22",
+    # Pinned to the SUMO version FIXS builds against (dependencies.yaml).
+    "traci==1.22.0",
+    "sumolib==1.22.0",
 ]
 # Not here, on purpose: carla. ensure_carla installs it after the env exists,
 # because a source-build CARLA needs its own wheel rather than the PyPI one.
