@@ -23,7 +23,7 @@ dispatch.bat
 ```
 
 This single command will:
-- Generate the version header (RealSimVersion.h) from git tags
+- Generate the version header (RealSimVersion.h) from the `VERSION` file
 - Initialize the clone: submodules, native deps (libsumo, libcarla), yaml-cpp
 - Build core components (TrafficLayer, VirtualEnvironment)
 - Build VISSIM driver model DLLs
@@ -188,8 +188,8 @@ dispatch.bat
 The release build process executes the following steps:
 
 0. **Version Header** (`generate_version.ps1`)
-   - Generates `CommonLib/RealSimVersion.h` from git tags
-   - Falls back to existing header or default (0.0.0) if git is unavailable
+   - Generates `CommonLib/RealSimVersion.h`: the version from the tracked `VERSION` file, the commit and a `git describe` label from git
+   - Fails the build if `VERSION` is missing or not `X.Y.Z`; without git, commit and label are `UNKNOWN`
    - Output: `CommonLib/RealSimVersion.h` (auto-generated, not committed)
 
 1. **External Libraries** (`1_external_libraries.bat`)
@@ -311,7 +311,7 @@ Whenever `ProprietaryFiles` moves, a fresh bundle must be built and published on
 ### Notes
 
 - **Bundle contents** (the files `pack_binaries.ps1` collects): both VISSIM DLLs (`DriverModel_RealSim.dll` + `_legacy.dll`), per-CM `CarMaker.win64.exe` + `libcarmaker4sl.mexw64`, the dSPACE `libRealSimDsLib_*.a`, and `RealSimSocket.mexw64`.
-- **Versioning** uses `git describe --match 'v[0-9]*'` so the rolling non-semver tag can't shadow the semver tag (which previously fell back to `0.0.0`). `CommonLib/RealSimVersion.h` is regenerated at build time by a pre-build step in `TrafficLayer.vcxproj`.
+- **Versioning**: the compiled version is the `VERSION` file at the repo root; bump it when a new `dev_vX.Y.Z` train is cut. CI fails a `dev_vX.Y.Z` / `beta_vX.Y.Z` build (or a PR into one) whose `VERSION` is not `X.Y.Z`. Git tags only feed the `REALSIM_GIT_TAG` label (#279). `CommonLib/RealSimVersion.h` is regenerated at build time by a pre-build step in `TrafficLayer.vcxproj`.
 - **`pack_binaries.ps1 -Publish`** works under both PowerShell 7 (`pwsh`, used by CI) and stock Windows PowerShell 5.1.
 
 ## Development Builds
@@ -440,7 +440,7 @@ When building components in Debug mode, make sure to link against the Debug libr
 ```
 scripts/
 ├── initialize_fixs.ps1              # Fresh-clone setup (submodules, native deps, yaml-cpp)
-├── generate_version.ps1             # Generate RealSimVersion.h from git tags
+├── generate_version.ps1             # Generate RealSimVersion.h from VERSION
 ├── update_fixs.ps1                  # CONSUMER-side: install a published release (Windows)
 ├── update_fixs.sh                   # CONSUMER-side: install a published release (POSIX)
 ├── build_libsumo.ps1                # STANDALONE: Build libsumo DLLs from SUMO source
