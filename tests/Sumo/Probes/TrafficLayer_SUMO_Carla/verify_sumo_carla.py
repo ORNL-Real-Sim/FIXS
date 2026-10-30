@@ -6,7 +6,7 @@ decisions make sense -- NO cross-backend diff, just run/capture/sanity-check.
 
 Pipeline:
   0. (you) CARLA server already running + simple_loop.xodr loaded as the world
-     (Carla\launch_carla.bat + Carla\load_opendrive_world.py -- see README).
+     (python Carla/load_opendrive_world.py <xodr> --launch --sync -- see README).
      This script verifies the RPC is reachable and skips cleanly if not.
   1. SUMO (headless) on the shared SimpleLoop net, TraCI server on port 1337
   2. TrafficLayer (SUMO path) -> serves the Carla bridge on the config's port
@@ -146,10 +146,9 @@ def main() -> int:
     # --- 0. CARLA must be up with the SimpleLoop world loaded ---
     if not carla_reachable(CARLA_HOST, CARLA_PORT):
         print(f"[verify] SKIP: no CARLA RPC on {CARLA_HOST}:{CARLA_PORT}.")
-        print( "         Start it first:")
-        print(f"           Carla\\launch_carla.bat")
-        print(f"           powershell -File Carla\\wait_for_rpc.ps1 -Port {CARLA_PORT}")
-        print(f"           <py> Carla\\load_opendrive_world.py {XODR} --sync --delta 0.1")
+        print( "         Start it first (the CARLA ~/.fixs/carla.json names):")
+        print(f"           python {REPO / 'Carla' / 'load_opendrive_world.py'} {XODR} "
+              f"--launch --port {CARLA_PORT} --sync --delta 0.1 --timeout 300")
         print( "         then re-run this verify.")
         return 3
 

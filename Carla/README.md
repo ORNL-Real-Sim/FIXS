@@ -33,10 +33,9 @@ Carla/                        <- self-contained co-sim component (shipped in the
   doctor.py                   check this machine can run a co-sim, before it tries
   peer.py                     control channel between the halves of a distributed co-sim
   set_spectator_view.py       point the CARLA spectator at a scene (top-down, or --follow)
-  load_opendrive_world.py     mesh an .xodr into a running server - no map package, no cook
-  launch_carla.bat            hand-launch a server from carla.env, for that no-cook path
-  carla.env.example           copy to carla.env and edit; read by launch_carla.bat
-  wait_for_rpc.ps1            block until that server accepts RPC
+  load_opendrive_world.py     mesh an .xodr into a server - no map package, no cook;
+                              --launch starts the configured CARLA first, through
+                              run_cosim's launcher
   README.md                   (this file)
 
 tests/Sumo/Carla/             <- tests only (no runtime code)

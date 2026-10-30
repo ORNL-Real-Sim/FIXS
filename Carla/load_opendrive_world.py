@@ -7,11 +7,12 @@ the same simple_loop.xodr the CarMaker side uses, so the two are coordinate-matc
 CARLA meshes the road procedurally on the fly -- a bare drivable road, no scenery,
 which is exactly what a bridge test needs.
 
-Run AFTER launch_carla.bat + wait_for_rpc.ps1 (the server must be accepting RPC),
-and BEFORE the bridge (VirCarlaEnv.exe) connects, so the world is already the
-OpenDRIVE road when the bridge calls GetWorld().
+Run it BEFORE the bridge connects, so the world is already the OpenDRIVE road when
+the bridge asks for it. --launch starts CARLA first, through run_cosim's own
+launcher and the CARLA that ~/.fixs/carla.json names -- the one way FIXS starts
+CARLA -- so nothing else has to; without it the server must already be running.
 
-  python load_opendrive_world.py <path-to.xodr> [--host H] [--port P]
+  python load_opendrive_world.py <path-to.xodr> [--launch] [--host H] [--port P]
                                  [--sync] [--delta 0.1] [--vertex-distance 2.0]
                                  [--max-road-length 50.0] [--wall-height 0.0]
                                  [--extra-width 0.6]
@@ -37,6 +38,9 @@ import carla  # noqa: E402  (deliberately after the re-exec above)
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("xodr", help="path to the .xodr file")
+    ap.add_argument("--launch", action="store_true",
+                    help="start the CARLA configured in ~/.fixs/carla.json first "
+                         "(run_cosim's launcher); give --timeout room for a cold start")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=2000)
     ap.add_argument("--timeout", type=float, default=20.0)
@@ -61,6 +65,16 @@ def main() -> int:
     if "<OpenDRIVE" not in xodr:
         print(f"[load_opendrive_world] FAIL: {args.xodr} does not look like OpenDRIVE")
         return 2
+
+    if args.launch:
+        cfg = env.load_config()
+        if not cfg:
+            print("[load_opendrive_world] FAIL: no CARLA configured on this machine; "
+                  "run  python Carla/carla_env_setup.py  (or run_cosim once) first.")
+            return 2
+        import run_cosim   # its launcher, so FIXS has one way to start CARLA
+        # Unleashed: this script exits once the road is in, and CARLA must stay up.
+        run_cosim.launch_carla(cfg, port=args.port, leash=False)
 
     print(f"[load_opendrive_world] connecting to {args.host}:{args.port} ...")
     # On a cold start the RPC port can be open (TCP listen backlog) BEFORE Carla's
