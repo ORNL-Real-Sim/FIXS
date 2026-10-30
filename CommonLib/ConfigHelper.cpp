@@ -134,7 +134,7 @@ int ConfigHelper::getConfig(string configName) {
 	// ===========================================================================
 	// 			READ Simulation Setup section
 	// ===========================================================================
-	node = config["SimulationSetup"];
+	node.reset(config["SimulationSetup"]);
 	if (node["EnableRealSim"]) {
 		SimulationSetup.EnableRealSim = parserFlag(node, "EnableRealSim");
 	}
@@ -272,7 +272,7 @@ int ConfigHelper::getConfig(string configName) {
 	// ===========================================================================
 	// 			READ Application Setup section
 	// ===========================================================================
-	node = config["ApplicationSetup"];
+	node.reset(config["ApplicationSetup"]);
 	ApplicationSetup.EnableApplicationLayer = parserFlag(node, "EnableApplicationLayer");
 	parserIntegerVector(node, "ApplicationPort", ApplicationSetup.ApplicationPort);
 
@@ -286,7 +286,7 @@ int ConfigHelper::getConfig(string configName) {
 	// ===========================================================================
 	// 			READ XIL Setup section
 	// ===========================================================================
-	node = config["XilSetup"];
+	node.reset(config["XilSetup"]);
 
 	XilSetup.EnableXil = parserFlag(node, "EnableXil");
 
@@ -452,7 +452,7 @@ int ConfigHelper::getConfig(string configName) {
 	// ===========================================================================
 	// 			READ CarMaker Setup section
 	// ===========================================================================
-	node = config["CarMakerSetup"];
+	node.reset(config["CarMakerSetup"]);
 	
 	if (node["EnableCosimulation"]) {
 		CarMakerSetup.EnableCosimulation = parserFlag(node, "EnableCosimulation");
@@ -549,7 +549,7 @@ int ConfigHelper::getConfig(string configName) {
 	// ===========================================================================
 	// 			READ Sumo Setup Section
 	// ===========================================================================
-	node = config["SumoSetup"];
+	node.reset(config["SumoSetup"]);
 
 	SumoSetup.SpeedModeConfigured = (bool)node["SpeedMode"];
 	if (node["SpeedMode"]) {
@@ -631,7 +631,7 @@ int ConfigHelper::getConfig(string configName) {
 	// ===========================================================================
 	// 			READ Carla Setup section
 	// ===========================================================================
-	node = config["CarlaSetup"];
+	node.reset(config["CarlaSetup"]);
 	if (node["EnableVerboseLog"]) {
 		CarlaSetup.EnableVerboseLog = parserFlag(node, "EnableVerboseLog");
 	}
@@ -790,7 +790,7 @@ int ConfigHelper::getConfig(string configName) {
 	VissimSetup.MaxVissimSigGrp = 1000;
 	VissimSetup.EnableDriverModelRelay = false;
 
-	node = config["VissimSetup"];
+	node.reset(config["VissimSetup"]);
 	if (node) {
 		if (node["EnableDSProxy"])           VissimSetup.EnableDSProxy           = parserFlag(node, "EnableDSProxy");
 		if (node["NetworkFile"])             VissimSetup.NetworkFile             = parserString(node, "NetworkFile");
@@ -810,7 +810,7 @@ int ConfigHelper::getConfig(string configName) {
 	// ===========================================================================
 	// 			READ DataLog Setup section (generic FIXS infrastructure logging)
 	// ===========================================================================
-	node = config["DataLogSetup"];
+	node.reset(config["DataLogSetup"]);
 	if (node) {
 		if (node["EnableDataLog"]) DataLogSetup.EnableDataLog = parserFlag(node, "EnableDataLog");
 		if (node["DataLogPath"])   DataLogSetup.DataLogPath   = parserString(node, "DataLogPath");
