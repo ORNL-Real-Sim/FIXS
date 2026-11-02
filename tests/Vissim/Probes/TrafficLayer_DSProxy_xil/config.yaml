@@ -35,9 +35,14 @@ ApplicationSetup:
 XilSetup:
     EnableXil: false
 
-VissimDSProxySetup:
-    Enable: true
-    NetworkFile: 'C:\src_git\RS_FIXS\156_drivingsim_dll_design\tests\Vissim\Probes\TrafficLayer_DSProxy_xil\stage_network\driving_simulator_test.inpx'
+# DSProxy: TrafficLayer spawns VISSIM via DrivingSimulatorProxy.dll and ticks it.
+VissimSetup:
+    EnableDSProxy: true
+    EnableDriverModelRelay: false   # no FIXS DriverModel in this probe
+
+    # Placeholder: NetworkFile must be absolute. The run_*.bat writes this checkout's
+    # stage_network path into config.runtime.yaml and launches TrafficLayer on that.
+    NetworkFile: 'stage_network\driving_simulator_test.inpx'
     VissimVersion: 2022
     SimulatorFrequency: 10
     VisibilityRadius: -1.0

@@ -32,7 +32,7 @@ from CommonLib.ConfigHelper import ConfigHelper  # noqa: E402
 from CommonLib.VehDataMsgDefs import VehData  # noqa: E402
 
 EGO_ID = "ego"
-START_X = 397.88
+START_X = 400.0  # front end inside link 2, which starts at x=397.89; VISSIM drops a Create off every link
 START_Y = 167.46
 EGO_SPEED_MPS = 10.0
 DT = 0.1  # 10 Hz
@@ -55,7 +55,7 @@ def make_ego(tick: int) -> VehData:
     v.positionX = START_X + EGO_SPEED_MPS * DT * tick
     v.positionY = START_Y
     v.positionZ = 0.0
-    v.heading = 0.0   # eastbound; PTV math convention (east = 0 rad)
+    v.heading = 90.0   # FIXS heading: compass degrees, north = 0, clockwise
     v.linkId = ""
     v.laneId = 0
     v.grade = 0.0

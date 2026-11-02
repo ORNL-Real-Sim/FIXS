@@ -90,6 +90,32 @@ def test_warmup_keys_are_parsed(tmp_path):
     assert ch.simulation_setup['WarmUpTime'] == 28985
 
 
+def test_retired_dsproxy_section_is_rejected(tmp_path):
+    """The retired VissimDSProxySetup section fails loudly instead of being ignored (#292)."""
+    cfg = tmp_path / "retired.yaml"
+    cfg.write_text(
+        "SimulationSetup:\n"
+        "  SelectedTrafficSimulator: VISSIM\n"
+        "VissimDSProxySetup:\n"
+        "  Enable: true\n"
+    )
+    with pytest.raises(SystemExit, match="VissimDSProxySetup' is retired.*EnableDSProxy"):
+        ConfigHelper().getConfig(str(cfg))
+
+
+def test_vissim_setup_section_is_accepted(tmp_path):
+    cfg = tmp_path / "current.yaml"
+    cfg.write_text(
+        "SimulationSetup:\n"
+        "  SelectedTrafficSimulator: VISSIM\n"
+        "VissimSetup:\n"
+        "  EnableDSProxy: true\n"
+    )
+    ch = ConfigHelper()
+    ch.getConfig(str(cfg))
+    assert ch.raw["VissimSetup"]["EnableDSProxy"] is True
+
+
 def test_reset_config():
     """resetConfig clears all setup dicts."""
     if not os.path.exists(SIMPLE_ECHO_CONFIG):

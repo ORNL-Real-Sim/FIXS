@@ -433,6 +433,8 @@ int runDSProxyMode(const ConfigHelper& config) {
     int egoVissimId = 0;                            // assigned by VISSIM via CreateID round-trip
     const int egoCreateId = 4711;                   // matches probe convention
     bool egoPending = false;                        // we've been given a pose to push but no VissimId yet
+    int egoPendingTicks = 0;
+    Simulator_Veh_Data egoCreatePose{};
 
     int lastReportedTick = -25;
     int rc = 0;
@@ -530,6 +532,12 @@ int runDSProxyMode(const ConfigHelper& config) {
                     printf("ego registered: VISSIM VehicleID=%d\n", egoVissimId);
                     break;
                 }
+            }
+            // The Create is sent once, so a first pose off every link leaves the ego absent for the whole run.
+            if (egoVissimId == 0 && ++egoPendingTicks == 10) {
+                fprintf(stderr, "WARNING: VISSIM has not created the ego 10 ticks after its Create; "
+                                "its first pose (%.2f, %.2f) is probably not on a link\n",
+                        egoCreatePose.Position_X, egoCreatePose.Position_Y);
             }
         }
 
@@ -664,6 +672,7 @@ int runDSProxyMode(const ConfigHelper& config) {
                                 ego.Create = true;
                                 ego.CreateID = egoCreateId;
                                 egoPending = true;
+                                egoCreatePose = ego;
                                 egos.push_back(ego);
                                 egoTaken = true;
                             }

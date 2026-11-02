@@ -1,18 +1,14 @@
 @echo off
 REM Stage B end-to-end probe (issue #158).
 REM
-REM Three-process orchestration:
-REM   1. Stage PTV's shipped DS example .inpx to a writable copy.
-REM   2. Launch TrafficLayer.exe in DSProxy mode (config has VissimDSProxySetup
-REM      AND ApplicationSetup.VehicleSubscription, so TrafficLayer opens its
-REM      application server socket and waits for a client).
-REM   3. Launch the fake-CarMaker Python client that connects, sends an ego
-REM      pose per tick, receives VehFullData_t + TrafficLightData_t messages.
+REM   1. Stage PTV's shipped DS example .inpx to stage_network\.
+REM   2. Write config.runtime.yaml (gitignored) with NetworkFile resolved to this
+REM      checkout's stage_network; the committed config.yaml holds a placeholder.
+REM   3. Launch TrafficLayer.exe in DSProxy mode on the runtime config (tl.log).
+REM   4. Launch the fake-CarMaker client: one ego pose out, vehicles + signals in, per tick.
 REM
-REM Expected output:
-REM   TrafficLayer prints "client connected on port 2444", then per-tick
-REM   summary with growing vehicle count and egos=1.
-REM   fake_carmaker prints "connected", then per-25-tick summary lines.
+REM Pass: tl.log shows "=== DSProxy mode", "ego registered: VISSIM VehicleID=N"
+REM and per-tick vehicles > 0 with egos=1.
 
 setlocal
 set HERE=%~dp0
@@ -32,6 +28,10 @@ if not exist "%PTV_DIR%\driving_simulator_test.inpx" (
     exit /b 2
 )
 
+set "PYEXE="
+if exist "%USERPROFILE%\miniconda3\envs\realsim_dev\python.exe" set "PYEXE=%USERPROFILE%\miniconda3\envs\realsim_dev\python.exe"
+if "%PYEXE%"=="" ( echo ERROR: realsim_dev python.exe not found & exit /b 3 )
+
 if not exist "%STAGE%" mkdir "%STAGE%"
 copy /Y "%PTV_DIR%\driving_simulator_test.inpx" "%STAGE%\"  >nul
 copy /Y "%PTV_DIR%\driving_simulator_test.layx" "%STAGE%\"  >nul
@@ -39,17 +39,32 @@ copy /Y "%PTV_DIR%\driving_simulator_test.fzp"  "%STAGE%\"  >nul
 copy /Y "%PTV_DIR%\driving_simulator_test.pp"   "%STAGE%\"  >nul
 copy /Y "%PTV_DIR%\CARRE4E_RO_500_1.sig"        "%STAGE%\"  >nul
 
-echo [1/2] Launching TrafficLayer in DSProxy mode (config: %HERE%config.yaml)
-start "TrafficLayer (DSProxy mode)" cmd /c ""%TL%" -f "%HERE%config.yaml""
+echo [1/3] Resolve NetworkFile to this checkout
+set CFG=%HERE%config.runtime.yaml
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$inpx = Join-Path '%STAGE%' 'driving_simulator_test.inpx';" ^
+  "(Get-Content '%HERE%config.yaml') -replace \"^(\s*NetworkFile:\s*).*$\", \"`$1'$inpx'\" | Set-Content -Encoding ascii '%CFG%'"
+if not exist "%CFG%" ( echo ERROR: failed to generate %CFG% & exit /b 4 )
+
+echo [2/3] Launching TrafficLayer in DSProxy mode (log: %HERE%tl.log)
+start "TrafficLayer (DSProxy mode)" /B cmd /c ""%TL%" -f "%CFG%" > "%HERE%tl.log" 2>&1"
 
 echo Waiting 4s for TrafficLayer to bind socket 2444 ...
-timeout /t 4 /nobreak >nul
+ping 127.0.0.1 -n 5 >nul
 
-echo [2/2] Launching fake_carmaker.py
-if exist "%USERPROFILE%\miniconda3\Scripts\activate.bat" (
-    call "%USERPROFILE%\miniconda3\Scripts\activate.bat" realsim_dev
-) else (
-    call conda activate realsim_dev
+echo [3/3] Launching fake_carmaker.py
+"%PYEXE%" "%HERE%fake_carmaker.py"
+set RC=%ERRORLEVEL%
+
+REM TrafficLayer exits on its own (end time or startup error) and closes VISSIM; never kill it mid-COM.
+for /L %%i in (1,1,30) do (
+    findstr /C:"=== DSProxy mode done" /C:"ERROR:" "%HERE%tl.log" >nul 2>&1 && goto :tl_done
+    ping 127.0.0.1 -n 2 >nul
 )
-python "%HERE%fake_carmaker.py"
-exit /b %ERRORLEVEL%
+echo WARNING: TrafficLayer has not finished; see %HERE%tl.log
+:tl_done
+findstr /C:"ego registered: VISSIM VehicleID=" "%HERE%tl.log" >nul 2>&1 || (
+    echo FAIL: ego never registered in VISSIM; see %HERE%tl.log
+    if %RC%==0 set RC=5
+)
+exit /b %RC%

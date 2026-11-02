@@ -829,6 +829,13 @@ int ConfigHelper::parseConfig(string configName) {
 	VissimSetup.MaxVissimSigGrp = 1000;
 	VissimSetup.EnableDriverModelRelay = false;
 
+	// The retired section would otherwise be ignored and TrafficLayer would run the legacy path.
+	if (config["VissimDSProxySetup"]) {
+		printf("ERROR: config section 'VissimDSProxySetup' is retired. Rename it to "
+		       "'VissimSetup' and its 'Enable' key to 'EnableDSProxy'; the other keys are unchanged.\n");
+		exit(-1);
+	}
+
 	node = config["VissimSetup"];
 	if (node) {
 		if (node["EnableDSProxy"])           VissimSetup.EnableDSProxy           = parserFlag(node, "EnableDSProxy");
