@@ -51,7 +51,7 @@ def make_ego(tick: int) -> VehData:
     v.positionX = START_X + EGO_SPEED * DT * tick
     v.positionY = START_Y
     v.positionZ = 0.0
-    v.heading = 0.0
+    v.heading = 90.0   # FIXS heading: compass degrees, north = 0, clockwise
     v.linkId = ""
     v.laneId = 0
     v.grade = 0.0

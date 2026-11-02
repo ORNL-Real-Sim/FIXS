@@ -26,7 +26,6 @@ Validates BOTH:
 from __future__ import annotations
 
 import json
-import math
 import os
 import pathlib
 import socket
@@ -58,7 +57,7 @@ class FrameCmd:
     phase: str
     x: float
     y: float
-    heading: float
+    heading: float   # FIXS heading: compass degrees, north = 0, clockwise
     speed: float
 
 
@@ -68,15 +67,15 @@ def build_trajectory() -> list[FrameCmd]:
     x, y = START_X, START_Y
 
     for i in range(30):                                       # A: east 10 m/s
-        cmds.append(FrameCmd(len(cmds), "A_east", x, y, 0.0, 10.0))
+        cmds.append(FrameCmd(len(cmds), "A_east", x, y, 90.0, 10.0))
         x += 10.0 * DT
     for i in range(15):                                       # B: hold
-        cmds.append(FrameCmd(len(cmds), "B_hold", x, y, 0.0, 0.0))
+        cmds.append(FrameCmd(len(cmds), "B_hold", x, y, 90.0, 0.0))
     for i in range(20):                                       # C: reverse 3 m/s
-        cmds.append(FrameCmd(len(cmds), "C_reverse", x, y, math.pi, 3.0))
+        cmds.append(FrameCmd(len(cmds), "C_reverse", x, y, 270.0, 3.0))
         x -= 3.0 * DT
     for i in range(20):                                       # D: east recovery
-        cmds.append(FrameCmd(len(cmds), "D_recovery", x, y, 0.0, 10.0))
+        cmds.append(FrameCmd(len(cmds), "D_recovery", x, y, 90.0, 10.0))
         x += 10.0 * DT
     return cmds
 

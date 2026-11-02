@@ -29,6 +29,11 @@ VIEW_TYPES = {
 #: ViewSetup.Views[].Overlay: the HUD elements a carla camera view can draw.
 VIEW_OVERLAY = ("signal", "speed", "pedals", "advisory")
 
+#: Same wording as ConfigHelper.cpp, which rejects the section too.
+RETIRED_DSPROXY_SECTION_ERROR = (
+    "ERROR: config section 'VissimDSProxySetup' is retired. Rename it to "
+    "'VissimSetup' and its 'Enable' key to 'EnableDSProxy'; the other keys are unchanged.")
+
 class ConfigHelper:
     def __init__(self):
         # Initialize the s_mapTypeValues
@@ -55,6 +60,8 @@ class ConfigHelper:
         with open(path, 'r') as file:
             config = yaml.safe_load(file)
         self.raw = config or {}
+        if "VissimDSProxySetup" in self.raw:
+            raise SystemExit(RETIRED_DSPROXY_SECTION_ERROR)
 
         # Simulation Setup
         simulation_node = config.get("SimulationSetup", {})
