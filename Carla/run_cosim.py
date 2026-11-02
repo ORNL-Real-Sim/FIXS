@@ -25,6 +25,7 @@ Examples:
 """
 import argparse
 import csv
+import hashlib
 import io
 import json
 import re
@@ -2334,40 +2335,36 @@ def _net_from_sumocfg(sumocfg):
     return None
 
 
-def resolve_tl_table(sumocfg, force=False, cache_name=None):
+def _tl_table_cache_path(net):
+    """~/.fixs/tables/<net>-<sha8>.csv, keyed on the net file's bytes."""
+    with open(net, "rb") as f:
+        sha8 = hashlib.sha256(f.read()).hexdigest()[:8]
+    stem = os.path.basename(net).split(".")[0]
+    return os.path.join(os.path.dirname(env.CONFIG_PATH), "tables", f"{stem}-{sha8}.csv")
+
+
+def resolve_tl_table(sumocfg, force=False):
     """Generate this scenario's traffic-light table from the SUMO net. It is cached in
-    the map's per-map folder ~/.fixs/maps/<cache_name>/tl_table.csv (cache_name = the
-    cooked map name), else the shared ~/.fixs/tables/<net>_tls.csv. `force`
+    ~/.fixs/tables/<net>-<sha8>.csv, keyed on the net's contents rather than the map
+    name, so an edited or replaced net never reuses another net's table. `force`
     regenerates even if a cache exists (used on --reimport). Returns a path, or None
     if there is no net to generate from. Generation needs pandas/shapely but not SUMO
     installed.
 
-    A traffic_light_table.csv sitting beside the sumocfg is deliberately NOT read. It
-    used to win over generation, which tied head positions to whichever file happened
-    to be next to the scenario rather than to the net: an app-owned scenario folder
-    copied into the map cache brought its own table along, and mlk_untextured was
-    baked from that stale copy - heads fanned across the full lane width - while the
-    generator was producing the current layout into tl_table.csv, unused. The table is
-    derived from the net, so the net is the only thing it should depend on.
+    A traffic_light_table.csv sitting beside the sumocfg is deliberately NOT read: the
+    table is derived from the net, so the net is the only thing it should depend on.
     """
     net = _net_from_sumocfg(sumocfg)
     if not net or not os.path.isfile(net):
         print("[cosim] no TL table and no net to generate one from; TL sync off.")
         return None
-    maps_root = os.path.join(os.path.dirname(env.CONFIG_PATH), "maps")
-    if cache_name:
-        cache = os.path.join(maps_root, cache_name)
-        out = os.path.join(cache, "tl_table.csv")
-    else:
-        cache = os.path.join(os.path.dirname(env.CONFIG_PATH), "tables")
-        out = os.path.join(cache, os.path.splitext(os.path.basename(net))[0] + "_tls.csv")
+    out = _tl_table_cache_path(net)
     if os.path.isfile(out) and not force:
         print(f"[cosim] TL table: cached generated {out}")
         return out
     try:
         sys.path.insert(0, os.path.join(HERE, "utils"))
         import extract_sumo_tls_as_table as gen
-        os.makedirs(cache, exist_ok=True)
         gen.generate_table(net, out)
         print(f"[cosim] TL table: generated from {os.path.basename(net)} -> {out}")
         return out
@@ -5198,11 +5195,11 @@ def main():
         sys.exit("[cosim] no SUMO scenario to run: pass --sumocfg, or choose a map "
                  "bundle / sumo source that provides one.")
 
-    # TL table for signal sync + placement: --tl-table wins, else committed next to
-    # the sumocfg, else generated from the SUMO net (cached ~/.fixs/tables).
+    # TL table for signal sync + placement: --tl-table wins, else generated from the
+    # SUMO net (cached in ~/.fixs/tables by net content).
     tl_table = args.tl_table
     if tls_manager == "sumo" and not tl_table:
-        tl_table = resolve_tl_table(sumocfg, force=args.reimport, cache_name=target_map)
+        tl_table = resolve_tl_table(sumocfg, force=args.reimport)
 
     # The scenario yaml, written like tl_table.csv: always, on first use (refreshed
     # by --reimport). Deliberately BEFORE the CARLA launch and the --prep-only

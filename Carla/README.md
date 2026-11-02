@@ -351,7 +351,9 @@ The tree splits on **can FIXS re-create this?**, not on which entity produced it
     <app>/<map>.yaml                 generated for this app on this map
     _generic/...                     a run with no application selected
   maps/                          <- RE-CREATABLE. Safe to delete to reclaim disk.
-    <map>/{<bundle>.zip, carla/, sumo/, tl_table.csv}
+    <map>/{<bundle>.zip, carla/, sumo/}
+  tables/                        <- RE-CREATABLE. TL tables, <net>-<sha8>.csv,
+                                    keyed on the SUMO net's contents
 ```
 
 `~/.fixs/apps/<app>/` mirrors `apps/<app>/` in the repo: one folder per
