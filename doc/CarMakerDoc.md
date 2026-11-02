@@ -544,6 +544,10 @@ CarMakerSetup:
     SynchronizeTrafficSignal: true
 
     TrafficSignalPort: 2444    
+
+    # most vehicles sent to CarMaker per step, nearest to the ego first (default 100, -1 = all).
+    # keep it at or below the number of RS_C*/RS_T* traffic objects in the TestRun
+    MaxVehiclesSent: 100
 ```
 Note, in dSPACE implementation, CarMakerIP should be the IP of the host PC.
 

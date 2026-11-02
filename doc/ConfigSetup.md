@@ -149,6 +149,7 @@ A controller reads this section with `fixs.config.get('xil')`: keys in snake_cas
 | EgoType | string | `""` | SUMO vehicle type for ego. Empty uses SUMO default. |
 | SynchronizeTrafficSignal | bool | false | If enabled, subscribes to all signal controllers for synchronization. |
 | TrafficSignalPort | int | 2444 or inferred | Port for signal data. Inferred from SignalSubscription if available. |
+| MaxVehiclesSent | int | 100 | SUMO only. Most vehicles sent to CarMaker per step, nearest to the ego first; `-1` sends every subscribed vehicle. Keep it at or below the number of `RS_C*`/`RS_T*` traffic objects in the TestRun: CarMaker gives slots first-come, so a vehicle sent beyond the pool may take a slot a nearer one needed. TrafficLayer prints one warning the first time the cap drops vehicles. |
 
 ## CarlaSetup
 
@@ -471,6 +472,9 @@ CarMakerSetup:
     # Synchronize traffic signals with CarMaker
     SynchronizeTrafficSignal: true
     TrafficSignalPort: 2444
+
+    # Most vehicles sent to CarMaker per step, nearest to ego first (-1 = all)
+    MaxVehiclesSent: 100
 
 # =============================================================================
 # CARLA Setup (Virtual Environment Co-simulation)

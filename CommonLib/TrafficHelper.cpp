@@ -1293,8 +1293,6 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 	//=================
 	// SUMO will have vehicles except for the first few time steps
 	//=================
-	int nVehSend = 0;
-
 	if (ENABLE_VEH_SUB && nVeh > 0) {
 
 		// only subscribe once
@@ -1584,51 +1582,17 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 
 
 		if (edgeHasSubscribed) {
-			nVehSend = 0;
+			for (auto& it : EdgeSubscribeRaw) {
+				for (auto& veh : it.second) {
+					const string& tempvehId = veh.first;
 
-			int temp = 1;
-
-			for (auto & it: EdgeSubscribeRaw) {
-				libsumo::SubscriptionResults VehDataSubscribeResults = it.second;
-
-				auto iter = VehDataSubscribeResults.begin();
-				nVehSend = min((int)VehDataSubscribeResults.size(), 200);
-
-				vector <string> tempVehIdList;
-				//tempVehIdList.push_back(egoIdVec[iC]);
-				for (int iV = 0; iV < VehDataSubscribeResults.size(); iV++) {
-					//if (iter->first != egoIdVec[iC]) {
-					tempVehIdList.push_back(iter->first);
-					//}
-					iter++;
-				}
-
-				for (int iV = 0; iV < nVehSend; iV++) {
-					VehFullData_t CurVehData;
-
-					string tempvehId = tempVehIdList[iV];
-
-					if (processedVehId_us.find(tempvehId) == processedVehId_us.end()) {
-						processedVehId_us.insert(tempvehId);
-					}
-					else {
+					// a vehicle within range of two subscribed edges is parsed once
+					if (!processedVehId_us.insert(tempvehId).second) {
 						continue;
 					}
 
-					this->parserSumoSubscription(VehDataSubscribeResults[tempvehId], tempvehId, CurVehData);
-					//libsumo::TraCIResults VehDataSubscribeTraciResults = VehDataSubscribeResults[tempvehId]
-
-
-
-					//Msg_c.packVehData(CurVehData, tempVehDataBuffer[iC], &tempVehDataByte[iC]);
-					//tempVehDataSend_v.push_back(CurVehData);
-
-					//tempVehIdSend_v.push_back(tempvehId);
-
-					//=================
-					// save to Msg_c recv buffer          
-					//=================
-					//Msg_c.VehDataRecvAll_v.push_back(CurVehData);
+					VehFullData_t CurVehData;
+					this->parserSumoSubscription(veh.second, tempvehId, CurVehData);
 					VehDataRecv_um_tmp[tempvehId] = CurVehData;
 
 					if (ENABLE_VERBOSE) {
@@ -1638,15 +1602,9 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 						FILE* f = fopen(MasterLogName.c_str(), "a");
 						fprintf(f, "recv SUMO veh id %s veh speed %.4f\n", tempvehId.c_str(), speed);
 						fclose(f);
-
 					}
-
-					//}
-					/*VehData_t iVehFullData;
-					Sock_c.depackVehData(tempVehDataBuffer[iC]+3, &iVehFullData);*/
 				}
 			}
-			//nVehSend = tempVehIdSend_v.size();
 		}
 
 
@@ -1701,8 +1659,7 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 #endif
 		}
 
-		// !!!temporary fix
-		// if doing vehicle simulator, e.g., CarMaker, only send limited number of vehicles
+		// CarMaker co-sim: the vehicles nearest the ego, at most CarMakerSetup.MaxVehiclesSent (-1 = all)
 		if (ENABLE_VEH_SIMULATOR) {
 			libsumo::TraCIPosition posEgo = SUMO_TRACI_NAMESPACE::Vehicle::getPosition(Config_c->EgoSetup.Id);
 
@@ -1713,18 +1670,26 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 			}
 			sort(dist2ego_v.begin(), dist2ego_v.end());
 
-			for (auto&it: dist2ego_v) {
-				string tempvehId = it.second;
+			const int maxVehSent = Config_c->CarMakerSetup.MaxVehiclesSent;
+			for (size_t iV = 0; iV < dist2ego_v.size(); iV++) {
+				const string& tempvehId = dist2ego_v[iV].second;
 
 				if (this->shouldSendVehicle(tempvehId, *simTime)) {
 					Msg_c.VehDataRecv_um[tempvehId] = VehDataRecv_um_tmp[tempvehId];
 				}
 
-				if (Msg_c.VehDataRecv_um.size() >= N_MAX_VEH) {
+				if (maxVehSent >= 0 && (int)Msg_c.VehDataRecv_um.size() >= maxVehSent) {
+					size_t nNotSent = dist2ego_v.size() - iV - 1;
+					if (nNotSent > 0 && !sendCapWarned) {
+						printf("WARNING: t=%.2f: CarMakerSetup.MaxVehiclesSent=%d reached; %zu farther subscribed "
+							"vehicles not sent (nearest to ego kept, -1 = no cap). Logged once.\n",
+							*simTime, maxVehSent, nNotSent);
+						fflush(stdout);
+						sendCapWarned = true;
+					}
 					break;
 				}
 			}
-				
 		}
 		else {
 			for (auto& it : VehDataRecv_um_tmp) {

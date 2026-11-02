@@ -579,6 +579,13 @@ int ConfigHelper::parseConfig(string configName) {
 		SocketPort2SubscriptionList_um[CarMakerSetup.TrafficSignalPort].SignalList.subAllSignalFlag = true;
 	}
 
+	CarMakerSetup.MaxVehiclesSent = parserInteger(node, "MaxVehiclesSent", 100);
+	if (CarMakerSetup.MaxVehiclesSent == 0 || CarMakerSetup.MaxVehiclesSent < -1) {
+		printf("ERROR: CarMakerSetup.MaxVehiclesSent must be -1 (no cap) or a positive count, got %d\n",
+			CarMakerSetup.MaxVehiclesSent);
+		exit(-1);
+	}
+
 	// ===========================================================================
 	// 			READ Sumo Setup Section
 	// ===========================================================================
