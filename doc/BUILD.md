@@ -201,7 +201,6 @@ The release build process executes the following steps:
 2. **Core Components** (`2_core_components.bat`)
    - `TrafficLayer.exe` - Main interface executable
    - `CoordMerge.exe` - Coordinated merge controller
-   - `VirtualEnvironment.lib` - Shared library for virtual environment integration
    - Output: Component directories + copied to `build/`
 
 3. **VISSIM Components** (`3_vissim_components.bat`)
@@ -209,25 +208,32 @@ The release build process executes the following steps:
    - `DriverModel_RealSim_legacy.dll` - VISSIM driver model, legacy/frozen (long API, VISSIM ≤ 2020)
    - Output: `ProprietaryFiles/VISSIMserver/` + copied to `build/`
 
-4. **CarMaker Components** (`4a_carmaker_components.ps1`)
-   - Generates BuildConfig Python files for each CarMaker version
+4. **VirtualEnvironment** (`4_virtual_environment.bat`)
+   - `VirtualEnvironment.lib` - Shared library for virtual environment integration
+
+**4c. Carla VirtualEnvironment** (`4c_carla_virenv.ps1`) - Optional
+   - `VirCarlaEnv.exe` - skipped when Carla is not configured
+
+5. **CarMaker Components** (`5a_carmaker_components.ps1`)
    - `CarMaker.win64.exe` - CarMaker Office executables
    - `libcarmaker4sl.mexw64` - CarMaker for Simulink MEX files
    - Built for each version in `dependencies.yaml` (e.g., CM11, CM13)
-   - Output: `CarMaker/CM*/` + copied to `build/CarMaker/`
+   - Output: `ProprietaryFiles/CM*_proj/` + copied to `build/CarMaker/CM*/`
 
-5. **dSPACE Libraries** (`4b_carmaker_dspace.ps1`) - Optional
+**5b. dSPACE Libraries** (`5b_carmaker_dspace.ps1`) - Optional
    - `libRealSimDsLib_2024a_CM*.a` - Version-specific dSPACE libraries
+   - Generates `CarMaker/RS_CM*_BuildConfig_2024a.py` for CarMaker for dSPACE
    - Only built if dSPACE ConfigurationDesk is detected
    - Built for each CarMaker version
-   - Output: `CommonLib/` + copied to `build/CarMaker/`
+   - Output: `build/CommonLib/` + copied to `build/CarMaker/CM*/`
+   - See [dSPACEDoc.md](dSPACEDoc.md)
 
-6. **MEX RealSimSocket** (`5_mex_realsim_socket.ps1`) - Optional
+6. **MEX RealSimSocket** (`6_mex_realsim_socket.ps1`) - Optional
    - `RealSimSocket.mexw64` - MATLAB interface for socket communication
    - Only built if MATLAB is detected
-   - Output: `CommonLib/` + copied to `build/`
+   - Output: `build/CommonLib/`
 
-7. **Build Information** (`6_build_info.ps1`)
+7. **Build Information** (`7_build_info.ps1`)
    - Generates `BUILD_INFO.txt` with version information
    - Lists all built components and their versions
    - Output: `build/BUILD_INFO.txt`
@@ -247,15 +253,17 @@ build/
 ├── RealSim*.m                        # MATLAB helper scripts
 ├── CommonLib/                        # Helper libraries and headers
 │   ├── *.h                           # Header files
-│   └── *.cpp                         # Source files (selective)
+│   ├── *.cpp                         # Source files (selective)
+│   └── libRealSimDsLib_*.a           # dSPACE libraries (if built)
 └── CarMaker/                         # CarMaker components
     ├── CM11/                         # CarMaker 11.1.2 build
     │   ├── CarMaker.win64.exe
-    │   └── libcarmaker4sl.mexw64
-    ├── CM13/                         # CarMaker 13.1.3 build
-    │   ├── CarMaker.win64.exe
-    │   └── libcarmaker4sl.mexw64
-    └── libRealSimDsLib_*.a           # dSPACE libraries (if built)
+    │   ├── libcarmaker4sl.mexw64
+    │   └── libRealSimDsLib_*_CM11_1_2.a  # dSPACE library (if built)
+    └── CM13/                         # CarMaker 13.1.3 build
+        ├── CarMaker.win64.exe
+        ├── libcarmaker4sl.mexw64
+        └── libRealSimDsLib_*_CM13_1_3.a  # dSPACE library (if built)
 ```
 
 ## Automated Release CI & Proprietary Binaries Bundle
@@ -340,25 +348,24 @@ scripts\dispatch\3_vissim_components.bat
 ```
 Builds VISSIM driver model DLLs. Run this when modifying VISSIM interface code.
 
-#### 4. CarMaker Components Only
+#### 5a. CarMaker Components Only
 ```batch
-powershell -ExecutionPolicy Bypass -File scripts\dispatch\4a_carmaker_components.ps1
+powershell -ExecutionPolicy Bypass -File scripts\dispatch\5a_carmaker_components.ps1
 ```
 Builds CarMaker executables. Automatically:
 - Reads CarMaker versions from `dependencies.yaml`
-- Generates BuildConfig Python files
 - Builds for each detected version
 - Run this when modifying CarMaker integration code
 
-#### 5. dSPACE Libraries Only
+#### 5b. dSPACE Libraries Only
 ```batch
-powershell -ExecutionPolicy Bypass -File scripts\dispatch\4b_carmaker_dspace.ps1
+powershell -ExecutionPolicy Bypass -File scripts\dispatch\5b_carmaker_dspace.ps1
 ```
-Builds dSPACE libraries for CarMaker HIL integration. Run this when modifying dSPACE interface code.
+Builds dSPACE libraries for CarMaker HIL integration and the CarMaker-for-dSPACE BuildConfig files. Run this when modifying dSPACE interface code. Details: [dSPACEDoc.md](dSPACEDoc.md).
 
 #### 6. MEX RealSimSocket Only
 ```batch
-powershell -ExecutionPolicy Bypass -File scripts\dispatch\5_mex_realsim_socket.ps1
+powershell -ExecutionPolicy Bypass -File scripts\dispatch\6_mex_realsim_socket.ps1
 ```
 Builds MATLAB MEX file for socket communication. Run this when modifying MATLAB interface code.
 
@@ -376,7 +383,7 @@ scripts\dispatch\3_vissim_components.bat
 
 **Scenario 3: Modified CarMaker User.c or integration**
 ```batch
-powershell -ExecutionPolicy Bypass -File scripts\dispatch\4a_carmaker_components.ps1
+powershell -ExecutionPolicy Bypass -File scripts\dispatch\5a_carmaker_components.ps1
 ```
 
 **Scenario 4: Testing full release package**
@@ -492,9 +499,9 @@ The `detect_tool_paths.ps1` script automatically locates installed tools:
 - Prioritizes version from `dependencies.yaml`
 
 **dSPACE Detection:**
-- Searches Program Files for ConfigurationDesk
-- Locates version matching `dependencies.yaml`
-- Finds DsBuildLibrary.mk for library compilation
+- Searches Program Files for `dSPACE ConfigurationDesk*` folders
+- Returns the alphabetically last one; the version in `dependencies.yaml` is not matched
+- `5b_carmaker_dspace.ps1` then requires `CFD_vars.bat` and `SCALEXIO\DsBuildLibrary.mk` in it
 
 **CarMaker Detection:**
 - Searches Program Files for IPG installations
@@ -503,31 +510,19 @@ The `detect_tool_paths.ps1` script automatically locates installed tools:
 
 ### BuildConfig Auto-Generation
 
-CarMaker builds require a BuildConfig Python file that specifies compiler settings, include paths, and library dependencies. The build system automatically generates these:
+CarMaker for dSPACE builds read compiler defines and libraries from a `CM_BuildConfig.py`. `5b_carmaker_dspace.ps1` generates one per CarMaker version:
 
 **Process:**
-1. `4a_carmaker_components.ps1` reads `dependencies.yaml`
-2. For each CarMaker version (e.g., 11.1.2, 13.1.3):
-   - Detects MATLAB version
-   - Locates CarMaker installation
-   - Generates `RS_CM{major}_{minor}_{patch}_BuildConfig_{matlab}.py`
-3. BuildConfig files are created in `CarMaker/` directory
-4. CarMaker uses these during compilation
+1. Reads the dSPACE version and CarMaker versions from `dependencies.yaml`
+2. For each CarMaker version whose dSPACE library built, copies CarMaker's `win64-<version>/CM4SL/CM_BuildConfig.py` and:
+   - Sets `CARMAKER_DIR` to `C:/IPG/carmaker/win64-<version>`
+   - Prepends `RS_CAVE`, `RS_DEBUG`, `RS_DSPACE` to every `CM_DEFINES` list
+   - Appends `libRealSimDsLib_<dspace>_CM<version>.a` to `libs`
+3. Writes `CarMaker/RS_CM{major}_{minor}_{patch}_BuildConfig_{dspace}.py` (e.g. `RS_CM13_1_3_BuildConfig_2024a.py`)
 
-**Generated BuildConfig Features:**
-- Correct MATLAB version paths
-- RealSim-specific defines (`RS_DSPACE`, `RS_DEBUG`)
-- Include paths for VirEnv_Wrapper.h
-- Links to libRealSimDsLib_*.a (for dSPACE builds)
-- Architecture-specific settings (dsrtlx, dsrt64)
+`CM_SRC_DIR` is left as CarMaker's default. See [dSPACEDoc.md](dSPACEDoc.md#carmaker-buildconfig-for-dspace) for how the file is used.
 
-**Manual Modifications (Advanced):**
-If you need custom BuildConfig settings, you can:
-1. Generate BuildConfig using the script
-2. Manually edit the generated Python file
-3. Re-run CarMaker build
-
-Note: Re-running `4a_carmaker_components.ps1` will regenerate and overwrite custom changes.
+Note: Re-running `5b_carmaker_dspace.ps1` will regenerate and overwrite custom changes.
 
 ## Troubleshooting
 
@@ -571,7 +566,7 @@ Error: Could not find MATLAB installation
 - Ensure MATLAB is installed
 - Update `dependencies.yaml` with correct MATLAB version
 - Check MATLAB registry entries exist
-- Try specifying MATLAB path manually in `5_mex_realsim_socket.ps1`
+- Try specifying MATLAB path manually in `6_mex_realsim_socket.ps1`
 
 ---
 
