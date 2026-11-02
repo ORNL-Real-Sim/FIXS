@@ -92,17 +92,25 @@ def tls_placed(carla_root, name, fingerprint=None):
     return stamped[0] == fingerprint
 
 
-def resolve_props(carla_root, ue4_root, bundle_dirs=(), props_dir=None):
-    """Find the map bundle's placement manifest, install the props it names, and
+def resolve_props(carla_root, ue4_root, bundle_dirs=(), props_dir=None,
+                  allow_legacy=False):
+    """Find the placement manifest in `bundle_dirs`, install the props it names, and
     return (settings, manifest_path, fingerprint).
 
-    A bundle that ships a manifest gets every number from it, and a missing value is
-    fatal. A bundle that ships none keeps the pre-manifest behaviour - atlanta and
-    mlk have no manifest yet, and failing them would be a flag day for no gain - but
-    says so, because a silently-chosen stock asset is how this went wrong before.
+    A manifest gets every number from it, and a missing value is fatal. With no
+    manifest anywhere the pre-manifest numbers are used only if `allow_legacy`;
+    otherwise this raises ManifestError.
     """
     manifest_path = props.find_manifest(*bundle_dirs)
     if not manifest_path:
+        if not allow_legacy:
+            searched = ", ".join(d for d in bundle_dirs if d) or "(none)"
+            raise props.ManifestError(
+                f"no {props.MANIFEST_NAME} in the map bundle or the shared props cache "
+                f"(searched: {searched}). Refusing to place with the built-in "
+                f"pre-manifest blueprint and z_offset_cm {props.LEGACY_TL_Z_OFFSET_CM:g}. "
+                f"Check gh auth / network so the shared props can be fetched, or pass "
+                f"--legacy-placement to place with the built-in values anyway.")
         settings = props.legacy_settings()
         print("[props] no placement.yaml in this map bundle; using the built-in "
               "blueprint and z_offset. Ship a manifest to make these the map's own.")
@@ -121,7 +129,7 @@ def resolve_props(carla_root, ue4_root, bundle_dirs=(), props_dir=None):
 
 
 def place_tls(name, tl_table, carla_root=None, ue4_root=None, force=False,
-              bundle_dirs=(), props_dir=None):
+              bundle_dirs=(), props_dir=None, allow_legacy=False):
     """Place traffic lights into the cooked map `name` from `tl_table`. Returns 0
     on success; exits with a clear message otherwise. No-op if already placed from
     the same manifest + props (unless force)."""
@@ -141,7 +149,8 @@ def place_tls(name, tl_table, carla_root=None, ue4_root=None, force=False,
     # what that question is about: same map, different numbers, means not placed.
     try:
         settings, manifest_path, fingerprint = resolve_props(
-            carla_root, ue4_root, bundle_dirs=bundle_dirs, props_dir=props_dir)
+            carla_root, ue4_root, bundle_dirs=bundle_dirs, props_dir=props_dir,
+            allow_legacy=allow_legacy)
     except props.ManifestError as exc:
         sys.exit(f"[props] {exc}")
 
@@ -208,11 +217,17 @@ def main():
                     help="directory holding the props' .uasset files, when they do "
                          "not sit beside placement.yaml (e.g. the map library's "
                          "shared props/ folder)")
+    ap.add_argument("--repo", default=None,
+                    help="map library to fetch the shared props from (default: "
+                         "map_repo in fixs_sources.txt, else the built-in library)")
+    ap.add_argument("--legacy-placement", action="store_true",
+                    help="when no placement.yaml can be found or fetched, place with "
+                         "the built-in pre-manifest blueprint and z_offset instead of "
+                         "refusing")
     args = ap.parse_args()
 
-    name = args.map
-    if not name and args.map_config:
-        name = import_map.read_map_config(args.map_config).get("package")
+    mc = import_map.read_map_config(args.map_config) if args.map_config else {}
+    name = args.map or mc.get("package")
     if not name:
         # No map given: let the user pick from the maps already cooked into this
         # CARLA. place_tls operates on a cooked map, so this needs no repo/network.
@@ -221,18 +236,16 @@ def main():
             ap.error("no CARLA configured (run setup_carla first), or pass --map <name>.")
         name = import_map.choose_imported_map(carla_root)
 
-    # Where to look for placement.yaml: an explicit --bundle, else the map's own
-    # cache dir (where run_cosim unpacks the bundle) and then the shared props
-    # cache. Map first, so a bundle shipping its own manifest overrides the
-    # library's shared defaults; find_manifest takes the first hit.
-    if args.bundle:
-        bundle_dirs = [args.bundle]
-    else:
-        bundle_dirs = [d for d in (import_map.map_cache_dir(name),
-                                   import_map.props_cache_dir()) if d]
+    # Bundle first so its own manifest overrides the shared one, which is fetched
+    # as run_cosim does; find_manifest takes the first hit.
+    repo, _ = import_map.resolve_map_source(args.repo or mc.get("repo"))
+    props_cache = import_map.fetch_props(repo)
+    bundle_dirs = [d for d in (args.bundle or import_map.map_cache_dir(name),
+                               props_cache) if d]
 
     return place_tls(name, args.tl_table, args.carla_root, args.ue4_root, args.force,
-                     bundle_dirs=bundle_dirs, props_dir=args.props_dir)
+                     bundle_dirs=bundle_dirs, props_dir=args.props_dir,
+                     allow_legacy=args.legacy_placement)
 
 
 if __name__ == "__main__":
