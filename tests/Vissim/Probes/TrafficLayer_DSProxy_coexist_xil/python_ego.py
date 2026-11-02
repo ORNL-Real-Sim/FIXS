@@ -45,7 +45,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 
 EGO_ID = "ego"
 DT = 0.1  # 10 Hz
-START_X = 397.88
+START_X = 400.0  # front end inside link 2, which starts at x=397.89; VISSIM drops a Create off every link
 START_Y = 167.46
 
 DM_FLAGGED_TYPE = "100"   # Car — what patch_inpx.py hooked the FIXS DriverModel onto

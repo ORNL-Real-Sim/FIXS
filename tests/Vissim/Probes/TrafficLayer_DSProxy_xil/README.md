@@ -63,7 +63,7 @@ launches `fake_carmaker.py`. VISSIM 2022 GUI opens.
 | Peak vehicles | 139 |
 | Signals received by C++ TrafficLayer | 20 per frame |
 | Signals received by Python client | 0 — see "Known gap" below |
-| Ego longitudinal motion | `ego_x_sent` 397.88 → 696.88 m over 300 ticks @ 10 m/s ✓ |
+| Ego longitudinal motion | `ego_x_sent` 400.00 → 699.00 m over 300 ticks @ 10 m/s ✓ |
 | Clean shutdown (`simState=0`, `VISSIM_Disconnect`) | OK |
 
 ## Known gap — Python TLS parsing

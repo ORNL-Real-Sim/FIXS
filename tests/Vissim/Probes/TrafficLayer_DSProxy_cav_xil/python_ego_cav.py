@@ -48,7 +48,7 @@ DM_FLAGGED_TYPE = "100"     # Car
 CAV_TARGET_SPEED = 5.0      # m/s — well below VISSIM-default ~14 m/s
 
 DT = 0.1
-START_X, START_Y = 397.88, 167.46
+START_X, START_Y = 400.0, 167.46  # front end inside link 2, which starts at x=397.89; VISSIM drops a Create off every link
 EGO_SPEED = 10.0
 
 

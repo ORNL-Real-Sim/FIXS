@@ -37,7 +37,7 @@ EGO_ID = "ego"
 EGO_TYPE = "200"      # HGV — distinct from the filter target ("100" = Car)
 CAR_TYPE = "100"      # the type the port-2445 client subscribes to
 DT = 0.1
-START_X, START_Y = 397.88, 167.46
+START_X, START_Y = 400.0, 167.46  # front end inside link 2, which starts at x=397.89; VISSIM drops a Create off every link
 EGO_SPEED = 10.0
 TICKS_TARGET = 80     # enough to see ~10 vehicles spawn on the test network
 
