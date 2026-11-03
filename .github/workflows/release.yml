@@ -572,3 +572,28 @@ jobs:
               -Tag $env:CHANNEL_TAG -Title $env:CHANNEL_TITLE -Rolling -Target $env:GITHUB_SHA `
               -Asset (Join-Path dist $want)
           exit $LASTEXITCODE
+
+      # main also gets a permanent vX.Y.Z release, created once per VERSION and never moved,
+      # so a consumer can install and name the version. A push with an already-pinned VERSION skips it.
+      - name: Pin the VERSION release (main only, once per version)
+        if: github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ver = (Get-Content VERSION -TotalCount 1).Trim()
+          if ($ver -notmatch '^\d+\.\d+\.\d+$') { Write-Error "VERSION must be X.Y.Z, got '$ver'"; exit 1 }
+          $tag = "v$ver"
+          $probe = gh api "repos/$env:GITHUB_REPOSITORY/git/ref/tags/$tag" 2>&1
+          if ($LASTEXITCODE -eq 0) { Write-Host "$tag already exists -> nothing to pin."; exit 0 }
+          # Only a 404 means "not pinned yet"; any other failure must not create a second release.
+          if ("$probe" -notmatch 'HTTP 404') { Write-Error "Could not check tag ${tag}: $probe"; exit 1 }
+          $win   = @(Get-ChildItem build -Filter 'fixs-build-*.zip')
+          $linux = @(Get-ChildItem dist  -Filter 'fixs-build-*-linux-x86_64.zip')
+          if ($win.Count -ne 1 -or $linux.Count -ne 1) { Write-Error "Expected one zip per platform, got: $($win.Name + $linux.Name)"; exit 1 }
+          Rename-Item $win[0].FullName   "fixs-build-$tag.zip"
+          Rename-Item $linux[0].FullName "fixs-build-$tag-linux-x86_64.zip"
+          & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dispatch\publish_release.ps1 `
+              -Tag $tag -Title "FIXS $tag" -Target $env:GITHUB_SHA `
+              -Asset (Join-Path dist "fixs-build-$tag-linux-x86_64.zip")
+          exit $LASTEXITCODE

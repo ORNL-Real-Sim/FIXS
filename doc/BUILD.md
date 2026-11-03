@@ -269,12 +269,15 @@ The hosted path is made proprietary-aware by the `RS_FIXS_AUTOMATION` environmen
 
 ### Rolling release channels
 
-| Branch | Rolling prerelease | Notes |
-|--------|--------------------|-------|
-| `main` | `latest` | current train |
-| `dev_v0.9.0` | `v0.9.0-alpha` | 0.9.0 train (SDK-free VirtualEnvironment, #174) |
+| Branch | Rolling prerelease | Permanent release |
+|--------|--------------------|-------------------|
+| `main` | `stable` | `vX.Y.Z` from `VERSION`, once per version |
+| `beta_vX.Y.Z` | `vX.Y.Z-beta` | — |
+| `dev_vX.Y.Z` | `vX.Y.Z-alpha` | — |
 
 On every push to a release branch the pipeline builds the public core, overlays the matching proprietary bundle, packs one canonical zip, and (re)publishes the rolling prerelease anchored to that commit. Pull requests build + package only (no publish), and upload the zip as a workflow artifact for inspection.
+
+On `main` the same zips are also published as a permanent `vX.Y.Z` release (the version in `VERSION`) the first time that version reaches `main`; it is never moved, and it becomes the repo's Latest release. Later pushes with the same `VERSION` (a docs fix, say) only update `stable`. Consumers install it with `run_cosim.bat --update-fixs vX.Y.Z`.
 
 ### The proprietary-binaries bundle
 
