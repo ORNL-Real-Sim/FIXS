@@ -87,11 +87,14 @@ Documentation files including simulator-specific guides:
 - `VISSIMdoc.md` - VISSIM interface documentation
 - `SUMOdoc.md` - SUMO interface documentation
 - `CarMakerDoc.md` - CarMaker interface documentation
+- `dSPACEDoc.md` - dSPACE (SCALEXIO) build and run documentation
 - `CARLAdoc.md` - CARLA interface documentation
 
 #### **ProprietaryFiles/**
 Proprietary or licensed files not for public distribution. Includes:
-- `buildRS_2024a.bat` - Builds Real-Sim MEX files for MATLAB R2024a
+- `CM11_proj/`, `CM13_proj/` - CarMaker projects, including CarMaker for dSPACE sources and ConfigurationDesk projects
+- `VISSIMserver/` - VISSIM driver model DLL sources
+- `dSPACE/` - ConfigurationDesk and ControlDesk projects
 
 #### **.github/**
 GitHub-specific configuration (workflows, issue templates, CI/CD).
@@ -115,7 +118,7 @@ This section documents known rough edges in the codebase for contributors.
 
 ### Build System
 - **Script numbering in `scripts/dispatch/`** — Scripts were renumbered in PR #135 but individual component scripts (4a, 4b, 5, 6) don't follow a clean linear sequence.
-- **`generate_version.ps1`** — Now called by `dispatch.bat` (added in PR #135), but requires git tags to be present; will produce a fallback version string if no tags exist.
+- **`generate_version.ps1`** — Called by `dispatch.bat`. The version comes from the `VERSION` file; bump it when cutting a new `dev_vX.Y.Z` (CI enforces the match).
 
 ### Tests
 - **No CI** — Python unit tests under `tests/Python/unit/` run locally but there is no GitHub Actions workflow to run them automatically. Tracked in issue [#57](https://github.com/ORNL-Real-Sim/FIXS/issues/57).

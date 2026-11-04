@@ -23,6 +23,7 @@ Real-Sim Documentation
    VISSIMdoc
    SUMOdoc
    CarMakerDoc
+   dSPACEDoc
    CARLAdoc
 
 .. toctree::

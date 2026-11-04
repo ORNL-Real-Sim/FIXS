@@ -260,6 +260,8 @@ $sb = [System.Text.StringBuilder]::new()
 [void]$sb.AppendLine()
 [void]$sb.AppendLine('SOURCE INFORMATION')
 [void]$sb.AppendLine('------------------')
+$FixsVersion = try { (Get-Content (Join-Path $RepoRoot 'VERSION') -TotalCount 1 -ErrorAction Stop).Trim() } catch { 'N/A' }
+[void]$sb.AppendLine("FIXS Version:         $FixsVersion")
 [void]$sb.AppendLine("Git Branch:           $GitBranch")
 [void]$sb.AppendLine("Git Commit:           $GitCommit ($GitMsg)")
 [void]$sb.AppendLine("Git Tag:              $GitTag")

@@ -12,7 +12,7 @@
 # TrafficLayer processes it first (ascending-port order) -- its advisory is then in
 # bucket B before VirCarlaEnv is published. Advisor = 4400, VirCarlaEnv = 4440.
 #
-# Run: run_sumo_carla_l2.bat (one click): CARLA + SUMO + TrafficLayer +
+# Run: run_sumo_carla.bat l2 (one click): CARLA + SUMO + TrafficLayer +
 # py_ego_speed_advisor.py (client 4400) + VirCarlaEnv (client 4440).
 # =============================================================================
 
