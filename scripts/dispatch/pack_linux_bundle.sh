@@ -187,6 +187,7 @@ else
         echo
         echo "SOURCE INFORMATION"
         echo "------------------"
+        echo "FIXS Version:         $(head -n1 "$REPO_ROOT/VERSION" 2>/dev/null | tr -d '[:space:]')"
         echo "Git Branch:           $(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null)"
         echo "Git Commit:           $(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null)"
         echo "Git Tag:              $VERSION"

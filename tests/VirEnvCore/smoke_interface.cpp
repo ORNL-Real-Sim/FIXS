@@ -25,15 +25,15 @@ int main() {
     be.initTrafficPool();
 
     // spawn within capacity
-    VehHandle a = be.spawnVehicle("car", "passenger", Pose{});
-    VehHandle b = be.spawnVehicle("car", "passenger", Pose{});
+    VehHandle a = be.spawnVehicle("car", "passenger", Pose{}, "veh.a");
+    VehHandle b = be.spawnVehicle("car", "passenger", Pose{}, "veh.b");
     assert(a != kNoHandle && b != kNoHandle && a != b);
     // capacity exhausted -> kNoHandle (mirrors the full-queue `continue` in runStep)
-    VehHandle c = be.spawnVehicle("car", "passenger", Pose{});
+    VehHandle c = be.spawnVehicle("car", "passenger", Pose{}, "veh.c");
     assert(c == kNoHandle);
     // despawn returns the slot; next spawn reuses it
     be.despawnVehicle(a);
-    VehHandle d = be.spawnVehicle("car", "passenger", Pose{});
+    VehHandle d = be.spawnVehicle("car", "passenger", Pose{}, "veh.d");
     assert(d == a);
 
     // actuation verbs in the raw FIXS frame

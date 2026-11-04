@@ -44,7 +44,7 @@ public:
     void initTrafficPool() override;                                       // lazy spawn -> caches blueprint lib
 
     VehHandle spawnVehicle(const std::string& vType, const std::string& vClass,
-                           const Pose& spawnPose) override;
+                           const Pose& spawnPose, const std::string& vehId) override;
     void      despawnVehicle(VehHandle h) override;
 
     void setVehiclePose(VehHandle h, const Pose& p) override;              // -> batched ApplyTransform

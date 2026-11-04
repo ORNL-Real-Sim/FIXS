@@ -3,3 +3,4 @@
 *.pdb
 *.ilk
 cl_out.txt
+build_stamp.txt

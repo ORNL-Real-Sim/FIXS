@@ -67,7 +67,8 @@ void CarMakerBackend::initTrafficPool() {
 //  map-ids + cleanup-vehicles steps.
 //----------------------------------------------------------------------------
 VehHandle CarMakerBackend::spawnVehicle(const std::string& /*vType*/, const std::string& vClass,
-                                        const Pose& /*spawnPose*/) {
+                                        const Pose& /*spawnPose*/,
+                                        const std::string& /*vehId*/) {
     if (vClass.find("car") != string::npos || vClass.find("passenger") != string::npos
         || vClass.find("private") != string::npos) {
         if (carQueue_.empty()) return kNoHandle;

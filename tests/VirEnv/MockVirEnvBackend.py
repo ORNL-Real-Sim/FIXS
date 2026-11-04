@@ -78,10 +78,14 @@ class MockVirEnvBackend(IVirEnvBackend):
         self._rec('initTrafficPool', '')
         self._poolInit = True
 
-    def spawnVehicle(self, vType, vClass, spawnPose):
+    def spawnVehicle(self, vType, vClass, spawnPose, vehId=''):
+        # vehId is recorded, not just accepted: a core that stops passing it then
+        # produces a different transcript, and test_core_parity fails on it. The
+        # C++ mock records it identically. (It used to be dropped here, and the C++
+        # core never passed it at all -- and no test could see the difference.)
         cls = self._classify(vClass)
         pool = self._poolFor(cls)
-        tag = '%s(%s/%s)' % (cls.name, vType, vClass)
+        tag = '%s(%s/%s) id=%s' % (cls.name, vType, vClass, vehId)
         if not pool:
             self._rec('spawnVehicle', tag + ' -> kNoHandle')
             return kNoHandle

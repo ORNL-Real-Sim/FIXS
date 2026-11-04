@@ -24,6 +24,9 @@
     <ProjectGuid>{57dc9187-389b-4204-9204-8a23adf386bc}</ProjectGuid>
     <RootNamespace>VirCarlaEnv</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <!-- 64-bit compiler: the 32-bit one runs out of address space on the boost/
+         libcarla headers under /GL and fails with C1001 at random lines (#380). -->
+    <PreferredToolArchitecture>x64</PreferredToolArchitecture>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
@@ -119,7 +122,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>NOMINMAX;_CRT_SECURE_NO_WARNINGS;_WINSOCK_DEPRECATED_NO_WARNINGS;WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>..\..\CommonLib\libsumo;..\..\CommonLib\yaml-cpp\build\include;..\..\CommonLib\yaml-cpp\include;..\..\CommonLib\libevent\build\bin\Release;..\..\CommonLib\libevent\compat;..\..\CommonLib\libevent\build\include;..\..\CommonLib\libevent\include;..\..\CommonLib\libevent;..\..\CommonLib\libevent\.\WIN32-Code;..\..\CommonLib;..\..\CommonLib\libcarla\include;..\..\CommonLib\libcarla\include\system</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\..\CommonLib\libsumo;..\..\CommonLib\yaml-cpp\build\include;..\..\CommonLib\yaml-cpp\include;..\..\CommonLib;..\..\CommonLib\libcarla\include;..\..\CommonLib\libcarla\include\system</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>

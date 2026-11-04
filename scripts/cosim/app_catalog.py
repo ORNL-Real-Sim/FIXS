@@ -81,7 +81,10 @@ Schema 1 (apps/apps.json)
         "--lateral-resolution": "0",    #   co-sim SUMO convention (run_cosim's
         "--time-to-teleport": "-1",     #   SUMO_CONVENTION). null drops a flag.
         "--step-length": null           #   Contract flags cannot be overridden.
-      }
+      },
+      "carla_args": {                   # optional: options for the CARLA server
+        "-quality-level": "Low"         #   run_cosim launches. null drops one it
+      }                                 #   passes; "" passes a bare -option.
     }
   ]
 }
@@ -510,6 +513,20 @@ def _normalize_app(raw, schema=LEGACY_SCHEMA, base=None):
         else:
             _warn(f"app '{app_id}': sumo_args key '{flag}' is not a --flag; ignoring it.")
     sumo_args = clean_args
+    # The same for the CARLA server's command line, keyed by its -option. A null value
+    # drops one run_cosim would pass; "" passes the option with no value.
+    carla_args = raw.get("carla_args")
+    if not isinstance(carla_args, dict):
+        if carla_args is not None:
+            _warn(f"app '{app_id}': 'carla_args' is not an object; ignoring it.")
+        carla_args = {}
+    clean_args = {}
+    for option, value in carla_args.items():
+        if isinstance(option, str) and option.startswith("-"):
+            clean_args[option] = value
+        else:
+            _warn(f"app '{app_id}': carla_args key '{option}' is not a -option; ignoring it.")
+    carla_args = clean_args
     # 'maps' is a HINT, not a constraint: it hoists those maps to the top of the
     # picker (choose_map's `preferred`). Declare it when the controller was written
     # against a particular network - one that hardcodes edge or TLS ids - and leave
@@ -567,6 +584,7 @@ def _normalize_app(raw, schema=LEGACY_SCHEMA, base=None):
            "configs": configs,
            "defaults": defaults,
            "sumo_args": sumo_args,
+           "carla_args": carla_args,
            "requirements": requirements,
            "needs_map_sumo": needs_map_sumo,
            "launch": launch}

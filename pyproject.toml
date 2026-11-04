@@ -1,7 +1,7 @@
 # The FIXS python env as a uv project - the same env environment.yml builds, for
-# machines that opted into uv (~/.fixs/env.json: {"use_uv": true}).
+# machines where setup was told to use uv (saved as ~/.fixs/env.json: {"env_manager": "uv"}).
 #
-# env_setup builds it with `uv sync --frozen` into ~/.fixs/envs/<name>, so uv.lock
+# env_setup builds it with `uv sync --locked` into ~/.fixs/envs/<name>, so uv.lock
 # pins every version on every machine. After editing this file, run `uv lock` and
 # commit both.
 #
@@ -23,6 +23,9 @@ dependencies = [
     "pyyaml",
     "shapely",
     "lxml",
+    # ViewSetup camera windows, recordings and their HUD (Carla/VirEnv/CarlaViews.py, CarlaHud.py).
+    "opencv-python",
+    "pillow",
     # On PyPI, so unlike carla there is no reason to leave them to a later step.
     # Floor = the SUMO version FIXS builds against (dependencies.yaml).
     "traci>=1.22",

@@ -29,6 +29,16 @@ __all__ = ['DataLogger']
 #: Written when DataLogSetup names no fields. Same list as the C++ default.
 _DEFAULT_FIELDS = ('positionX', 'positionY', 'positionZ', 'heading', 'speed')
 
+
+def perRunPath(path):
+    """`path` with the run id as its last dir when this run shares the machine
+    (run_cosim set FIXS_SLOT >= 1); unchanged otherwise, and when absolute."""
+    runId = os.environ.get('FIXS_RUN_ID')
+    if not runId or (os.environ.get('FIXS_SLOT') or '0') == '0' or not path             or os.path.isabs(path):
+        return path
+    head, tail = os.path.split(path)
+    return os.path.join(head, runId, tail)
+
 #: Fields rendered as text rather than as a number.
 _STRING_FIELDS = frozenset({'type', 'vehicleClass', 'linkId'})
 

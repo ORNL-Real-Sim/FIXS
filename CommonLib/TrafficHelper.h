@@ -159,6 +159,13 @@ public:
 	// for last tick.
 	std::unordered_map<std::string, std::pair<double, double>> externalEgoLastFedXY_;
 
+	// Ids given SumoSetup.SpeedMode/LaneChangeMode while in the network; SUMO keeps
+	// a mode until the vehicle leaves, so each id is set once per stay.
+	std::unordered_set<std::string> sumoModesApplied_;
+	// SumoSetup.EgoModesOnEntry: which ids are the ego, and which got the modes this stay.
+	std::unordered_set<std::string> egoModesOnEntryIds_;
+	std::unordered_set<std::string> egoModesOnEntryApplied_;
+
 	// #177: skip per-vehicle TraCI getters whose output is never sent. Derived
 	// once from VehicleMessageField_set in connectionSetup -- getNextTLS is only
 	// needed for the signalLight* fields, getLeader/getSpeed for precedingVehicle*.
@@ -265,6 +272,24 @@ public:
 	int shouldSendVehicle(std::string vehicleId, double simTime);
 
 private:
+	// ViewSetup sumo views: the first one drives sumo-gui's own view, the rest are added views.
+	struct GuiViewState_t {
+		const ViewDef_t* def = nullptr;
+		std::string viewId;
+		bool following = false;
+		bool zoomSet = false;
+		bool failed = false;
+		double giveUpAt = -1.0;      // added view: sim time to stop waiting for sumo-gui to create it
+		double nextTry = -1.0;
+	};
+	void followInGui(double simTime);
+	const double kGuiViewWaitS = 10.0;
+	const double kGuiViewRetryS = 0.5;
+	bool guiViewsInit_ = false;
+	bool guiUnavailable_ = false;
+	std::string guiMainView_;
+	std::vector<GuiViewState_t> guiViews_;
+
 	void parserSumoSubscription(libsumo::TraCIResults VehDataSubscribeTraciResults, std::string vehId, VehFullData_t& CurVehData);
 
 	// #65: NOT named M_PI. MSVC leaves M_PI undefined unless _USE_MATH_DEFINES,
