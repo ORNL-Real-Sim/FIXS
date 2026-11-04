@@ -570,3 +570,51 @@ def test_a_mirrored_ego_takes_the_named_blueprint_and_colour():
     assert asked[0].id == "vehicle.kia.ev6" and asked[0].attrs == {"color": "150,20,30"}
     assert asked[1].id != "vehicle.kia.ev6" and asked[1].attrs == {}
     del carla
+
+
+# ---------------------------------------------------------------- plate and wheel slots
+
+def test_plate_and_wheel_slots_get_their_own_slots():
+    raw = copy.deepcopy(MANIFEST)
+    raw["materials"]["plate"] = {"match": "Plate", "texture": "plate/T_Plate.png",
+                                 "roughness": 0.9, "specular": 0.1}
+    raw["materials"]["wheel_slots"] = [{"match": "Tyre", "slot": "Rims", "metallic": 0.9}]
+    m = vm.validate(raw, "v.yaml")
+    chunks, mats = toy_car()
+    P, N, UV = _box((-0.4, 1.95, 0.4), (0.4, 2.0, 0.6))
+    chunks.append({"group": "body", "material": "Plate", "P": P, "N": N, "UV": UV})
+    mats["Plate"] = {"name": "Plate", "color": [1, 1, 1, 1], "texture": "old.png"}
+    arrays, meta = mesh.build_parts(mesh.to_vehicle_frame(chunks, 1.0, "-y", "+z"), mats, m)
+    info = {s["slot"]: s for s in meta["slot_info"]}
+    assert info["M_LicensePlate"]["role"] == "plate"
+    assert info["M_LicensePlate"]["texture"] == "plate/T_Plate.png"
+    assert info["M_LicensePlate"]["look"] == {"roughness": 0.9, "specular": 0.1}
+    assert info["M_Rims"]["look"] == {"metallic": 0.9}
+    assert "M_Tyre" not in info                      # every tyre triangle sits on a wheel bone
+
+
+def test_plate_match_is_exact_not_a_substring():
+    cfg = {"plate": {"match": "material"}, "strip": ["_Car_"]}
+    assert mesh.role_of("material", cfg) == "plate"
+    assert mesh.role_of("_Car_material", cfg) == "plate"
+    assert mesh.role_of("Carpet_material_2", cfg) == "opaque"
+
+
+def test_plate_texture_is_copied_from_the_bundle(tmp_path):
+    import prep_vehicle
+    (tmp_path / "plate").mkdir()
+    (tmp_path / "plate" / "T_Plate.png").write_bytes(b"png")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "a.png").write_bytes(b"a")
+    slots = [{"texture": "plate/T_Plate.png"}, {"texture": "a.png"}, {"texture": "gone.png"}]
+    missing = prep_vehicle.copy_textures(slots, str(tmp_path / "src"), str(tmp_path / "out"), str(tmp_path))
+    assert [s["texture"] for s in slots] == ["T_Plate.png", "a.png", None] and missing == ["gone.png"]
+    assert (tmp_path / "out" / "T_Plate.png").read_bytes() == b"png"
+
+
+def test_fit_circle():
+    import math as _m
+    from vehicles import verify
+    pts = [(3 + 5 * _m.cos(a / 10), -2 + 5 * _m.sin(a / 10)) for a in range(40)]
+    r, resid = verify.fit_circle(pts)
+    assert r == pytest.approx(5.0) and resid < 1e-9

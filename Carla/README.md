@@ -321,6 +321,16 @@ waits for them to exit; `--no-register` builds the assets now (a new vehicle's f
 not open anywhere) and `--register-only` adds the factory entry later. Running servers
 see a new vehicle only after a restart.
 
+**Collision shape.** The vehicle's physics asset is a copy of the stock Tesla's: UE 4.26's
+Python cannot edit physics-asset bodies, so the body box stays the Tesla's. Wheel contact uses the wheel blueprints' radius and width,
+which do come from the manifest.
+
+**Checking it.** `--verify <id> --port <rpc> --tm-port <tm>` spawns the car on a server
+nobody else is driving, applies the manifest physics, and reports settling, wheelbase
+and track, wheel radius, 0-50 km/h and braking, full-lock wheel angles, the full-lock
+turning circle and a 25 s autopilot drive. Dimension checks accepted at prep
+(`--allow-mismatch`) are reported but do not fail it.
+
 **Packaged CARLA** cannot take a new vehicle: the blueprint and the factory entry would
 have to be cooked into a patch pak, which FIXS does not build. Install on a source build.
 
@@ -343,7 +353,11 @@ Blender, run headless with `--disable-autoexec --factory-startup`. It scales and
 the model (`source.scale/forward/up`), drops SketchUp's reversed twin faces
 (`dedupe_twins`), finds the four wheels by size or by node name, sorts material slots
 into paint / glass / light glass / other by name, optionally decimates, and rigs the
-mesh to `Vehicle_Base` + four wheel bones. It checks length, height, wheelbase, track
+mesh to `Vehicle_Base` + four wheel bones. `materials.plate` names the licence-plate
+material (exact source name) and a plate texture shipped in the bundle, with its own
+finish (a matte plate: `roughness: 0.9, specular: 0.1`); `materials.wheel_slots` moves a
+material's wheel triangles into their own slot, for a mesh that shares one material
+between the rims and the cabin. It checks length, height, wheelbase, track
 and wheel radius against the manifest's `dimensions` and stops if one is out of
 tolerance (`--allow-mismatch` accepts it and records it in `rig/prep_report.json`).
 Upload the zip as a release asset and add a `vehicles` entry (`id`, `title`, `release`,

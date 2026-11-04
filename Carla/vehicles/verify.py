@@ -67,6 +67,7 @@ def main_check(bp_id, host, port, tm_port, color=None, out_dir=None):
         sp = _straight_spawn(cmap)
         sp.location.z += 0.3
         actor = world.spawn_actor(bp, sp)
+        R["color_attribute"] = actor.attributes.get("color")
         pc = actor.get_physics_control()
         vmanifest.apply_physics(pc, vmanifest.physics_plan(m), carla)
         actor.apply_physics_control(pc)
@@ -108,12 +109,16 @@ def main_check(bp_id, host, port, tm_port, color=None, out_dir=None):
                 round(actor.get_wheel_steer_angle(carla.VehicleWheelLocation.FL_Wheel), 2),
                 round(actor.get_wheel_steer_angle(carla.VehicleWheelLocation.FR_Wheel), 2)]
 
+        R["turning_circle"] = _turning_circle(world, cmap, actor, carla, m)
+
         tm = client.get_trafficmanager(tm_port)
         tm.set_synchronous_mode(True)
         actor.apply_control(carla.VehicleControl(brake=0.0))
         actor.set_autopilot(True, tm_port)
+        tm.ignore_lights_percentage(actor, 100)
+        tm.set_desired_speed(actor, 35.0)
         dist, last, zmin = 0.0, actor.get_location(), 1e9
-        for _ in range(int(20 / DT)):
+        for _ in range(int(25 / DT)):
             world.tick()
             loc = actor.get_location()
             dist += loc.distance(last)
@@ -127,23 +132,41 @@ def main_check(bp_id, host, port, tm_port, color=None, out_dir=None):
         if tm is not None:
             tm.set_synchronous_mode(False)
         world.apply_settings(orig)
+    R["accepted_mismatch"] = _accepted_mismatch(m)
     _report(R, rows)
     if out_dir:
         os.makedirs(out_dir, exist_ok=True)
         with open(os.path.join(out_dir, "verify_{}.json".format(bp_id)), "w", encoding="utf-8") as fh:
             json.dump(R, fh, indent=1, default=str)
-    ok = all(r[4] for r in rows) and abs(R["settle"]["z_above_road"]) < 0.05 and R["autopilot_m"] > 20
+    accepted = R["accepted_mismatch"]
+    ok = (all(r[4] or r[0] in accepted for r in rows) and abs(R["settle"]["z_above_road"]) < 0.05
+          and R["autopilot_m"] > 100)
     return 0 if ok else 1
 
 
+def _accepted_mismatch(m):
+    """Dimension checks prep was told to accept (--allow-mismatch), from rig/prep_report.json."""
+    try:
+        with open(os.path.join(m["dir"], vmanifest.RIG_REPORT), "r", encoding="utf-8") as fh:
+            return list(json.load(fh).get("accepted_mismatch") or [])
+    except (OSError, ValueError):
+        return []
+
+
 def _report(R, rows):
-    print("[verify] {}  colour attribute: {}".format(R["id"], R["has_color"]))
+    print("[verify] {}  colour attribute: {} (spawned with {})".format(
+        R["id"], R["has_color"], R.get("color_attribute")))
     print("[verify] settle: {}".format({k: round(v, 3) for k, v in R["settle"].items()}))
     print(vmanifest.format_checks(rows))
+    if R.get("accepted_mismatch"):
+        print("[verify] accepted at prep (rig/prep_report.json): {}".format(", ".join(R["accepted_mismatch"])))
     print("[verify] 0-50 km/h {} s over {:.1f} m; stop {:.2f} s over {:.1f} m".format(
         None if R["t_0_50_s"] is None else round(R["t_0_50_s"], 2), R["dist_0_50_m"], R["stop_s"], R["stop_m"]))
     print("[verify] full lock FL/FR deg: left {} right {}".format(
         R["steer_full_left_FL_FR_deg"], R["steer_full_right_FL_FR_deg"]))
+    tc = R.get("turning_circle") or {}
+    print("[verify] full-lock circle at ~5 km/h: centre path {} m, kerb to kerb {} m ({} deg swept)".format(
+        tc.get("centre_path_diameter_m"), tc.get("kerb_to_kerb_diameter_m"), tc.get("heading_swept_deg")))
     print("[verify] autopilot drove {:.0f} m, lowest body z above lane {:.3f} m".format(
         R["autopilot_m"], R["autopilot_min_z_above_lane"]))
 
@@ -167,3 +190,68 @@ def _straight_spawn(cmap, min_len=70.0):
         if ok:
             return sp
     raise RuntimeError("no straight 70 m stretch from any spawn point on this map")
+
+
+def fit_circle(pts):
+    """(radius, max residual) of the least-squares circle through [(x, y)]."""
+    import numpy as np
+    p = np.asarray(pts, float)
+    A = np.c_[2 * p[:, 0], 2 * p[:, 1], np.ones(len(p))]
+    cx, cy, k = np.linalg.lstsq(A, (p ** 2).sum(1), rcond=None)[0]
+    r = math.sqrt(k + cx * cx + cy * cy)
+    return r, float(np.abs(np.hypot(p[:, 0] - cx, p[:, 1] - cy) - r).max())
+
+
+def _open_site(cmap, carla):
+    best = None
+    for a, _ in cmap.get_topology():
+        if a.is_junction:
+            e = a.get_junction().bounding_box.extent
+            if best is None or min(e.x, e.y) > best[0]:
+                best = (min(e.x, e.y), a.get_junction())
+    loc = best[1].bounding_box.location
+    wp = cmap.get_waypoint(loc)
+    return carla.Transform(carla.Location(loc.x, loc.y, wp.transform.location.z + 0.3),
+                           carla.Rotation(yaw=wp.transform.rotation.yaw))
+
+
+def _turning_circle(world, cmap, actor, carla, m):
+    """Full right lock at ~5 km/h in the widest junction: centre-path and kerb-to-kerb diameters."""
+    actor.set_transform(_open_site(cmap, carla))
+    actor.apply_control(carla.VehicleControl(brake=1.0))
+    for _ in range(100):
+        world.tick()
+    inv = actor.get_transform().get_inverse_matrix()
+    fl = actor.get_physics_control().wheels[0].position  # world cm
+    fl_local = [sum(inv[r][k] * c for k, c in enumerate((fl.x / 100, fl.y / 100, fl.z / 100, 1.0)))
+                for r in range(3)]
+    # the outer (left) front tyre's outer edge, in the vehicle frame
+    front_x, edge_y = fl_local[0], fl_local[1] - m["wheels"]["width_m"] / 2
+    target, centre, kerb, swept, last = 5 / 3.6, [], [], 0.0, None
+    for n in range(int(60 / DT)):
+        v = _speed(actor)
+        brk = 0.3 if v > target * 1.3 else 0.0
+        thr = 0.0 if brk else max(0.0, min(0.6, 0.35 + 0.8 * (target - v)))
+        actor.apply_control(carla.VehicleControl(throttle=thr, brake=brk, steer=1.0))
+        world.tick()
+        t = actor.get_transform()
+        if n * DT < 6.0:
+            last = t.rotation.yaw
+            continue
+        swept += abs((t.rotation.yaw - last + 180) % 360 - 180)
+        last = t.rotation.yaw
+        o = t.transform(carla.Location(front_x, edge_y, 0))
+        centre.append((t.location.x, t.location.y))
+        kerb.append((o.x, o.y))
+        if swept >= 360.0:
+            break
+    actor.apply_control(carla.VehicleControl(brake=1.0))
+    for _ in range(50):
+        world.tick()
+    if len(centre) < 10:
+        return {"heading_swept_deg": swept}
+    rc, ec = fit_circle(centre)
+    rk, ek = fit_circle(kerb)
+    return {"heading_swept_deg": round(swept, 1), "centre_path_diameter_m": round(2 * rc, 2),
+            "centre_fit_resid_m": round(ec, 3), "kerb_to_kerb_diameter_m": round(2 * rk, 2),
+            "kerb_fit_resid_m": round(ek, 3)}

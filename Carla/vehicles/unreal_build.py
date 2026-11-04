@@ -165,7 +165,8 @@ def build_materials(job):
                 if not look.get("color"):
                     color = [1.0, 1.0, 1.0]
             mel.set_material_instance_vector_parameter_value(mi, "BaseColor", lin_color(color))
-            for p, k in (("Metallic", "metallic"), ("Roughness", "roughness"), ("Emissive", "emissive")):
+            for p, k in (("Metallic", "metallic"), ("Roughness", "roughness"), ("Specular", "specular"),
+                         ("Emissive", "emissive")):
                 if look.get(k) is not None:
                     mel.set_material_instance_scalar_parameter_value(mi, p, float(look[k]))
         out[s["slot"]] = mi
@@ -204,7 +205,13 @@ def physics_asset(job, sk):
     dst = "{}/PA_{}".format(job["dest"], job["asset_name"])
     pa = unreal.load_asset(dst) if eal.does_asset_exist(dst) else eal.duplicate_asset(job["stock"]["physics_asset"], dst)
     box, info = job["collision_box_cm"], []
-    for bs in pa.get_editor_property("skeletal_body_setups"):
+    try:
+        setups = pa.get_editor_property("skeletal_body_setups")
+    except Exception as e:
+        # UE 4.26 Python does not expose the bodies; the duplicated stock shapes stay
+        setups = []
+        info.append("body shapes not editable from Python ({}); kept the template's".format(type(e).__name__))
+    for bs in setups:
         bone = str(bs.get_editor_property("bone_name"))
         ag = bs.get_editor_property("agg_geom")
         boxes = list(ag.get_editor_property("box_elems"))

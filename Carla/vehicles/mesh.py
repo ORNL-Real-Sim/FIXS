@@ -212,7 +212,19 @@ def dedupe(P, N, UV, keep, cabin_centre):
 
 # ---------------------------------------------------------------- materials
 
+PLATE_SLOT = "M_LicensePlate"
+
+
+def _stripped(name, materials_cfg):
+    for s in materials_cfg.get("strip") or []:
+        name = name.replace(s, "")
+    return name.strip("_")
+
+
 def role_of(name, materials_cfg):
+    plate = materials_cfg.get("plate")
+    if plate and plate.get("match") in (name, _stripped(name, materials_cfg)):
+        return "plate"
     for role in ("paint", "light_glass", "glass"):
         if any(s in name for s in materials_cfg.get(role) or []):
             return role
@@ -222,18 +234,31 @@ def role_of(name, materials_cfg):
 def slot_name(name, role, materials_cfg):
     if role == "paint":
         return PAINT_SLOT
-    for s in materials_cfg.get("strip") or []:
-        name = name.replace(s, "")
+    if role == "plate":
+        return PLATE_SLOT
+    name = _stripped(name, materials_cfg)
     clean = "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in name).strip("_")
     return "M_" + (clean or "Material")
+
+
+def _clean_look(look):
+    return {k: v for k, v in look.items() if k not in ("match", "slot", "texture") and v is not None}
 
 
 def look_for(name, materials_cfg):
     """The first `materials.look` entry whose match is in `name`, else {}."""
     for look in materials_cfg.get("look") or []:
         if look.get("match") and look["match"] in name:
-            return {k: v for k, v in look.items() if k != "match" and v is not None}
+            return _clean_look(look)
     return {}
+
+
+def wheel_slot_for(name, materials_cfg):
+    """The `materials.wheel_slots` entry for a material on a wheel bone, or None."""
+    for ws in materials_cfg.get("wheel_slots") or []:
+        if ws.get("match") and ws["match"] in name:
+            return ws
+    return None
 
 
 # ---------------------------------------------------------------- assemble
@@ -269,6 +294,14 @@ def build_parts(chunks, materials, m):
             keep = "both"
         P, N, UV = dedupe(c["P"], c["N"], c["UV"], keep, cabin)
         bone = BONE_OF[wheel_groups[c["group"]]] if c["group"] in wheel_groups else BASE_BONE
+        look = look_for(name, mats_cfg)
+        ws = wheel_slot_for(name, mats_cfg) if bone != BASE_BONE and role == "opaque" else None
+        if ws is not None:
+            slot, look = "M_" + ws["slot"], _clean_look(ws)
+        texture = info.get("texture")
+        if role == "plate":
+            look = _clean_look(mats_cfg["plate"])
+            texture = mats_cfg["plate"].get("texture") or texture
         k = (bone, slot)
         if k in parts:
             parts[k] = tuple(np.concatenate([a, b]) for a, b in zip(parts[k], (P, N, UV)))
@@ -277,7 +310,7 @@ def build_parts(chunks, materials, m):
         if slot not in slot_info:
             slot_info[slot] = {"slot": slot, "role": role, "source_material": name,
                                "color": list(info.get("color") or [0.8, 0.8, 0.8, 1.0]),
-                               "texture": info.get("texture"), "look": look_for(name, mats_cfg)}
+                               "texture": texture, "look": look}
 
     arrays, out_parts = {}, []
     for i, ((bone, slot), (P, N, UV)) in enumerate(sorted(parts.items())):

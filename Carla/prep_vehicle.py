@@ -78,8 +78,9 @@ def read_source(m, blender, work):
     return path, chunks, materials, tex_root
 
 
-def copy_textures(slot_info, tex_root, dest):
-    """Copy each slot's texture into rig/textures/, found by basename under `tex_root`."""
+def copy_textures(slot_info, tex_root, dest, bundle=None):
+    """Copy each slot's texture into rig/textures/: a bundle-relative path as given (the
+    licence plate), else found by basename under `tex_root`."""
     os.makedirs(dest, exist_ok=True)
     index = {}
     for root, _, names in os.walk(tex_root):
@@ -90,7 +91,8 @@ def copy_textures(slot_info, tex_root, dest):
         t = s.get("texture")
         if not t:
             continue
-        found = index.get(os.path.basename(t).lower())
+        own = os.path.join(bundle, t) if bundle else None
+        found = own if own and os.path.isfile(own) else index.get(os.path.basename(t).lower())
         if found:
             shutil.copy2(found, os.path.join(dest, os.path.basename(found)))
             s["texture"] = os.path.basename(found)
@@ -154,7 +156,7 @@ def prep(bundle, blender=None, allow_mismatch=False, keep_work=False):
         tex_dest = os.path.join(m["dir"], vmanifest.RIG_TEXTURES)
         if os.path.isdir(tex_dest):
             shutil.rmtree(tex_dest)
-        missing = copy_textures(meta["slot_info"], tex_root, tex_dest)
+        missing = copy_textures(meta["slot_info"], tex_root, tex_dest, m["dir"])
         if missing:
             print("[prep] textures not found, slots left untextured: {}".format(missing))
         _write_json(os.path.join(m["dir"], vmanifest.RIG_MATERIALS), {"slots": meta["slot_info"]})
@@ -176,7 +178,9 @@ def pack(bundle, out_zip, include_source=False):
     if not os.path.isfile(os.path.join(bundle, vmanifest.RIG_FBX)):
         sys.exit("[prep] {} is not prepared yet (no {})".format(bundle, vmanifest.RIG_FBX))
     roots = [vmanifest.RIG_DIR] + (["source"] if include_source else [])
-    files = [n for n in (vmanifest.MANIFEST_NAME, "README.md") if os.path.isfile(os.path.join(bundle, n))]
+    plate = (m["materials"].get("plate") or {}).get("texture")
+    files = [n for n in (vmanifest.MANIFEST_NAME, "README.md", plate)
+             if n and os.path.isfile(os.path.join(bundle, n))]
     for r in roots:
         for root, _, names in os.walk(os.path.join(bundle, r)):
             files += [os.path.relpath(os.path.join(root, n), bundle) for n in names]

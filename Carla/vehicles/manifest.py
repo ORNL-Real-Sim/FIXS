@@ -351,6 +351,18 @@ def _source(c, raw):
     return out
 
 
+LOOK_KEYS = (("metallic", 1.0), ("roughness", 1.0), ("specular", 1.0), ("emissive", 100.0))
+
+
+def _look(c, item, q):
+    look = {}
+    for k, hi in LOOK_KEYS:
+        look[k] = c.number(item, q, k, required=False, lo=0.0, hi=hi)
+    if "color" in item:
+        look["color"] = c.color(q + "color", item["color"])
+    return look
+
+
 def _materials(c, raw):
     mat = c.section(raw, "materials")
     p = "materials."
@@ -358,18 +370,30 @@ def _materials(c, raw):
            "glass": c.strings(mat, p, "glass", required=False, non_empty=False) or [],
            "light_glass": c.strings(mat, p, "light_glass", required=False, non_empty=False) or [],
            "strip": c.strings(mat, p, "strip", required=False, non_empty=False) or [],
-           "look": []}
+           "look": [], "wheel_slots": [], "plate": None}
     for i, item in enumerate((mat or {}).get("look") or []):
         q = "{}look[{}].".format(p, i)
         if not isinstance(item, dict):
             c.err(q[:-1], "must be a mapping")
             continue
-        look = {"match": c.string(item, q, "match")}
-        for k, hi in (("metallic", 1.0), ("roughness", 1.0), ("emissive", 100.0)):
-            look[k] = c.number(item, q, k, required=False, lo=0.0, hi=hi)
-        if "color" in item:
-            look["color"] = c.color(q + "color", item["color"])
-        out["look"].append(look)
+        out["look"].append(dict(_look(c, item, q), match=c.string(item, q, "match")))
+    # a source material's triangles on the wheels split into their own slot (e.g. rims)
+    for i, item in enumerate((mat or {}).get("wheel_slots") or []):
+        q = "{}wheel_slots[{}].".format(p, i)
+        if not isinstance(item, dict):
+            c.err(q[:-1], "must be a mapping")
+            continue
+        out["wheel_slots"].append(dict(_look(c, item, q), match=c.string(item, q, "match"),
+                                       slot=c.string(item, q, "slot", pattern=r"[A-Za-z0-9_]+")))
+    plate = (mat or {}).get("plate")
+    if plate is not None:
+        q = p + "plate."
+        if not isinstance(plate, dict):
+            c.err(q[:-1], "must be a mapping")
+        else:
+            # match is the exact source material name, so a generic word cannot catch other slots
+            out["plate"] = dict(_look(c, plate, q), match=c.string(plate, q, "match"),
+                                texture=c.string(plate, q, "texture", required=False))
     return out
 
 
