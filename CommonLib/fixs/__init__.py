@@ -561,6 +561,9 @@ class _Launch:
 #: variable, so growth is a property here rather than another `fixs.something`.
 launch = _Launch()
 
+#: Values a controller adds to the bridge's PlotSetup windows: fixs.plot.put(name, value), fixs.plot.mark(label).
+from CommonLib.fixs._plot import plot                                   # noqa: E402
+
 # Extra fields for the FIXS_HANDOFF report, e.g. launch.overlayConfig()'s.
 _handoffExtra = {}
 

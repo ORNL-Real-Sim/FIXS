@@ -332,6 +332,48 @@ the extra render pass on the CARLA server, which shows up in the bridge's
 cameras. At shutdown the bridge prints each camera's callback, draw and encode cost.
 Closing a camera window removes that camera unless it is also recording.
 
+## PlotSetup
+
+Live Plotly plots fed by the Python bridge, each in a bare browser window titled
+`FIXS plot: <Name>`: stacked panels of the last `Window` seconds, one per entry in
+`Panels`. A panel lists its series as `[command, actual, ...]`: the first is drawn
+dashed, the rest solid, so a panel reads as command against response. The panels share
+a time axis in seconds since the plot's first sample. TrafficLayer ignores this section.
+
+```yaml
+PlotSetup:
+  Plots:
+    - Name: ego                              # window "FIXS plot: ego"
+      Target: ego
+      Size: [760, 480]
+      Window: 60                             # seconds shown
+      Panels:
+        - [speedDesired, speed]              # title, unit and legend from the series names
+        - Series: [steerAngleDesired, steerAngle]
+          Title: Front wheel angle
+          Labels: [command, actual]
+        - Series: [app.laneTarget, app.lateralOffset]
+          Title: Lateral offset
+          Unit: m                            # app.<name> values have no unit of their own
+```
+
+A series is one of:
+
+- a field of the target's FIXS record listed in `VehicleMessageField`. For the ego this is
+  the record the embedded controller writes, so `steerAngleDesired` and the pedals are its
+  command;
+- `steerAngle`, `throttle`, `brake`: what PhysX applied to a physics ego that tick
+  (`steerAngle` is the mean of the front wheels' angles);
+- `app.<name>`: a value an embedded controller sets with `fixs.plot.put(name, value)`.
+  `fixs.plot.mark(label)` draws a labelled line at the current time on every plot.
+
+Steer angles are shown in degrees. The bridge keeps about two samples per pixel of
+`Size` width and serves them on a local port; the page polls at 10 Hz. The window is
+Edge or Chrome in app mode, `Size` pixels; without either, open the printed address in
+any browser. In a `run_cosim` run, `<run dir>/plots.json` lists each plot's address and
+`clock` (the sim time), so a recorder can show a plot as an OBS browser source. Plotly
+comes from the installed `plotly` package, else its CDN. Needs the Python engine.
+
 ## Port slots: several co-sims on one machine
 
 The ports in a scenario yaml are the ports a run uses. A person running one co-sim

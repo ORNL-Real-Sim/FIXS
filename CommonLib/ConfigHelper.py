@@ -28,6 +28,10 @@ VIEW_TYPES = {
 }
 #: ViewSetup.Views[].Overlay: the HUD elements a carla camera view can draw.
 VIEW_OVERLAY = ("signal", "speed", "pedals", "advisory")
+#: PlotSetup.Plots[].Panels: series the bridge measures itself, besides the ego's message fields.
+PLOT_MEASURED = ("steerAngle", "throttle", "brake")
+#: PlotSetup.Plots[].Panels: prefix of a series an in-process controller supplies with fixs.plot.put().
+PLOT_APP_PREFIX = "app."
 
 class ConfigHelper:
     def __init__(self):
@@ -42,6 +46,7 @@ class ConfigHelper:
         self.Carla_setup = defaultdict(lambda: None)
         self.DataLog_setup = defaultdict(lambda: None)
         self.View_setup = defaultdict(lambda: None)
+        self.Plot_setup = defaultdict(lambda: None)
         # The document as written, before defaults were applied. Every section
         # above is a defaultdict filled in with fallbacks, so it cannot answer
         # "did the author actually say this?" -- and for some keys that is the
@@ -302,6 +307,59 @@ class ConfigHelper:
         # ViewSetup -- parity with the ViewSetup section in ConfigHelper.cpp.
         self.View_setup["Views"] = self._parseViews(config.get("ViewSetup", {}) or {})
 
+        # PlotSetup -- live plot windows drawn by the Python bridge; the C++ parse has no use for it.
+        self.Plot_setup["Plots"] = self._parsePlots(config.get("PlotSetup", {}) or {})
+
+    def _parsePlots(self, node):
+        """PlotSetup.Plots: windows of stacked time panels; each panel is [command, actual, ...]
+        or {Series: [command, actual, ...], Title, Unit, Labels}."""
+        declared = node.get("Plots") or []
+        if not isinstance(declared, list):
+            raise SystemExit("ERROR: PlotSetup.Plots must be a list of plots")
+        fields = set(self.simulation_setup["VehicleMessageField"] or [])
+        plots = []
+        for i, p in enumerate(declared):
+            where = "PlotSetup.Plots[%d]" % i
+            if not isinstance(p, dict):
+                raise SystemExit("ERROR: %s must be a mapping" % where)
+            panels = [self._parsePlotPanel(where, x) for x in (p.get("Panels") or [])]
+            if not panels:
+                raise SystemExit("ERROR: %s.Panels must be a non-empty list of panels" % where)
+            for name in (n for panel in panels for n in panel["Series"]):
+                if not (name in fields or name in PLOT_MEASURED or name.startswith(PLOT_APP_PREFIX)):
+                    raise SystemExit("ERROR: %s: series '%s' is not in VehicleMessageField, not one of %s, "
+                                     "and not %s<name>" % (where, name, "|".join(PLOT_MEASURED), PLOT_APP_PREFIX))
+            size = p.get("Size", [760, 480])
+            if not (isinstance(size, list) and len(size) == 2 and min(int(x) for x in size) > 0):
+                raise SystemExit("ERROR: %s.Size must be two positive pixel counts" % where)
+            plots.append({
+                "Name": str(p.get("Name", "plot%d" % i)),
+                "Target": str(p.get("Target", "ego")),
+                "Enable": self.parserFlag(p, "Enable", True),
+                "Size": [int(x) for x in size],
+                "Window": float(p.get("Window", 60.0)),
+                "Panels": panels,
+            })
+        names = [p["Name"] for p in plots]
+        if len(set(names)) != len(names):
+            raise SystemExit("ERROR: PlotSetup.Plots: give each plot its own Name")
+        return [p for p in plots if p["Enable"]]
+
+    @staticmethod
+    def _parsePlotPanel(where, x):
+        """One panel as {Series, Title, Unit, Labels}; '' and [] mean derived from the series."""
+        if isinstance(x, list):
+            x = {"Series": x}
+        series = x.get("Series") if isinstance(x, dict) else None
+        if not (isinstance(series, list) and series):
+            raise SystemExit("ERROR: %s.Panels: a panel is a non-empty series list, or a mapping with one "
+                             "in Series" % where)
+        labels = [str(n) for n in x.get("Labels") or []]
+        if labels and len(labels) != len(series):
+            raise SystemExit("ERROR: %s.Panels: Labels needs one label per series" % where)
+        return {"Series": [str(n) for n in series], "Title": str(x.get("Title") or ""),
+                "Unit": str(x.get("Unit") or ""), "Labels": labels}
+
     def _parseViews(self, view_node):
         declared = view_node.get("Views") or []
         if not isinstance(declared, list):
@@ -425,6 +483,7 @@ class ConfigHelper:
         self.Carla_setup.clear()
         self.DataLog_setup.clear()
         self.View_setup.clear()
+        self.Plot_setup.clear()
 
     def parserFlag(self, node, name, default=False):
         return node.get(name, default) in ['true', True]

@@ -1,0 +1,159 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>{{TITLE}}</title>
+<script src="{{PLOTLY}}"></script>
+<style>
+  html, body { margin: 0; height: 100%; background: #fff; overflow: hidden; }
+  #plot { width: 100vw; height: 100vh; }
+</style>
+</head>
+<body>
+<div id="plot"></div>
+<script>
+// Rows, top to bottom: a strip for mark labels, then per panel a title row and the panel.
+// Text sits only in the strip, the title rows and the axis margin, so no line crosses it.
+const NAME = "{{NAME}}";
+const INK = "#222", MUTED = "#666", GRID = "#E6E6E6", AXIS = "#9A9A9A", MARK = "#D9822B";
+const COMMAND = "#1A1A1A", ACTUALS = ["#1565C0", "#2E7D32", "#6A1B9A", "#C62828"];
+const MIN_SPAN = {"m/s": 2, "m/s²": 1, "deg": 4, "m": 1, "": 1};
+const STRIP = 26, TITLE = 20, GAP = 10, MARGIN = {l: 50, r: 16, t: STRIP, b: 42};
+const FONT = "Segoe UI, Roboto, Helvetica Neue, Arial, sans-serif";
+const gd = document.getElementById("plot");
+let spec, seq = 0, now = 0, marksKey = "", traceOf = [];
+
+function domains(h) {
+  // [y0, y1] per panel as paper fractions, top panel first.
+  const n = spec.panels.length, P = h - MARGIN.t - MARGIN.b;
+  const ph = (P - n * TITLE - (n - 1) * GAP) / n;
+  return spec.panels.map((_, i) => {
+    const top = i * (TITLE + ph + GAP) + TITLE;
+    return [1 - (top + ph) / P, 1 - top / P];
+  });
+}
+
+function sameLabels() {
+  const key = p => JSON.stringify(p.labels);
+  return spec.panels.every(p => key(p) === key(spec.panels[0]));
+}
+
+function layout() {
+  const w = window.innerWidth, h = window.innerHeight, dom = domains(h), P = h - MARGIN.t - MARGIN.b;
+  const L = {
+    width: w, height: h, margin: MARGIN, paper_bgcolor: "#fff", plot_bgcolor: "#fff",
+    font: {family: FONT, size: 11, color: INK}, showlegend: true,
+    legend: {orientation: "h", x: 1, xanchor: "right", y: dom[0][1] + 3 / P, yanchor: "bottom",
+             font: {size: 11, color: MUTED}, bgcolor: "rgba(0,0,0,0)", itemwidth: 30, tracegroupgap: 0},
+    annotations: [], shapes: [],
+  };
+  spec.panels.forEach((p, i) => {
+    const ax = i ? String(i + 1) : "";
+    L["yaxis" + ax] = {domain: dom[i], gridcolor: GRID, zerolinecolor: "#C8C8C8", linecolor: AXIS,
+                        ticks: "outside", tickcolor: AXIS, ticklen: 3, nticks: 4, showline: true,
+                        tickfont: {size: 10, color: MUTED}, automargin: false};
+    L["xaxis" + ax] = {anchor: "y" + ax, matches: i ? "x" : undefined, gridcolor: GRID, linecolor: AXIS,
+                        showline: true, ticks: i === spec.panels.length - 1 ? "outside" : "",
+                        tickcolor: AXIS, ticklen: 3, showticklabels: i === spec.panels.length - 1,
+                        tickfont: {size: 10, color: MUTED}, zeroline: false};
+    L.annotations.push({text: "<b>" + p.title + "</b>" + (p.unit ? " (" + p.unit + ")" : ""), xref: "paper",
+                        yref: "paper", x: 0, y: dom[i][1], xanchor: "left", yanchor: "bottom", yshift: 2,
+                        showarrow: false, font: {size: 12, color: INK}});
+  });
+  const last = spec.panels.length > 1 ? String(spec.panels.length) : "";
+  L["xaxis" + last].title = {text: "time (s)", standoff: 4, font: {size: 11, color: MUTED}};
+  return L;
+}
+
+function traces() {
+  const out = [], one = sameLabels();
+  traceOf = [];
+  spec.panels.forEach((p, i) => {
+    const ax = i ? String(i + 1) : "";
+    p.series.forEach((s, j) => {
+      const command = j === 0 && p.series.length > 1;
+      out.push({x: [], y: [], xaxis: "x" + ax, yaxis: "y" + ax, mode: "lines", name: p.labels[j],
+                showlegend: !one || i === 0, legendgroup: one ? p.labels[j] : undefined,
+                line: command ? {color: COMMAND, width: 1.3, dash: "dash"}
+                              : {color: ACTUALS[(j - (p.series.length > 1 ? 1 : 0)) % ACTUALS.length], width: 1.8}});
+      traceOf.push(spec.panels.slice(0, i).reduce((a, q) => a + q.series.length, 0) + j);
+    });
+  });
+  return out;
+}
+
+function ranges(x0, x1) {
+  // Each panel's y range from what is on screen, at least its unit's minimum span.
+  const upd = {"xaxis.range": [x0, x1]};
+  let k = 0;
+  spec.panels.forEach((p, i) => {
+    let lo = Infinity, hi = -Infinity;
+    p.series.forEach(() => {
+      const tr = gd.data[k++];
+      for (let m = 0; m < tr.x.length; m++) {
+        const v = tr.y[m];
+        if (v === null || tr.x[m] < x0) continue;
+        if (v < lo) lo = v;
+        if (v > hi) hi = v;
+      }
+    });
+    if (lo > hi) { lo = 0; hi = 1; }
+    const grow = Math.max((MIN_SPAN[p.unit] ?? 1) - (hi - lo), 0) / 2 + 0.08 * (hi - lo);
+    upd["yaxis" + (i ? String(i + 1) : "") + ".range"] = [lo - grow, hi + grow];
+  });
+  return upd;
+}
+
+function markLayout(marks, x0) {
+  // Lines inside each panel only; labels in the top strip, flipped left near the right edge.
+  const shapes = [], notes = [];
+  marks.forEach(([t, label]) => {
+    spec.panels.forEach((_, i) => {
+      const ax = i ? String(i + 1) : "";
+      shapes.push({type: "line", xref: "x", yref: "y" + ax + " domain", x0: t, x1: t, y0: 0, y1: 1,
+                   line: {color: MARK, width: 1.2, dash: "dot"}});
+    });
+    const right = (t - x0) / spec.window > 0.72;
+    notes.push({text: label, xref: "x", yref: "paper", x: t, y: 1, yanchor: "bottom", yshift: 2,
+                xanchor: right ? "right" : "left", xshift: right ? -3 : 3, showarrow: false,
+                font: {size: 11, color: MARK}});
+  });
+  return {shapes, notes};
+}
+
+async function tick() {
+  try {
+    const d = await (await fetch("/data/" + NAME + "?since=" + seq)).json();
+    seq = d.seq;
+    now = d.now;
+    if (d.rows.length) {
+      const xs = traceOf.map(() => []), ys = traceOf.map(() => []);
+      d.rows.forEach(r => traceOf.forEach((_, k) => { xs[k].push(r[0]); ys[k].push(r[k + 1]); }));
+      Plotly.extendTraces(gd, {x: xs, y: ys}, traceOf, spec.maxPoints);
+    }
+    const x0 = Math.max(0, now - spec.window), x1 = Math.max(spec.window, now);
+    const upd = ranges(x0, x1);
+    const key = JSON.stringify(d.marks) + (x0 > 0);
+    if (key !== marksKey || d.marks.length) {
+      marksKey = key;
+      const base = layout().annotations, m = markLayout(d.marks, x0);
+      upd.shapes = m.shapes;
+      upd.annotations = base.concat(m.notes);
+    }
+    Plotly.relayout(gd, upd);
+  } catch (e) {
+    // The run has ended or not started yet: keep the last picture.
+  }
+  setTimeout(tick, 100);
+}
+
+(async () => {
+  spec = await (await fetch("/spec/" + NAME)).json();
+  document.title = spec.title;
+  await Plotly.newPlot(gd, traces(), layout(), {staticPlot: true, displayModeBar: false, responsive: false});
+  window.addEventListener("resize", () => Plotly.relayout(gd, layout()));
+  tick();
+})();
+</script>
+</body>
+</html>
