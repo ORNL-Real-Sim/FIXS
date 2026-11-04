@@ -508,5 +508,5 @@ Forward-looking decisions for unifying the virtual-environment bridges (CarMaker
 - C++ headers (`ConfigHelper.h`, `SocketHelper.h`, `MsgHelper.h`) have no Doxygen comments; C++ API doc is deferred until issue #137 is addressed.
 
 ### Build system
-- `generate_version.ps1` requires git tags to exist; falls back to a placeholder version string otherwise. Mention this when helping with release tagging.
+- The compiled version is the root `VERSION` file (#279), not git tags. A new `dev_vX.Y.Z` train must bump it; CI's detect job fails a train build or PR whose `VERSION` differs.
 - Script numbering in `scripts/dispatch/` (4a, 4b, 5, 6) is non-linear — a known rough edge, not a bug.

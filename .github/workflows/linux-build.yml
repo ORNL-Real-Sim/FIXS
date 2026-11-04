@@ -91,7 +91,7 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0        # git describe needs tags for RealSimVersion.h
+          fetch-depth: 0        # git describe needs tags for the REALSIM_GIT_TAG label
           # Full history, but only HEAD's file contents; focal's git 2.25 cannot fetch with a filter.
           filter: ${{ matrix.slug != 'focal' && 'blob:none' || '' }}
           submodules: false     # ProprietaryFiles is private and not needed here
