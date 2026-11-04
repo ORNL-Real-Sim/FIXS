@@ -283,11 +283,11 @@ ViewSetup:
 | --- | --- | --- | --- |
 | Name | all | the Type | Unique across the list. Camera windows and added sumo-gui views are titled `FIXS view: <Name>`. |
 | Simulator | all | `carla` | `carla` or `sumo`. |
-| Type | all | carla `chase`, sumo `follow` | carla `spectator`: the CARLA window itself, a top-down snap (at most one). carla `bev` / `chase` / `driver`: an RGB camera rigidly attached to Target, in its own window. sumo `follow`: tracks Target. sumo `fixed`: shows Boundary. |
+| Type | all | carla `chase`, sumo `follow` | carla `spectator`: the CARLA window itself, a top-down snap (at most one). carla `bev` / `chase` / `driver`: an RGB camera on Target (rigidly attached, but for a north-up `bev`), in its own window. sumo `follow`: tracks Target. sumo `fixed`: shows Boundary. |
 | Target | all but sumo `fixed` | `"ego"` | Vehicle id. A camera attaches when the vehicle exists, re-attaches if it is respawned, and waits while it is gone. |
 | Enable | all | true | |
 | Height | carla `spectator`, `bev` | 50 | Metres above the target. |
-| AlignYaw | carla `spectator` | false | Rotate the view with the target's heading. A `bev` camera always turns with the target. |
+| AlignYaw | carla `spectator`, `bev` | spectator false, bev true | Rotate the view with the target's heading. A `bev` with `AlignYaw: false` keeps north (SUMO's +y) at the top, as sumo-gui does. |
 | Offset | carla `bev`, `chase`, `driver` | bev `[0, 0, Height]`, chase `[-6.5, 0, 2.8]`, driver `[0.5, 0, 1.5]` | Camera position in the target's frame, metres: x forward, y right, z up. |
 | Pitch | carla `bev`, `chase`, `driver` | bev -90, chase -12, driver -5 | Degrees; negative looks down. |
 | Size | carla cameras | `[960, 540]` | Image and window size, pixels. |

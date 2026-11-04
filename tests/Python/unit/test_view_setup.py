@@ -131,6 +131,13 @@ def test_bev_height_and_explicit_mount(tmp_path):
     assert cameraMount(v["c"]) == (-4.0, 0.5, 2.0, -20.0)
 
 
+def test_a_bev_turns_with_its_target_unless_told_to_keep_north_up(tmp_path):
+    v = byName(parse(tmp_path, views=[{"Name": "b", "Type": "bev"},
+                                      {"Name": "n", "Type": "bev", "AlignYaw": False},
+                                      {"Name": "c", "Type": "chase"}]))
+    assert v["b"]["AlignYaw"] and not v["n"]["AlignYaw"] and not v["c"]["AlignYaw"]
+
+
 @pytest.mark.parametrize("views,needle", [
     ([{"Simulator": "vissim"}], "Simulator must be carla|sumo"),
     ([{"Type": "follow"}], "Type for carla"),

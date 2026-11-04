@@ -446,7 +446,7 @@ class ConfigHelper:
             "Offset": floats("Offset", 3, mountOffset),
             "Pitch": float(node.get("Pitch", mountPitch)),
             "Height": height,
-            "AlignYaw": self.parserFlag(node, "AlignYaw", False),
+            "AlignYaw": self.parserFlag(node, "AlignYaw", vtype == "bev"),
             "Zoom": float(node.get("Zoom", 600.0)),
             "Boundary": floats("Boundary", 4, []),
             "Display": self.parserFlag(node, "Display", True),

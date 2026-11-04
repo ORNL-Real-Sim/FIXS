@@ -59,6 +59,14 @@ def cameraMount(view):
     return float(x), float(y), float(z), float(view['Pitch'])
 
 
+def northUpPose(actor, view):
+    """A bev camera over ``actor`` at its Offset, image top to the north: SUMO +y, CARLA -y."""
+    import carla
+    x, y, z, pitch = cameraMount(view)
+    loc = actor.get_transform().transform(carla.Location(x, y, z))
+    return carla.Transform(loc, carla.Rotation(pitch=pitch, yaw=-90.0))
+
+
 def bgraOf(image):
     """A carla.Image's pixels as an (h, w, 4) BGRA array, without copying."""
     return np.frombuffer(image.raw_data, dtype=np.uint8).reshape(image.height, image.width, 4)
@@ -373,6 +381,7 @@ class _View:
         self.view = view
         self.slot = _Slot(view)
         self.camera = None
+        self.northUp = False
         self.parentId = None
         self.seqAtAttach = 0
         self.frameSeen = False
@@ -467,6 +476,8 @@ class CarlaViews:
                           % (v.slot.name, v.slot.target, simTime))
                 continue
             if v.camera is not None and v.parentId == actor.id:
+                if v.northUp:
+                    v.camera.set_transform(northUpPose(actor, v.view))
                 continue
             self._drop(v)
             self._attach(v, actor, simTime)
@@ -484,15 +495,21 @@ class CarlaViews:
         if bp.has_attribute('role_name'):
             bp.set_attribute('role_name', ROLE_PREFIX + d['Name'])
         x, y, z, pitch = cameraMount(d)
+        northUp = d['Type'] == 'bev' and not d['AlignYaw']
         try:
-            cam = self._world.spawn_actor(
-                bp, carla.Transform(carla.Location(x, y, z), carla.Rotation(pitch=pitch)),
-                attach_to=actor, attachment_type=carla.AttachmentType.Rigid)
+            if northUp:
+                # Not attached: moved over the target each tick with a fixed heading.
+                cam = self._world.spawn_actor(bp, northUpPose(actor, d))
+            else:
+                cam = self._world.spawn_actor(
+                    bp, carla.Transform(carla.Location(x, y, z), carla.Rotation(pitch=pitch)),
+                    attach_to=actor, attachment_type=carla.AttachmentType.Rigid)
         except RuntimeError as e:
             print("ViewSetup '%s': camera spawn failed (%s)" % (d['Name'], e), file=sys.stderr)
             return
         cam.listen(v.slot.push)
         v.camera = cam
+        v.northUp = northUp
         v.parentId = actor.id
         v.seqAtAttach = v.slot.seq
         v.frameSeen = False
