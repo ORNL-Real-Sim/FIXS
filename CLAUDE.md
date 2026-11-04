@@ -91,21 +91,21 @@ scripts\dispatch\2_core_components.bat
 # VISSIM driver models only
 scripts\dispatch\3_vissim_components.bat
 
-# CarMaker (auto-generates BuildConfig files based on dependencies.yaml)
-powershell -ExecutionPolicy Bypass -File scripts\dispatch\4a_carmaker_components.ps1
+# CarMaker (versions from dependencies.yaml)
+powershell -ExecutionPolicy Bypass -File scripts\dispatch\5a_carmaker_components.ps1
 
-# dSPACE libraries
-powershell -ExecutionPolicy Bypass -File scripts\dispatch\4b_carmaker_dspace.ps1
+# dSPACE libraries + CarMaker-for-dSPACE BuildConfig files (doc/dSPACEDoc.md)
+powershell -ExecutionPolicy Bypass -File scripts\dispatch\5b_carmaker_dspace.ps1
 
 # MATLAB MEX file
-powershell -ExecutionPolicy Bypass -File scripts\dispatch\5_mex_realsim_socket.ps1
+powershell -ExecutionPolicy Bypass -File scripts\dispatch\6_mex_realsim_socket.ps1
 ```
 
 ### Build System Features
 
 - **Automated tool detection**: [scripts/dispatch/detect_tool_paths.ps1](scripts/dispatch/detect_tool_paths.ps1) finds Visual Studio, MATLAB, dSPACE, and CarMaker installations
 - **Version management**: [dependencies.yaml](dependencies.yaml) defines all tool versions; scripts parse this to determine what to build
-- **BuildConfig auto-generation**: CarMaker BuildConfig Python files are dynamically generated for each CarMaker/MATLAB version combination
+- **BuildConfig auto-generation**: `5b_carmaker_dspace.ps1` generates the CarMaker-for-dSPACE BuildConfig Python files for each CarMaker/dSPACE version combination
 - **Modular scripts**: Each subsystem has dedicated build script in [scripts/dispatch/](scripts/dispatch/)
 - **Build logs**: Detailed logs in `scripts/dispatch/build.log` and `scripts/dispatch/build_summary.log`
 - **Debug/Release**: Set `RS_BUILD_CONFIG` environment variable to switch between Debug and Release builds
@@ -479,6 +479,7 @@ Forward-looking decisions for unifying the virtual-environment bridges (CarMaker
 - VISSIM-specific: [doc/VISSIMdoc.md](doc/VISSIMdoc.md)
 - SUMO-specific: [doc/SUMOdoc.md](doc/SUMOdoc.md)
 - CarMaker-specific: [doc/CarMakerDoc.md](doc/CarMakerDoc.md)
+- dSPACE-specific: [doc/dSPACEDoc.md](doc/dSPACEDoc.md)
 
 ---
 
@@ -508,5 +509,5 @@ Forward-looking decisions for unifying the virtual-environment bridges (CarMaker
 - C++ headers (`ConfigHelper.h`, `SocketHelper.h`, `MsgHelper.h`) have no Doxygen comments; C++ API doc is deferred until issue #137 is addressed.
 
 ### Build system
-- `generate_version.ps1` requires git tags to exist; falls back to a placeholder version string otherwise. Mention this when helping with release tagging.
+- The compiled version is the root `VERSION` file (#279), not git tags. A new `dev_vX.Y.Z` train must bump it; CI's detect job fails a train build or PR whose `VERSION` differs.
 - Script numbering in `scripts/dispatch/` (4a, 4b, 5, 6) is non-linear — a known rough edge, not a bug.

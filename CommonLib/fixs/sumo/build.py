@@ -339,9 +339,13 @@ def _report(path):
     resolved = str(Path(path).resolve())
     tmp = Path(handoff + ".tmp")
     tmp.parent.mkdir(parents=True, exist_ok=True)
-    tmp.write_text(json.dumps({"sumocfg": resolved}), encoding="utf-8")
+    from .. import _handoffExtra
+    tmp.write_text(json.dumps({"sumocfg": resolved, **_handoffExtra}), encoding="utf-8")
     os.replace(tmp, handoff)
     print("[fixs.sumo] reported scenario -> " + resolved)
+    if "configOverlay" in _handoffExtra:
+        print("[fixs.sumo] reported a config overlay for this run: "
+              + ", ".join(_handoffExtra["configOverlay"]))
 
 
 #: Conventional file name per output element, so `outputs` can be given as names

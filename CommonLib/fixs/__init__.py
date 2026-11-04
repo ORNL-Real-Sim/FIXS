@@ -80,6 +80,7 @@ import dataclasses
 import math
 import os
 import socket
+import struct
 import sys
 import time as _time
 import typing
@@ -96,21 +97,66 @@ __all__ = [
     'emit', 'transport', 'commandKind',
     'Vehicle', 'MAX_STEER_RAD',
     'Shutdown', 'FixsError', 'NotConnected', 'ProtocolError',
-    'driver',
+    'driver', 'accelerationFromSpeed', 'speedFromAcceleration',
 ]
 
 
-def driver(exchange=None, **options):
+def driver(exchange=None, *, xil=None, control=None, usercontrol=None, **options):
     """A ready-made controller for the ego -- see :mod:`CommonLib.fixs._driver`.
 
-        Controller = fixs.driver()              # no cell
-        Controller = fixs.driver(exchange)      # yours: (vref, dt) -> mps
+        Controller = fixs.driver()                       # no cell
+        Controller = fixs.driver(xil=exchange)           # yours: (vref, dt) or (vref, aref, dt) -> mps
+        Controller = fixs.driver(control=my_control)     # your own step: my_control(ego, dt)
 
     Imported lazily: the driver pulls in fixs.carla and CARLA's agents, which
-    a SUMO-only or CarMaker run has no reason to load.
+    a SUMO-only or CarMaker run has no reason to load. `exchange` and
+    `usercontrol` are the old names, kept for one release (see _driver._oldNames).
     """
     from CommonLib.fixs._driver import driver as _driver
-    return _driver(exchange, **options)
+    return _driver(exchange, xil=xil, control=control, usercontrol=usercontrol, **options)
+
+
+def _driverSet(**options):
+    """fixs.driver.set(startInGear=True): options for every driver built after this call."""
+    from CommonLib.fixs._driver import setDefaults
+    setDefaults(**options)
+
+
+def _driverInstance():
+    """fixs.driver.instance(): the driver FIXS built for this run, from inside control(ego, dt)."""
+    from CommonLib.fixs._driver import instance
+    return instance()
+
+
+driver.set = _driverSet
+driver.instance = _driverInstance
+
+
+_F32 = struct.Struct('<f')
+
+
+def _f32(x):
+    """x rounded to the wire's float32."""
+    return _F32.unpack(_F32.pack(x))[0]
+
+
+def speedFromAcceleration(speed, accelerationDesired, step):
+    """(m/s, m/s^2, s) -> m/s: speed + accelerationDesired * step, at the wire's float32, never below 0."""
+    return max(0.0, _f32(speed + accelerationDesired * step))
+
+
+def accelerationFromSpeed(speed, speedDesired, step):
+    """(m/s, m/s, s) -> m/s^2: the float32 accelerationDesired that
+    speedFromAcceleration turns back into speedDesired exactly, or the nearest
+    one where the float32 wire has none (a speed between 0 and ~0.25 m/s)."""
+    target = _f32(speedDesired)
+    a = _f32((target - speed) / step)
+    ulp = 2.0 ** (math.frexp(a)[1] - 24) if a else 2.0 ** -149
+    for k in (0, 1, -1, 2, -2, 3, -3):
+        b = _f32(a + k * ulp)
+        if speedFromAcceleration(speed, b, step) == target:
+            return b
+    return a
 
 
 #: Full-lock front road-wheel angle [rad]. `steerAngleDesired` is an ANGLE on
@@ -224,10 +270,8 @@ class Vehicle(VehData):
     is available here with no change to this module.
     """
 
-    #: Longitudinal control. TrafficLayer consumes one of these, never both:
-    #: ConfigHelper.cpp:256 requires exactly one in VehicleMessageField, and
-    #: TrafficHelper.cpp:801 reports that SUMO does not implement the
-    #: acceleration form.
+    #: Longitudinal control. SUMO acts on speedDesired; accelerationDesired may
+    #: ride with it for a controller downstream (fixs.driver referenceMode).
     LONGITUDINAL_FIELDS = frozenset({'speedDesired', 'accelerationDesired'})
 
     #: The pedals. CarlaBackend::applyEgoActuation reads throttle, brake AND
@@ -493,6 +537,19 @@ class _Launch:
             return None
         return os.environ.get('FIXS_SUMO_ONLY') != '1'
 
+    def overlayConfig(self, overlay):
+        """Run this run's stack on the scenario yaml with ``overlay`` merged in.
+
+        ``overlay`` maps sections to keys, e.g. ``{'CarlaSetup': {'RealtimePacing': True}}``;
+        mappings merge, anything else replaces. It goes to run_cosim with the scenario
+        that ``fixs.sumo.scenario()`` reports, so call this first. run_cosim merges it
+        into a copy for this run only; ``configPath`` still names the chosen yaml.
+        Each call merges into the earlier ones, by the same rule.
+        """
+        if not isinstance(overlay, dict):
+            raise TypeError('overlayConfig takes a dict of yaml sections')
+        _handoffExtra['configOverlay'] = _mergedOverlay(_handoffExtra.get('configOverlay', {}), overlay)
+
     def __repr__(self):
         if not self.supervised:
             return '<launch: not started by run_cosim>'
@@ -503,6 +560,17 @@ class _Launch:
 #: This run's launch facts. A singleton rather than one module-level name per
 #: variable, so growth is a property here rather than another `fixs.something`.
 launch = _Launch()
+
+# Extra fields for the FIXS_HANDOFF report, e.g. launch.overlayConfig()'s.
+_handoffExtra = {}
+
+
+def _mergedOverlay(base, overlay):
+    out = dict(base)
+    for key, val in overlay.items():
+        out[key] = (_mergedOverlay(out[key], val)
+                    if isinstance(val, dict) and isinstance(out.get(key), dict) else val)
+    return out
 
 
 class _VehicleView(_View):
@@ -1051,12 +1119,7 @@ def _validateCommand(record):
             )
 
     elif kind == 'speedsteer':
-        if written >= Vehicle.LONGITUDINAL_FIELDS:
-            raise ProtocolError(
-                f"'{who}': set speedDesired or accelerationDesired, not both -- "
-                f"TrafficLayer accepts exactly one longitudinal command "
-                f"(ConfigHelper.cpp:256)."
-            )
+        pass                            # one or both longitudinal fields, with or without steer
 
     elif written & Vehicle.STEER_FIELD:
         # Steer alone became representable when it left PEDAL_FIELDS. It is not
@@ -1079,7 +1142,7 @@ def __getattr__(name):
     # side, which a client that is not driving an ego has no reason to load, and
     # sumo reads scenario files a controller may never touch. Bound into the
     # module afterwards, so the cost is once and later lookups are ordinary.
-    if name in ('sumo', 'carla'):
+    if name in ('sumo', 'carla', 'config', 'xil'):
         import importlib
         module = importlib.import_module(f'{__name__}.{name}')
         globals()[name] = module

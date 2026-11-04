@@ -545,6 +545,31 @@ void TrafficHelper::getConfig() {
 	// even when the application layer is the one TrafficLayer talks to.
 	warmupEgoId_v = Config_c->WarmUpEgoIds;
 
+	// the ego is EgoSetup.Id plus every id either layer subscribes by id
+	egoModesOnEntryIds_.clear();
+	if (Config_c->SumoSetup.EgoModesOnEntry) {
+		egoModesOnEntryIds_ = Config_c->WarmUpEgoIds;
+		if (!Config_c->EgoSetup.Id.empty()) egoModesOnEntryIds_.insert(Config_c->EgoSetup.Id);
+
+		std::string ids;
+		for (const auto& id : egoModesOnEntryIds_) ids += (ids.empty() ? "'" : ", '") + id + "'";
+		if (ENABLE_EXT_DYN) {
+			egoModesOnEntryIds_.clear();
+			printf("WARNING: SumoSetup.EgoModesOnEntry is ignored with "
+				"SimulationSetup.EnableExternalDynamics: true.\n");
+		}
+		else if (egoModesOnEntryIds_.empty()) {
+			printf("WARNING: SumoSetup.EgoModesOnEntry is on but no ego id is known "
+				"(EgoSetup.Id or a by-id VehicleSubscription); it does nothing.\n");
+		}
+		else {
+			printf("SumoSetup.EgoModesOnEntry: on entry ego %s gets SpeedMode %s, LaneChangeMode %s\n",
+				ids.c_str(),
+				Config_c->SumoSetup.SpeedModeConfigured ? std::to_string(Config_c->SumoSetup.SpeedMode).c_str() : "(not set, SUMO default kept)",
+				Config_c->SumoSetup.LaneChangeMode >= 0 ? std::to_string(Config_c->SumoSetup.LaneChangeMode).c_str() : "(-1, SUMO default kept)");
+		}
+	}
+
 	// #176: the `all` subscription means every vehicle in the network, unbounded.
 	// If a radius was also configured alongside `all`, it is ignored — warn so the
 	// config author is not surprised.
@@ -815,8 +840,35 @@ int TrafficHelper::sendToSUMO(double simTime, MsgHelper Msg_c) {
 		//uint8_t a = (color) & 0xFF;
 		//traci.vehicle.setColor("flow_0.0", libsumo::TraCIColor(r, g, b, a));
 
-		for (int iV = 0; iV < VehIdInSimulator.size(); iV++) {
-			//traci.vehicle.setSpeedMode(VehIdInSimulator[iV], 31); // default speed mode
+		if (!sumoModesApplied_.empty() || !egoModesOnEntryIds_.empty()) {
+			const unordered_set<string> inNetwork(VehIdInSimulator.begin(), VehIdInSimulator.end());
+
+			// a vehicle that left comes back with SUMO's default modes
+			auto dropAbsent = [&](unordered_set<string>& applied) {
+				for (auto it = applied.begin(); it != applied.end();) {
+					it = inNetwork.count(*it) ? std::next(it) : applied.erase(it);
+				}
+			};
+			dropAbsent(sumoModesApplied_);
+			dropAbsent(egoModesOnEntryApplied_);
+
+			for (const auto& egoId : egoModesOnEntryIds_) {
+				if (!inNetwork.count(egoId) || egoModesOnEntryApplied_.count(egoId) ||
+					externalEgoOwnerOf(egoId) != ExternalEgoOwner::None) {
+					continue;
+				}
+				if (Config_c->SumoSetup.SpeedModeConfigured) {
+					SUMO_TRACI_NAMESPACE::Vehicle::setSpeedMode(egoId, Config_c->SumoSetup.SpeedMode);
+				}
+				if (Config_c->SumoSetup.LaneChangeMode >= 0) {
+					SUMO_TRACI_NAMESPACE::Vehicle::setLaneChangeMode(egoId, Config_c->SumoSetup.LaneChangeMode);
+				}
+				egoModesOnEntryApplied_.insert(egoId);
+				printf("SumoSetup.EgoModesOnEntry: ego '%s' entered at t=%.2f; speedMode %d, laneChangeMode %d\n",
+					egoId.c_str(), simTime,
+					SUMO_TRACI_NAMESPACE::Vehicle::getSpeedMode(egoId),
+					SUMO_TRACI_NAMESPACE::Vehicle::getLaneChangeMode(egoId));
+			}
 		}
 		for (int iV = 0; iV < Msg_c.VehDataSend_um[0].size(); iV++) {
 			string idStr = Msg_c.VehDataSend_um[0][iV].id;
@@ -925,39 +977,14 @@ int TrafficHelper::sendToSUMO(double simTime, MsgHelper Msg_c) {
 					else {
 						SUMO_TRACI_NAMESPACE::Vehicle::setSpeed(idStr, speed); // speed set at (k) essentially will be reflected at (k+1), not considered in the integration
 
-						/*
-						bit0: Regard safe speed
-						bit1 : Regard maximum acceleration
-						bit2 : Regard maximum deceleration
-						bit3 : Regard right of way at intersections(only applies to approaching foe vehicles outside the intersection)
-						bit4 : Brake hard to avoid passing a red light
-						bit5 : Disregard right of way within intersections(only applies to foe vehicles that have entered the intersection).
-						*/
-
-						SUMO_TRACI_NAMESPACE::Vehicle::setSpeedMode(idStr, Config_c->SumoSetup.SpeedMode); // 000000 most checks off
-
-						/*
-						Lane changing, by the same route: SUMO owns the vehicle,
-						so the mode is set here and not by an application. A
-						client has no TraCI connection of its own -- it holds a
-						FIXS port, and reaching for traci from one fails with
-						"Not connected".
-
-						bit0/1: strategic   (reach the lane the route needs)
-						bit2/3: cooperative (make room for others)
-						bit4/5: speed gain  (change lane to go faster)
-						bit6/7: keep right
-						597 is SUMO's default, every motive on. 512 leaves only
-						strategic: follows its route, never changes lane by choice.
-						*/
-						if (Config_c->SumoSetup.LaneChangeMode >= 0) {
-							SUMO_TRACI_NAMESPACE::Vehicle::setLaneChangeMode(idStr, Config_c->SumoSetup.LaneChangeMode);
+						if (sumoModesApplied_.insert(idStr).second) {
+							// speedMode bits: 0 safe speed, 1 max accel, 2 max decel, 3 right of way, 4 red light, 5 ignore foes inside junction
+							SUMO_TRACI_NAMESPACE::Vehicle::setSpeedMode(idStr, Config_c->SumoSetup.SpeedMode);
+							// laneChangeMode bits: 0-1 strategic, 2-3 cooperative, 4-5 speed gain, 6-7 keep right
+							if (Config_c->SumoSetup.LaneChangeMode >= 0) {
+								SUMO_TRACI_NAMESPACE::Vehicle::setLaneChangeMode(idStr, Config_c->SumoSetup.LaneChangeMode);
+							}
 						}
-						//SUMO_TRACI_NAMESPACE::Vehicle::setSpeedMode(idStr, 0); // 000000 most checks off
-						//SUMO_TRACI_NAMESPACE::Vehicle::setSpeedMode(idStr, 24); // 011000
-						//SUMO_TRACI_NAMESPACE::Vehicle::setSpeedMode(idStr, 8); // 001000
-
-						//SUMO_TRACI_NAMESPACE::Vehicle::setSpeedFactor(idStr, 1);
 					}
 
 					// change vehicle color if needed
@@ -1120,6 +1147,99 @@ void TrafficHelper::parseSendMsg(MsgHelper MsgIn_c, MsgHelper& MsgOut_c) {
 	
 }
 
+void TrafficHelper::followInGui(double simTime) {
+	if (guiUnavailable_) {
+		return;
+	}
+	if (!guiViewsInit_) {
+		guiViewsInit_ = true;
+		bool first = true;
+		for (const ViewDef_t& v : Config_c->ViewSetup.Views) {
+			if (v.Simulator != "sumo") continue;
+			// The first sumo view is sumo-gui's own view (viewId resolved later); the rest are added.
+			if (v.Enable) {
+				GuiViewState_t s;
+				s.def = &v;
+				s.viewId = first ? "" : "FIXS view: " + v.Name;
+				guiViews_.push_back(s);
+			}
+			first = false;
+		}
+	}
+	std::vector<GuiViewState_t*> due;
+	for (GuiViewState_t& s : guiViews_) {
+		if (s.failed) continue;
+		if (s.def->Type == "follow"
+			&& std::find(VehIdInSimulator.begin(), VehIdInSimulator.end(), s.def->Target) == VehIdInSimulator.end()) {
+			// sumo-gui drops the track when the vehicle leaves (e.g. a teleport); re-track on return.
+			s.following = false;
+			continue;
+		}
+		if (!s.following) due.push_back(&s);
+	}
+	if (due.empty()) {
+		return;
+	}
+	if (guiMainView_.empty()) {
+		try {
+			std::vector<std::string> ids = SUMO_TRACI_NAMESPACE::GUI::getIDList();
+			if (ids.empty()) {
+				throw std::runtime_error("no view");
+			}
+			guiMainView_ = ids[0];
+		}
+		catch (const std::exception& e) {
+			guiUnavailable_ = true;
+			printf("ViewSetup: SUMO has no GUI view (%s); the sumo views are ignored\n", e.what());
+			return;
+		}
+	}
+	for (GuiViewState_t* s : due) {
+		const ViewDef_t& v = *s->def;
+		const bool added = !s->viewId.empty();
+		const std::string viewId = added ? s->viewId : guiMainView_;
+		if (simTime < s->nextTry) continue;
+		try {
+			if (added) {
+				// sumo-gui creates an added view asynchronously: wait until it reports the view.
+				if (s->giveUpAt < 0) {
+					s->giveUpAt = simTime + kGuiViewWaitS;
+					if (!SUMO_TRACI_NAMESPACE::GUI::hasView(viewId)) {
+						SUMO_TRACI_NAMESPACE::GUI::addView(viewId);
+					}
+				}
+				if (!SUMO_TRACI_NAMESPACE::GUI::hasView(viewId)) {
+					throw std::runtime_error("View '" + viewId + "' is not known");
+				}
+			}
+			if (v.Type == "fixed") {
+				SUMO_TRACI_NAMESPACE::GUI::setBoundary(viewId, v.Boundary[0], v.Boundary[1], v.Boundary[2], v.Boundary[3]);
+				printf("ViewSetup '%s': sumo-gui view '%s' shows [%.0f, %.0f, %.0f, %.0f]\n", v.Name.c_str(),
+					viewId.c_str(), v.Boundary[0], v.Boundary[1], v.Boundary[2], v.Boundary[3]);
+			}
+			else {
+				SUMO_TRACI_NAMESPACE::GUI::trackVehicle(viewId, v.Target);
+				// Zoom once, so a zoom the user picks afterwards is kept.
+				if (!s->zoomSet) {
+					SUMO_TRACI_NAMESPACE::GUI::setZoom(viewId, v.Zoom);
+					s->zoomSet = true;
+				}
+				printf("ViewSetup '%s': sumo-gui view '%s' follows '%s' at zoom %.0f%%\n", v.Name.c_str(),
+					viewId.c_str(), v.Target.c_str(), v.Zoom);
+			}
+			s->following = true;
+		}
+		catch (const std::exception& e) {
+			if (added && simTime < s->giveUpAt) {
+				s->nextTry = simTime + kGuiViewRetryS;
+				continue;
+			}
+			s->failed = true;
+			printf("ViewSetup '%s': sumo-gui view '%s' failed (%s); ignored\n", v.Name.c_str(), viewId.c_str(), e.what());
+		}
+	}
+}
+
 void TrafficHelper::runOneStepSimulation() {
 	if (SUMO_OR_VISSIM.compare("SUMO") == 0) {
 		SUMO_TRACI_NAMESPACE::Simulation::step();
@@ -1157,7 +1277,8 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 
 	*simTime = SUMO_TRACI_NAMESPACE::Simulation::getTime();
 	VehIdInSimulator = SUMO_TRACI_NAMESPACE::Vehicle::getIDList();
-	
+	followInGui(*simTime);
+
 	int nVeh = VehIdInSimulator.size(); // number of vehicles
 
 	if (ENABLE_VERBOSE) {
