@@ -5,6 +5,7 @@
     if fixs.xil.enabled():
         dyno = fixs.xil.dynosim(vehicle={'mass_kg': 2100.0})
         vRef = dyno.exchange(vRef, aRef, dt)
+        steerDeg = dyno.steer(steerRefDeg, dt)    # steering-wheel degrees
 
 FIXS ships the simulated dyno and nothing else. Which dyno answers a run is
 the application's choice: ``Transport: udp`` means it talks to a rig of its
@@ -35,26 +36,26 @@ def replyPort():
     return slotPorts(os.environ.get('FIXS_SLOT') or 0)[1]
 
 
-def dynosim(vehicle=None, dyno=None, driver=None):
-    """The simulated dyno, built from the vehicle, dyno and robot-driver
-    parameters given. Reads no scenario: whether one is in the loop is the
-    caller's question (:func:`enabled`, ``fixs.config.get('xil')``).
+def dynosim(vehicle=None, dyno=None, driver=None, steering=None):
+    """The simulated dyno, built from the vehicle, dyno, robot-driver and
+    steering-robot parameters given. Reads no scenario: whether one is in the
+    loop is the caller's question (:func:`enabled`, ``fixs.config.get('xil')``).
     CommonLib.xil refuses a parameter it does not know, so a typo fails.
     """
-    return _Dyno(vehicle=vehicle, dyno=dyno, driver=driver)
+    return _Dyno(vehicle=vehicle, dyno=dyno, driver=driver, steering=steering)
 
 
 class _Dyno:
     """The simulated bench. ``exchange`` steps it once and returns the speed reached."""
 
-    def __init__(self, vehicle=None, dyno=None, driver=None):
-        from CommonLib.xil.driver import RobotDriver
+    def __init__(self, vehicle=None, dyno=None, driver=None, steering=None):
+        from CommonLib.xil.driver import RobotDriver, SteeringRobot
         from CommonLib.xil.dynosim import Dyno, DynoSim
         from CommonLib.xil.link import LocalLink
         from CommonLib.xil.vehicle import Vehicle
 
         self.sim = DynoSim(Vehicle(**(vehicle or {})), Dyno(**(dyno or {})),
-                           RobotDriver(**(driver or {})))
+                           RobotDriver(**(driver or {})), SteeringRobot(**(steering or {})))
         self.link = LocalLink()
         self.misses = 0
 
@@ -73,6 +74,10 @@ class _Dyno:
             self.misses += 1
             return vref
         return got[0]
+
+    def steer(self, ref_deg, dt):
+        """Step the steering robot once by dt and return the steering-wheel angle it reached [deg]."""
+        return self.sim.steer(ref_deg, dt)
 
     def age(self):
         """Seconds since the bench last answered, or None if it never has."""

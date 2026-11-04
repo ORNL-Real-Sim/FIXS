@@ -16,7 +16,7 @@ import pytest
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__),
                                                 '..', '..', '..')))
 
-from CommonLib.xil.driver import RobotDriver  # noqa: E402
+from CommonLib.xil.driver import RobotDriver, SteeringRobot  # noqa: E402
 from CommonLib.xil.dynosim import Dyno, DynoSim  # noqa: E402
 from CommonLib.xil.vehicle import Vehicle  # noqa: E402
 
@@ -403,3 +403,74 @@ def test_reset_restores_a_known_state():
     assert sim.speed == pytest.approx(7.0)
     assert sim.driver.integral == 0.0
     assert sim.time == 0.0
+
+
+# ------------------------------------------------------------------ steering (#388)
+
+def steer_for(robot, ref, secs, dt=0.01):
+    angle = None
+    for _ in range(int(round(secs / dt))):
+        angle = robot.step(ref, dt)
+    return angle
+
+
+def test_the_steering_robot_settles_on_the_command():
+    assert steer_for(SteeringRobot(), 90.0, 2.0) == pytest.approx(90.0, abs=1e-6)
+
+
+def test_the_steering_rate_is_capped():
+    robot = SteeringRobot(rate_dps=100.0, tau_s=0.0)
+    assert steer_for(robot, 400.0, 1.0) == pytest.approx(100.0, abs=1e-6)
+
+
+def test_the_steering_angle_is_capped():
+    assert steer_for(SteeringRobot(max_deg=200.0), 900.0, 5.0) == pytest.approx(200.0, abs=1e-6)
+
+
+def test_the_lag_lets_the_wheel_trail_a_moving_command():
+    robot = SteeringRobot(rate_dps=1e6, tau_s=0.1)
+    assert steer_for(robot, 10.0, 0.1) == pytest.approx(10.0 * (1.0 - math.exp(-1.0)), rel=1e-3)
+
+
+def test_a_steering_delay_applies_the_command_of_that_long_ago():
+    robot = SteeringRobot(rate_dps=1e6, tau_s=0.0, delay_s=0.1)
+    assert steer_for(robot, 30.0, 0.09) == 0.0
+    assert steer_for(robot, 30.0, 0.02) == pytest.approx(30.0)
+
+
+def test_backlash_holds_the_wheel_until_the_play_is_taken_up():
+    robot = SteeringRobot(rate_dps=1e6, tau_s=0.0, backlash_deg=4.0)
+    assert steer_for(robot, 10.0, 0.1) == pytest.approx(8.0)
+    assert steer_for(robot, 7.0, 0.1) == pytest.approx(8.0)
+    assert steer_for(robot, 4.0, 0.1) == pytest.approx(6.0)
+
+
+def test_steering_reset_returns_the_wheel_to_centre():
+    robot = SteeringRobot(delay_s=0.05)
+    steer_for(robot, 45.0, 1.0)
+    robot.reset()
+    assert robot.angle_deg == 0.0 and steer_for(robot, 0.0, 0.1) == 0.0
+
+
+def test_a_bad_steering_robot_is_rejected():
+    with pytest.raises(ValueError):
+        SteeringRobot(rate_dps=0.0)
+    with pytest.raises(ValueError):
+        SteeringRobot(backlash_deg=-1.0)
+
+
+def test_the_dyno_steers_without_touching_the_speed():
+    sim = DynoSim()
+    for _ in range(100):
+        sim.step(5.0, 0.01)
+    speed = sim.speed
+    assert sim.steer(20.0, 0.01) != 0.0
+    assert sim.speed == speed
+
+
+def test_the_steering_ratio_converts_both_ways():
+    car = Vehicle(steering_ratio=15.0)
+    assert car.steering_wheel_deg(math.radians(10.0)) == pytest.approx(150.0)
+    assert car.road_wheel_rad(150.0) == pytest.approx(math.radians(10.0))
+    with pytest.raises(ValueError):
+        Vehicle(steering_ratio=0.0)
