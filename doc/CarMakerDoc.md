@@ -173,7 +173,7 @@ User_Init (void)
     return 0;
 }
 ```
-- Modify User_TestRun_Start_atEnd
+- Modify User_TestRun_Start_atEnd. The `SimCore.State` gate depends on the variant. In **src** (office), CarMaker also calls this hook at `SCState_Start` during a preprocessing pass, and starting FIXS there opens a second connection that TrafficLayer never services, so the co-sim hangs. Office therefore gates on `SCState_StartWait`. Headless (`-screen`) office builds never get past `SCState_Start` here, so they must be built with `RS_HEADLESS` defined. In **src_cm4sl**, the state only reaches `SCState_Start`, so replace the `#ifdef RS_HEADLESS ... #endif` lines below with the single `SCState_Start` line. `CarMaker/patch_user_c.ps1` picks the variant from the folder name, or you can pass `-Variant Office|CM4SL`.
 ```c++
 int
 User_TestRun_Start_atEnd (void)
@@ -186,7 +186,11 @@ User_TestRun_Start_atEnd (void)
     // ===========================================================================
     // 			 RealSim 
     // ===========================================================================	   
+#ifdef RS_HEADLESS
     if (VirEnv_isVeryFirstStep && SimCore.State >= SCState_Start) {
+#else
+    if (VirEnv_isVeryFirstStep && SimCore.State >= SCState_StartWait) {
+#endif
         VirEnv_initialization(VirEnv_c, RS_configFile, RS_signalTable);
     }
     // ===========================================================================
