@@ -1,6 +1,7 @@
 #include "ConfigHelper.h"
 #include "PlatformCompat.h"   // #65: windows.h/shlwapi live behind this now
 #include <algorithm>
+#include <cctype>
 
 using namespace std;
 
@@ -1037,7 +1038,39 @@ int ConfigHelper::parseConfig(string configName) {
 	// ===========================================================================
 	parseViewSetup(config["ViewSetup"]);
 
+	// A subscription with no ip counts as remote, so it keeps listening on all interfaces.
+	{
+		bool allLocal = true;
+		const Subscription_t* subLists[] = {
+			&ApplicationSetup.VehicleSubscription, &ApplicationSetup.SignalSubscription,
+			&ApplicationSetup.DetectorSubscription, &XilSetup.VehicleSubscription,
+			&XilSetup.SignalSubscription, &XilSetup.DetectorSubscription };
+		for (const Subscription_t* subs : subLists) {
+			for (const auto& sub : *subs) {
+				const auto& ips = std::get<2>(sub);
+				if (ips.empty()) allLocal = false;
+				for (const auto& ip : ips) allLocal = allLocal && isLoopbackAddress(ip);
+			}
+		}
+		allLocal = allLocal && isLoopbackAddress(CarMakerSetup.CarMakerIP)
+			&& isLoopbackAddress(CarlaSetup.CarlaClientIP);
+		// The CarMaker side dials this key when set (CarMaker/RealSimSetCarMakerConfig.py).
+		YAML::Node cmNode = config["CarMakerSetup"];
+		if (cmNode && cmNode["TrafficLayerIP"]) {
+			allLocal = allLocal && isLoopbackAddress(parserString(cmNode, "TrafficLayerIP"));
+		}
+		ClientsAllLocal = allLocal;
+	}
+
 	return 0;
+}
+
+bool ConfigHelper::isLoopbackAddress(const std::string& addr) {
+	std::string a = addr;
+	a.erase(0, a.find_first_not_of(" \t"));
+	a.erase(a.find_last_not_of(" \t") + 1);
+	std::transform(a.begin(), a.end(), a.begin(), [](unsigned char c) { return (char)std::tolower(c); });
+	return a == "localhost" || a == "::1" || a.rfind("127.", 0) == 0;
 }
 
 namespace {

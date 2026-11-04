@@ -578,6 +578,11 @@ int main(int argc, char* argv[]) {
 		printf("Read configuration file success\n");
 	}
 
+	Sock_c.ListenLoopbackOnly = Config_c.ClientsAllLocal;
+	printf(Config_c.ClientsAllLocal
+		? "Listening on 127.0.0.1 only: every client address in the config is local.\n"
+		: "Listening on all interfaces: the config names a non-local client address.\n");
+
 	{
 		FILE* f = fopen(MasterLogName.c_str(), "a");
 		fprintf(f, "\nConfigFile %s\n", configPath.c_str());

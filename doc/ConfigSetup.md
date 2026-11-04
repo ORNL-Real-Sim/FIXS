@@ -112,6 +112,13 @@ On Windows the resolved folder is supplied to `SetDllDirectory`. On Linux the fo
 **DetectorSubscription** supports:
 - `detector`: Subscribe by detector pattern. Attributes: `pattern`, `name`, or `id` (list).
 
+A subscription's `ip` is the address its client dials to reach TrafficLayer. When every such
+address in the config is local (`127.x`, `localhost`) — subscription `ip`s in ApplicationSetup
+and XilSetup, `CarMakerIP`, `CarlaClientIP` and `CarMakerSetup.TrafficLayerIP` — TrafficLayer
+listens on 127.0.0.1 only, so Windows Firewall does not prompt. Any other address makes it
+listen on all interfaces, which a client on another computer needs; TrafficLayer prints which
+one it chose at startup.
+
 Example subscription block:
 
 ```yaml

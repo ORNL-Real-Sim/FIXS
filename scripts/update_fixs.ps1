@@ -248,16 +248,8 @@ function Select-Release($releases) {
 }
 
 function Grant-TrafficLayerFirewall($exe) {
-    # TrafficLayer listens on all interfaces (a remote XIL client has to reach
-    # it), so the first launch from a new path pops Windows Defender Firewall's
-    # "allow access" dialog. That rule is keyed on the exe PATH, so every fresh
-    # app checkout asked again mid co-sim. Creating it here, once per install,
-    # moves the question to setup. Creating a rule needs admin: elevated we just
-    # add it; unelevated and interactive we ask, and a yes raises one UAC
-    # prompt; otherwise we print the one command to run. Never fails the
-    # install: the bundle is complete either way, and a local-only run works
-    # without the rule. Windows-only concern, so update_fixs.sh has no
-    # counterpart.
+    # Only remote clients need this: TrafficLayer listens on 127.0.0.1 alone when every
+    # config address is local, and Windows does not prompt for that. Never fails the install.
     if (-not (Test-Path $exe)) { return }
     $hasRule = {
         @(Get-NetFirewallApplicationFilter -Program $exe -ErrorAction SilentlyContinue |
@@ -276,9 +268,9 @@ function Grant-TrafficLayerFirewall($exe) {
             Start-Process netsh -ArgumentList $netshArgs -Wait -NoNewWindow | Out-Null
         } elseif ([Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
             Write-Host ""
-            Write-Host "Firewall: TrafficLayer.exe has no inbound rule yet, so Windows will pop an" -ForegroundColor Yellow
-            Write-Host "  'allow access' dialog during the first co-sim run. Adding the rule now" -ForegroundColor Yellow
-            Write-Host "  needs administrator approval (one Windows UAC prompt)." -ForegroundColor Yellow
+            Write-Host "Firewall: TrafficLayer.exe has no inbound rule yet. Local co-sims do not need one;" -ForegroundColor Yellow
+            Write-Host "  an XIL client on another computer does, or Windows asks on its first run." -ForegroundColor Yellow
+            Write-Host "  Adding the rule now needs administrator approval (one Windows UAC prompt)." -ForegroundColor Yellow
             $answer = Read-Host "Add the firewall rule now? [Y/n]"
             if ($answer -notmatch '^\s*[nN]') {
                 try {
@@ -297,8 +289,8 @@ function Grant-TrafficLayerFirewall($exe) {
         Write-Host "Firewall: could not check/add a rule ($($_.Exception.Message))."
     }
     Write-Host ""
-    Write-Host "Firewall: no inbound rule for TrafficLayer.exe. Windows will ask to allow it on" -ForegroundColor Yellow
-    Write-Host "  the first co-sim run. To set it up once instead, run this in an Administrator prompt:" -ForegroundColor Yellow
+    Write-Host "Firewall: no inbound rule for TrafficLayer.exe. Local co-sims do not need one; for an" -ForegroundColor Yellow
+    Write-Host "  XIL client on another computer, run this once in an Administrator prompt:" -ForegroundColor Yellow
     Write-Host "    netsh $netshArgs"
     Write-Host ""
 }

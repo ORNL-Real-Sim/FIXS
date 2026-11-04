@@ -463,7 +463,7 @@ int SocketHelper::initConnection(std::string errorLogName) {
 			/* Construct local address structure */
 			memset(&selfServerAddr[iS], 0, sizeof(selfServerAddr[iS]));   /* Zero out structure */
 			selfServerAddr[iS].sin_family = AF_INET;                /* Internet address family */
-			selfServerAddr[iS].sin_addr.s_addr = htonl(INADDR_ANY); /* Any incoming interface */
+			selfServerAddr[iS].sin_addr.s_addr = htonl(ListenLoopbackOnly ? INADDR_LOOPBACK : INADDR_ANY);
 			selfServerAddr[iS].sin_port = htons(selfServerPort[iS]);      /* Local port */
 
 #ifndef WIN32
