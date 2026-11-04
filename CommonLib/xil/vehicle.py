@@ -133,8 +133,12 @@ class Vehicle(object):
     ``Vehicle(mass_kg=1800, front_share=0.5)`` without having to know which.
     """
 
-    def __init__(self, mass_kg=2100.0, powertrain=None, driveline=None, **kw):
+    def __init__(self, mass_kg=2100.0, steering_ratio=15.0, powertrain=None, driveline=None, **kw):
+        if steering_ratio <= 0.0:
+            raise ValueError('steering_ratio must be positive')
         self.mass_kg = mass_kg
+        #: Steering-wheel angle per road-wheel angle (#388). A dyno's steering is steering-wheel degrees.
+        self.steering_ratio = steering_ratio
         self.powertrain = powertrain or Powertrain(**_take(kw, Powertrain))
         self.driveline = driveline or Driveline(**_take(kw, Driveline))
         if kw:
@@ -154,6 +158,14 @@ class Vehicle(object):
     @property
     def torque_bandwidth_Hz(self):
         return self.driveline.torque_bandwidth_Hz
+
+    def steering_wheel_deg(self, road_wheel_rad):
+        """The steering-wheel angle [deg] that turns the road wheels road_wheel_rad."""
+        return math.degrees(road_wheel_rad) * self.steering_ratio
+
+    def road_wheel_rad(self, steering_wheel_deg):
+        """The road-wheel angle [rad] a steering-wheel angle [deg] gives."""
+        return math.radians(steering_wheel_deg) / self.steering_ratio
 
     def axle_torque(self, throttle, omega_front, omega_rear):
         return self.powertrain.torque(throttle, omega_front, omega_rear,

@@ -1,4 +1,4 @@
-"""The robot driver on the bench (#323).
+"""The robot drivers on the bench: pedals (#323) and steering wheel (#388).
 
 A bench does not drive itself. Somebody works the pedal: on a real emissions cell
 that is a driver robot chasing a speed trace, and here it is this.
@@ -15,6 +15,7 @@ matters when the bench is asked to PREDICT hardware, not when it is used to buil
 a coupling.
 """
 
+import math
 from collections import deque
 
 
@@ -195,3 +196,60 @@ class RobotDriver(object):
         self.pedal = max(-self.max_brake,
                          min(self.max_throttle, kp * err + ki * self.integral))
         return (self.pedal, 0.0) if self.pedal >= 0.0 else (0.0, -self.pedal)
+
+
+class SteeringRobot(object):
+    """The steering robot: turns the steering wheel toward a commanded angle (#388).
+
+    Angles are steering-wheel degrees, the unit a dyno wire carries. Each step
+    the command passes, in order, a transport delay, the angle limit, a
+    first-order lag, the rate limit and the column's backlash. It tracks a
+    reference; a person at the wheel, who may disagree with it, is not this.
+
+    The defaults are a placeholder robot, not a measured one, like the pedal PI.
+    """
+
+    def __init__(self, max_deg=540.0, rate_dps=360.0, tau_s=0.05, delay_s=0.0,
+                 backlash_deg=0.0):
+        if max_deg <= 0.0 or rate_dps <= 0.0 or tau_s < 0.0 or delay_s < 0.0 \
+                or backlash_deg < 0.0:
+            raise ValueError('SteeringRobot: max_deg and rate_dps must be positive, '
+                             'tau_s, delay_s and backlash_deg not negative')
+        self.max_deg = max_deg
+        self.rate_dps = rate_dps
+        self.tau_s = tau_s
+        self.delay_s = delay_s
+        self.backlash_deg = backlash_deg
+        self.reset()
+
+    def reset(self):
+        #: The robot's own angle, before the column's backlash.
+        self.motor_deg = 0.0
+        #: The steering-wheel angle reached: what a dyno reports.
+        self.angle_deg = 0.0
+        self._clock = 0.0
+        self._sent = deque()
+        self._applied = 0.0
+
+    def step(self, ref_deg, dt):
+        """Returns the steering-wheel angle reached after dt, in degrees."""
+        if dt <= 0.0:
+            raise ValueError('dt must be positive')
+        target = float(ref_deg)
+        if self.delay_s > 0.0:
+            self._sent.append((self._clock, target))
+            due = self._clock - self.delay_s + 1e-9
+            self._clock += dt
+            while self._sent and self._sent[0][0] <= due:
+                self._applied = self._sent.popleft()[1]
+            target = self._applied
+        target = max(-self.max_deg, min(self.max_deg, target))
+        want = target - self.motor_deg
+        if self.tau_s > 0.0:
+            want *= 1.0 - math.exp(-dt / self.tau_s)
+        cap = self.rate_dps * dt
+        self.motor_deg += max(-cap, min(cap, want))
+        half = 0.5 * self.backlash_deg
+        # The wheel moves only once the motor has taken up the play on that side.
+        self.angle_deg = min(max(self.angle_deg, self.motor_deg - half), self.motor_deg + half)
+        return self.angle_deg
