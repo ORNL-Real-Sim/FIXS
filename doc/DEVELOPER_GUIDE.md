@@ -87,11 +87,14 @@ Documentation files including simulator-specific guides:
 - `VISSIMdoc.md` - VISSIM interface documentation
 - `SUMOdoc.md` - SUMO interface documentation
 - `CarMakerDoc.md` - CarMaker interface documentation
+- `dSPACEDoc.md` - dSPACE (SCALEXIO) build and run documentation
 - `CARLAdoc.md` - CARLA interface documentation
 
 #### **ProprietaryFiles/**
 Proprietary or licensed files not for public distribution. Includes:
-- `buildRS_2024a.bat` - Builds Real-Sim MEX files for MATLAB R2024a
+- `CM11_proj/`, `CM13_proj/` - CarMaker projects, including CarMaker for dSPACE sources and ConfigurationDesk projects
+- `VISSIMserver/` - VISSIM driver model DLL sources
+- `dSPACE/` - ConfigurationDesk and ControlDesk projects
 
 #### **.github/**
 GitHub-specific configuration (workflows, issue templates, CI/CD).
