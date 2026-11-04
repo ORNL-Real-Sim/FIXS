@@ -292,7 +292,12 @@ class _Display(threading.Thread):
                     self.error = e
                     print('ViewSetup: display error (%s)' % e, file=sys.stderr)
                 time.sleep(0.05)
-        cv2.destroyAllWindows()
+        # Only this thread's windows: destroying another thread's HighGUI window deadlocks.
+        for s in self._slots:
+            try:
+                cv2.destroyWindow(windowTitle(s.name))
+            except cv2.error:
+                pass                              # closed by hand already
         cv2.waitKey(1)
 
     def stop(self):

@@ -588,6 +588,7 @@ def main(argv=None):
                         d.positionX, d.positionY, d.positionZ = es.x, es.y, es.z
                         d.heading = es.heading
                         d.grade = es.grade
+                        d.lightIndicators = VirEnvCore.encodeLightBits(es.brake, es.indL, es.indR)
                         core.Msg_c.VehDataSend_um.setdefault(0, []).append(d)
                         if dataLog.isOpen() and logWanted(d.id):
                             dataLog.logVehicle(simTime, d)
