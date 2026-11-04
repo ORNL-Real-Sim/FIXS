@@ -35,6 +35,7 @@ from CommonLib.VirEnv.FixsProtocol import kFeedPeriodS, onFeedBoundary   # noqa:
 from CommonLib.VirEnv.EgoControllerHost import (                        # noqa: E402
     loadController, runController)
 from CommonLib.VirEnv.IVirEnvBackend import EgoState, Pose, kNoHandle    # noqa: E402
+from CommonLib.VirEnv.PlotView import PlotWindows                        # noqa: E402
 from CommonLib.VirEnv.VirEnvCore import VirEnvCore                       # noqa: E402
 
 if __package__:
@@ -296,6 +297,7 @@ def main(argv=None):
                   "No physics ego is spawned.")
     lastAdvisory = cs['EgoTargetSpeed']
     views = CarlaViews(world, config.View_setup['Views'], carlaStep)
+    plots = PlotWindows(config.Plot_setup['Plots'] or [])
     for v in config.View_setup['Views']:
         if v['Simulator'] == 'carla' and v['Type'] == 'spectator' and not v['Implied']:
             print("ViewSetup '%s': the CARLA window follows '%s' (%s)" % (
@@ -306,6 +308,28 @@ def main(argv=None):
             return backend.egoActor()
         h = core.mappedVehicles().get(target)
         return None if h is None else backend.actorOf(h)
+
+    def _plotSample(target):
+        """PlotSetup values for ``target``: its record (with the controller's command for the ego),
+        what PhysX applied to a physics ego, and the controller's fixs.plot values."""
+        from CommonLib import fixs as _fixs
+        out = {}
+        try:
+            rec = _fixs.vehicle.get(target)
+        except Exception:
+            rec = core.Msg_c.VehDataRecv_um.get(target)
+        if rec is not None:
+            for name in config.simulation_setup['VehicleMessageField'] or []:
+                v = getattr(rec, name, None)
+                if isinstance(v, (int, float)):
+                    out[name] = float(v)
+        if virEnvOwnsEgo and target == egoId and backend.egoActor() is not None:
+            ego = backend.egoActor()
+            ctl = ego.get_control()
+            wheels = (carla.VehicleWheelLocation.FL_Wheel, carla.VehicleWheelLocation.FR_Wheel)
+            out['steerAngle'] = math.radians(sum(ego.get_wheel_steer_angle(w) for w in wheels) / 2.0)
+            out['throttle'], out['brake'] = ctl.throttle, ctl.brake
+        return out
 
     def _hudSample(target):
         """The HUD's values for ``target`` at the frame just ticked; None where there is no data."""
@@ -522,6 +546,14 @@ def main(argv=None):
                 _t0 = time.monotonic()
                 views.sampleHud(frameId, _hudSample)
                 phase["views"] += time.monotonic() - _t0
+            if plots.active():
+                from CommonLib.fixs import plot as _appPlot
+                appValues, appMarks = _appPlot.take()
+                sample = {}
+                for target in plots.targets():
+                    sample[target] = _plotSample(target)
+                    sample[target].update(('app.' + k, v) for k, v in appValues.items())
+                plots.add(simTime, sample, appMarks)
 
             # SUMO <-> CARLA elevation audit, once per exchange. Here rather than
             # inside setVehiclePose because it asks whether the two MAPS agree,
@@ -556,6 +588,7 @@ def main(argv=None):
                         d.positionX, d.positionY, d.positionZ = es.x, es.y, es.z
                         d.heading = es.heading
                         d.grade = es.grade
+                        d.lightIndicators = VirEnvCore.encodeLightBits(es.brake, es.indL, es.indR)
                         core.Msg_c.VehDataSend_um.setdefault(0, []).append(d)
                         if dataLog.isOpen() and logWanted(d.id):
                             dataLog.logVehicle(simTime, d)
@@ -687,10 +720,12 @@ def main(argv=None):
         if poseLog is not None:
             poseLog.close()
         views.close()
+        plots.close()
         if virEnvOwnsEgo:
             backend.destroyEgo()
     finally:
         views.close()
+        plots.close()
         core.shutdown()
         settings = world.get_settings()
         if settings.synchronous_mode:

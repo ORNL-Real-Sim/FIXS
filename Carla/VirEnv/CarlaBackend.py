@@ -471,6 +471,12 @@ class CarlaBackend(IVirEnvBackend):
             self._lastEgoPose = (out.x, out.y, out.z, out.heading)
         out.grade = sTf.rotation.pitch * math.pi / 180.0
         out.speed = math.sqrt(vel.x * vel.x + vel.y * vel.y)
+        # The lights a controller set on the ego, and its brake as applied: SUMO shows them
+        # when VehicleMessageField has lightIndicators.
+        lights = int(self._egoActor.get_light_state())
+        out.indL = bool(lights & int(carla.VehicleLightState.LeftBlinker))
+        out.indR = bool(lights & int(carla.VehicleLightState.RightBlinker))
+        out.brake = self._egoActor.get_control().brake > 0.0
         return True
 
     def noteWorldTicked(self):
