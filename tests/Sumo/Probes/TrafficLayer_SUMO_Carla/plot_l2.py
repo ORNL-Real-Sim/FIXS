@@ -1,6 +1,6 @@
 """L2 ego speed: commanded advisory vs Carla‑measured vs SUMO‑view, from ONE log.
 
-Reads _datalog/l2.csv (run_sumo_carla_l2.bat), which now logs the ego twice per
+Reads _datalog/l2.csv (run_sumo_carla.bat l2), which now logs the ego twice per
 feed on a SINGLE clock:
   id 'ego'      = Carla readback   (speed = measured, speedDesired = the external command)
   id 'ego_sumo' = SUMO's report    (speed = SUMO getSpeed)
@@ -34,7 +34,7 @@ def load(path):
 def main():
     csv_path = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else DL / "l2.csv"
     if not csv_path.is_file():
-        print(f"missing {csv_path} -- run run_sumo_carla_l2.bat first"); return 2
+        print(f"missing {csv_path} -- run run_sumo_carla.bat l2 first"); return 2
     try:
         import plotly.graph_objects as go
         from plotly.subplots import make_subplots

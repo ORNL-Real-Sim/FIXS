@@ -23,7 +23,7 @@ dispatch.bat
 ```
 
 This single command will:
-- Generate the version header (RealSimVersion.h) from git tags
+- Generate the version header (RealSimVersion.h) from the `VERSION` file
 - Initialize the clone: submodules, native deps (libsumo, libcarla), yaml-cpp
 - Build core components (TrafficLayer, VirtualEnvironment)
 - Build VISSIM driver model DLLs
@@ -188,8 +188,8 @@ dispatch.bat
 The release build process executes the following steps:
 
 0. **Version Header** (`generate_version.ps1`)
-   - Generates `CommonLib/RealSimVersion.h` from git tags
-   - Falls back to existing header or default (0.0.0) if git is unavailable
+   - Generates `CommonLib/RealSimVersion.h`: the version from the tracked `VERSION` file, the commit and a `git describe` label from git
+   - Fails the build if `VERSION` is missing or not `X.Y.Z`; without git, commit and label are `UNKNOWN`
    - Output: `CommonLib/RealSimVersion.h` (auto-generated, not committed)
 
 1. **External Libraries** (`1_external_libraries.bat`)
@@ -201,7 +201,6 @@ The release build process executes the following steps:
 2. **Core Components** (`2_core_components.bat`)
    - `TrafficLayer.exe` - Main interface executable
    - `CoordMerge.exe` - Coordinated merge controller
-   - `VirtualEnvironment.lib` - Shared library for virtual environment integration
    - Output: Component directories + copied to `build/`
 
 3. **VISSIM Components** (`3_vissim_components.bat`)
@@ -209,25 +208,32 @@ The release build process executes the following steps:
    - `DriverModel_RealSim_legacy.dll` - VISSIM driver model, legacy/frozen (long API, VISSIM ≤ 2020)
    - Output: `ProprietaryFiles/VISSIMserver/` + copied to `build/`
 
-4. **CarMaker Components** (`5a_carmaker_components.ps1`)
-   - Generates BuildConfig Python files for each CarMaker version
+4. **VirtualEnvironment** (`4_virtual_environment.bat`)
+   - `VirtualEnvironment.lib` - Shared library for virtual environment integration
+
+**4c. Carla VirtualEnvironment** (`4c_carla_virenv.ps1`) - Optional
+   - `VirCarlaEnv.exe` - skipped when Carla is not configured
+
+5. **CarMaker Components** (`5a_carmaker_components.ps1`)
    - `CarMaker.win64.exe` - CarMaker Office executables
    - `libcarmaker4sl.mexw64` - CarMaker for Simulink MEX files
    - Built for each version in `dependencies.yaml` (e.g., CM11, CM13)
-   - Output: `CarMaker/CM*/` + copied to `build/CarMaker/`
+   - Output: `ProprietaryFiles/CM*_proj/` + copied to `build/CarMaker/CM*/`
 
-5. **dSPACE Libraries** (`5b_carmaker_dspace.ps1`) - Optional
+**5b. dSPACE Libraries** (`5b_carmaker_dspace.ps1`) - Optional
    - `libRealSimDsLib_2024a_CM*.a` - Version-specific dSPACE libraries
+   - Generates `CarMaker/RS_CM*_BuildConfig_2024a.py` for CarMaker for dSPACE
    - Only built if dSPACE ConfigurationDesk is detected
    - Built for each CarMaker version
-   - Output: `CommonLib/` + copied to `build/CarMaker/`
+   - Output: `build/CommonLib/` + copied to `build/CarMaker/CM*/`
+   - See [dSPACEDoc.md](dSPACEDoc.md)
 
 6. **MEX RealSimSocket** (`6_mex_realsim_socket.ps1`) - Optional
    - `RealSimSocket.mexw64` - MATLAB interface for socket communication
    - Only built if MATLAB is detected
-   - Output: `CommonLib/` + copied to `build/`
+   - Output: `build/CommonLib/`
 
-7. **Build Information** (`6_build_info.ps1`)
+7. **Build Information** (`7_build_info.ps1`)
    - Generates `BUILD_INFO.txt` with version information
    - Lists all built components and their versions
    - Output: `build/BUILD_INFO.txt`
@@ -247,15 +253,17 @@ build/
 ├── RealSim*.m                        # MATLAB helper scripts
 ├── CommonLib/                        # Helper libraries and headers
 │   ├── *.h                           # Header files
-│   └── *.cpp                         # Source files (selective)
+│   ├── *.cpp                         # Source files (selective)
+│   └── libRealSimDsLib_*.a           # dSPACE libraries (if built)
 └── CarMaker/                         # CarMaker components
     ├── CM11/                         # CarMaker 11.1.2 build
     │   ├── CarMaker.win64.exe
-    │   └── libcarmaker4sl.mexw64
-    ├── CM13/                         # CarMaker 13.1.3 build
-    │   ├── CarMaker.win64.exe
-    │   └── libcarmaker4sl.mexw64
-    └── libRealSimDsLib_*.a           # dSPACE libraries (if built)
+    │   ├── libcarmaker4sl.mexw64
+    │   └── libRealSimDsLib_*_CM11_1_2.a  # dSPACE library (if built)
+    └── CM13/                         # CarMaker 13.1.3 build
+        ├── CarMaker.win64.exe
+        ├── libcarmaker4sl.mexw64
+        └── libRealSimDsLib_*_CM13_1_3.a  # dSPACE library (if built)
 ```
 
 ## Automated Release CI & Proprietary Binaries Bundle
@@ -269,17 +277,19 @@ The hosted path is made proprietary-aware by the `RS_FIXS_AUTOMATION` environmen
 
 ### Rolling release channels
 
-| Branch | Rolling prerelease | Notes |
-|--------|--------------------|-------|
-| `main` | `stable` | release tier |
-| `beta_vX.Y.Z` | `vX.Y.Z-beta` | test tier |
-| `dev_vX.Y.Z` | `vX.Y.Z-alpha` | dev tier (e.g. `dev_v0.9.0` → `v0.9.0-alpha`, SDK-free VirtualEnvironment, #174) |
+| Branch | Rolling prerelease | Permanent release | Notes |
+|--------|--------------------|-------------------|-------|
+| `main` | `stable` | `vX.Y.Z` from `VERSION`, once per version | release tier |
+| `beta_vX.Y.Z` | `vX.Y.Z-beta` | — | test tier |
+| `dev_vX.Y.Z` | `vX.Y.Z-alpha` | — | dev tier (e.g. `dev_v0.9.0` → `v0.9.0-alpha`, SDK-free VirtualEnvironment, #174) |
 
 `scripts/dispatch/release_channel.ps1` owns this mapping. Each channel also has a
 Read the Docs version under the same name (see the Developer Guide's documentation
 section).
 
 On every push to a release branch the pipeline builds the public core, overlays the matching proprietary bundle, packs one canonical zip, and (re)publishes the rolling prerelease anchored to that commit. Pull requests build + package only (no publish), and upload the zip as a workflow artifact for inspection.
+
+On `main` the same zips are also published as a permanent `vX.Y.Z` release (the version in `VERSION`) the first time that version reaches `main`; it is never moved, and it becomes the repo's Latest release. Later pushes with the same `VERSION` (a docs fix, say) only update `stable`. Consumers install it with `run_cosim.bat --update-fixs vX.Y.Z`.
 
 ### The proprietary-binaries bundle
 
@@ -316,7 +326,7 @@ Whenever `ProprietaryFiles` moves, a fresh bundle must be built and published on
 ### Notes
 
 - **Bundle contents** (the files `pack_binaries.ps1` collects): both VISSIM DLLs (`DriverModel_RealSim.dll` + `_legacy.dll`), per-CM `CarMaker.win64.exe` + `libcarmaker4sl.mexw64`, the dSPACE `libRealSimDsLib_*.a`, and `RealSimSocket.mexw64`.
-- **Versioning** uses `git describe --match 'v[0-9]*'` so the rolling non-semver tag can't shadow the semver tag (which previously fell back to `0.0.0`). `CommonLib/RealSimVersion.h` is regenerated at build time by a pre-build step in `TrafficLayer.vcxproj`.
+- **Versioning**: the compiled version is the `VERSION` file at the repo root; bump it when a new `dev_vX.Y.Z` train is cut. CI fails a `dev_vX.Y.Z` / `beta_vX.Y.Z` build (or a PR into one) whose `VERSION` is not `X.Y.Z`. Git tags only feed the `REALSIM_GIT_TAG` label (#279). `CommonLib/RealSimVersion.h` is regenerated at build time by a pre-build step in `TrafficLayer.vcxproj`.
 - **`pack_binaries.ps1 -Publish`** works under both PowerShell 7 (`pwsh`, used by CI) and stock Windows PowerShell 5.1.
 
 ## Development Builds
@@ -345,21 +355,20 @@ scripts\dispatch\3_vissim_components.bat
 ```
 Builds VISSIM driver model DLLs. Run this when modifying VISSIM interface code.
 
-#### 4. CarMaker Components Only
+#### 5a. CarMaker Components Only
 ```batch
 powershell -ExecutionPolicy Bypass -File scripts\dispatch\5a_carmaker_components.ps1
 ```
 Builds CarMaker executables. Automatically:
 - Reads CarMaker versions from `dependencies.yaml`
-- Generates BuildConfig Python files
 - Builds for each detected version
 - Run this when modifying CarMaker integration code
 
-#### 5. dSPACE Libraries Only
+#### 5b. dSPACE Libraries Only
 ```batch
 powershell -ExecutionPolicy Bypass -File scripts\dispatch\5b_carmaker_dspace.ps1
 ```
-Builds dSPACE libraries for CarMaker HIL integration. Run this when modifying dSPACE interface code.
+Builds dSPACE libraries for CarMaker HIL integration and the CarMaker-for-dSPACE BuildConfig files. Run this when modifying dSPACE interface code. Details: [dSPACEDoc.md](dSPACEDoc.md).
 
 #### 6. MEX RealSimSocket Only
 ```batch
@@ -445,7 +454,7 @@ When building components in Debug mode, make sure to link against the Debug libr
 ```
 scripts/
 ├── initialize_fixs.ps1              # Fresh-clone setup (submodules, native deps, yaml-cpp)
-├── generate_version.ps1             # Generate RealSimVersion.h from git tags
+├── generate_version.ps1             # Generate RealSimVersion.h from VERSION
 ├── update_fixs.ps1                  # CONSUMER-side: install a published release (Windows)
 ├── update_fixs.sh                   # CONSUMER-side: install a published release (POSIX)
 ├── build_libsumo.ps1                # STANDALONE: Build libsumo DLLs from SUMO source
@@ -497,9 +506,9 @@ The `detect_tool_paths.ps1` script automatically locates installed tools:
 - Prioritizes version from `dependencies.yaml`
 
 **dSPACE Detection:**
-- Searches Program Files for ConfigurationDesk
-- Locates version matching `dependencies.yaml`
-- Finds DsBuildLibrary.mk for library compilation
+- Searches Program Files for `dSPACE ConfigurationDesk*` folders
+- Returns the alphabetically last one; the version in `dependencies.yaml` is not matched
+- `5b_carmaker_dspace.ps1` then requires `CFD_vars.bat` and `SCALEXIO\DsBuildLibrary.mk` in it
 
 **CarMaker Detection:**
 - Searches Program Files for IPG installations
@@ -508,29 +517,17 @@ The `detect_tool_paths.ps1` script automatically locates installed tools:
 
 ### BuildConfig Auto-Generation
 
-CarMaker builds require a BuildConfig Python file that specifies compiler settings, include paths, and library dependencies. The build system automatically generates these:
+CarMaker for dSPACE builds read compiler defines and libraries from a `CM_BuildConfig.py`. `5b_carmaker_dspace.ps1` generates one per CarMaker version:
 
 **Process:**
-1. `5b_carmaker_dspace.ps1` reads `dependencies.yaml`
-2. For each CarMaker version (e.g., 11.1.2, 13.1.3):
-   - Detects MATLAB version
-   - Locates CarMaker installation
-   - Generates `RS_CM{major}_{minor}_{patch}_BuildConfig_{matlab}.py`
-3. BuildConfig files are created in `CarMaker/` directory
-4. CarMaker uses these during compilation
+1. Reads the dSPACE version and CarMaker versions from `dependencies.yaml`
+2. For each CarMaker version whose dSPACE library built, copies CarMaker's `win64-<version>/CM4SL/CM_BuildConfig.py` and:
+   - Sets `CARMAKER_DIR` to `C:/IPG/carmaker/win64-<version>`
+   - Prepends `RS_CAVE`, `RS_DEBUG`, `RS_DSPACE` to every `CM_DEFINES` list
+   - Appends `libRealSimDsLib_<dspace>_CM<version>.a` to `libs`
+3. Writes `CarMaker/RS_CM{major}_{minor}_{patch}_BuildConfig_{dspace}.py` (e.g. `RS_CM13_1_3_BuildConfig_2024a.py`)
 
-**Generated BuildConfig Features:**
-- Correct MATLAB version paths
-- RealSim-specific defines (`RS_DSPACE`, `RS_DEBUG`)
-- Include paths for VirEnv_Wrapper.h
-- Links to libRealSimDsLib_*.a (for dSPACE builds)
-- Architecture-specific settings (dsrtlx, dsrt64)
-
-**Manual Modifications (Advanced):**
-If you need custom BuildConfig settings, you can:
-1. Generate BuildConfig using the script
-2. Manually edit the generated Python file
-3. Re-run CarMaker build
+`CM_SRC_DIR` is left as CarMaker's default. See [dSPACEDoc.md](dSPACEDoc.md#carmaker-buildconfig-for-dspace) for how the file is used.
 
 Note: Re-running `5b_carmaker_dspace.ps1` will regenerate and overwrite custom changes.
 
