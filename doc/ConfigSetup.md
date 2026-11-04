@@ -68,6 +68,7 @@ silently ignored.
 | LaneChangeMode | int | -1 | Passed to `Vehicle::setLaneChangeMode` together with SpeedMode, and as rarely. -1 leaves SUMO's default; 512 allows strategic changes only, so the vehicle follows its route but never changes lane by choice. |
 | EgoModesOnEntry | bool | false | When true, the ego also gets SpeedMode and LaneChangeMode as it enters the network, even when no client commands it (e.g. a baseline run that leaves SUMO to drive the ego). The ego is `EgoSetup.Id` plus every id a VehicleSubscription in ApplicationSetup or XilSetup names by `id`. Only the configured modes are applied: an absent SpeedMode leaves SUMO's default (31) rather than the 0 above, and LaneChangeMode -1 leaves SUMO's default. Not applied to an ego that CarMaker or the virtual environment drives, or with `EnableExternalDynamics: true`. A client that later commands the ego still applies SpeedMode/LaneChangeMode as above. |
 | ExecutionOrder | int | 1 | Order passed to `Simulation::setOrder`. |
+| EgoKeepRoute | int | 6 | `keepRoute` bitmask of the `Vehicle::moveToXY` that writes an externally driven ego (CarMaker, or CARLA under `EgoSetup.Dynamics: virenv`) into SUMO. Not used with `EnableExternalDynamics: true`. |
 | EnableAutoLaunch | bool | false | When true, TrafficLayer starts SUMO automatically; otherwise it expects a running instance. |
 | SumoConfigFile | string | `""` | Path to `.sumocfg` used when auto-launching. Relative paths resolved against config file directory. |
 | NumClients | int | 1 | Number of SUMO clients negotiated during auto-launch. |
@@ -136,6 +137,82 @@ When the application layer is disabled but XIL is enabled, the interface automat
 
 A controller reads this section with `fixs.config.get('xil')`: keys in snake_case (`transport`, `enable_xil`), plus `ip` and `port` from the first VehicleSubscription.
 
+## EgoSetup
+
+The ego vehicle, described once for every component that reads `config.yaml`: TrafficLayer, the CarMaker library and both CARLA bridges (`VirCarlaEnv.exe` and the Python bridge). It replaces the ego keys that used to live in `CarMakerSetup` and `CarlaSetup`; those are still read, as fallbacks (see [Legacy ego keys](#legacy-ego-keys)). Every key is optional.
+
+```yaml
+EgoSetup:
+  Id: ego                    # FIXS id of the ego
+  Type: passenger            # vehicle type the traffic simulator knows it by
+  Dynamics: virenv           # traffic | virenv
+  ActuationSource: user      # simulator | fixs | user
+  Controller: apps/<app>/my_controller.py   # user control law, Python bridge only
+```
+
+| Key | Type | Default | Used by | Notes |
+| --- | --- | --- | --- | --- |
+| Id | string | inferred, see below | TrafficLayer, CarMaker library, CARLA bridges | The ego's id in the traffic simulator. **TrafficLayer**, when `CarMakerSetup.EnableCosimulation` is true: on SUMO it adds this vehicle at the first step if the scenario has not (red, no route), writes CarMaker's pose into it every step (its speed instead, with `SimulationSetup.EnableExternalDynamics: true`), always forwards it to CarMaker, and ranks the other vehicles by distance from it when limiting what CarMaker is sent. It is also one of the vehicles `SumoSetup.EgoModesOnEntry` applies to. **CarMaker library**: the record it never spawns as a traffic object, and the id it sends its own vehicle's state under. **CARLA bridges**: the vehicle spawned as a physics ego under `Dynamics: virenv`. |
+| Type | string | `"car"` with `CarlaSetup.EnableCosimulation: true`, else `""` | TrafficLayer, CarMaker library, CARLA bridges | The ego's vehicle type in the traffic simulator, **not** how it looks in CarMaker or CARLA (see [Ego vehicle type](#ego-vehicle-type)). SUMO: the type id TrafficLayer passes to `Vehicle::add` when it adds the ego; `""` adds it with SUMO's default type. VISSIM (DSProxy mode): the VISSIM vehicle type number. |
+| Dynamics | string | `""` | TrafficLayer, CARLA bridges | What computes the ego's motion. `traffic` (or unset): the traffic simulator. `virenv`: the virtual environment's physics (CARLA). `xil` is refused at startup: an external plant owning the ego is the CarMaker path, switched on by `CarMakerSetup.EnableCosimulation`, so leave Dynamics unset for a CarMaker/XIL run. Any other value is refused. Case-insensitive. |
+| ActuationSource | string | `""` | CARLA bridges | Who produces the pedals and steer of a CARLA physics ego. `simulator` (or unset): CARLA's Traffic Manager autopilot. `fixs`: FIXS's own pure-pursuit driver along `CarlaSetup.EgoRoutePoints`, for a map the Traffic Manager cannot route. `user`: a user control law, which runs in-process when `Controller` names one and otherwise arrives in the ego's record each feed. Any other value is refused. Case-insensitive. |
+| Controller | string | `""` | Python CARLA bridge | The user control law for `ActuationSource: user`: `path/to/file.py`, `path/to/file.py:attribute` or `package.module:attribute`, optionally followed by ` --options` for the controller. A relative path resolves against the directory the bridge was started from, not the config file's. The Python bridge calls it every CARLA step. `VirCarlaEnv.exe` does not load it; there, a `user` ego with a Controller is driven by the Traffic Manager. |
+
+There is no `KeepRoute` key here: the keepRoute bitmask for an externally driven ego is `SumoSetup.EgoKeepRoute`.
+
+**How `Id` is resolved**, first match wins:
+
+1. `EgoSetup.Id`
+2. `CarlaSetup.EgoId`
+3. `CarMakerSetup.EgoId`
+4. the id, if there is exactly one, named by `type: ego` VehicleSubscriptions with `id` and `radius` — XilSetup's when `ApplicationSetup.EnableApplicationLayer` is false and `XilSetup.EnableXil` is true, otherwise ApplicationSetup's
+5. `"ego"` when `CarlaSetup.EnableCosimulation` is true
+6. startup error when `CarMakerSetup.EnableCosimulation` is true
+7. `""`: no component in this run owns an ego
+
+**With `Dynamics: virenv`:**
+
+- TrafficLayer treats every id in `CarlaSetup.InterestedIds` as driven by CARLA (only when `CarlaSetup.EnableCosimulation` is true): it inserts the vehicle into SUMO from CARLA's pose if the scenario has not, then writes CARLA's pose and speed into it every step (its speed only, with `SimulationSetup.EnableExternalDynamics: true`). Keep `EgoSetup.Id` in `InterestedIds`; `VirCarlaEnv.exe` leaves the ego to the traffic simulator and only mirrors it when it is not there.
+- The bridge spawns the ego with `CarlaSetup.EgoBlueprint`. With `CarlaSetup.EgoSpawnPose` set (4 values) it spawns there before the run; without it, it waits for the traffic simulator to insert the ego and spawns it at the first pose it reports.
+- `XilSetup.SpeedToTraffic: xil` and `XilSetup.SpeedToApplication: xil` require it (among other settings; the startup error lists them).
+
+**`ActuationSource: user` without a Controller** takes `acceleratorPedalDesired`, `brakePedalDesired` and `steerAngleDesired` from the ego's record each 0.1 s feed. All three must be in `VehicleMessageField`, or the config is refused at startup. It is also refused when `CarlaSetup.EnableCosimulation` and `CarlaSetup.EnablePythonBackend` are both true (the Python bridge), because at the feed the record's `speed` is the advisory, not the measured speed: name a Controller, or set `EnablePythonBackend: false` to use `VirCarlaEnv.exe`.
+
+**`ActuationSource: user` with a Controller and `Dynamics: traffic`** (Python bridge): no physics ego is spawned. The controller is called every CARLA step as a cell in the speed loop, and what it commands is sent to TrafficLayer as the ego's `speedDesired`.
+
+### Ego vehicle type
+
+`EgoSetup.Type` names the ego **in the traffic simulator**. It does not choose the ego's model in CarMaker or CARLA:
+
+| Where | The ego's look comes from | What `EgoSetup.Type` does there |
+| --- | --- | --- |
+| SUMO | — | The type id of the `Vehicle::add` that inserts the ego: by TrafficLayer at the first step of a CarMaker run, and when it injects a CARLA physics ego the scenario did not declare. An ego the scenario already declares keeps its own type. |
+| VISSIM (DSProxy) | The VISSIM vehicle type | Read as the VISSIM vehicle type number. Empty, non-numeric or ≤ 0 gives 100, the network's car type. |
+| CarMaker | CarMaker's own vehicle | Sent as the `type` of the ego record. The CarMaker library never spawns the ego as a traffic object. |
+| CARLA | `CarlaSetup.EgoBlueprint` (default `vehicle.tesla.model3`) when CARLA owns the ego | Sent as the `type` of the ego record. With `Dynamics: traffic` the ego is mirrored like any other vehicle, by the rules below. |
+
+Every vehicle CarMaker or CARLA mirrors from the traffic simulator — including an ego another client drives — is chosen by the `vehicleClass` field of its record (SUMO's `vClass`), not by its type:
+
+- **CarMaker** draws from two pools of traffic objects defined in the TestRun: names containing `RS_C` (cars) and `RS_T` (trucks). A vehicle class containing `car`, `passenger` or `private` takes a car; one containing `truck` takes a truck; any other class (motorcycle, bus, bicycle, ...) is not shown. A vehicle is also not shown when its pool is empty.
+- **CARLA** picks a blueprint per vehicle class from fixed pools: `passenger`, `truck`, `van`, `bus`, `motorcycle`, `bicycle`, `pedestrian`, `emergency`. Within a pool the choice is a hash of the vehicle id, so a vehicle keeps its model across runs and in both bridges. An unknown class gets `vehicle.tesla.model3`. With `CarlaSetup.UseVehicleTypeAsBlueprint: true` the SUMO type id is used as the blueprint id instead.
+
+On dSPACE the CarMaker library does not read `config.yaml`: it gets `EgoId` and `EgoType` as name/value pairs through `VirEnv_readConfig`, and EgoSetup and its fallbacks do not apply.
+
+### Legacy ego keys
+
+Still accepted so older configs run unchanged. An `EgoSetup` key wins over its legacy keys. For `Id`, `Type` and `Controller`, the C++ components (TrafficLayer, the CarMaker library, `VirCarlaEnv.exe`) also print a warning for each legacy key whose value differs.
+
+| Legacy key | Fallback for | Mapping |
+| --- | --- | --- |
+| `CarlaSetup.EgoId` | `Id` | Tried before `CarMakerSetup.EgoId`. |
+| `CarMakerSetup.EgoId` | `Id` | |
+| `CarlaSetup.EgoSumoType` | `Type` | Tried before `CarMakerSetup.EgoType`. |
+| `CarMakerSetup.EgoType` | `Type` | |
+| `CarlaSetup.EgoController` | `Controller` | Tried before `CarMakerSetup.EgoController`. |
+| `CarMakerSetup.EgoController` | `Controller` | |
+| `CarlaSetup.EgoMode` + `CarlaSetup.EnableExternalControl` | `Dynamics` | Read when either is present: `virenv` when `EnableExternalControl` is true **and** `EgoMode` ≥ 1, otherwise `traffic`. |
+| `CarlaSetup.EgoL0Driver` | `ActuationSource` | Case-insensitive. `tm` → `simulator`; `pursuit`, `fallback`, `egodriver` → `fixs`; `actuation`, `embedded` → `user`. Any other value leaves ActuationSource unset. |
+
 ## CarMakerSetup
 
 | Key | Type | Default | Notes |
@@ -145,8 +222,8 @@ A controller reads this section with `fixs.config.get('xil')`: keys in snake_cas
 | CarMakerIP | string | inferred or `"127.0.0.1"` | Connection IP for CarMaker. Inferred from subscription if single vehicle subscribed. |
 | CarMakerPort | int | inferred or 7331 | Connection port for CarMaker. Inferred from subscription if single vehicle subscribed. |
 | TrafficRefreshRate | double | 0.001 | How often traffic poses are re-applied to CarMaker, i.e. CarMaker's own step. **Not** the FIXS exchange period, which is a fixed 0.1 s — the core interpolates each sample (position, heading, grade) across the sub-steps in between, so 0.001 means smooth 1 kHz traffic motion off a 10 Hz feed. |
-| EgoId | string | inferred or `"egoCm"` | Identifier for the ego vehicle in SUMO. Inferred from subscription if single vehicle subscribed. |
-| EgoType | string | `""` | SUMO vehicle type for ego. Empty uses SUMO default. |
+| EgoId | string | — | Legacy; use `EgoSetup.Id`. See [Legacy ego keys](#legacy-ego-keys). |
+| EgoType | string | — | Legacy; use `EgoSetup.Type`. See [Legacy ego keys](#legacy-ego-keys). |
 | SynchronizeTrafficSignal | bool | false | If enabled, subscribes to all signal controllers for synchronization. |
 | TrafficSignalPort | int | 2444 or inferred | Port for signal data. Inferred from SignalSubscription if available. |
 
@@ -156,7 +233,7 @@ A controller reads this section with `fixs.config.get('xil')`: keys in snake_cas
 | --- | --- | --- | --- |
 | EnableVerboseLog | bool | false | Verbose logging for the CARLA bridge. |
 | EnableCosimulation | bool | false | Enables CARLA co-simulation. |
-| EnableExternalControl | bool | false | When true, SUMO vehicles updated from CARLA state; when false, CARLA only visualizes. |
+| EnableExternalControl | bool | — | Legacy; use `EgoSetup.Dynamics`. Together with `EgoMode` ≥ 1 it means `Dynamics: virenv`. See [Legacy ego keys](#legacy-ego-keys). |
 | UseVehicleTypeAsBlueprint | bool | false | Interpret SUMO vehicle types as CARLA blueprints. |
 | CarlaServerIP | string | `"127.0.0.1"` | CARLA server endpoint IP. |
 | CarlaServerPort | int | 2000 | CARLA server endpoint port. |
@@ -448,6 +525,14 @@ XilSetup:
         port: [420]
 
 # =============================================================================
+# Ego Setup (the ego, for every component)
+# =============================================================================
+EgoSetup:
+    # Ego id and vehicle type in the traffic simulator
+    Id: ego
+    Type: passenger
+
+# =============================================================================
 # CarMaker Setup (IPG CarMaker Co-simulation)
 # =============================================================================
 CarMakerSetup:
@@ -464,10 +549,6 @@ CarMakerSetup:
     # Traffic objects update rate (seconds)
     TrafficRefreshRate: 0.001
 
-    # Ego vehicle settings
-    EgoId: ego
-    EgoType: passenger
-
     # Synchronize traffic signals with CarMaker
     SynchronizeTrafficSignal: true
     TrafficSignalPort: 2444
@@ -481,10 +562,6 @@ CarlaSetup:
 
     # Enable CARLA co-simulation
     EnableCosimulation: true
-
-    # If true, SUMO vehicles updated from CARLA state
-    # If false, CARLA only visualizes SUMO vehicles
-    EnableExternalControl: true
 
     # Use vehicle type as CARLA blueprint
     UseVehicleTypeAsBlueprint: true
