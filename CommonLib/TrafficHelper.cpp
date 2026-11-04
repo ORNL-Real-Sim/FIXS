@@ -1359,13 +1359,20 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 
 		}
 
+		// Vehicles to subscribe on entry: this step's departures, or on the first pass every
+		// vehicle already in the network (a warm-up that serves no client never reaches here).
+		vector <string> vehDepartedId_v;
+		if (!allVehicleHasSubscribed || get<0>(subscribeAllVehicle)) {
+			vehDepartedId_v = presentVehiclesSubscribed
+				? SUMO_TRACI_NAMESPACE::Simulation::getDepartedIDList()
+				: VehIdInSimulator;
+			presentVehiclesSubscribed = true;
+		}
+
 		if (!allVehicleHasSubscribed) {
 			// -------------------
 			//  subscribe vehicle
 			// -------------------
-			
-			// get list of all vehicles entered network
-			vector <string> vehDepartedId_v = SUMO_TRACI_NAMESPACE::Simulation::getDepartedIDList();
 			allVehicleHasSubscribed = true;
 			// only able to get vehicle subscription for vehicles already in the network
 			int i = 0;
@@ -1395,25 +1402,11 @@ int TrafficHelper::recvFromSUMO(double* simTime, MsgHelper& Msg_c) {
 
 		}
 
-		// -------------------------------------------------------------------
-		//  #176: subscribe ALL vehicles when the YAML `all` flag is set.
-		//  `all` means every vehicle in the network, unbounded (the configured radius is
-		//  ignored, see init warning). We issue a plain per-vehicle subscription for each
-		//  vehicle as it ENTERS, using the same getDepartedIDList() pattern as the per-ego
-		//  radius path above. SUMO removes a vehicle's subscription automatically when it
-		//  leaves the network, so no client-side tracking set and no explicit unsubscribe
-		//  are needed (unsubscribing an already-departed id would error). Results are read
-		//  below via Vehicle::getAllSubscriptionResults().
-		// -------------------------------------------------------------------
+		// `all`: subscribe each vehicle once, on entry; SUMO drops the subscription when it leaves.
 		if (get<0>(subscribeAllVehicle)) {
-			vector <string> vehDepartedAll_v = SUMO_TRACI_NAMESPACE::Simulation::getDepartedIDList();
-			for (const string& vid : vehDepartedAll_v) {
+			for (const string& vid : vehDepartedId_v) {
 				SUMO_TRACI_NAMESPACE::Vehicle::subscribe(vid, VehDataSubscribeList, 0, tSimuEnd);
-				// #86: subscribe the leader too, so it arrives in the same batch as
-				// everything else. Without this, parserSumoSubscription pays a
-				// getLeader round-trip PER VEHICLE PER STEP - measured at 161/step on
-				// the MLK corridor, 34.7 us each. Only when a precedingVehicle* field
-				// is actually forwarded; the subscription is issued once, on entry.
+				// The leader arrives in the same batch instead of a getLeader call per vehicle per step.
 				if (NEED_PRECEDING_VEH) {
 					SUMO_TRACI_NAMESPACE::Vehicle::subscribeLeader(
 						vid, Config_c->SumoSetup.PrecedingVehicleLookahead, 0, tSimuEnd);

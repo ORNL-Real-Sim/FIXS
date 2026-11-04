@@ -114,6 +114,8 @@ public:
 	bool edgeHasSubscribed = false;
 	bool pointHasSubscribed = false;
 	bool allVehicleHasSubscribed = false;
+	// The vehicles already in the network have been taken in by the entry subscriptions.
+	bool presentVehiclesSubscribed = false;
 	std::vector <bool> vehicleHasSubscribed_v;
 
 
