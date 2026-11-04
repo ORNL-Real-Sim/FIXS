@@ -1,23 +1,42 @@
 # RealSim dSPACE Documentation
 
-This page covers running a Real-Sim FIXS client on dSPACE real-time hardware. The
-CarMaker side of the same setup (User.c changes, TestRuns, signal-light tables) is in
-[CarMakerDoc](CarMakerDoc.md).
+This page covers running a Real-Sim FIXS client on dSPACE real-time hardware. There
+are two ways to do it:
+
+| | Plain Simulink on dSPACE | CarMaker on dSPACE |
+|---|---|---|
+| What runs on the target | Your Simulink model with the RealSim blocks | CarMaker for dSPACE, with FIXS in `User.c` |
+| FIXS code on the target | The RealSim blocks, generated from MATLAB code | The RealSim dSPACE library (`libRealSimDsLib_*.a`) |
+| Connection to TrafficLayer | A TCP function block in ConfigurationDesk | The library's own socket |
+| Needs CarMaker | No | Yes |
+| Needs a library build | No | Only if the release does not include it |
+
+In both, TrafficLayer and the traffic simulator run on a host PC, and the target
+connects to TrafficLayer over Ethernet. The CarMaker side of the CarMaker setup
+(User.c changes, TestRuns, signal-light tables) is in [CarMakerDoc](CarMakerDoc.md).
+
+The Simulink templates are being reworked: the RealSim blocks are to become a
+Simulink library ([#110](https://github.com/ORNL-Real-Sim/FIXS/issues/110)), placed
+automatically ([#107](https://github.com/ORNL-Real-Sim/FIXS/issues/107)). The
+Simulink sections below describe the templates as of 0.9.0.
 
 ## Table of Contents
 <!-- TOC -->
 * [Scope](#scope)
 * [Versions](#versions)
-* [RealSim dSPACE library](#realsim-dspace-library)
-  * [When you need to build it](#when-you-need-to-build-it)
-  * [Build with 5b_carmaker_dspace.ps1](#build-with-5b_carmaker_dspaceps1)
-  * [Build by hand with dsmake](#build-by-hand-with-dsmake)
-* [CarMaker BuildConfig for dSPACE](#carmaker-buildconfig-for-dspace)
-* [Prepare the CarMaker project](#prepare-the-carmaker-project)
-* [Configuration file on the target](#configuration-file-on-the-target)
-* [ConfigurationDesk project](#configurationdesk-project)
-* [SCALEXIO Ethernet for RS Simulink blocks](#scalexio-ethernet-for-rs-simulink-blocks)
-* [Run a dSPACE simulation](#run-a-dspace-simulation)
+* [Common setup](#common-setup)
+* [Plain Simulink on dSPACE](#plain-simulink-on-dspace)
+  * [Start from the template](#start-from-the-template)
+  * [Initialize the model](#initialize-the-model)
+  * [TCP connection in ConfigurationDesk](#tcp-connection-in-configurationdesk)
+  * [Run a Simulink dSPACE simulation](#run-a-simulink-dspace-simulation)
+* [CarMaker on dSPACE](#carmaker-on-dspace)
+  * [RealSim dSPACE library](#realsim-dspace-library)
+  * [CarMaker BuildConfig for dSPACE](#carmaker-buildconfig-for-dspace)
+  * [Prepare the CarMaker project](#prepare-the-carmaker-project)
+  * [Configuration file on the target](#configuration-file-on-the-target)
+  * [RealSim Simulink blocks in a CarMaker model](#realsim-simulink-blocks-in-a-carmaker-model)
+  * [Run a dSPACE simulation](#run-a-dspace-simulation)
 * [Troubleshooting](#troubleshooting)
 <!-- TOC -->
 
@@ -25,20 +44,15 @@ CarMaker side of the same setup (User.c changes, TestRuns, signal-light tables) 
 
 - **Hardware/tooling:** SCALEXIO, built with ConfigurationDesk. Other dSPACE
   platforms are not covered.
-- **What runs on the target:** the RealSim dSPACE library
-  (`libRealSimDsLib_<dSPACE>_CM<CarMaker>.a`). It is the same FIXS client code that
-  the CarMaker Office/Simulink builds use (`SocketHelper`, `MsgHelper`,
-  `VirEnvHelper`, `VirEnv_Wrapper` from `CommonLib/`), cross-compiled for SCALEXIO
-  with `RS_DSPACE` defined.
-- **What runs on the host PC:** TrafficLayer and the traffic simulator. The target
-  connects to TrafficLayer over Ethernet.
-- **CarMaker dependency:** `VirEnvHelper.cpp` includes `<CarMaker.h>`, so the
-  library is compiled against a specific CarMaker version's headers. There is no
-  CarMaker-free dSPACE build today; one library is built per CarMaker version.
-
-The parts that do not depend on CarMaker are the ConfigurationDesk overrun setting,
-the target file-system path of the configuration file, and the SCALEXIO Ethernet
-setup for RS Simulink blocks.
+- **Plain Simulink:** the target runs code generated from your Simulink model. The
+  RealSim blocks (`RealSimPack`, `RealSimDepack` and the rest of the "RealSim Core"
+  subsystem) are MATLAB code, so they are generated along with the model. Nothing is
+  compiled from `CommonLib/` C++.
+- **CarMaker:** the target runs CarMaker for dSPACE, linked against the RealSim
+  dSPACE library. That library is FIXS's C++ client (`SocketHelper`, `MsgHelper`,
+  `VirEnvHelper`, `VirEnv_Wrapper` from `CommonLib/`) cross-compiled for SCALEXIO with
+  `RS_DSPACE` defined. `VirEnvHelper.cpp` includes `<CarMaker.h>`, so one library is
+  built per CarMaker version.
 
 ## Versions
 
@@ -48,12 +62,94 @@ Tool versions come from `dependencies.yaml`:
 |---|---|---|
 | `development_tools.dspace.version` | `2024a` | Library and BuildConfig file names |
 | `development_tools.dspace.product` / `release` | ConfigurationDesk 2024-A / 24.1 | Informational |
-| `simulators.carmaker.versions` | `13.1.3`, `11.1.2` | One library per version |
+| `simulators.carmaker.versions` | `13.1.3`, `11.1.2` | One library per version (CarMaker only) |
 | `development_tools.matlab.version` | `2024a` | Simulink models |
 
-## RealSim dSPACE library
+## Common setup
 
-### When you need to build it
+1. **Network.** The target connects to TrafficLayer, so the host PC needs an address
+   on the network SCALEXIO is on, and that address (not `127.0.0.1`) is the one the
+   target is given. The host firewall must let TrafficLayer accept the connection.
+2. **Overruns.** In ConfigurationDesk set the number of accepted overruns to `-1`:
+   ![](img/DS_SCLX_NO_OVERRUN.png)
+3. **Order.** TrafficLayer is the server and the target is a client: start
+   TrafficLayer (and its traffic simulator) before starting the real-time
+   application.
+
+## Plain Simulink on dSPACE
+
+### Start from the template
+
+`CommonLib/RealSimTemplate_dSPACE.slx` is the starting model. It contains the
+"RealSim Core" subsystem, which packs your vehicle's state into a FIXS message and
+unpacks the traffic TrafficLayer sends back, and the `dSPACE TCP In` / `dSPACE TCP Out`
+blocks that connect it to the ConfigurationDesk TCP function block. Put your vehicle
+model next to it.
+
+`CommonLib/RealSimTemplate.slx` is the host-PC (non-dSPACE) version of the same
+model; it talks to TrafficLayer through the `RealSimSocket` MEX block instead of
+dSPACE TCP blocks.
+
+### Initialize the model
+
+The model needs the message definitions from your `config.yaml` before it is built.
+Set the model's `InitFcn` to:
+
+```matlab
+% FIXS CommonLib (from a checkout or a release) and the run's config.yaml
+addpath(genpath('C:\path\to\FIXS\CommonLib'))
+configFilename = 'C:\path\to\your\app\config.yaml';
+
+[VehicleMessageFieldDefInputVec, VehDataBus] = RealSimInitSimulink(configFilename);
+
+RealSimPara = struct;
+RealSimPara.speedInit = 13.5;   % initial ego speed when it enters the traffic network
+RealSimPara.tLookahead = 0.1;   % 0.1 for external control; >= 0.2 when the traffic simulator drives
+RealSimPara.smoothWindow = 1;   % points in the speed moving average; 1 means no averaging
+```
+
+![](img/SimulinkInitFcn.png)
+
+`RealSimInitSimulink` reads `config.yaml` on the host when the model is built, using
+`ReadYaml` from `CommonLib/YAMLMatlab`. The message layout (`VehicleMessageField`) is
+compiled into the real-time application, so rebuild after changing it in
+`config.yaml`. `RealSimInitSimulink` also returns `TrafficLayerIP` and
+`TrafficLayerPort`; the dSPACE template does not use them, because on dSPACE the
+address is set in ConfigurationDesk (next section).
+
+### TCP connection in ConfigurationDesk
+
+The template's TCP blocks map to two function blocks in ConfigurationDesk:
+
+- **Ethernet Setup:** the SCALEXIO side. Its IP address and subnet mask are the
+  target's own address on the network shared with the host; assign it to the
+  Ethernet controller the cable is on.
+- **TCP:** the connection to TrafficLayer. Run it as **client**, with
+  **Destination IP address** = the host PC running TrafficLayer and **Destination
+  port** = the port TrafficLayer listens on for this client in `config.yaml`. The
+  example uses `2333`.
+
+The example sets the Transmit maximum vector size to 200 and the Receive maximum
+vector size to 1024, with variable vector sizes defined by the model.
+
+![](img/DS_SCLX_Eth_1.png)
+![](img/DS_SCLX_Eth_2.png)
+![](img/DS_SCLX_Eth_3.png)
+![](img/DS_SCLX_Eth_4.png)
+![](img/DS_SCLX_Eth_5.png)
+
+### Run a Simulink dSPACE simulation
+
+1. Build the application in ConfigurationDesk.
+2. Start TrafficLayer and the traffic simulator on the host with the same
+   `config.yaml` the model was built with.
+3. Download and start the real-time application (e.g. from ControlDesk).
+
+## CarMaker on dSPACE
+
+### RealSim dSPACE library
+
+#### When you need to build it
 
 A CarMaker-for-dSPACE application that defines `REALSIM` in `User.c` always links
 this library. You do **not** need to build it yourself if your release package
@@ -70,7 +166,7 @@ installed; `dispatch.bat` skips the step otherwise, and always skips it when
 Build it yourself when you change any of the four `CommonLib` sources above, need a
 CarMaker version the release does not include, or use a different dSPACE release.
 
-### Build with 5b_carmaker_dspace.ps1
+#### Build with 5b_carmaker_dspace.ps1
 
 ```batch
 powershell -ExecutionPolicy Bypass -File scripts\dispatch\5b_carmaker_dspace.ps1
@@ -123,7 +219,7 @@ a - VirEnv_Wrapper.o64
 library successfully built.
 ```
 
-### Build by hand with dsmake
+#### Build by hand with dsmake
 
 Open a command prompt in `CommonLib/`, run `CFD_vars.bat` from the ConfigurationDesk
 installation (for 2024-A: `C:\Program Files\dSPACE ConfigurationDesk 2024-A (24.1)`),
@@ -131,7 +227,7 @@ then run the `dsmake` command from step 5 with your own paths. dSPACE describes
 building user libraries in its FAQ:
 https://www.dspace.com/en/inc/home/support/kb/faqs/faq012.cfm.
 
-## CarMaker BuildConfig for dSPACE
+### CarMaker BuildConfig for dSPACE
 
 CarMaker for dSPACE reads compiler defines and libraries from a `CM_BuildConfig.py`.
 `5b_carmaker_dspace.ps1` derives `CarMaker/RS_CM<CarMaker>_BuildConfig_<dSPACE>.py`
@@ -171,7 +267,7 @@ Instead of editing the Python file you can set the same values in
 ConfigurationDesk -> Build Configuration -> Properties:
 ![CM_DS_BuildConfig_24a.png](img/CM_DS_BuildConfig_24a.png)
 
-## Prepare the CarMaker project
+### Prepare the CarMaker project
 
 1. Copy `CommonLib/VirEnv_Wrapper.h` and the library for your CarMaker version
    (e.g. `libRealSimDsLib_2024a_CM13_1_3.a`) into `<your CM project>\include`.
@@ -179,7 +275,7 @@ ConfigurationDesk -> Build Configuration -> Properties:
    [CarMakerDoc: Compile Source Codes](CarMakerDoc.md#compile-source-codes). The
    only dSPACE difference is the configuration-file path, below.
 
-## Configuration file on the target
+### Configuration file on the target
 
 With `RS_DSPACE` defined the library does not parse `config.yaml` (no YAML parser on
 the target). It reads a flat text file instead, generated on the host by
@@ -191,7 +287,7 @@ python CarMaker\RealSimSetCarMakerConfig.py --configFile <config.yaml> --cm-proj
 
 This writes `<CM project>\RS_tmp\RealSimCarMakerConfig.txt` (and copies the signal
 table next to it). The `TrafficLayerIP` in that file is the address the target
-connects to, so it must be the host PC's address on the network SCALEXIO is on.
+connects to (see [Common setup](#common-setup)).
 
 In `User.c`, `RS_configFile` must point to that file **on the SCALEXIO Linux file
 system** (root is `/`):
@@ -213,54 +309,20 @@ char* RS_signalTable;
 To check the path, use the `msys` tool that ships with CarMaker to telnet into the
 SCALEXIO.
 
-## ConfigurationDesk project
+### RealSim Simulink blocks in a CarMaker model
 
-1. Set the number of accepted overruns to `-1`:
-   ![](img/DS_SCLX_NO_OVERRUN.png)
-2. Build the application in ConfigurationDesk.
+A CarMaker-for-dSPACE Simulink model can also carry the RealSim blocks. Set them up
+as in plain Simulink:
+[Initialize the model](#initialize-the-model) and
+[TCP connection in ConfigurationDesk](#tcp-connection-in-configurationdesk).
 
 Example projects (in the private `ProprietaryFiles` submodule): ConfigurationDesk
 projects `RS_DS_CM11_SimulinkRS`, `RS_DS_CM11_noSimulinkRS` and
 `RS_DS_CM11_noSimulinkRS_useManeuver` under `CM11_proj/ConfigDesk`, with the matching
-Simulink models under `CM11_proj/src_cm4sl_ds`.
+Simulink models under `CM11_proj/src_cm4sl_ds`. `RS_DS_CM11_SimulinkRS` uses the
+RealSim Simulink blocks; the two `noSimulinkRS` projects use only the library.
 
-## SCALEXIO Ethernet for RS Simulink blocks
-
-**Only needed if the Simulink model uses the RealSim Simulink blocks.**
-
-The model needs an initialization script, best called as the model's `InitFcn`:
-
-```matlab
-%% define constants
-curFilePath = fileparts(mfilename('fullpath'));
-RealSimAppPath = fullfile(curFilePath,'..\RealSimApps\SumoIpg');
-RealSimPath = fullfile(curFilePath,'..\RealSimRelease');
-configFilename = fullfile(RealSimAppPath,'config_SUMO.yaml');
-
-%% add path of RealSim tools
-addpath(genpath(RealSimPath))
-
-%% initialize RealSim for Simulink, read yaml file
-[VehicleMessageFieldDefInputVec, VehDataBus, TrafficLayerIP, TrafficLayerPort] = RealSimInitSimulink(configFilename);
-RealSimPara = struct;
-RealSimPara.speedInit = 13.5; % initial speed of the ego vehicle when entering SUMO network
-RealSimPara.tLookahead = 0.1; % use 0.1 for external control, recommend to use tLookahead >= 0.2 for SUMO driver
-RealSimPara.smoothWindow = 1; % number of moving average data point, 1 essentially mean no moving average
-```
-
-![](img/SimulinkInitFcn.png)
-
-Set up the SCALEXIO TCP connections in ConfigurationDesk as below. The
-`RS_DS_CM11_SimulinkRS` project and `RS_DS_CM11_SimulinkRS.slx` model show a complete
-setup.
-
-![](img/DS_SCLX_Eth_1.png)
-![](img/DS_SCLX_Eth_2.png)
-![](img/DS_SCLX_Eth_3.png)
-![](img/DS_SCLX_Eth_4.png)
-![](img/DS_SCLX_Eth_5.png)
-
-## Run a dSPACE simulation
+### Run a dSPACE simulation
 
 1. Check that `RS_configFile` in `User.c` is correct for your environment.
 2. Open the ConfigurationDesk project `RS_DS_CM11_noSimulinkRS_useManeuver` in
@@ -282,6 +344,24 @@ rebuilding, as long as the Simulink model is unchanged.
 
 ## Troubleshooting
 
+Both setups:
+
+- **No connection to TrafficLayer** — the address the target is given (the TCP
+  block's destination IP, or `TrafficLayerIP` in `RealSimCarMakerConfig.txt`) is not
+  reachable from SCALEXIO (e.g. `127.0.0.1`), the port does not match `config.yaml`,
+  TrafficLayer was not started first, or the host firewall blocks TrafficLayer.
+- **Overrun errors** — set the accepted overruns to `-1` in ConfigurationDesk.
+
+Plain Simulink:
+
+- **`config.yaml` changes have no effect** — the message layout is compiled in;
+  rebuild the application after changing `VehicleMessageField`.
+- **`Unrecognized function or variable 'RealSimInitSimulink'` (or `'ReadYaml'`)** —
+  `CommonLib` (with its `YAMLMatlab` subfolder) is not on the MATLAB path; check the
+  `addpath` in `InitFcn`.
+
+CarMaker library build and link:
+
 - **`Could not auto-detect dSPACE installation`** — no `dSPACE ConfigurationDesk*`
   folder under Program Files. With several installed, the alphabetically last one
   is used.
@@ -298,7 +378,3 @@ rebuilding, as long as the Simulink model is unchanged.
 - **CarMaker log shows `RealSim: Read RealSimCarMakerConfig.txt failed`** —
   `RS_configFile` does not point to an existing file on the target; check it with
   `msys`/telnet.
-- **No connection to TrafficLayer** — `TrafficLayerIP` in `RealSimCarMakerConfig.txt`
-  is not reachable from SCALEXIO (e.g. `127.0.0.1`), or the host firewall blocks
-  TrafficLayer.
-- **Overrun errors** — set the accepted overruns to `-1` in ConfigurationDesk.

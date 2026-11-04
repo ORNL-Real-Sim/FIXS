@@ -274,8 +274,8 @@ Using either relative path to the working directory or absolute path are OK
 ### Setup CM dSPACE
 
 Building and running CarMaker on dSPACE SCALEXIO (RealSim dSPACE library,
-`CM_BuildConfig.py`, ConfigurationDesk, target configuration file, SCALEXIO
-Ethernet) is covered in [dSPACEDoc](dSPACEDoc.md). The `User.c` changes are the same
+`CM_BuildConfig.py`, ConfigurationDesk, target configuration file) is covered in
+[dSPACEDoc: CarMaker on dSPACE](dSPACEDoc.md#carmaker-on-dspace). The `User.c` changes are the same
 as above except for the configuration-file path; see
 [dSPACEDoc: Configuration file on the target](dSPACEDoc.md#configuration-file-on-the-target).
 
