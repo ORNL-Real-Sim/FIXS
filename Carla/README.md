@@ -278,6 +278,11 @@ python Carla/place_tls.py --map-config apps/roosevelt/roosevelt_map.txt \
                           --tl-table apps/roosevelt/Roosevelt_Sumo_Scenario/traffic_light_table.csv
 ```
 
+The head blueprint and z offset come from `placement.yaml`: the map bundle's own if
+it ships one, else the map library's shared one, which `place_tls.py` fetches into
+`~/.fixs/props` as `run_cosim.py` does. If neither can be found it refuses; pass
+`--legacy-placement` to place with the built-in pre-manifest values instead.
+
 A re-import wipes the map's content (and the marker), so the lights are re-placed
 automatically on the next run.
 

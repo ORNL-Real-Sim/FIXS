@@ -5511,9 +5511,11 @@ def main():
                     print(f"[cosim] placing traffic lights for '{target_map}' before launch ...")
                     _tell_peer(ctl_sock, "place_tls",
                                f"placing traffic lights for '{target_map}'")
+                    # A legacy placement leaves no fingerprint, so the next run that
+                    # fetches the props re-places it.
                     place_tls.place_tls(target_map, tl_table, carla_root=cfg["carla_root"],
                                         ue4_root=cfg.get("ue4_root"), force=args.reimport,
-                                        bundle_dirs=bundle_dirs)
+                                        bundle_dirs=bundle_dirs, allow_legacy=True)
                 else:
                     print(f"[cosim] note: traffic lights not placed for '{target_map}'. Run "
                           f"place_tls (or --reimport) to add them, else no TL sync.")

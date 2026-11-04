@@ -1182,7 +1182,7 @@ def test_place_tls_noop_when_marker_present(monkeypatch, tmp_path, capsys):
                                  "ue4_root": str(tmp_path / "ue4")})
     monkeypatch.setattr(place_tls.subprocess, "call",
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("editor launched!")))
-    assert place_tls.place_tls("RP_Ver0529", str(table)) == 0
+    assert place_tls.place_tls("RP_Ver0529", str(table), allow_legacy=True) == 0
     assert "already placed" in capsys.readouterr().out
 
 
