@@ -29,6 +29,13 @@ https://www.energy.gov/sites/default/files/2021-06/eems101_deter_2021_o_5-19_645
 
 Publication list is upcoming...
 
+## License and Citation
+FIXS is released under the [MIT License](LICENSE). The `ProprietaryFiles` submodule is a separate private repository and is not covered by this license.
+
+The software record is on DOE CODE: https://www.osti.gov/doecode/biblio/110562
+
+> Shao, Yunli, Cook, Adian, Wang, Chieh (Ross), Chen, Jianfei, Zhou, Anye, Deter, Dean, Perry, Nolan, and Thompson, Bradley. *Real-Sim Flexible Interface for X-in-the-loop Simulation (FIXS)*. Computer Software. USDOE Office of Energy Efficiency and Renewable Energy (EERE), Office of Sustainable Transportation, Vehicle Technologies Office (VTO). 27 Jul. 2023. Web. doi:10.11578/dc.20230727.1.
+
 # Other links
 This README contains general information of the interface. For specific documentation of different simulators, check the following links:
 * ### [Build Instructions](doc/BUILD.md) - Comprehensive build system documentation
@@ -131,8 +138,8 @@ scripts\dispatch\2_core_components.bat
 # VISSIM components only
 scripts\dispatch\3_vissim_components.bat
 
-# CarMaker components only (auto-generates BuildConfig files)
-powershell -ExecutionPolicy Bypass -File scripts\dispatch\4a_carmaker_components.ps1
+# CarMaker components only
+powershell -ExecutionPolicy Bypass -File scripts\dispatch\5a_carmaker_components.ps1
 ```
 
 For complete build system documentation including Debug/Release configurations, troubleshooting, and architecture details, see **[doc/BUILD.md](doc/BUILD.md)**.

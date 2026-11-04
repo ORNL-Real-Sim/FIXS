@@ -33,10 +33,9 @@ Carla/                        <- self-contained co-sim component (shipped in the
   doctor.py                   check this machine can run a co-sim, before it tries
   peer.py                     control channel between the halves of a distributed co-sim
   set_spectator_view.py       point the CARLA spectator at a scene (top-down, or --follow)
-  load_opendrive_world.py     mesh an .xodr into a running server - no map package, no cook
-  launch_carla.bat            hand-launch a server from carla.env, for that no-cook path
-  carla.env.example           copy to carla.env and edit; read by launch_carla.bat
-  wait_for_rpc.ps1            block until that server accepts RPC
+  load_opendrive_world.py     mesh an .xodr into a server - no map package, no cook;
+                              --launch starts the configured CARLA first, through
+                              run_cosim's launcher
   README.md                   (this file)
 
 tests/Sumo/Carla/             <- tests only (no runtime code)
@@ -119,22 +118,22 @@ Setup asks **packaged** vs **source build**, then opens a native folder picker:
 
 **What a packaged build cannot do:** cook or place anything &mdash; that needs the
 Unreal editor, which a package does not ship. So it runs a Digital-Twin-Library map
-only if the library publishes it *precooked* (`<map>_cooked.tar.gz`), exactly as it
-was cooked; traffic lights and signs are whatever the asset already contains.
+only if the library publishes it *precooked* for your OS (`<map>_cooked.tar.gz` on
+Linux, `<map>_cooked_windows.tar.gz` on Windows), exactly as it was cooked; traffic
+lights and signs are whatever the asset already contains.
 `run_cosim` installs that asset for you, and names the missing asset up front for a
 map that has none. To cook a map yourself, use a source build. *Installing* a
 precooked asset works the same on Windows and Linux &mdash; it is a plain extract,
 done here in `tarfile` rather than through CARLA's bash-only `Util/ImportAssets.sh`.
 
-**Windows note:** the *assets* are not yet OS-neutral. Every `*_cooked.tar.gz` the
-library publishes today is a Linux cook &mdash; its materials carry SPIR-V and no
-Direct3D shaders &mdash; and a packaged build has no shader compiler, so on Windows
-those materials fall back to the default one: correct geometry and traffic lights,
-grey road surface. Setup therefore still offers **source build only** on Windows;
-pass `--allow-packaged-windows` if you only need stock maps (Town01, ...) from a
-package. `run_cosim` also warns before launching when the installed map has no
-shaders for the platform it is about to run on. Tracked in
-ORNL-Real-Sim/FIXS_Applications#29.
+**Windows: experimental.** A cook is per OS: a Linux cook's materials carry only
+Vulkan shaders, and a packaged build has no shader compiler, so on Windows it loads
+with correct geometry and traffic lights but a grey checkerboard road. On Windows
+FIXS therefore fetches `<map>_cooked_windows.tar.gz`, which few library maps publish
+yet (`mlk_notexture_uturn` does); for any other map use a source build. Launching
+with `-vulkan` is not a workaround &mdash; on 0.9.15 it crashed with a Linux cook
+loaded. `run_cosim` warns before launching when the installed map has no shaders for
+the platform it is about to run on. Tracked in ORNL-Real-Sim/FIXS_Applications#29.
 
 Setup also resolves the **python env** that runs the co-sim and stores it in the
 config, so the launcher works on any machine no matter what the env is named:
@@ -489,9 +488,15 @@ Anything that changes **how the traffic behaves** comes from one table in `run_c
 (`SUMO_CONTRACT` / `SUMO_CONVENTION`), injected on the SUMO command line for both
 bridges and printed with each flag's origin. The map's `.sumocfg` is used as it ships
 and never edited: it is app-independent, so a co-sim requirement does not belong in it.
-Precedence is `contract > app sumo_args > convention > the map's cfg`, and an app
-deviates via `sumo_args` in `apps.json`. Nothing is generated or cached: the flags are
+Precedence is `contract > --sumo-args > app sumo_args > convention > the map's cfg`,
+and an app deviates via `sumo_args` in `apps.json`. Nothing is generated or cached: the flags are
 passed and printed, so what a run gave SUMO is in its own log.
+
+The CARLA server gets the same treatment: `carla_args` in `apps.json` (e.g.
+`{"-quality-level": "Low"}`), then `--carla-args "..."`, replace run_cosim's own
+options by name. `null` drops one, `""` passes a bare one, and `-carla-rpc-port` /
+`-game` stay FIXS's. The front doors forward both flags through `COSIM_CARLA_ARGS` /
+`COSIM_SUMO_ARGS`, since their values start with `-`.
 
 `--start` is passed explicitly as `true`/`false` rather than omitted, because omitting
 it does not turn it off &mdash; a cfg declaring `<start value="t"/>` (roosevelt's does)

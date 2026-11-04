@@ -112,6 +112,7 @@ private:
     std::vector<int>         serverPort_;
 
     long lastRefreshSlot_ = -1;
+    long long lastFeedSlot_ = 0;   // slot 0 is t = 0, which is not an exchange
 
     void  logCore(const char* msg);
     static int decodeLightBits(int lightIndicators, bool& brake, bool& indL, bool& indR);

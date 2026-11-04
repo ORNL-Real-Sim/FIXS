@@ -3,7 +3,7 @@ the FIXS DataLogger CSVs, on the shared SimpleLoop scenario.
 
 This is a TEST-SPECIFIC analysis script (per the FIXS logging split: the logger
 is generic infrastructure in CommonLib/DataLogger; the plotting lives here). It
-reads the two CSVs produced by run_sumo_carla_l0_tm.bat / _egodriver.bat
+reads the two CSVs produced by run_sumo_carla.bat l0_tm / l0_egodriver
 (_datalog/l0_tm.csv, _datalog/l0_egodriver.csv) -- both in the SUMO/VISSIM wire
 convention -- and writes _datalog/l0_compare.png plus a numeric summary.
 

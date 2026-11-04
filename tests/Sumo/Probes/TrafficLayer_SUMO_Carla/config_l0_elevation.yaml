@@ -20,7 +20,7 @@
 #   2 = Advisory    : L2 -- + external desired-speed advisory via FIXS   [reserved]
 #   3 = Control     : L4 -- + external throttle/brake/steer via FIXS     [reserved]
 #
-# Run: run_sumo_carla_l0_tm.bat (one click). SUMO side runs the BACKGROUND-ONLY
+# Run: run_sumo_carla.bat l0_elevation (one click). SUMO side runs the BACKGROUND-ONLY
 # scenario (simple_loop.sumocfg) -- the ego is injected by TrafficLayer from the
 # Carla readback (same mechanism as the CM office demo's egoCm).
 # =============================================================================

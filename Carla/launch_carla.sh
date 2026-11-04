@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# launch_carla.sh -- Linux counterpart of launch_carla.bat (+ wait_for_rpc.ps1)
+# launch_carla.sh -- start a CARLA server on Linux and wait for its RPC port
 #
 # Starts a CARLA server and returns once its RPC port answers, so a caller can
 # go straight to connecting. --stop takes down the server on a port again,

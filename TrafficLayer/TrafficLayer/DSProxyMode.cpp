@@ -104,7 +104,7 @@ Simulator_Veh_Data egoFromMsg(const VehFullData_t& v) {
     ego.Speed = v.speed;
     // The ego's length/appearance in VISSIM comes entirely from its VehicleType
     // (PTV Simulator_Veh_Data has no length field). v.type carries
-    // CarMakerSetup.EgoType; if unset/non-numeric, default to the network's car
+    // EgoSetup.Type; if unset/non-numeric, default to the network's car
     // type (100) so the ego renders as a car instead of a default long vehicle.
     {
         int egoType = 100;
