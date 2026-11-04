@@ -39,6 +39,7 @@ import sys
 import time
 import traceback
 import urllib.request
+import xml.etree.ElementTree as ET
 
 import app_catalog
 import carla_env_setup as env
@@ -1748,13 +1749,38 @@ def _unreal_log_dir(cfg):
     return d if os.path.isdir(d) else None
 
 
-def report_unreal_crash(cfg):
-    """Print the newest Unreal log's fatal lines, and its path.
+def _unreal_crash_report(cfg, pid, since):
+    """(path, error, modules) of the crash report Unreal wrote for `pid` at or after
+    `since`, or None. The exception is only there: the log just stops."""
+    d = _unreal_log_dir(cfg)
+    crashes = os.path.join(os.path.dirname(d), "Crashes") if d else None
+    if pid is None or not crashes or not os.path.isdir(crashes):
+        return None
+    reports = [os.path.join(crashes, sub, "CrashContext.runtime-xml")
+               for sub in os.listdir(crashes)]
+    reports = [p for p in reports if os.path.isfile(p) and os.path.getmtime(p) >= since]
+    for path in sorted(reports, key=os.path.getmtime, reverse=True):
+        try:
+            props = ET.parse(path).getroot().find("RuntimeProperties")
+        except (ET.ParseError, OSError):
+            continue
+        if props is None or (props.findtext("ProcessId") or "").strip() != str(pid):
+            continue
+        modules = []
+        for frame in (props.findtext("PCallStack") or "").split():
+            if frame.startswith("UE4Editor-") and frame not in modules:
+                modules.append(frame)
+        return path, (props.findtext("ErrorMessage") or "").strip(), modules[:3]
+    return None
 
-    A CARLA that dies during LoadMap leaves everything needed to diagnose it in
-    that file - the map it was loading and the exception - while the console says
-    only that a port did not open. Reading three greps out of it here is the
-    difference between a one-line answer and an afternoon.
+
+def report_unreal_crash(cfg, pid=None, since=0.0):
+    """Print the newest Unreal log's fatal lines and its path, then the exception
+    from Unreal's crash report for `pid`, if it wrote one.
+
+    A CARLA that dies during LoadMap leaves everything needed to diagnose it on
+    disk while the console says only that a port did not open. Reading it here is
+    the difference between a one-line answer and an afternoon.
     """
     d = _unreal_log_dir(cfg)
     if not d:
@@ -1776,6 +1802,14 @@ def report_unreal_crash(cfg):
                 or "Unhandled Exception" in ln)]
     for ln in keep[-6:]:
         print(f"[cosim]   | {ln.strip()}")
+    report = _unreal_crash_report(cfg, pid, since)
+    if report:
+        path, error, modules = report
+        print(f"[cosim]   Unreal crashed: {error or 'no message'}"
+              + (f" (in {', '.join(modules)})" if modules else ""))
+        print(f"[cosim]   its crash report: {path}")
+        print("[cosim]   A LoadMap line above names what was loading when the engine "
+              "crashed, not what crashed it.")
 
 
 def wait_for_port(host, port, timeout=180, proc=None, cfg=None):
@@ -1785,7 +1819,8 @@ def wait_for_port(host, port, timeout=180, proc=None, cfg=None):
     compiling shaders at second 179 are the same to a socket poll, and reporting
     both as a timeout sends you to wait longer for something that is not running.
     """
-    deadline = time.time() + timeout
+    started = time.time()
+    deadline = started + timeout
     while time.time() < deadline:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.settimeout(2)
@@ -1794,7 +1829,8 @@ def wait_for_port(host, port, timeout=180, proc=None, cfg=None):
         if proc is not None and proc.poll() is not None:
             print(f"[cosim] the CARLA server exited ({proc.returncode}) before "
                   f"opening port {port} - it did not time out, it stopped.")
-            report_unreal_crash(cfg)
+            # `proc` was launched just before this call, so its report is not older.
+            report_unreal_crash(cfg, proc.pid, started - 5)
             return False
         time.sleep(2)
     return False
