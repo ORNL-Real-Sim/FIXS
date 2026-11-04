@@ -274,7 +274,8 @@ int runDSProxyMode(const ConfigHelper& config) {
     int signalSock = -1;
     int signalListener = -1;
 
-    auto bindListener = [](int port) -> int {
+    const bool loopbackOnly = config.ClientsAllLocal;
+    auto bindListener = [loopbackOnly](int port) -> int {
         WSADATA wsaData;
         WSAStartup(MAKEWORD(2, 2), &wsaData);    // idempotent if already initialized elsewhere
         int s = static_cast<int>(socket(AF_INET, SOCK_STREAM, IPPROTO_TCP));
@@ -283,7 +284,7 @@ int runDSProxyMode(const ConfigHelper& config) {
         setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (const char*)&reuse, sizeof(reuse));
         sockaddr_in addr{};
         addr.sin_family = AF_INET;
-        addr.sin_addr.s_addr = htonl(INADDR_ANY);
+        addr.sin_addr.s_addr = htonl(loopbackOnly ? INADDR_LOOPBACK : INADDR_ANY);
         addr.sin_port = htons(static_cast<u_short>(port));
         if (::bind(s, (sockaddr*)&addr, sizeof(addr)) < 0) {
             fprintf(stderr, "ERROR: bind(%d) failed: %d\n", port, WSAGetLastError());

@@ -161,6 +161,9 @@ public:
 	// exist and the warm-up gains nothing on that half of its peers.
 	bool DeferAcceptClients = false;
 
+	// Bind the listening sockets to 127.0.0.1 instead of all interfaces.
+	bool ListenLoopbackOnly = false;
+
 	// The blocking "wait for all clients" accept loop. Run automatically by
 	// initConnection() unless DeferAcceptClients is set; call it directly when it
 	// was deferred. Returns 0 on success, -1 on a socket error.

@@ -423,6 +423,11 @@ public:
 	// so it can see both layers' egos without touching message routing.
 	std::unordered_set <std::string> WarmUpEgoIds;
 
+	// True when every address a client is told to dial TrafficLayer at is loopback,
+	// so TrafficLayer can listen on 127.0.0.1 only (no Windows Firewall prompt).
+	bool ClientsAllLocal = false;
+	static bool isLoopbackAddress(const std::string& addr);
+
 	// subscription abstraction, these variables are raw configuration specs
 	// users can use these raw specs to create their own subscription containers for different usages
 	SimulationSetup_t SimulationSetup;
