@@ -99,3 +99,31 @@ def test_reset_config():
     ch.resetConfig()
     assert len(ch.simulation_setup) == 0
     assert len(ch.application_setup) == 0
+
+
+def _load_carmaker(tmp_path, body):
+    cfg = tmp_path / "cm.yaml"
+    cfg.write_text("SimulationSetup:\n  SelectedTrafficSimulator: \"SUMO\"\n" + body)
+    ch = ConfigHelper()
+    ch.getConfig(str(cfg))
+    return ch
+
+
+def test_max_vehicles_sent_defaults_to_100(tmp_path):
+    """No CarMakerSetup key keeps the old compiled-in cap (#232)."""
+    for body in ("", "CarMakerSetup:\n  EnableCosimulation: true\n"):
+        assert _load_carmaker(tmp_path, body).CarMaker_setup['MaxVehiclesSent'] == 100
+
+
+@pytest.mark.parametrize("value", [-1, 1, 250])
+def test_max_vehicles_sent_is_parsed(tmp_path, value):
+    ch = _load_carmaker(tmp_path, "CarMakerSetup:\n  MaxVehiclesSent: %d\n" % value)
+    assert ch.CarMaker_setup['MaxVehiclesSent'] == value
+
+
+@pytest.mark.parametrize("value", [0, -2])
+def test_max_vehicles_sent_rejects_invalid(tmp_path, value):
+    """0 would send nothing and < -1 means nothing; both stop at load like ConfigHelper.cpp."""
+    with pytest.raises(SystemExit) as exc:
+        _load_carmaker(tmp_path, "CarMakerSetup:\n  MaxVehiclesSent: %d\n" % value)
+    assert "MaxVehiclesSent" in str(exc.value)

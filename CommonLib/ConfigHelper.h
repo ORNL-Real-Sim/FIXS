@@ -153,6 +153,9 @@ struct CarMakerSetup_t {
 
 	int TrafficSignalPort;
 
+	// nearest-to-ego vehicles sent per step; -1 = all
+	int MaxVehiclesSent;
+
 };
 
 struct CarlaSetup_t {

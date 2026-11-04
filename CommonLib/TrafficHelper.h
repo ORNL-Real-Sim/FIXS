@@ -317,7 +317,7 @@ private:
 
 	const double SIM_STEP = 0.1;
 
-	const int N_MAX_VEH = 100;
+	bool sendCapWarned = false;
 };
 
 

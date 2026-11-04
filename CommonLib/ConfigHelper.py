@@ -122,6 +122,14 @@ class ConfigHelper:
                 raise SystemExit("ERROR: XilSetup.%s must be one of %s, got '%s'" % (key, "|".join(allowed), value))
             self.Xil_setup[key] = value
 
+        # CarMaker Setup: MaxVehiclesSent only, parity with ConfigHelper.cpp (-1 = no cap).
+        cm_node = config.get("CarMakerSetup", {}) or {}
+        self.CarMaker_setup["MaxVehiclesSent"] = self.parserInteger(cm_node, "MaxVehiclesSent", 100)
+        if self.CarMaker_setup["MaxVehiclesSent"] == 0 or self.CarMaker_setup["MaxVehiclesSent"] < -1:
+            raise SystemExit(
+                "ERROR: CarMakerSetup.MaxVehiclesSent must be -1 (no cap) or a positive count, got %d"
+                % self.CarMaker_setup["MaxVehiclesSent"])
+
         # Carla Setup
         carla_node = config.get("CarlaSetup", {})
         self.Carla_setup["EnableVerboseLog"] = self.parserFlag(carla_node, "EnableVerboseLog", False)
