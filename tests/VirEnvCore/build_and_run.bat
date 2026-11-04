@@ -44,5 +44,10 @@ cl /std:c++17 /EHsc /MD /nologo /W3 /DWIN32 /D_CRT_SECURE_NO_WARNINGS %INC% view
 if %ERRORLEVEL% neq 0 ( echo VIEWDUMP BUILD_FAILED & exit /b 1 )
 
 echo.
+echo === ego_dump (the C++ EgoSetup parse, for test_ego_setup_parity) ===
+cl /std:c++17 /EHsc /MD /nologo /W3 /DWIN32 /D_CRT_SECURE_NO_WARNINGS %INC% ego_dump.cpp "%CLIB%\ConfigHelper.cpp" /Fe:ego_dump.exe /link "%YAML%" ws2_32.lib
+if %ERRORLEVEL% neq 0 ( echo EGODUMP BUILD_FAILED & exit /b 1 )
+
+echo.
 echo ALL VIRENVCORE GUARD TESTS PASSED
 endlocal

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # =============================================================================
-# run_sumo_carla_demo.sh -- Linux counterpart of run_sumo_carla_demo.bat (#65)
+# run_sumo_carla_demo.sh -- Linux counterpart of run_sumo_carla.bat demo (#65)
 #
 #   SUMO --[TraCI]--> TrafficLayer --[VehFullData]--> VirCarlaEnv --> CARLA
 #
 # Click-to-run: no arguments brings CARLA up, loads the map, runs the co-sim and
 # takes it all down. CARLA bring-up/teardown lives in Carla/launch_carla.sh, the
-# counterpart of Carla\launch_carla.bat, so this file stays about the demo.
+# Linux side of FIXS's CARLA launch, so this file stays about the demo.
 #
 # Differences from the .bat, all forced by the platform:
 #   * CARLA gets its OWN port (2100), not the conventional 2000, and only a
