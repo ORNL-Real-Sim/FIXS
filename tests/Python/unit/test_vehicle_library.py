@@ -323,16 +323,25 @@ def test_owned_and_installed_ids_follow_receipts(tmp_path, monkeypatch):
 # ---------------------------------------------------------------- shared installs
 
 def test_instances_on_install_matches_only_this_install():
+    win = os.name == "nt"
+    base = "C:\src_ext" if win else "/opt/src_ext"
+    sep = "\\" if win else "/"
+
+    def at(*parts):
+        return sep.join((base,) + parts)
+
     procs = [
-        {"pid": 1, "name": "UE4Editor.exe", "exe": r"C:\UE\Engine\Binaries\Win64\UE4Editor.exe",
-         "cmd": r'"C:\UE\UE4Editor.exe" "C:\src_ext\Carla\Unreal\CarlaUE4\CarlaUE4.uproject" -game'},
-        {"pid": 2, "name": "UE4Editor.exe", "exe": "", "cmd": r"UE4Editor.exe C:\src_ext\Carla2\Unreal\x.uproject"},
-        {"pid": 3, "name": "CarlaUE4-Win64-Shipping.exe", "exe": r"C:\src_ext\Carla\Dist\CarlaUE4.exe", "cmd": ""},
-        {"pid": 4, "name": "python.exe", "exe": "", "cmd": r"python C:\src_ext\Carla\PythonAPI\x.py"},
+        {"pid": 1, "name": "UE4Editor.exe", "exe": sep.join((base, "UE", "UE4Editor.exe")),
+         "cmd": '"{}" "{}" -game'.format(sep.join((base, "UE", "UE4Editor.exe")),
+                                          at("Carla", "Unreal", "CarlaUE4", "CarlaUE4.uproject"))},
+        {"pid": 2, "name": "UE4Editor.exe", "exe": "", "cmd": "UE4Editor.exe " + at("Carla2", "Unreal", "x.uproject")},
+        {"pid": 3, "name": "CarlaUE4-Win64-Shipping.exe", "exe": at("Carla", "Dist", "CarlaUE4.exe"), "cmd": ""},
+        {"pid": 4, "name": "python.exe", "exe": "", "cmd": "python " + at("Carla", "PythonAPI", "x.py")},
     ]
-    hits = install_guard.instances_on_install(procs, r"C:/src_ext/Carla")
+    root = at("Carla").replace("\\", "/")
+    hits = install_guard.instances_on_install(procs, root)
     assert [p["pid"] for p in hits] == [1, 3]
-    assert install_guard.instances_on_install(procs, r"C:/src_ext/Carla", exclude_pids=(1, 3)) == []
+    assert install_guard.instances_on_install(procs, root, exclude_pids=(1, 3)) == []
 
 
 def test_file_in_use_is_false_for_a_free_file(tmp_path):
