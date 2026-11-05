@@ -4908,6 +4908,7 @@ def main():
                                                               cache_name=target_map)
         map_sumocfg = import_map.bundle_sumocfg(sumo_dir)
         if map_sumocfg:
+            map_sumocfg = import_map.runnable_sumocfg(map_sumocfg, cache_name=target_map)
             print(f"[cosim] '{app['id']}' builds its scenario from the map's: "
                   f"{map_sumocfg}")
         else:
@@ -5308,6 +5309,10 @@ def main():
     if sumocfg is None:
         sys.exit("[cosim] no SUMO scenario to run: pass --sumocfg, or choose a map "
                  "bundle / sumo source that provides one.")
+    # Not an app's own scenario: it built that, and may yet be writing to it.
+    if not app_owns_scenario:
+        sumocfg = import_map.runnable_sumocfg(
+            sumocfg, cache_name=None if args.sumocfg else target_map)
 
     # TL table for signal sync + placement: --tl-table wins, else committed next to
     # the sumocfg, else generated from the SUMO net (cached ~/.fixs/tables).
@@ -5833,6 +5838,8 @@ def serve_forever():
     while True:
         n += 1
         try:
+            import import_map
+            import_map.start_new_run()
             rc = main()
         except KeyboardInterrupt:
             _fail_peer("stopped from the render host (Ctrl+C)", retryable=True)

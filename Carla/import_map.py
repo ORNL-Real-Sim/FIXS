@@ -51,6 +51,7 @@ Examples:
   python import_map.py --package RP_Ver0529 --package-url https://.../RP_Ver0529_import.zip
 """
 import argparse
+import copy
 import fnmatch
 import os
 import platform
@@ -815,27 +816,105 @@ def clear_staging(carla_root, name):
                 print(f"[import]   could not remove it ({exc}); leaving it.")
 
 
+# What an archiver adds to a zip by itself. Never part of a map, and on a mac-made
+# zip __MACOSX/ mirrors the whole tree, so it must not count as a second bundle.
+_ZIP_JUNK_DIRS = {"__macosx"}
+_ZIP_JUNK_FILES = {".ds_store", "thumbs.db", "desktop.ini"}
+_BUNDLE_HALVES = {"carla", "sumo", "props"}
+_BUNDLE_MAX_WRAPPERS = 3
+
+
+def _bundle_prefix(names):
+    """Where a bundle's root sits inside a zip: "" when `carla/` is at the top (the
+    published convention), "<wrapper>/" when it was zipped from one folder too high,
+    None when this is not a bundle at all.
+
+    A wrapper needs `sumo/` beside `carla/`. A top-level `carla/` has always been
+    enough on its own, but one level down that would claim a legacy CARLA-only
+    package that merely has a folder of that name inside it. Two equally shallow
+    candidates are None: which one is the map cannot be told from here."""
+    dirs = set()
+    for n in names:
+        parts = n.replace("\\", "/").split("/")[:-1]
+        if not parts or any(p.lower() in _ZIP_JUNK_DIRS for p in parts):
+            continue
+        dirs.update("/".join(parts[:i + 1]) for i in range(len(parts)))
+    lowered = {d.lower() for d in dirs}
+    if "carla" in lowered:
+        return ""
+    found = []
+    for d in dirs:
+        parent, _, leaf = d.rpartition("/")
+        if leaf.lower() == "carla" and parent.count("/") < _BUNDLE_MAX_WRAPPERS \
+                and f"{parent}/sumo".lower() in lowered:
+            found.append(parent + "/")
+    if not found:
+        return None
+    depth = min(p.count("/") for p in found)
+    shallowest = [p for p in found if p.count("/") == depth]
+    return shallowest[0] if len(shallowest) == 1 else None
+
+
 def _looks_like_bundle(names):
-    """True if a package's entries are rooted under a top-level `carla/` - the
-    Digital-Twin-Library combined layout (`carla/` + `sumo/`) - rather than a
-    flat/legacy CARLA-only package."""
-    tops = {n.replace("\\", "/").split("/", 1)[0] for n in names if n.strip()}
-    return "carla" in tops
+    """True if a package's entries hold the Digital-Twin-Library combined layout
+    (`carla/` + `sumo/`), rather than a flat/legacy CARLA-only package."""
+    return _bundle_prefix(names) is not None
 
 
-def _bundle_members(z, sumo_only):
-    """Which entries of a bundle zip to extract: everything, or only `sumo/`."""
-    if not sumo_only:
-        return None                      # extractall's own default
-    return [n for n in z.namelist()
-            if n.replace("\\", "/").split("/", 1)[0] == "sumo"]
+def _bundle_rel(name, prefix):
+    """A zip entry's path from the bundle root, with its half in the lower case the
+    rest of this module (and a case-sensitive disk) expects. None for an entry that
+    is outside the bundle or is archiver junk."""
+    n = name.replace("\\", "/")
+    if not n.startswith(prefix):
+        return None
+    rel = n[len(prefix):]
+    parts = rel.split("/")
+    if not rel or any(p.lower() in _ZIP_JUNK_DIRS for p in parts) \
+            or parts[-1].lower() in _ZIP_JUNK_FILES:
+        return None
+    if len(parts) > 1 and parts[0].lower() in _BUNDLE_HALVES:
+        parts[0] = parts[0].lower()
+    return "/".join(parts)
+
+
+def _extract_bundle(z, dest, prefix, sumo_only):
+    """Extract a bundle zip so `carla/` + `sumo/` land directly under `dest`, whatever
+    the zip wrapped them in: everything, or only `sumo/`. zipfile still does the
+    writing, so its protection against ../ paths in an entry still applies."""
+    for info in z.infolist():
+        rel = _bundle_rel(info.filename, prefix)
+        if rel is None or (sumo_only and rel.split("/", 1)[0] != "sumo"):
+            continue
+        member = copy.copy(info)
+        member.filename = rel
+        z.extract(member, dest)
+
+
+def _unwrap_bundle_dir(src):
+    """The folder form of _bundle_prefix: `src` itself unless it only wraps a bundle,
+    e.g. a zip extracted by hand into a folder named after it. Follows a lone
+    subfolder at a time, so a folder with several things in it is not guessed at."""
+    cur = src
+    for _ in range(_BUNDLE_MAX_WRAPPERS + 1):
+        if os.path.isdir(os.path.join(cur, "carla")):
+            if cur == src or os.path.isdir(os.path.join(cur, "sumo")):
+                return cur
+            return src
+        subs = [e.path for e in os.scandir(cur) if e.is_dir()
+                and e.name.lower() not in _ZIP_JUNK_DIRS]
+        if len(subs) != 1:
+            return src
+        cur = subs[0]
+    return src
 
 
 def open_bundle(src, cache_name=None):
     """Split a map source into its CARLA package and its SUMO scenario.
 
     A Digital-Twin-Library map ships as one bundle - a zip (or folder) with a
-    top-level `carla/` (the CARLA import package) and `sumo/` (the scenario).
+    top-level `carla/` (the CARLA import package) and `sumo/` (the scenario). One
+    wrapped in an extra folder is read through it, with a note; see _bundle_prefix.
     Returns `(carla_src, sumo_dir)`:
       - bundle  -> (`<cache>/carla`, `<cache>/sumo`); a zip is extracted once
                    (re-extracted only when the zip is newer). `cache_name` (the
@@ -848,8 +927,11 @@ def open_bundle(src, cache_name=None):
     `carla_src` is what to hand `ensure_map`/`stage_package`; `sumo_dir` (or None)
     is where run_cosim finds the `.sumocfg`."""
     if os.path.isdir(src):
-        carla = os.path.join(src, "carla")
-        sumo = os.path.join(src, "sumo")
+        root = _unwrap_bundle_dir(src)
+        if root != src:
+            print(f"[import] '{src}' wraps its bundle in a folder; using {root}")
+        carla = os.path.join(root, "carla")
+        sumo = os.path.join(root, "sumo")
         if os.path.isdir(carla):
             return carla, (sumo if os.path.isdir(sumo) else None)
         # Handed something INSIDE carla/ - what the picker returns for an
@@ -859,8 +941,13 @@ def open_bundle(src, cache_name=None):
         return src, _bundle_sumo_beside(src)
     if os.path.isfile(src) and src.lower().endswith(".zip"):
         with zipfile.ZipFile(src) as z:
-            if not _looks_like_bundle(z.namelist()):
+            prefix = _bundle_prefix(z.namelist())
+            if prefix is None:
                 return src, None
+            if prefix:
+                print(f"[import] {os.path.basename(src)} wraps carla/ + sumo/ in "
+                      f"'{prefix}' instead of shipping them at the top; reading "
+                      f"through it. Worth reporting to whoever published it.")
             unpacked = _map_cache_dir(cache_name) if cache_name else os.path.join(
                 os.path.dirname(os.path.abspath(src)),
                 os.path.splitext(os.path.basename(src))[0] + "_unpacked")
@@ -883,7 +970,7 @@ def open_bundle(src, cache_name=None):
                 for sub in ("carla", "sumo", "props"):
                     shutil.rmtree(os.path.join(unpacked, sub), ignore_errors=True)
                 os.makedirs(unpacked, exist_ok=True)
-                z.extractall(unpacked, members=_bundle_members(z, sumo_only))
+                _extract_bundle(z, unpacked, prefix, sumo_only)
                 print(f"[import] unpacked {'sumo half of ' if sumo_only else ''}"
                       f"bundle -> {unpacked}")
         carla = os.path.join(unpacked, "carla")
@@ -913,6 +1000,124 @@ def bundle_sumocfg(sumo_dir):
         sys.exit(f"[import] {sumo_dir} has {len(cfgs)} .sumocfg files {cfgs}; "
                  f"pass --sumocfg to choose one.")
     return os.path.join(sumo_dir, cfgs[0])
+
+
+def _sumocfg_input_entries(root):
+    """(element, option, [entries]) for every option of a parsed .sumocfg that names
+    input files. Outputs are left out: they need not exist before the run."""
+    found = []
+    for el in root.iter():
+        val = el.get("value")
+        if val is None or "output" in el.tag or not el.tag.endswith(("-file", "-files")):
+            continue
+        entries = [v.strip() for v in val.split(",") if v.strip()]
+        if entries:
+            found.append((el, el.tag, entries))
+    return found
+
+
+def _sumocfg_replacement(option, cfg, taken):
+    """The file a .sumocfg must have meant, or None when that cannot be known.
+
+    Deliberately narrow, because a wrong guess is not an error anyone would see: it
+    is a run on different traffic under the same name. `<cfg stem>.<kind>.xml` always
+    qualifies. A lone .net.xml does too, since a scenario has one net - but a lone
+    .rou.xml does not: it could as easily be vtypes.rou.xml as the demand."""
+    suffix = {"net-file": ".net.xml", "route-files": ".rou.xml",
+              "additional-files": ".add.xml"}.get(option)
+    if not suffix:
+        return None
+    folder = os.path.dirname(os.path.abspath(cfg))
+    stem = os.path.splitext(os.path.basename(cfg))[0]
+    if stem + suffix not in taken and os.path.isfile(os.path.join(folder, stem + suffix)):
+        return stem + suffix
+    if option == "net-file":
+        nets = [f for f in os.listdir(folder)
+                if f.lower().endswith(suffix) and f not in taken]
+        if len(nets) == 1:
+            return nets[0]
+    return None
+
+
+def sumocfg_missing_inputs(cfg):
+    """[(option, named, replacement-or-None)] for each input file a .sumocfg names
+    that is not there. SUMO reads relative paths against the config file. An
+    unreadable config is [] - SUMO's own message about it is the better one."""
+    try:
+        root = ET.parse(cfg).getroot()
+    except (OSError, ET.ParseError):
+        return []
+    folder = os.path.dirname(os.path.abspath(cfg))
+    inputs = _sumocfg_input_entries(root)
+    absent = [(opt, v) for _el, opt, vals in inputs for v in vals
+              if not os.path.isfile(os.path.join(folder, v))]
+    taken = {os.path.basename(v) for _el, _opt, vals in inputs for v in vals} - \
+        {os.path.basename(v) for _opt, v in absent}
+    missing = []
+    for opt, v in absent:
+        fix = _sumocfg_replacement(opt, cfg, taken)
+        if fix:
+            taken.add(fix)
+        missing.append((opt, v, fix))
+    return missing
+
+
+def _write_corrected_sumocfg(cfg, fixes, cache_name):
+    """A copy of `cfg` with `fixes` applied, in ~/.fixs/maps/<cache_name>/sumo_corrected/.
+
+    A copy, in its own folder, because the shipped file is not ours to edit: sumo/
+    has to stay what the bundle ships or report_bundle_parity would be right to call
+    it modified, and a second .sumocfg beside it would trip bundle_sumocfg. So every
+    input path in the copy is absolute, and it is rewritten from the shipped file on
+    each run, which is what makes a corrected bundle take over by itself."""
+    ET.register_namespace("xsi", "http://www.w3.org/2001/XMLSchema-instance")
+    tree = ET.parse(cfg)
+    folder = os.path.dirname(os.path.abspath(cfg))
+    for el, opt, vals in _sumocfg_input_entries(tree.getroot()):
+        el.set("value", ",".join(
+            os.path.join(folder, fixes.get((opt, v), v)) for v in vals))
+    dest = os.path.join(_map_cache_dir(cache_name), "sumo_corrected")
+    os.makedirs(dest, exist_ok=True)
+    path = os.path.join(dest, os.path.basename(cfg))
+    tree.write(path, encoding="utf-8", xml_declaration=True)
+    return path
+
+
+_SUMOCFG_NOTED = set()      # one run resolves its scenario more than once
+
+
+def runnable_sumocfg(cfg, cache_name=None):
+    """The .sumocfg to hand SUMO: `cfg` itself unless it names input files that are
+    not there. Run this on a scenario before launching, so that failure is a message
+    here and not a sumo-gui window that opens, errors and quits.
+
+      every input present      -> `cfg`
+      all missing, all certain -> a corrected copy (map cache only), said out loud
+      otherwise                -> exit, listing what is missing
+
+    `cache_name` is None for a scenario the user named themselves: that is theirs to
+    fix, so it gets the diagnosis and no copy."""
+    missing = sumocfg_missing_inputs(cfg)
+    if not missing:
+        return cfg
+    name = os.path.basename(cfg)
+    lines = [f"  {opt}: {v}" + (f" -> {fix}" if fix else " (no certain replacement)")
+             for opt, v, fix in missing]
+    if not cache_name or not all(fix for _opt, _v, fix in missing):
+        sys.exit(f"[import] {cfg} names files that are not beside it:\n"
+                 + "\n".join(f"[import] {ln}" for ln in lines)
+                 + "\n[import] SUMO cannot start on this. Correct those values in "
+                   "the .sumocfg, or pass --sumocfg with one that works.")
+    path = _write_corrected_sumocfg(
+        cfg, {(opt, v): fix for opt, v, fix in missing}, cache_name)
+    if cfg not in _SUMOCFG_NOTED:
+        _SUMOCFG_NOTED.add(cfg)
+        print(f"[import] *** {name} names files its bundle does not ship: ***")
+        for ln in lines:
+            print(f"[import] {ln}")
+        print(f"[import] running a corrected copy; the shipped file is untouched: {path}")
+        print("[import] worth reporting to whoever published the map.")
+    return path
 
 
 def map_name_in(carla_src, descriptor_only=False):
@@ -2305,10 +2510,12 @@ def bundle_parity(cache_name, half="sumo"):
     shipped = set()
     try:
         with zipfile.ZipFile(zip_path) as z:
+            bundle_root = _bundle_prefix(z.namelist()) or ""
             for info in z.infolist():
-                if not info.filename.startswith(prefix) or info.filename.endswith("/"):
+                rel = _bundle_rel(info.filename, bundle_root)
+                if rel is None or not rel.startswith(prefix) or rel.endswith("/"):
                     continue
-                rel = info.filename[len(prefix):]
+                rel = rel[len(prefix):]
                 shipped.add(rel)
                 disk = os.path.join(root, rel.replace("/", os.sep))
                 if not os.path.isfile(disk):
@@ -2519,6 +2726,30 @@ def _download_release_asset(repo, tag, pattern, suffix, force_redownload=False,
     dir, and a map may well have both downloaded."""
     gh = _require_gh()
     tag_dir = _map_cache_dir(cache_name or tag)
+    # run_cosim reaches for the bundle from several places in one run. The answer
+    # does not change between them, so asking again - or, on a re-download, fetching
+    # a few hundred MB again - only makes the user repeat themselves.
+    settled = _ASSETS_SETTLED.get((tag_dir, pattern))
+    if settled and os.path.isfile(settled):
+        return settled
+    path = _settle_release_asset(gh, repo, tag, tag_dir, pattern, suffix,
+                                 force_redownload, what)
+    _ASSETS_SETTLED[(tag_dir, pattern)] = path
+    return path
+
+
+_ASSETS_SETTLED = {}        # (cache dir, asset pattern) -> the file this run settled on
+
+
+def start_new_run():
+    """Forget what the previous run settled. A process is not always one run: --serve
+    re-enters main() for each, and there a later --reimport has to download again."""
+    _ASSETS_SETTLED.clear()
+    _SUMOCFG_NOTED.clear()
+
+
+def _settle_release_asset(gh, repo, tag, tag_dir, pattern, suffix, force_redownload, what):
+    """The cache-or-download decision of _download_release_asset, made once a run."""
     cached = [f for f in os.listdir(tag_dir) if f.lower().endswith(suffix)] \
         if os.path.isdir(tag_dir) else []
     # An exact name must be matched exactly: a map's cache can hold both its
