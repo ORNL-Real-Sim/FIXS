@@ -153,6 +153,19 @@ def _spectatorTransform(tf, height, alignYaw):
     return carla.Transform(loc, carla.Rotation(-90.0, yaw, 0.0))
 
 
+def resolveEgoPhysics(blueprintId, manifestPath=''):
+    """The manifest physics plan of a library ego blueprint (#470), or None for a stock one."""
+    from Carla.vehicles.manifest import ManifestError, for_blueprint, physics_plan
+    try:
+        m, path = for_blueprint(blueprintId, manifestPath)
+    except ManifestError as exc:
+        raise SystemExit('ERROR: %s' % exc)
+    if m is None:
+        return None
+    print('Ego %s: physics from %s' % (blueprintId, path))
+    return physics_plan(m)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(
         prog='mainVirCarla',
@@ -220,6 +233,8 @@ def main(argv=None):
     deferEgoSpawn = virEnvOwnsEgo and len(cs['EgoSpawnPose']) < 4
 
     interestedIds = set(cs['InterestedIds'] or [])
+    egoPhysics = (resolveEgoPhysics(cs['EgoBlueprint'], cs['EgoVehicleManifest'])
+                  if virEnvOwnsEgo else None)
 
     client = carla.Client(cs['CarlaServerIP'], cs['CarlaServerPort'])
     client.set_timeout(10.0)
@@ -244,6 +259,9 @@ def main(argv=None):
     # EgoMode >= 1: Carla OWNS the ego -- the core must never spawn or teleport the
     # traffic simulator's echo of it, which is the injected shadow of this actor.
     core.egoId_ = egoId if virEnvOwnsEgo else ''
+    if not virEnvOwnsEgo:
+        backend.setMirroredEgo(egoId, cs['EgoBlueprint'] if cs['EgoBlueprintSet'] else '',
+                               cs['EgoColor'])
     core.egoType_ = ''
     core.trafficLayerIP_ = cs['CarlaClientIP']
     core.vehDataPort_ = cs['CarlaClientPort']
@@ -367,7 +385,8 @@ def main(argv=None):
             sp = Pose(x=cs['EgoSpawnPose'][0], y=cs['EgoSpawnPose'][1],
                       z=cs['EgoSpawnPose'][2], headingDeg=cs['EgoSpawnPose'][3])
             if not _bringUpEgo(cs, backend, egoDriver, world, virEnvOwnsEgo,
-                               useFixsDriver, useWireActuation, useEmbedded, sp, True):
+                               useFixsDriver, useWireActuation, useEmbedded, sp, True,
+                               egoPhysics):
                 return -1
             egoIsUp = True
         elif deferEgoSpawn:
@@ -420,7 +439,7 @@ def main(argv=None):
                           % (egoId, simTime, sp.x, sp.y, sp.z, sp.headingDeg))
                     if not _bringUpEgo(cs, backend, egoDriver, world, virEnvOwnsEgo,
                                        useFixsDriver, useWireActuation,
-                                       useEmbedded, sp, False):
+                                       useEmbedded, sp, False, egoPhysics):
                         break
                     egoIsUp = True
 
@@ -719,11 +738,20 @@ def main(argv=None):
             dataLog.close()
         if poseLog is not None:
             poseLog.close()
+        # Before the views close, so a dyno the controller holds ramps down on camera.
+        if embedded is not None:
+            embedded, _closing = None, embedded
+            _closing.shutdown()
         views.close()
         plots.close()
         if virEnvOwnsEgo:
             backend.destroyEgo()
     finally:
+        if embedded is not None:
+            try:
+                embedded.shutdown()
+            except Exception as exc:
+                print('Ego controller shutdown failed: %s' % exc)
         views.close()
         plots.close()
         core.shutdown()
@@ -735,7 +763,7 @@ def main(argv=None):
 
 
 def _bringUpEgo(cs, backend, egoDriver, world, virEnvOwnsEgo, useFixsDriver,
-                useWireActuation, useEmbedded, sp, settleOutOfBand):
+                useWireActuation, useEmbedded, sp, settleOutOfBand, egoPhysics=None):
     """Spawn the ego at `sp` and wire whichever driver owns it. -> bool
 
     Peer of the ``bringUpEgo`` lambda in mainVirCarla.cpp:282, and callable from
@@ -752,7 +780,8 @@ def _bringUpEgo(cs, backend, egoDriver, world, virEnvOwnsEgo, useFixsDriver,
     there advances Carla past the feed and desyncs every mirrored vehicle. A
     deferred ego therefore settles inside the co-sim ticks instead.
     """
-    if backend.spawnEgo(cs['EgoBlueprint'], sp, cs['TrafficManagerPort']) == kNoHandle:
+    if backend.spawnEgo(cs['EgoBlueprint'], sp, cs['TrafficManagerPort'],
+                        color=cs['EgoColor'], physics=egoPhysics) == kNoHandle:
         print('ego spawn failed', file=sys.stderr)
         return False
 

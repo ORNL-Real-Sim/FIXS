@@ -358,6 +358,9 @@ class Controller:
     _EXCHANGE = None
     #: True for an exchange(vref, aref, dt), False for exchange(vref, dt).
     _EXCHANGE_TAKES_AREF = False
+    #: xilStart(v0) before the first exchange, xilStop() at shutdown. None: not called.
+    _XIL_START = None
+    _XIL_STOP = None
     _OPTIONS = None
     #: The user's control(ego, dt), run in place of default(). None runs default().
     _CONTROL = None
@@ -417,6 +420,9 @@ class Controller:
         self.misses = 0
         #: What the bench last achieved. None until it has answered once.
         self.vDyno = None
+        #: The ego's speed this step, handed to xilStart as the rig's initial speed.
+        self._egoSpeed = 0.0
+        self._xilStarted = False
 
         # Map and route planner are built at start-up, not on the first
         # controlled tick (FIXS#373). Skipped without a bridge (unit tests) and
@@ -456,6 +462,9 @@ class Controller:
         Those ticks are counted, because a run that ends with many of them did
         not test what it claims to have tested.
         """
+        if self._XIL_START is not None and not self._xilStarted:
+            self._xilStarted = True         # set first: a failed start is not retried every step
+            self._XIL_START(self._egoSpeed)
         if self._EXCHANGE_TAKES_AREF:
             reached = self._exchange(vRef, self._arefFor(vRef) if aRef is None else aRef, self.dt)
         else:
@@ -546,6 +555,7 @@ class Controller:
         """FIXS calls this every step: the control passed to fixs.driver(), else default()."""
         if dt > 0:
             self.dt = dt
+        self._egoSpeed = max(0.0, float(getattr(ego, 'speed', 0.0) or 0.0))
         self.elapsed += dt
         self.steps += 1
         if self._CONTROL is not None:
@@ -818,6 +828,11 @@ class Controller:
         global _instance
         if _instance is self:
             _instance = None
+        if self._XIL_STOP is not None and self._xilStarted:
+            try:
+                self._XIL_STOP()
+            except Exception as exc:          # shutdown must finish: report and go on
+                print('[driver] xilStop failed: %s' % exc, flush=True)
         if self.log is not None:
             self.log.close()
             self.log = None
@@ -898,7 +913,8 @@ def _oldNames(exchange, usercontrol, xil, control):
     return xil, control
 
 
-def driver(exchange=None, *, xil=None, control=None, usercontrol=None, **options):
+def driver(exchange=None, *, xil=None, control=None, usercontrol=None,
+           xilStart=None, xilStop=None, **options):
     """-> class -- the controller the scenario should name.
 
     ``xil(vref, dt) -> mps`` is yours: a speed goes in, the speed your dyno
@@ -907,6 +923,11 @@ def driver(exchange=None, *, xil=None, control=None, usercontrol=None, **options
     passes through untouched; those are counted and reported. Omit it and
     nothing is in the loop. For the simulated cell, pass
     ``fixs.xil.dynosim().exchange``.
+
+    ``xilStart(v0)`` is called once, before the first exchange, with the ego's
+    speed at that step: a rig ramps to it before the run goes on. ``xilStop()``
+    is called at shutdown, handing the car back to the rig. Both are optional;
+    :class:`CommonLib.xil.link.UdpRig` has all three.
 
     ``control(ego, dt)`` is your own step, called in place of :meth:`Controller.default`.
     It reaches this driver through :func:`instance` when it wants any of it.
@@ -922,13 +943,16 @@ def driver(exchange=None, *, xil=None, control=None, usercontrol=None, **options
     ``--command-shape`` still wins over all of them, being nearer the run.
     """
     xil, control = _oldNames(exchange, usercontrol, xil, control)
-    for name, fn in (('xil', xil), ('control', control)):
+    for name, fn in (('xil', xil), ('control', control),
+                     ('xilStart', xilStart), ('xilStop', xilStop)):
         if fn is not None and not callable(fn):
             raise TypeError('fixs.driver(%s=): %r is not callable' % (name, fn))
     cls = type('Controller', (Controller,),
                dict(_EXCHANGE=staticmethod(xil) if xil else None,
                     _EXCHANGE_TAKES_AREF=_takesAref(xil) if xil else False,
                     _CONTROL=staticmethod(control) if control else None,
+                    _XIL_START=staticmethod(xilStart) if xilStart else None,
+                    _XIL_STOP=staticmethod(xilStop) if xilStop else None,
                     _OPTIONS=dict(_DEFAULTS, **options)))
     _BUILT.append(cls)
     return cls
