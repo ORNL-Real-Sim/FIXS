@@ -392,8 +392,11 @@ def _materials(c, raw):
             c.err(q[:-1], "must be a mapping")
         else:
             # match is the exact source material name, so a generic word cannot catch other slots
+            size = c.vec(plate, q, "size_m", 2, required=False)
+            if size is not None and not (0.05 <= min(size) and max(size) <= 1.0):
+                c.err(q + "size_m", "must be [width, height] in metres, each 0.05-1.0, got {}".format(size))
             out["plate"] = dict(_look(c, plate, q), match=c.string(plate, q, "match"),
-                                texture=c.string(plate, q, "texture", required=False))
+                                texture=c.string(plate, q, "texture", required=False), size_m=size)
     return out
 
 

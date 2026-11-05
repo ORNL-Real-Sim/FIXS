@@ -593,6 +593,35 @@ def test_plate_and_wheel_slots_get_their_own_slots():
     assert "M_Tyre" not in info                      # every tyre triangle sits on a wheel bone
 
 
+def _plate_quad(x, w, h, tilt_deg):
+    """Two triangles of a w x h plate at x, leaning back by tilt_deg."""
+    t = np.radians(tilt_deg)
+    up = np.array([np.sign(x) * np.sin(t), 0.0, np.cos(t)])
+    c = np.array([x, 0.0, 0.6])
+    a, b, cc, d = (c + sy * w / 2 * np.array([0, 1.0, 0]) + sz * h / 2 * up
+                   for sy, sz in ((-1, -1), (1, -1), (1, 1), (-1, 1)))
+    return np.array([[a, b, cc], [a, cc, d]])
+
+
+def test_plates_are_resized_in_their_own_plane():
+    P = np.concatenate([_plate_quad(-2.3, 0.347, 0.125, 12.0), _plate_quad(2.36, 0.347, 0.125, 0.0)])
+    out = mesh.fit_plates(P, [0.305, 0.152])
+    for side in (out[:2], out[2:]):
+        q = side.reshape(-1, 3)
+        assert np.ptp(q[:, 1]) == pytest.approx(0.305, abs=1e-6)
+        assert np.linalg.norm(q[2] - q[1]) == pytest.approx(0.152, abs=1e-6)   # along the leaning side
+    assert out[:2, :, 0].mean() < -2.3 and out[2:, :, 0].mean() > 2.36          # lifted off the bumper
+
+
+def test_plate_size_is_checked():
+    raw = copy.deepcopy(MANIFEST)
+    raw["materials"]["plate"] = {"match": "Plate", "size_m": [0.305, 0.152]}
+    assert vm.validate(raw, "v.yaml")["materials"]["plate"]["size_m"] == [0.305, 0.152]
+    raw["materials"]["plate"]["size_m"] = [305, 152]
+    with pytest.raises(vm.ManifestError):
+        vm.validate(raw, "v.yaml")
+
+
 def test_plate_match_is_exact_not_a_substring():
     cfg = {"plate": {"match": "material"}, "strip": ["_Car_"]}
     assert mesh.role_of("material", cfg) == "plate"

@@ -210,6 +210,36 @@ def dedupe(P, N, UV, keep, cabin_centre):
     return P[idx], N[idx], UV[idx]
 
 
+def fit_plates(P, size_m, standoff=0.004):
+    """Resize each plate quad (front, rear) in its own plane to `size_m` = [width, height].
+
+    The plate texture spans the quad's UVs, so this sets the size the plate is drawn at.
+    `standoff` lifts it off the bumper so the larger quad does not sink into it."""
+    P = np.array(P, dtype=float)
+    out = P.copy()
+    for side in (P[:, :, 0].mean(1) >= 0, P[:, :, 0].mean(1) < 0):
+        if not side.any():
+            continue
+        q = P[side].reshape(-1, 3)
+        c0 = (q.min(0) + q.max(0)) / 2
+        normal = np.linalg.svd(q - q.mean(0))[2][2]
+        if normal[0] * c0[0] < 0:
+            normal = -normal
+        lat = np.array([0.0, 1.0, 0.0]) - normal[1] * normal
+        lat /= np.linalg.norm(lat)
+        up = np.cross(normal, lat)
+        if up[2] < 0:
+            up = -up
+        a, b = (q - c0) @ lat, (q - c0) @ up
+        sa = size_m[0] / max(np.ptp(a), 1e-9)
+        sb = size_m[1] / max(np.ptp(b), 1e-9)
+        mid_a, mid_b = (a.max() + a.min()) / 2, (b.max() + b.min()) / 2
+        new = (c0 + np.outer((a - mid_a) * sa + mid_a, lat) + np.outer((b - mid_b) * sb + mid_b, up)
+               + standoff * normal)
+        out[side] = new.reshape(-1, 3, 3)
+    return out
+
+
 # ---------------------------------------------------------------- materials
 
 PLATE_SLOT = "M_LicensePlate"
@@ -293,6 +323,8 @@ def build_parts(chunks, materials, m):
         if not src["dedupe_twins"]:
             keep = "both"
         P, N, UV = dedupe(c["P"], c["N"], c["UV"], keep, cabin)
+        if role == "plate" and (mats_cfg["plate"] or {}).get("size_m"):
+            P = fit_plates(P, mats_cfg["plate"]["size_m"])
         bone = BONE_OF[wheel_groups[c["group"]]] if c["group"] in wheel_groups else BASE_BONE
         look = look_for(name, mats_cfg)
         ws = wheel_slot_for(name, mats_cfg) if bone != BASE_BONE and role == "opaque" else None
