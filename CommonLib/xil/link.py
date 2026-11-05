@@ -25,6 +25,7 @@ and "fall back to your own reference" are both right somewhere, so the link does
 not choose.
 """
 
+import math
 import socket
 import struct
 import time
@@ -271,18 +272,23 @@ class TcpLink(object):
 # run start and stop, for a rig answering in lockstep (#473)
 # --------------------------------------------------------------------------- #
 #: Control codes, carried in the packet's speed slot: a commanded speed is never negative.
-#: Host -> rig: (START, v0) ramp to v0 and start logging; (STOP, 0) ramp down to rest.
-#: Rig -> host: (HELLO, 0) on start-up; (START, v) settled at v; (STOP, v) at rest;
+#: Host -> rig: (START, v0) ramp to v0 and start logging; (STOP, 0) the car goes back to the rig.
+#: Rig -> host: (HELLO, 0) on start-up; (START, v) settled at v; (STOP, v) released at v (0 once at rest);
 #: (FAULT, v) fault or e-stop.
 HELLO, START, STOP, FAULT = -1, -2, -3, -4
 _NAMES = {HELLO: 'HELLO', START: 'START', STOP: 'STOP', FAULT: 'FAULT'}
 
 
 def code(speed):
-    """The control code in a packet's speed slot, or None if it is a speed."""
-    if not speed < 0:                       # also None for NaN
+    """The control code in a packet's speed slot, or None if it is a speed.
+
+    Codes are exact negative whole numbers. Anything else is a speed, so a rig
+    may report -0.01 m/s of sensor noise without it reading as a code.
+    """
+    speed = float(speed)
+    if not (speed < 0 and math.isfinite(speed) and speed.is_integer()):
         return None
-    return int(round(speed))
+    return int(speed)
 
 
 def codeName(c):
@@ -297,6 +303,16 @@ def _say(msg):
     print(msg, flush=True)
 
 
+#: While waiting on START or STOP, say so this often [s].
+REMIND_S = 30.0
+#: A STOP answered below this speed [m/s] is "at rest"; above it, the rig has taken the car moving.
+AT_REST_MPS = 0.05
+
+
+def _minutes(s):
+    return '%d s' % s if s < 120 else '%.0f min' % (s / 60.0)
+
+
 class UdpRig(object):
     """The simulator end of a rig that answers each command once (lockstep).
 
@@ -308,11 +324,18 @@ class UdpRig(object):
     START and STOP are resent every ``resend_s`` until answered; the rig answers a
     repeat by acknowledging again. A rig must also ramp down on its own when no
     packet arrives for a few seconds, since a killed process never sends STOP.
+
+    The rig answers STOP once FIXS no longer controls the car: at rest after its own
+    ramp-down, or at once when a driver takes over. Its program may exit after that
+    and start again for the next run; START waits for it, and its hello cuts the wait.
+
+    A limit of 0 is no limit: START waits for the rig as long as it takes, which is
+    the default because the run is paused meanwhile.
     """
 
     def __init__(self, ip, port=REFERENCE_PORT, reply_port=MEASUREMENT_PORT,
-                 step_timeout_s=1.0, max_misses=5, start_timeout_s=300.0,
-                 stop_timeout_s=15.0, resend_s=1.0, log=_say, clock=time.monotonic):
+                 step_timeout_s=1.0, max_misses=5, start_timeout_s=0.0,
+                 stop_timeout_s=60.0, resend_s=1.0, log=_say, clock=time.monotonic):
         self.peer = (ip, int(port))
         self.reply_port = int(reply_port)
         self.step_timeout_s = float(step_timeout_s)
@@ -329,6 +352,16 @@ class UdpRig(object):
         self.startSpeed = None
         self.misses = 0
         self._missRun = 0
+
+    @classmethod
+    def fromConfig(cls, xil, reply_port=MEASUREMENT_PORT, **options):
+        """A rig at XilSetup's ip and port, with XilSetup.Rig's limits: ``fixs.config.get('xil')``."""
+        limits = dict(xil.get('rig') or {})
+        for key, name in (('StartTimeout', 'start_timeout_s'), ('StopTimeout', 'stop_timeout_s'),
+                          ('StepTimeout', 'step_timeout_s'), ('MaxMisses', 'max_misses')):
+            if key in limits:
+                options.setdefault(name, limits[key])
+        return cls(xil['ip'], xil['port'], reply_port, **options)
 
     def _send(self, speed, second):
         try:
@@ -354,7 +387,7 @@ class UdpRig(object):
             left = deadline - self._clock()
             if left <= 0:
                 return None
-            self._sock.settimeout(left)
+            self._sock.settimeout(None if math.isinf(left) else left)
             try:
                 data, _ = self._sock.recvfrom(64)
             except socket.timeout:
@@ -365,10 +398,16 @@ class UdpRig(object):
                 return unpack(data)
 
     def _request(self, which, value, timeout):
-        """Send (which, value) until the rig acknowledges it; the ack's value, or None on timeout."""
-        deadline = self._clock() + timeout
+        """Send (which, value) until the rig acknowledges it; the ack's value, or None on timeout (0: none)."""
+        begun = self._clock()
+        deadline = begun + timeout if timeout > 0 else float('inf')
+        remind = begun + REMIND_S
         self._drain()
         while self._clock() < deadline:
+            if self._clock() >= remind:
+                self._log('[rig] still waiting for the rig to answer %s (%s)'
+                          % (codeName(which), _minutes(self._clock() - begun)))
+                remind += REMIND_S
             self._send(which, value)
             resend_at = min(deadline, self._clock() + self.resend_s)
             while True:
@@ -390,7 +429,7 @@ class UdpRig(object):
         v0 = max(0.0, float(v0))
         self._log('[rig] START: ramp to %.2f m/s (%s:%d)' % ((v0,) + self.peer))
         v = self._request(START, v0, self.start_timeout_s)
-        if v is None:
+        if v is None:                       # only with a StartTimeout
             raise RigError('rig %s:%d did not answer START in %.0f s'
                            % (self.peer + (self.start_timeout_s,)))
         self.started, self.startSpeed = True, v
@@ -403,13 +442,13 @@ class UdpRig(object):
             self.start(0.0)
         self._drain()
         self._send(max(0.0, float(vref)), float(aref))
-        deadline = self._clock() + self.step_timeout_s
+        deadline = self._clock() + self.step_timeout_s if self.step_timeout_s > 0 else float('inf')
         while True:
             got = self._recv(deadline - self._clock())
             if got is None:
                 break
             c = code(got[0])
-            if c is None:
+            if c is None:                   # a speed, slightly negative ones included
                 self._missRun = 0
                 return got[0]
             if c == FAULT:
@@ -419,17 +458,17 @@ class UdpRig(object):
             # a late START/STOP acknowledgement: keep waiting for this step's answer
         self.misses += 1
         self._missRun += 1
-        if self._missRun >= self.max_misses:
+        if self.max_misses and self._missRun >= self.max_misses:
             raise RigError('rig %s:%d did not answer %d steps in a row'
                            % (self.peer + (self._missRun,)))
         return None
 
     def stop(self):
-        """Ask the rig to ramp down to rest; the speed it stopped at, or None. Never raises."""
+        """Hand the car back to the rig; the speed it answered at, or None. Never raises."""
         if not self.started:
             return None
         self.started = False
-        self._log('[rig] STOP: ramp down to rest')
+        self._log('[rig] STOP: the car goes back to the rig')
         try:
             v = self._request(STOP, 0.0, self.stop_timeout_s)
         except RigError as exc:
@@ -438,8 +477,10 @@ class UdpRig(object):
         if v is None:
             self._log('[rig] no STOP answer in %.0f s; the rig must ramp down on its own timeout'
                       % self.stop_timeout_s)
-        else:
+        elif abs(v) < AT_REST_MPS:
             self._log('[rig] at rest (%.2f m/s)' % v)
+        else:
+            self._log('[rig] released at %.2f m/s: the rig has the car' % v)
         return v
 
     def close(self):

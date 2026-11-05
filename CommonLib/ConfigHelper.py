@@ -131,6 +131,7 @@ class ConfigHelper:
             raise SystemExit(
                 "ERROR: XilSetup.Transport must be one of inprocess|udp|tcp, got '%s'"
                 % self.Xil_setup["Transport"])
+        self.Xil_setup["Rig"] = self.parseRigLimits(xil_node.get("Rig"))
         # The ego speed SUMO is given (virenv | xil) and applications receive (traffic | xil).
         for key, allowed in (("SpeedToTraffic", ("virenv", "xil")), ("SpeedToApplication", ("traffic", "xil"))):
             value = self.parserString(xil_node, key, allowed[0]).strip().lower()
@@ -530,6 +531,29 @@ class ConfigHelper:
     def parserStringVector(self, node, name, default):
         return node.get(name, default)
 
+
+    RIG_LIMITS = ("StartTimeout", "StopTimeout", "StepTimeout", "MaxMisses")
+
+    def parseRigLimits(self, node):
+        """XilSetup.Rig: only the limits written, checked; UdpRig holds the defaults."""
+        if node is None:
+            return {}
+        if not isinstance(node, dict):
+            raise SystemExit("ERROR: XilSetup.Rig must be a mapping of %s" % ", ".join(self.RIG_LIMITS))
+        unknown = sorted(set(node) - set(self.RIG_LIMITS))
+        if unknown:
+            raise SystemExit("ERROR: XilSetup.Rig has no %s; it takes %s"
+                             % (", ".join(unknown), ", ".join(self.RIG_LIMITS)))
+        limits = {}
+        for key, value in node.items():
+            try:
+                value = int(value) if key == "MaxMisses" else float(value)
+            except (TypeError, ValueError):
+                raise SystemExit("ERROR: XilSetup.Rig.%s must be a number, got %r" % (key, value))
+            if value < 0:
+                raise SystemExit("ERROR: XilSetup.Rig.%s must be >= 0 (0 = no limit), got %r" % (key, value))
+            limits[key] = value
+        return limits
 
     def parseVehicleSubscription(self, node, name, default=[]):
         # Process each subscription in the list

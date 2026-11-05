@@ -198,3 +198,102 @@ def test_stop_without_an_answer_returns_none_and_does_not_raise():
     finally:
         rig.close()
         fake.stop()
+
+
+def test_a_slightly_negative_speed_is_a_speed_not_a_code():
+    assert code(-0.01) is None and code(-0.6) is None and code(-1.4) is None
+    assert code(float('-inf')) is None
+    fake, rig = _rig(lambda s, a: _bench(s, a) if code(s) == START else [(-0.02, 0.0)])
+    try:
+        rig.start(0.0)
+        assert rig.exchange(0.0, 0.0, 0.05) == pytest.approx(-0.02)
+        assert rig.misses == 0
+    finally:
+        rig.close()
+        fake.stop()
+
+
+def test_with_no_start_limit_it_waits_and_says_so(monkeypatch):
+    import CommonLib.xil.link as link
+    monkeypatch.setattr(link, 'REMIND_S', 0.3)
+    said, seen = [], []
+
+    def late(s, a):
+        seen.append(s)
+        return [(START, a)] if len(seen) >= 6 else []
+    fake = FakeRig(late)
+    fake.start()
+    rig = UdpRig('127.0.0.1', fake.port, fake.reply_port, resend_s=0.2, log=said.append)
+    try:
+        assert rig.start_timeout_s == 0
+        assert rig.start(0.0) == 0.0
+        assert any('still waiting for the rig to answer START' in m for m in said)
+    finally:
+        rig.close()
+        fake.stop()
+
+
+def test_a_hello_from_a_rig_that_just_came_up_gets_start_again_at_once():
+    import time
+    seen = []
+
+    def fresh(s, a):
+        seen.append(s)
+        return [(HELLO, 0.0)] if len(seen) == 1 else [(START, a)]
+    fake, rig = _rig(fresh, resend_s=5.0)
+    try:
+        t0 = time.monotonic()
+        assert rig.start(0.0) == 0.0
+        assert time.monotonic() - t0 < 2.0 and len(seen) == 2
+    finally:
+        rig.close()
+        fake.stop()
+
+
+def test_stop_answered_while_moving_is_a_release_to_the_driver():
+    said = []
+    fake, rig = _rig(lambda s, a: [(START, 0.0)] if code(s) == START else [(STOP, 4.0)])
+    rig._log = said.append
+    try:
+        rig.start(0.0)
+        assert rig.stop() == pytest.approx(4.0)
+        assert any('released at 4.00 m/s' in m for m in said)
+    finally:
+        rig.close()
+        fake.stop()
+
+
+def test_max_misses_zero_never_ends_the_run():
+    fake, rig = _rig(lambda s, a: _bench(s, a) if code(s) == START else [], max_misses=0,
+                     step_timeout_s=0.05)
+    try:
+        rig.start(0.0)
+        assert [rig.exchange(5.0, 0.0, 0.05) for _ in range(8)] == [None] * 8
+    finally:
+        rig.close()
+        fake.stop()
+
+
+def test_from_config_takes_the_rig_limits_and_keeps_the_defaults():
+    port = _free_udp_port()
+    rig = UdpRig.fromConfig({'ip': '127.0.0.1', 'port': 5010,
+                             'rig': {'StopTimeout': 120.0, 'MaxMisses': 0}}, port, log=lambda m: None)
+    try:
+        assert rig.peer == ('127.0.0.1', 5010)
+        assert (rig.stop_timeout_s, rig.max_misses) == (120.0, 0)
+        assert (rig.start_timeout_s, rig.step_timeout_s) == (0.0, 1.0)
+    finally:
+        rig.close()
+
+
+def test_the_yaml_rig_block_is_checked():
+    from CommonLib.ConfigHelper import ConfigHelper
+    parse = ConfigHelper().parseRigLimits
+    assert parse(None) == {}
+    assert parse({'StopTimeout': 90, 'MaxMisses': '3'}) == {'StopTimeout': 90.0, 'MaxMisses': 3}
+    with pytest.raises(SystemExit, match='has no StopTimout'):
+        parse({'StopTimout': 90})
+    with pytest.raises(SystemExit, match='>= 0'):
+        parse({'StartTimeout': -1})
+    with pytest.raises(SystemExit, match='mapping'):
+        parse(60)

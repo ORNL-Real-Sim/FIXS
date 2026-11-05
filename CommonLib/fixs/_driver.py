@@ -926,7 +926,7 @@ def driver(exchange=None, *, xil=None, control=None, usercontrol=None,
 
     ``xilStart(v0)`` is called once, before the first exchange, with the ego's
     speed at that step: a rig ramps to it before the run goes on. ``xilStop()``
-    is called at shutdown, for a rig to ramp down to rest. Both are optional;
+    is called at shutdown, handing the car back to the rig. Both are optional;
     :class:`CommonLib.xil.link.UdpRig` has all three.
 
     ``control(ego, dt)`` is your own step, called in place of :meth:`Controller.default`.
