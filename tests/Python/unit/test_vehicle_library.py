@@ -324,7 +324,7 @@ def test_owned_and_installed_ids_follow_receipts(tmp_path, monkeypatch):
 
 def test_instances_on_install_matches_only_this_install():
     win = os.name == "nt"
-    base = "C:\src_ext" if win else "/opt/src_ext"
+    base = r"C:\src_ext" if win else "/opt/src_ext"
     sep = "\\" if win else "/"
 
     def at(*parts):
