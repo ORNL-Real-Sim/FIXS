@@ -719,11 +719,20 @@ def main(argv=None):
             dataLog.close()
         if poseLog is not None:
             poseLog.close()
+        # Before the views close, so a dyno the controller holds ramps down on camera.
+        if embedded is not None:
+            embedded, _closing = None, embedded
+            _closing.shutdown()
         views.close()
         plots.close()
         if virEnvOwnsEgo:
             backend.destroyEgo()
     finally:
+        if embedded is not None:
+            try:
+                embedded.shutdown()
+            except Exception as exc:
+                print('Ego controller shutdown failed: %s' % exc)
         views.close()
         plots.close()
         core.shutdown()

@@ -14,7 +14,10 @@ little-endian float32, 8 bytes, references on :5010 and measurements on :5011.
 Steer is carried because the packet carries it; nothing here acts on it, because
 this bench is longitudinal.
 
-UDP is free-running with no handshake. The newest datagram wins and nothing
+``UdpRig`` is the lockstep alternative for a rig that answers every command
+once, with START/STOP codes in the speed slot (see ``HELLO``..``FAULT``).
+
+UdpLink is free-running with no handshake. The newest datagram wins and nothing
 blocks. TCP costs a connection and gives back delivery and ordering; it never
 blocks either, so a run starts before the far end is listening. A caller that
 has gone stale decides for itself what to do about it -- "keep the last value"
@@ -262,3 +265,182 @@ class TcpLink(object):
     recv_measurement = recv
     reference_age = age
     measurement_age = age
+
+
+# --------------------------------------------------------------------------- #
+# run start and stop, for a rig answering in lockstep (#473)
+# --------------------------------------------------------------------------- #
+#: Control codes, carried in the packet's speed slot: a commanded speed is never negative.
+#: Host -> rig: (START, v0) ramp to v0 and start logging; (STOP, 0) ramp down to rest.
+#: Rig -> host: (HELLO, 0) on start-up; (START, v) settled at v; (STOP, v) at rest;
+#: (FAULT, v) fault or e-stop.
+HELLO, START, STOP, FAULT = -1, -2, -3, -4
+_NAMES = {HELLO: 'HELLO', START: 'START', STOP: 'STOP', FAULT: 'FAULT'}
+
+
+def code(speed):
+    """The control code in a packet's speed slot, or None if it is a speed."""
+    if not speed < 0:                       # also None for NaN
+        return None
+    return int(round(speed))
+
+
+def codeName(c):
+    return _NAMES.get(c, 'code %s' % c)
+
+
+class RigError(RuntimeError):
+    """The rig reported a fault, restarted mid-run, or stopped answering."""
+
+
+def _say(msg):
+    print(msg, flush=True)
+
+
+class UdpRig(object):
+    """The simulator end of a rig that answers each command once (lockstep).
+
+        rig = UdpRig(ip, 5010, 5011)
+        rig.start(v0)                    # until the rig says it has settled at v0
+        speed = rig.exchange(vref, aref, dt)
+        rig.stop()                       # until the rig says it is at rest
+
+    START and STOP are resent every ``resend_s`` until answered; the rig answers a
+    repeat by acknowledging again. A rig must also ramp down on its own when no
+    packet arrives for a few seconds, since a killed process never sends STOP.
+    """
+
+    def __init__(self, ip, port=REFERENCE_PORT, reply_port=MEASUREMENT_PORT,
+                 step_timeout_s=1.0, max_misses=5, start_timeout_s=300.0,
+                 stop_timeout_s=15.0, resend_s=1.0, log=_say, clock=time.monotonic):
+        self.peer = (ip, int(port))
+        self.reply_port = int(reply_port)
+        self.step_timeout_s = float(step_timeout_s)
+        self.max_misses = int(max_misses)
+        self.start_timeout_s = float(start_timeout_s)
+        self.stop_timeout_s = float(stop_timeout_s)
+        self.resend_s = float(resend_s)
+        self._log = log
+        self._clock = clock
+        self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._sock.bind(('', self.reply_port))
+        self.started = False
+        #: The speed the rig settled at on START, and steps it did not answer.
+        self.startSpeed = None
+        self.misses = 0
+        self._missRun = 0
+
+    def _send(self, speed, second):
+        try:
+            self._sock.sendto(pack(speed, second), self.peer)
+        except OSError:
+            pass
+
+    def _drain(self):
+        """Drop whatever is queued: a late answer belongs to an earlier command."""
+        self._sock.setblocking(False)
+        try:
+            while True:
+                self._sock.recvfrom(64)
+        except OSError:
+            pass
+        finally:
+            self._sock.setblocking(True)
+
+    def _recv(self, timeout):
+        """The next whole packet within `timeout` s as (speed, second), or None."""
+        deadline = self._clock() + timeout
+        while True:
+            left = deadline - self._clock()
+            if left <= 0:
+                return None
+            self._sock.settimeout(left)
+            try:
+                data, _ = self._sock.recvfrom(64)
+            except socket.timeout:
+                return None
+            except ConnectionResetError:    # Windows: an earlier send found no rig listening
+                continue
+            if len(data) >= PACKET_SIZE:
+                return unpack(data)
+
+    def _request(self, which, value, timeout):
+        """Send (which, value) until the rig acknowledges it; the ack's value, or None on timeout."""
+        deadline = self._clock() + timeout
+        self._drain()
+        while self._clock() < deadline:
+            self._send(which, value)
+            resend_at = min(deadline, self._clock() + self.resend_s)
+            while True:
+                got = self._recv(resend_at - self._clock())
+                if got is None:
+                    break
+                c = code(got[0])
+                if c == which:
+                    return got[1]
+                if c == FAULT:
+                    raise RigError('rig %s:%d reported a fault (%g) during %s'
+                                   % (self.peer + (got[1], codeName(which))))
+                if c == HELLO:
+                    break                   # it has just come up: ask again now
+        return None
+
+    def start(self, v0=0.0):
+        """Ask the rig to ramp to `v0` m/s; return the speed it settled at."""
+        v0 = max(0.0, float(v0))
+        self._log('[rig] START: ramp to %.2f m/s (%s:%d)' % ((v0,) + self.peer))
+        v = self._request(START, v0, self.start_timeout_s)
+        if v is None:
+            raise RigError('rig %s:%d did not answer START in %.0f s'
+                           % (self.peer + (self.start_timeout_s,)))
+        self.started, self.startSpeed = True, v
+        self._log('[rig] ready at %.2f m/s' % v)
+        return v
+
+    def exchange(self, vref, aref, dt):
+        """Send one command and return the speed the rig reached, or None if it did not answer."""
+        if not self.started:
+            self.start(0.0)
+        self._drain()
+        self._send(max(0.0, float(vref)), float(aref))
+        deadline = self._clock() + self.step_timeout_s
+        while True:
+            got = self._recv(deadline - self._clock())
+            if got is None:
+                break
+            c = code(got[0])
+            if c is None:
+                self._missRun = 0
+                return got[0]
+            if c == FAULT:
+                raise RigError('rig %s:%d reported a fault (%g)' % (self.peer + (got[1],)))
+            if c == HELLO:
+                raise RigError('rig %s:%d restarted mid-run' % self.peer)
+            # a late START/STOP acknowledgement: keep waiting for this step's answer
+        self.misses += 1
+        self._missRun += 1
+        if self._missRun >= self.max_misses:
+            raise RigError('rig %s:%d did not answer %d steps in a row'
+                           % (self.peer + (self._missRun,)))
+        return None
+
+    def stop(self):
+        """Ask the rig to ramp down to rest; the speed it stopped at, or None. Never raises."""
+        if not self.started:
+            return None
+        self.started = False
+        self._log('[rig] STOP: ramp down to rest')
+        try:
+            v = self._request(STOP, 0.0, self.stop_timeout_s)
+        except RigError as exc:
+            self._log('[rig] %s' % exc)
+            return None
+        if v is None:
+            self._log('[rig] no STOP answer in %.0f s; the rig must ramp down on its own timeout'
+                      % self.stop_timeout_s)
+        else:
+            self._log('[rig] at rest (%.2f m/s)' % v)
+        return v
+
+    def close(self):
+        self._sock.close()

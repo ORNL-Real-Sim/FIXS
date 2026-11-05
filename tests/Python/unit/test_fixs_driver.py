@@ -814,3 +814,67 @@ def test_the_exchange_says_what_it_takes_by_its_arguments():
     assert driver(xil=xil.dynosim().exchange)._EXCHANGE_TAKES_AREF is True
     with pytest.raises(TypeError):
         driver(xil=lambda vref: vref)
+
+
+# -- a rig's start and stop: xilStart / xilStop (#473) ---------------------
+
+@pytest.mark.parametrize('scenario', [False], indirect=True)
+def test_xil_start_gets_the_ego_speed_once_before_the_first_exchange(scenario):
+    calls = []
+
+    def mine(ego, dt):
+        drv = fixs.driver.instance()
+        drv.exchange(7.0)
+        drv.exchange(7.0)
+
+    d = _build(driver(xil=lambda v, dt: calls.append(('x', v)) or v,
+                      xilStart=lambda v0: calls.append(('start', v0)), control=mine))
+    d.control(_FakeEgo(), 0.05)
+    d.control(_FakeEgo(), 0.05)
+    assert calls == [('start', 4.0)] + [('x', 7.0)] * 4
+
+
+@pytest.mark.parametrize('scenario', [False], indirect=True)
+def test_xil_stop_runs_at_shutdown_only_if_the_rig_was_started(scenario):
+    stops = []
+    d = _build(driver(xil=lambda v, dt: v, xilStart=lambda v0: None,
+                      xilStop=lambda: stops.append(1)))
+    d.shutdown()
+    assert stops == []                      # never started: nothing to ramp down
+    d = _build(driver(xil=lambda v, dt: v, xilStart=lambda v0: None,
+                      xilStop=lambda: stops.append(1)))
+    d.exchange(5.0)
+    d.shutdown()
+    assert stops == [1]
+
+
+@pytest.mark.parametrize('scenario', [False], indirect=True)
+def test_a_failing_xil_stop_does_not_stop_the_shutdown(scenario, capsys):
+    def boom():
+        raise RuntimeError('rig gone')
+    d = _build(driver(xil=lambda v, dt: v, xilStart=lambda v0: None, xilStop=boom))
+    d.exchange(5.0)
+    d.shutdown()
+    assert 'xilStop failed: rig gone' in capsys.readouterr().out
+    with pytest.raises(fixs.FixsError):
+        fixs.driver.instance()
+
+
+@pytest.mark.parametrize('scenario', [False], indirect=True)
+def test_a_failed_start_is_not_retried_every_step(scenario):
+    tries = []
+
+    def start(v0):
+        tries.append(v0)
+        raise RuntimeError('no rig')
+    d = _build(driver(xil=lambda v, dt: v, xilStart=start))
+    with pytest.raises(RuntimeError):
+        d.exchange(5.0)
+    d.exchange(5.0)
+    assert len(tries) == 1
+
+
+@pytest.mark.parametrize('kw', ['xilStart', 'xilStop'])
+def test_a_non_callable_rig_hook_is_refused_at_the_call(kw):
+    with pytest.raises(TypeError):
+        driver(xil=lambda v, dt: v, **{kw: 3})

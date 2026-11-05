@@ -101,19 +101,22 @@ __all__ = [
 ]
 
 
-def driver(exchange=None, *, xil=None, control=None, usercontrol=None, **options):
+def driver(exchange=None, *, xil=None, control=None, usercontrol=None,
+           xilStart=None, xilStop=None, **options):
     """A ready-made controller for the ego -- see :mod:`CommonLib.fixs._driver`.
 
         Controller = fixs.driver()                       # no cell
         Controller = fixs.driver(xil=exchange)           # yours: (vref, dt) or (vref, aref, dt) -> mps
         Controller = fixs.driver(control=my_control)     # your own step: my_control(ego, dt)
+        Controller = fixs.driver(xil=rig.exchange, xilStart=rig.start, xilStop=rig.stop)
 
     Imported lazily: the driver pulls in fixs.carla and CARLA's agents, which
     a SUMO-only or CarMaker run has no reason to load. `exchange` and
     `usercontrol` are the old names, kept for one release (see _driver._oldNames).
     """
     from CommonLib.fixs._driver import driver as _driver
-    return _driver(exchange, xil=xil, control=control, usercontrol=usercontrol, **options)
+    return _driver(exchange, xil=xil, control=control, usercontrol=usercontrol,
+                   xilStart=xilStart, xilStop=xilStop, **options)
 
 
 def _driverSet(**options):
