@@ -33,6 +33,7 @@ Carla/                        <- self-contained co-sim component (shipped in the
   doctor.py                   check this machine can run a co-sim, before it tries
   peer.py                     control channel between the halves of a distributed co-sim
   set_spectator_view.py       point the CARLA spectator at a scene (top-down, or --follow)
+  obs_recorder.py             record a run with OBS: an app's panels over this run's windows
   load_opendrive_world.py     mesh an .xodr into a server - no map package, no cook;
                               --launch starts the configured CARLA first, through
                               run_cosim's launcher
@@ -465,6 +466,23 @@ python run_cosim.py --no-launch --map RP_Ver0529 \
   (run via the UE4 editor `-ExecutePythonScript`); see `sumo/`.
 - Large map assets (FBX / cooked content) are **not** stored here - the tests use
   stock Town01; application maps ship separately.
+
+### Recording a run with OBS
+
+`obs_recorder.py` is the library an application's recorder calls (`run_cosim.bat --record`
+in an application repo): it lays the app's panels over this run's own CARLA, sumo-gui and
+plot windows and records them into the run's folder. Windows only.
+
+- Install [OBS Studio](https://obsproject.com) 28 or newer and, in OBS, tick
+  **Tools &rarr; WebSocket Server Settings &rarr; Enable WebSocket server** (port 4455).
+  The recorder reads the password from OBS's own settings; for an OBS elsewhere set
+  `OBS_WS_URL` and `OBS_WS_PASSWORD`.
+- A run uses the OBS that is open. When another run is recording with it, it is
+  recording by hand, or none is open, the run starts an OBS of its own (`--portable`,
+  settings under `<OBS install>/config`, WebSocket ports 4456&ndash;4475) and closes it at
+  the end, so runs side by side are each recorded. Set `OBS_EXE` if OBS is not running
+  and not in `Program Files`.
+- A run that cannot record says so in its console: `*** THIS RUN IS NOT RECORDED ... ***`.
 
 ### Timestep & speed
 There is no shared timestep any more &mdash; there are **three** cadences, and only one
