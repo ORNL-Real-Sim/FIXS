@@ -22,8 +22,12 @@ Shared installs: other CARLA servers or editors running from the same install ho
 factory open and the save would fail. This refuses (listing them) unless --wait is
 given, and never stops a process.
 
-Source builds only. A packaged CARLA cannot load new vehicle blueprints without a
-cooked patch pak, which this does not build.
+Packaged CARLA has no editor, so it installs a COOK instead: a source build makes it
+with --cook, the library publishes it beside the bundle (<id>_cooked_windows.tar.gz), and
+on a packaged build --vehicle fetches and extracts it (Carla/vehicles/cooked.py).
+
+  python Carla/import_vehicle.py --cook out.tar.gz        source: cook every registered vehicle
+  python Carla/import_vehicle.py --cooked <tar.gz>        packaged: install a cook you have
 """
 import argparse
 import datetime
@@ -40,6 +44,7 @@ sys.path.insert(0, HERE)
 import carla_env_setup as env  # noqa: E402
 import props  # noqa: E402
 from vehicles import catalog  # noqa: E402
+from vehicles import cooked  # noqa: E402
 from vehicles import install_guard  # noqa: E402
 from vehicles import manifest as vmanifest  # noqa: E402
 
@@ -205,8 +210,15 @@ def rig_inputs(m):
 
 # ---------------------------------------------------------------- CARLA side
 
+def is_packaged(carla_root):
+    return bool(env.packaged_exe(carla_root)) and not os.path.isfile(
+        os.path.join(carla_root, "Unreal", "CarlaUE4", "CarlaUE4.uproject"))
+
+
 def resolve_carla(carla_root=None, ue4_root=None):
+    """{mode, carla_root, ue4_root, uproject, editor, package_root} of the CARLA to install into."""
     cfg = env.load_config() or {}
+    explicit = carla_root
     carla_root = carla_root or cfg.get("carla_root")
     ue4_root = ue4_root or cfg.get("ue4_root")
     mode = cfg.get("mode")
@@ -214,17 +226,19 @@ def resolve_carla(carla_root=None, ue4_root=None):
         sys.exit("[vehicle] this machine is a CARLA client; install the vehicle on the CARLA host.")
     if not carla_root:
         sys.exit("[vehicle] no CARLA configured - run setup_carla first, or pass --carla-root.")
-    if mode == "packaged" or (env.packaged_exe(carla_root) and not os.path.isfile(
-            os.path.join(carla_root, "Unreal", "CarlaUE4", "CarlaUE4.uproject"))):
-        sys.exit("[vehicle] {} is a PACKAGED CARLA. A library vehicle has to be built in the "
-                 "Unreal editor of a source build; a packaged build cannot load it without a cooked "
-                 "patch pak, which FIXS does not make yet.".format(carla_root))
+    if (mode == "packaged" and not explicit) or is_packaged(carla_root):
+        exe = env.packaged_exe(carla_root)
+        if not exe:
+            sys.exit("[vehicle] {} is not a packaged CARLA (no CarlaUE4 launcher).".format(carla_root))
+        return {"mode": "packaged", "carla_root": carla_root, "package_root": os.path.dirname(exe),
+                "ue4_root": None, "uproject": None, "editor": None}
     uproject, editor = env.source_paths(carla_root, ue4_root or "")
     if not os.path.isfile(uproject):
         sys.exit("[vehicle] {} is not a CARLA source build (no {}).".format(carla_root, uproject))
     if not ue4_root or not os.path.isfile(editor):
         sys.exit("[vehicle] UE4Editor not found (ue4_root={!r}); pass --ue4-root.".format(ue4_root))
-    return carla_root, ue4_root, uproject, editor
+    return {"mode": "source", "carla_root": carla_root, "package_root": None,
+            "ue4_root": ue4_root, "uproject": uproject, "editor": editor}
 
 
 def wait_until_free(carla_root, need_factory, wait_s):
@@ -315,7 +329,7 @@ def install(m, carla_root, ue4_root, uproject, editor, register=True, register_o
         return 0
 
     fact = res.get("factory") or {}
-    prior = catalog.read_receipt(m["id"]) or {}
+    prior = catalog.read_receipt(m["id"], carla_root) or {}
     registered = prior.get("registered", False)
     if need_factory:
         registered = fact.get("action") in ("added", "updated", "unchanged") and fact.get("saved", True)
@@ -349,7 +363,7 @@ def _files(d):
 
 def uninstall(bp_id, carla_root, ue4_root, uproject, editor, keep_assets=False,
               restore_factory=False, wait_s=0.0, dry_run=False):
-    rec = catalog.read_receipt(bp_id)
+    rec = catalog.read_receipt(bp_id, carla_root)
     if rec is None:
         sys.exit("[vehicle] no install receipt for {}; nothing FIXS installed to remove.".format(bp_id))
     if not dry_run:
@@ -366,7 +380,7 @@ def uninstall(bp_id, carla_root, ue4_root, uproject, editor, keep_assets=False,
         if not dry_run:
             shutil.copy2(original, factory_file(carla_root))
             for i in others + [bp_id]:
-                r = catalog.read_receipt(i)
+                r = catalog.read_receipt(i, carla_root)
                 if r:
                     r["registered"] = False
                     catalog.write_receipt(i, r)
@@ -385,9 +399,137 @@ def uninstall(bp_id, carla_root, ue4_root, uproject, editor, keep_assets=False,
         if not dry_run and os.path.isdir(d):
             shutil.rmtree(d)
     if not dry_run:
-        os.remove(catalog.receipt_path(bp_id))
+        catalog.remove_receipt(bp_id, carla_root)
     log("uninstalled {}.".format(bp_id))
     return 0
+
+
+def carla_version(carla_root):
+    """CARLA version of a source build, from its git tag; "" when unknown."""
+    try:
+        out = subprocess.run(["git", "-C", carla_root, "describe", "--tags"], capture_output=True,
+                             text=True, timeout=10)
+        return out.stdout.strip() if out.returncode == 0 else ""
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def cook_all(c, out_path):
+    """Source build: cook every registered library vehicle into `out_path` for packaged CARLAs."""
+    procs = install_guard.instances_on_install(install_guard.list_processes(), c["carla_root"])
+    if procs:
+        log("note: other processes run from this install; the cook only reads it:\n"
+            + install_guard.describe(procs))
+    recs = [r for _, r in catalog.registered_receipts(c["carla_root"])]
+    editor_cmd = c["editor"].replace("UE4Editor.exe", "UE4Editor-Cmd.exe")
+    work = os.path.join(catalog.home(), "_cook")
+    os.makedirs(work, exist_ok=True)
+    log("cooking {} for packaged CARLA (shaders take a while) ...".format(
+        ", ".join(r["id"] for r in recs) or "nothing"))
+    try:
+        path = cooked.cook(c["carla_root"], editor_cmd, c["uproject"], recs, os.path.abspath(out_path),
+                           work, carla_version(c["carla_root"]))
+    except cooked.CookError as exc:
+        sys.exit("[vehicle] {}".format(exc))
+    log("wrote {} ({:.1f} MB, sha256 {})".format(path, os.path.getsize(path) / 1e6,
+                                                 catalog.sha256_of(path)))
+    return 0
+
+
+def install_cooked(c, tar_path, wait_s=0.0):
+    """Packaged build: install a cook. Refuses while a CARLA runs from this install."""
+    procs, _ = wait_until_free(c["carla_root"], False, wait_s)
+    if procs:
+        sys.exit("[vehicle] CARLA runs from this install; close it first (this tool never stops "
+                 "it):\n" + install_guard.describe(procs))
+    try:
+        ids = cooked.install(tar_path, c["package_root"], c["carla_root"], log=log)
+    except cooked.CookError as exc:
+        sys.exit("[vehicle] {}".format(exc))
+    log("installed {} into {} (packaged).".format(", ".join(ids), c["package_root"]))
+    return ids
+
+
+def uninstall_cooked(c):
+    """Packaged build: restore the stock factory and remove every cooked library vehicle."""
+    procs, _ = wait_until_free(c["carla_root"], False, 0.0)
+    if procs:
+        sys.exit("[vehicle] CARLA runs from this install; close it first:\n"
+                 + install_guard.describe(procs))
+    try:
+        gone = cooked.uninstall(c["package_root"], c["carla_root"], log=log)
+    except cooked.CookError as exc:
+        sys.exit("[vehicle] {}".format(exc))
+    log("restored the stock VehicleFactory; removed {}.".format(", ".join(gone) or "nothing"))
+    return 0
+
+
+def cooked_from_library(repo, name):
+    """Download the catalog's cook for `name` on this OS; returns its path."""
+    vehicles, _ = catalog.fetch_catalog(repo)
+    ent = catalog.entry(vehicles, name)
+    if ent is None:
+        sys.exit("[vehicle] {!r} is not in {}'s catalog.".format(name, repo))
+    asset = cooked.catalog_cooked_asset(ent)
+    if not asset:
+        sys.exit("[vehicle] {} publishes no cook for this OS, so a packaged CARLA cannot load it; "
+                 "use a source build.".format(ent["id"]))
+    sha = ent.get("cooked_sha256_" + cooked.os_tag()) or ""
+    try:
+        return catalog.download(repo, dict(ent, asset=asset, sha256=sha),
+                                os.path.join(catalog.vehicle_dir(ent["id"]), "download"))
+    except catalog.CatalogError as exc:
+        sys.exit("[vehicle] {}".format(exc))
+
+
+def content_root(carla_root, mode):
+    if mode == "packaged":
+        return os.path.join(os.path.dirname(env.packaged_exe(carla_root)), "CarlaUE4", "Content")
+    return os.path.join(carla_root, "Unreal", "CarlaUE4", "Content")
+
+
+def install_state(bp_id, carla_root, mode):
+    """'stock', 'installed' or 'missing' for blueprint `bp_id` in this CARLA."""
+    if not bp_id or bp_id in catalog.STOCK_IDS:
+        return "stock"
+    rec = catalog.read_receipt(bp_id, carla_root)
+    if not rec or not rec.get("registered") or not rec.get("asset_dir"):
+        return "missing"
+    d = os.path.join(content_root(carla_root, mode), rec["asset_dir"][len("/Game/"):].replace("/", os.sep))
+    return "installed" if os.path.isdir(d) else "missing"
+
+
+def ensure_for_run(bp_id, carla_root, mode, ue4_root=None, interactive=False, ask=input, repo=None):
+    """run_cosim's preflight: make sure the configured ego blueprint exists in this CARLA.
+
+    Stock and installed blueprints pass. A missing library vehicle is offered for import
+    when someone is there to answer; otherwise the run stops with the command to run."""
+    state = install_state(bp_id, carla_root, mode)
+    if state != "missing":
+        return state
+    repo = catalog.resolve_repo(repo)
+    how = "python FIXS/Carla/import_vehicle.py --vehicle {}".format(bp_id)
+    vehicles, _ = catalog.fetch_catalog(repo)
+    if catalog.entry(vehicles, bp_id) is None and not catalog.vehicle_receipts(bp_id):
+        sys.exit("[cosim] CarlaSetup.EgoBlueprint {} is neither a stock CARLA 0.9.15 vehicle nor in "
+                 "the vehicle library ({}). Check the spelling, or install a local bundle with:\n"
+                 "    python FIXS/Carla/import_vehicle.py --bundle <zip|dir>".format(bp_id, repo))
+    print("[cosim] the ego vehicle {} is not installed in this {} CARLA ({}).".format(
+        bp_id, mode, carla_root))
+    if not interactive:
+        sys.exit("[cosim] install it first:\n    {}".format(how))
+    answer = (ask("[cosim] import it now from {}? [Y/n] ".format(repo)) or "y").strip().lower()
+    if answer not in ("y", "yes"):
+        sys.exit("[cosim] not imported. To do it later:\n    {}".format(how))
+    c = resolve_carla(carla_root, ue4_root)
+    if c["mode"] == "packaged":
+        install_cooked(c, cooked_from_library(repo, bp_id))
+    else:
+        install(bundle_from_library(repo, bp_id), c["carla_root"], c["ue4_root"], c["uproject"],
+                c["editor"])
+    if install_state(bp_id, carla_root, c["mode"]) != "installed":
+        sys.exit("[cosim] {} still is not installed; see the lines above.".format(bp_id))
+    return "imported"
 
 
 def list_vehicles(repo):
@@ -430,6 +572,9 @@ def main():
     ap.add_argument("--host", default="localhost", help="--verify: CARLA host")
     ap.add_argument("--port", type=int, default=2000, help="--verify: CARLA RPC port")
     ap.add_argument("--tm-port", type=int, default=8000, help="--verify: Traffic Manager port")
+    ap.add_argument("--cook", metavar="OUT", help="source build: cook every registered library vehicle "
+                                                 "into OUT (.tar.gz) for packaged CARLAs")
+    ap.add_argument("--cooked", metavar="TAR", help="packaged build: install a cook you have")
     ap.add_argument("--carla-root", help="override the saved carla_root")
     ap.add_argument("--ue4-root", help="override the saved ue4_root")
     args = ap.parse_args()
@@ -441,7 +586,19 @@ def main():
         from vehicles import verify
         return verify.main_check(catalog.resolve_id(args.verify), args.host, args.port, args.tm_port)
 
-    carla_root, ue4_root, uproject, editor = resolve_carla(args.carla_root, args.ue4_root)
+    c = resolve_carla(args.carla_root, args.ue4_root)
+    if c["mode"] == "packaged":
+        if args.cook:
+            sys.exit("[vehicle] --cook needs a source build; this CARLA is packaged.")
+        if args.uninstall:
+            return uninstall_cooked(c)
+        install_cooked(c, args.cooked or cooked_from_library(repo, args.vehicle or ""), args.wait)
+        return 0
+    if args.cooked:
+        sys.exit("[vehicle] --cooked is for a packaged CARLA; a source build installs the bundle.")
+    if args.cook:
+        return cook_all(c, args.cook)
+    carla_root, ue4_root, uproject, editor = c["carla_root"], c["ue4_root"], c["uproject"], c["editor"]
     if args.uninstall:
         return uninstall(catalog.resolve_id(args.uninstall), carla_root, ue4_root, uproject, editor,
                          args.keep_assets, args.restore_factory, args.wait, args.dry_run)

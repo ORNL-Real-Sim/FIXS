@@ -300,7 +300,13 @@ A physics ego (`EgoSetup.Dynamics: virenv`) also gets the manifest's physics (ma
 drag, wheel radius, max steer, torque curve, ...) after it spawns. See
 [ConfigSetup.md](../doc/ConfigSetup.md#carlasetup) for the keys.
 
-**What the install does.** Source builds only. It runs the Unreal editor once
+**run_cosim checks it first.** Before CARLA launches, `run_cosim` looks up the
+scenario's `EgoBlueprint`. A stock CARLA vehicle passes; a library vehicle that this
+CARLA does not have is offered for import (`[Y/n]`) on a run someone is sitting at, and
+stops an unattended run with the `import_vehicle.py` command to type. An id that is
+neither stock nor in the catalog stops the run as a likely typo.
+
+**What the install does.** On a source build it runs the Unreal editor once
 (`-ExecutePythonScript`, the same way `place_tls.py` does) to import the rigged FBX onto
 CARLA's 4-wheel vehicle skeleton, build materials (the paint slot on CARLA's car-paint
 master, so the blueprint's `color` attribute works), a physics asset, wheel blueprints
@@ -322,8 +328,10 @@ not open anywhere) and `--register-only` adds the factory entry later. Running s
 see a new vehicle only after a restart.
 
 **Collision shape.** The vehicle's physics asset is a copy of the stock Tesla's: UE 4.26's
-Python cannot edit physics-asset bodies, so the body box stays the Tesla's. Wheel contact uses the wheel blueprints' radius and width,
-which do come from the manifest.
+Python cannot edit physics-asset bodies, so the chassis collision body stays the
+Tesla's. Wheel contact uses the wheel blueprints' radius and width, and the actor's
+`bounding_box` (what sensors and FIXS read) is measured from the vehicle's own mesh;
+both match the manifest.
 
 **Checking it.** `--verify <id> --port <rpc> --tm-port <tm>` spawns the car on a server
 nobody else is driving, applies the manifest physics, and reports settling, wheelbase
@@ -331,8 +339,26 @@ and track, wheel radius, 0-50 km/h and braking, full-lock wheel angles, the full
 turning circle and a 25 s autopilot drive. Dimension checks accepted at prep
 (`--allow-mismatch`) are reported but do not fail it.
 
-**Packaged CARLA** cannot take a new vehicle: the blueprint and the factory entry would
-have to be cooked into a patch pak, which FIXS does not build. Install on a source build.
+**Packaged CARLA** has no editor, so it installs a cook instead of building:
+
+```
+python Carla/import_vehicle.py --cook vehicle.kia.ev6_cooked_windows.tar.gz   # on a source build
+python Carla/import_vehicle.py --vehicle ev6                    # on a packaged build: fetch + extract
+python Carla/import_vehicle.py --cooked <tar.gz>                # packaged, a cook you have
+python Carla/import_vehicle.py --uninstall ev6                  # packaged: back to the stock factory
+```
+
+`--cook` runs Unreal's cook commandlet over every library vehicle registered in the
+source build plus `VehicleFactory`, and packs the cooked files with each vehicle's
+`vehicle.yaml`. The library publishes it as `<id>_cooked_windows.tar.gz` beside the
+bundle (catalog keys `cooked_asset_windows` / `cooked_sha256_windows` override the
+name and pin the hash). On a packaged build the install backs up the stock factory,
+writes only under `CarlaUE4/Content/FIXS/Vehicles/` and the factory's two files
+(anything else in the archive is refused), and records the install per CARLA, so a
+machine with both a source and a packaged CARLA tracks each. A cooked factory lists
+the stock vehicles plus the cooked set, so a cook replaces the library vehicles of a
+packaged install rather than adding to them, and `--uninstall` there restores the
+stock factory and removes them all. The cook must come from the same CARLA version.
 
 **Traffic never uses a library vehicle.** Background traffic draws from the fixed stock
 pools in `VirEnv/BridgeHelper.py`; only `EgoBlueprint` (or

@@ -10,7 +10,7 @@ The library repo's root catalog.json carries a `vehicles` list beside the map li
 Machine state lives in ~/.fixs/vehicles/ ($FIXS_VEHICLE_CACHE), outside any checkout:
 
     <id>/bundle/          the extracted bundle (vehicle.yaml, rig/, ...)
-    <id>/install.json     receipt written by import_vehicle.py
+    <id>/installs/*.json  one receipt per CARLA install, written by import_vehicle.py
     _factory_backup/      VehicleFactory.uasset copies taken before the first edit
     catalog.json          last fetched catalog, for offline use
 
@@ -26,6 +26,23 @@ import zipfile
 
 DEFAULT_REPO = "ORNL-Real-Sim/VehicleDynamicsLibrary"
 CATALOG_SCHEMA = 1
+
+# The 41 vehicles CARLA 0.9.15's own VehicleFactory lists: never a library install.
+STOCK_IDS = frozenset((
+    "vehicle.audi.a2", "vehicle.audi.etron", "vehicle.audi.tt", "vehicle.bh.crossbike",
+    "vehicle.bmw.grandtourer", "vehicle.carlamotors.carlacola", "vehicle.carlamotors.european_hgv",
+    "vehicle.carlamotors.firetruck", "vehicle.chevrolet.impala", "vehicle.citroen.c3",
+    "vehicle.diamondback.century", "vehicle.dodge.charger_2020", "vehicle.dodge.charger_police",
+    "vehicle.dodge.charger_police_2020", "vehicle.ford.ambulance", "vehicle.ford.crown",
+    "vehicle.ford.mustang", "vehicle.gazelle.omafiets", "vehicle.harley-davidson.low_rider",
+    "vehicle.jeep.wrangler_rubicon", "vehicle.kawasaki.ninja", "vehicle.lincoln.mkz_2017",
+    "vehicle.lincoln.mkz_2020", "vehicle.mercedes.coupe", "vehicle.mercedes.coupe_2020",
+    "vehicle.mercedes.sprinter", "vehicle.micro.microlino", "vehicle.mini.cooper_s",
+    "vehicle.mini.cooper_s_2021", "vehicle.mitsubishi.fusorosa", "vehicle.nissan.micra",
+    "vehicle.nissan.patrol", "vehicle.nissan.patrol_2021", "vehicle.seat.leon",
+    "vehicle.tesla.cybertruck", "vehicle.tesla.model3", "vehicle.toyota.prius",
+    "vehicle.vespa.zx125", "vehicle.volkswagen.t2", "vehicle.volkswagen.t2_2021",
+    "vehicle.yamaha.yzf"))
 
 
 class CatalogError(Exception):
@@ -47,24 +64,69 @@ def bundle_dir(bp_id):
     return os.path.join(vehicle_dir(bp_id), "bundle")
 
 
-def receipt_path(bp_id):
+def _same_root(a, b):
+    return os.path.normcase(os.path.abspath(a or "")) == os.path.normcase(os.path.abspath(b or ""))
+
+
+def root_key(carla_root):
+    """Short stable name for one CARLA install."""
+    return hashlib.sha1(os.path.normcase(os.path.abspath(carla_root)).encode("utf-8")).hexdigest()[:10]
+
+
+def receipt_path(bp_id, carla_root):
+    """One receipt per CARLA install, so a source and a packaged build each keep their own."""
+    return os.path.join(vehicle_dir(bp_id), "installs", root_key(carla_root) + ".json")
+
+
+def _legacy_receipt_path(bp_id):
     return os.path.join(vehicle_dir(bp_id), "install.json")
 
 
-def read_receipt(bp_id):
+def _load_json(path):
     try:
-        with open(receipt_path(bp_id), "r", encoding="utf-8") as fh:
+        with open(path, "r", encoding="utf-8") as fh:
             return json.load(fh)
     except (OSError, ValueError):
         return None
 
 
+def vehicle_receipts(bp_id):
+    """Every install receipt of `bp_id`, one per CARLA install."""
+    d = os.path.join(vehicle_dir(bp_id), "installs")
+    out = [_load_json(os.path.join(d, n)) for n in sorted(os.listdir(d))
+           if n.endswith(".json")] if os.path.isdir(d) else []
+    out = [r for r in out if r]
+    legacy = _load_json(_legacy_receipt_path(bp_id))
+    if legacy and not any(_same_root(r.get("carla_root"), legacy.get("carla_root")) for r in out):
+        out.append(legacy)
+    return out
+
+
+def read_receipt(bp_id, carla_root=None):
+    """The receipt for `bp_id` in `carla_root`; without a root, the first one found."""
+    for r in vehicle_receipts(bp_id):
+        if carla_root is None or _same_root(r.get("carla_root"), carla_root):
+            return r
+    return None
+
+
 def write_receipt(bp_id, receipt):
-    os.makedirs(vehicle_dir(bp_id), exist_ok=True)
-    tmp = receipt_path(bp_id) + ".tmp"
+    path = receipt_path(bp_id, receipt["carla_root"])
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(receipt, fh, indent=2, sort_keys=True)
-    os.replace(tmp, receipt_path(bp_id))
+    os.replace(tmp, path)
+    legacy = _load_json(_legacy_receipt_path(bp_id))
+    if legacy and _same_root(legacy.get("carla_root"), receipt["carla_root"]):
+        os.remove(_legacy_receipt_path(bp_id))
+
+
+def remove_receipt(bp_id, carla_root):
+    for path in (receipt_path(bp_id, carla_root), _legacy_receipt_path(bp_id)):
+        r = _load_json(path)
+        if r is not None and _same_root(r.get("carla_root"), carla_root):
+            os.remove(path)
 
 
 def _receipts(carla_root=None):
@@ -72,14 +134,16 @@ def _receipts(carla_root=None):
         return []
     out = []
     for name in sorted(os.listdir(home())):
-        r = read_receipt(name)
-        if not r:
-            continue
-        if carla_root and os.path.normcase(os.path.abspath(r.get("carla_root", ""))) != \
-                os.path.normcase(os.path.abspath(carla_root)):
-            continue
-        out.append((name, r))
+        for r in vehicle_receipts(name):
+            if carla_root and not _same_root(r.get("carla_root"), carla_root):
+                continue
+            out.append((name, r))
     return out
+
+
+def registered_receipts(carla_root, include_unregistered=False):
+    """[(id, receipt)] for the library vehicles registered in `carla_root`."""
+    return [(n, r) for n, r in _receipts(carla_root) if include_unregistered or r.get("registered")]
 
 
 def installed_ids(carla_root=None):
