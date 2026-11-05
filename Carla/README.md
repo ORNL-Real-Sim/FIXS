@@ -30,6 +30,9 @@ Carla/                        <- self-contained co-sim component (shipped in the
   app_catalog.py              the apps/ manifest contract for FIXS application repos
   run_profile.py              named run setups (~/.fixs/run_profiles.json) + review loop
   props.py                    placement props and their manifest, from the map library
+  import_vehicle.py           install a vehicle from the vehicle library into a source build
+  prep_vehicle.py             turn a vehicle bundle's source model into its rigged FBX
+  vehicles/                   vehicle.yaml schema, catalog, mesh prep, editor/Blender scripts
   doctor.py                   check this machine can run a co-sim, before it tries
   peer.py                     control channel between the halves of a distributed co-sim
   set_spectator_view.py       point the CARLA spectator at a scene (top-down, or --follow)
@@ -266,6 +269,126 @@ cooked content aside and imports fresh - CARLA's `ImportAssets` cooks cleanly in
 an empty destination but often fails to *replace* existing content; the backup is
 restored if the cook fails, so a working map is never lost.
 
+## Vehicles from the vehicle library
+
+A custom ego vehicle (the ORNL dyno car, a 2023 Kia EV6, is the first) works like a
+map: the vehicle library ([ORNL-Real-Sim/VehicleDynamicsLibrary](https://github.com/ORNL-Real-Sim/VehicleDynamicsLibrary),
+private) stores one zip per vehicle as a release asset, indexed by a `vehicles` list in
+its root `catalog.json`; every tool is here. Nothing in FIXS names a particular vehicle.
+`--repo`, else `vehicle_repo=` in the application's `fixs_sources.txt`, picks another
+library. Downloads, receipts and the installed manifests live in `~/.fixs/vehicles/`
+(`FIXS_VEHICLE_CACHE` moves it).
+
+```
+python Carla/import_vehicle.py                  # pick from the catalog, install, register
+python Carla/import_vehicle.py --vehicle ev6    # by id or model name
+python Carla/import_vehicle.py --bundle <zip|dir>
+python Carla/import_vehicle.py --list
+python Carla/import_vehicle.py --uninstall ev6  # unregister + delete its assets
+python Carla/import_vehicle.py --verify ev6 --port 2000   # on a server you own
+```
+
+Then name it in the scenario yaml:
+
+```yaml
+CarlaSetup:
+  EgoBlueprint: vehicle.kia.ev6
+  EgoColor: "150,20,30"        # optional; any R,G,B
+```
+
+A physics ego (`EgoSetup.Dynamics: virenv`) also gets the manifest's physics (mass,
+drag, wheel radius, max steer, torque curve, ...) after it spawns. See
+[ConfigSetup.md](../doc/ConfigSetup.md#carlasetup) for the keys.
+
+**run_cosim checks it first.** Before CARLA launches, `run_cosim` looks up the
+scenario's `EgoBlueprint`. A stock CARLA vehicle passes; a library vehicle that this
+CARLA does not have is offered for import (`[Y/n]`) on a run someone is sitting at, and
+stops an unattended run with the `import_vehicle.py` command to type. An id that is
+neither stock nor in the catalog stops the run as a likely typo.
+
+**What the install does.** On a source build it runs the Unreal editor once
+(`-ExecutePythonScript`, the same way `place_tls.py` does) to import the rigged FBX onto
+CARLA's 4-wheel vehicle skeleton, build materials (the paint slot on CARLA's car-paint
+master, so the blueprint's `color` attribute works), a physics asset, wheel blueprints
+and the vehicle blueprint, all under `/Game/FIXS/Vehicles/<Asset>/` - outside
+`/Game/Carla`, which CARLA's updaters own. It then edits **one** stock asset: it adds
+the vehicle's entry to CARLA's `VehicleFactory` (`Content/Carla/Blueprints/Vehicles/`).
+That edit is idempotent, touches only entries FIXS added (a stock or hand-added entry
+with the same id is refused unless you pass `--adopt`), and is preceded by a backup in
+`~/.fixs/vehicles/_factory_backup/`. `--uninstall` removes the entry again;
+`--uninstall --restore-factory` puts back the factory as it was before FIXS first edited
+it. A CARLA content update replaces `VehicleFactory` and drops the entry: re-run with
+`--register-only`.
+
+**Shared installs.** A CARLA server or editor running from the same install keeps the
+packages it loaded open, and saving over them fails. The importer lists those
+processes and stops before changing anything; it never stops them itself. `--wait S`
+waits for them to exit; `--no-register` builds the assets now (a new vehicle's files are
+not open anywhere) and `--register-only` adds the factory entry later. Running servers
+see a new vehicle only after a restart.
+
+**Collision shape.** The vehicle's physics asset is a copy of the stock Tesla's: UE 4.26's
+Python cannot edit physics-asset bodies, so the chassis collision body stays the
+Tesla's. Wheel contact uses the wheel blueprints' radius and width, and the actor's
+`bounding_box` (what sensors and FIXS read) is measured from the vehicle's own mesh;
+both match the manifest.
+
+**Checking it.** `--verify <id> --port <rpc> --tm-port <tm>` spawns the car on a server
+nobody else is driving, applies the manifest physics, and reports settling, wheelbase
+and track, wheel radius, 0-50 km/h and braking, full-lock wheel angles, the full-lock
+turning circle and a 25 s autopilot drive. Dimension checks accepted at prep
+(`--allow-mismatch`) are reported but do not fail it.
+
+**Packaged CARLA** has no editor, so it installs a cook instead of building:
+
+```
+python Carla/import_vehicle.py --cook vehicle.kia.ev6_cooked_windows.tar.gz   # on a source build
+python Carla/import_vehicle.py --vehicle ev6                    # on a packaged build: fetch + extract
+python Carla/import_vehicle.py --cooked <tar.gz>                # packaged, a cook you have
+python Carla/import_vehicle.py --uninstall ev6                  # packaged: back to the stock factory
+```
+
+`--cook` runs Unreal's cook commandlet over every library vehicle registered in the
+source build plus `VehicleFactory`, and packs the cooked files with each vehicle's
+`vehicle.yaml`. The library publishes it as `<id>_cooked_windows.tar.gz` beside the
+bundle (catalog keys `cooked_asset_windows` / `cooked_sha256_windows` override the
+name and pin the hash). On a packaged build the install backs up the stock factory,
+writes only under `CarlaUE4/Content/FIXS/Vehicles/` and the factory's two files
+(anything else in the archive is refused), and records the install per CARLA, so a
+machine with both a source and a packaged CARLA tracks each. A cooked factory lists
+the stock vehicles plus the cooked set, so a cook replaces the library vehicles of a
+packaged install rather than adding to them, and `--uninstall` there restores the
+stock factory and removes them all. The cook must come from the same CARLA version.
+
+**Traffic never uses a library vehicle.** Background traffic draws from the fixed stock
+pools in `VirEnv/BridgeHelper.py`; only `EgoBlueprint` (or
+`UseVehicleTypeAsBlueprint: true` with a matching SUMO type) can name one.
+
+### Preparing a bundle (library maintainers)
+
+A bundle is a folder with `vehicle.yaml` (schema in `vehicles/manifest.py`), a
+`README.md` with the model's credit and licence, and the source model under `source/`.
+
+```
+python Carla/prep_vehicle.py <bundle_dir>                         # writes <bundle_dir>/rig/
+python Carla/prep_vehicle.py <bundle_dir> --no-prep --pack vehicle.kia.ev6.zip
+```
+
+`prep_vehicle.py` reads Collada with pycollada (Blender 5 cannot) and FBX/glTF/OBJ through
+Blender, run headless with `--disable-autoexec --factory-startup`. It scales and orients
+the model (`source.scale/forward/up`), drops SketchUp's reversed twin faces
+(`dedupe_twins`), finds the four wheels by size or by node name, sorts material slots
+into paint / glass / light glass / other by name, optionally decimates, and rigs the
+mesh to `Vehicle_Base` + four wheel bones. `materials.plate` names the licence-plate
+material (exact source name) and a plate texture shipped in the bundle, with its own
+finish (a matte plate: `roughness: 0.9, specular: 0.1`); `materials.wheel_slots` moves a
+material's wheel triangles into their own slot, for a mesh that shares one material
+between the rims and the cabin. It checks length, height, wheelbase, track
+and wheel radius against the manifest's `dimensions` and stops if one is out of
+tolerance (`--allow-mismatch` accepts it and records it in `rig/prep_report.json`).
+Upload the zip as a release asset and add a `vehicles` entry (`id`, `title`, `release`,
+`asset`, optional `sha256`) to the library's `catalog.json`.
+
 ## Traffic lights (maps without dynamic signals)
 
 If a map's OpenDRIVE has no dynamic signals, CARLA spawns no `traffic.traffic_light`
@@ -356,6 +479,10 @@ The tree splits on **can FIXS re-create this?**, not on which entity produced it
     _generic/...                     a run with no application selected
   maps/                          <- RE-CREATABLE. Safe to delete to reclaim disk.
     <map>/{<bundle>.zip, carla/, sumo/, tl_table.csv}
+  vehicles/                      <- library vehicles (import_vehicle.py)
+    <id>/bundle/vehicle.yaml         the manifest the bridge applies for EgoBlueprint <id>
+    <id>/install.json                receipt: what was installed where, factory entry or not
+    _factory_backup/                 VehicleFactory.uasset copies taken before each edit
 ```
 
 `~/.fixs/apps/<app>/` mirrors `apps/<app>/` in the repo: one folder per

@@ -33,6 +33,22 @@ PLOT_MEASURED = ("steerAngle", "throttle", "brake")
 #: PlotSetup.Plots[].Panels: prefix of a series an in-process controller supplies with fixs.plot.put().
 PLOT_APP_PREFIX = "app."
 
+
+def parseEgoColor(value):
+    """CarlaSetup.EgoColor as CARLA's "R,G,B" attribute string; "" when unset."""
+    if value is None or value == "":
+        return ""
+    parts = value if isinstance(value, (list, tuple)) else str(value).replace(" ", "").split(",")
+    try:
+        rgb = [int(p) for p in parts]
+    except (TypeError, ValueError):
+        rgb = []
+    if len(rgb) != 3 or not all(0 <= c <= 255 for c in rgb) or any(isinstance(p, bool) for p in parts):
+        raise SystemExit("ERROR: CarlaSetup.EgoColor must be \"R,G,B\" or [R, G, B] with integers "
+                         "0..255, got %r" % (value,))
+    return ",".join(str(c) for c in rgb)
+
+
 class ConfigHelper:
     def __init__(self):
         # Initialize the s_mapTypeValues
@@ -193,6 +209,12 @@ class ConfigHelper:
         # #325: the user controller, as a path relative to where the run was
         # launched.
         self.Carla_setup["EgoBlueprint"] = self.parserString(carla_node, "EgoBlueprint", "vehicle.tesla.model3")
+        # #470: only a yaml that names EgoBlueprint gives a mirrored (Dynamics: traffic) ego that model.
+        self.Carla_setup["EgoBlueprintSet"] = bool(carla_node.get("EgoBlueprint"))
+        # #470: "R,G,B" for the blueprint's `color` attribute; "" leaves CARLA's pick.
+        self.Carla_setup["EgoColor"] = parseEgoColor(carla_node.get("EgoColor"))
+        # #470: a library vehicle's vehicle.yaml; "" = the one import_vehicle.py installed for EgoBlueprint.
+        self.Carla_setup["EgoVehicleManifest"] = str(self.parserString(carla_node, "EgoVehicleManifest", "") or "")
         self.Carla_setup["EgoSpawnPose"] = [float(v) for v in (carla_node.get("EgoSpawnPose") or [])]
         self.Carla_setup["EgoRoutePoints"] = [(float(pt[0]), float(pt[1]))
                                               for pt in (carla_node.get("EgoRoutePoints") or [])]

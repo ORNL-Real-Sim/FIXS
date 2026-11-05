@@ -26,6 +26,8 @@ dependencies = [
     # ViewSetup camera windows, recordings and their HUD (Carla/VirEnv/CarlaViews.py, CarlaHud.py).
     "opencv-python",
     "pillow",
+    # Carla/prep_vehicle.py reads Collada vehicle models.
+    "pycollada",
     # On PyPI, so unlike carla there is no reason to leave them to a later step.
     # Pinned to the SUMO version FIXS builds against (dependencies.yaml).
     "traci==1.22.0",

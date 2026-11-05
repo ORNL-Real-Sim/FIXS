@@ -2510,6 +2510,23 @@ def resolve_tl_table(sumocfg, force=False, cache_name=None):
 MUST_ANSWER = ("app", "map", "config")
 
 
+def _ensure_ego_vehicle(args, cfg, config_yaml):
+    """Offer to import a library ego vehicle the local CARLA lacks (FIXS#470)."""
+    if args.sumo_only or cfg is None or cfg.get("mode") not in ("source", "packaged"):
+        return
+    if not config_yaml or not os.path.isfile(config_yaml) or not scenario_has_carla(config_yaml):
+        return
+    bp_id = (get_yaml_scalar(config_yaml, "CarlaSetup", "EgoBlueprint") or "").strip("'\"")
+    if not bp_id:
+        return
+    import import_vehicle
+    state = import_vehicle.ensure_for_run(bp_id, cfg["carla_root"], cfg["mode"],
+                                          ue4_root=cfg.get("ue4_root"),
+                                          interactive=_interactive(args), ask=_ask)
+    if state in ("installed", "imported"):
+        print(f"[cosim] ego vehicle {bp_id}: {state} in this CARLA")
+
+
 def _interactive(args):
     """Whether THIS run is allowed to stop and ask a human. Asked once, here.
 
@@ -5074,6 +5091,9 @@ def main():
             if ans.startswith("y"):
                 args.reimport = True
                 resolved = None
+
+    # A library ego vehicle (CarlaSetup.EgoBlueprint) must be in this CARLA before it launches.
+    _ensure_ego_vehicle(args, cfg, args.config or (setup or {}).get("config"))
 
     # The application starts HERE: after the last question this script asks, and
     # before anything reaches for a map bundle.
