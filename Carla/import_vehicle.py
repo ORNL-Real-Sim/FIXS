@@ -188,7 +188,10 @@ def bundle_from_library(repo, name):
         ent = pick(vehicles, input("Pick a vehicle [number or id]: "))
         if ent is None:
             sys.exit("[vehicle] nothing picked.")
-    zip_path = catalog.download(repo, ent, os.path.join(catalog.vehicle_dir(ent["id"]), "download"))
+    try:
+        zip_path = catalog.download(repo, ent, os.path.join(catalog.vehicle_dir(ent["id"]), "download"))
+    except catalog.CatalogError as exc:
+        sys.exit("[vehicle] {}".format(exc))
     catalog.extract(zip_path, catalog.bundle_dir(ent["id"]))
     m = _load_bundle(catalog.bundle_dir(ent["id"]))
     if m["id"] != ent["id"]:
@@ -509,7 +512,13 @@ def ensure_for_run(bp_id, carla_root, mode, ue4_root=None, interactive=False, as
         return state
     repo = catalog.resolve_repo(repo)
     how = "python FIXS/Carla/import_vehicle.py --vehicle {}".format(bp_id)
-    vehicles, _ = catalog.fetch_catalog(repo)
+    vehicles, where = catalog.fetch_catalog(repo)
+    if where is None and not catalog.vehicle_receipts(bp_id):
+        sys.exit("[cosim] CarlaSetup.EgoBlueprint {} is not a stock CARLA 0.9.15 vehicle, and the "
+                 "vehicle library {} could not be read. It is private: install the GitHub CLI, run "
+                 "`gh auth login` with an account that can see it, and run again. Or install a "
+                 "bundle you have:\n    python FIXS/Carla/import_vehicle.py --bundle <zip|dir>".format(
+                     bp_id, repo))
     if catalog.entry(vehicles, bp_id) is None and not catalog.vehicle_receipts(bp_id):
         sys.exit("[cosim] CarlaSetup.EgoBlueprint {} is neither a stock CARLA 0.9.15 vehicle nor in "
                  "the vehicle library ({}). Check the spelling, or install a local bundle with:\n"
