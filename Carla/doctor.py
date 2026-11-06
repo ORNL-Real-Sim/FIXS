@@ -282,8 +282,6 @@ def _check_maps(rep, maps_root):
         d = os.path.join(maps_root, n)
         bits = []
         bits.append("sumo/" if os.path.isdir(os.path.join(d, "sumo")) else "no sumo/")
-        bits.append("tl_table.csv" if os.path.isfile(os.path.join(d, "tl_table.csv"))
-                    else "no tl_table.csv")
         ok = "no sumo/" not in bits
         rep.add("Maps", n, OK if ok else WARN, ", ".join(bits))
 

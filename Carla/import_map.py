@@ -2035,7 +2035,7 @@ def _map_cache_dir(name=None):
     """Local map cache: ~/.fixs/maps (next to carla.json), or $FIXS_MAP_CACHE. With
     `name`, the per-map subfolder ~/.fixs/maps/<name>/ - named by the cooked map
     name so it matches CARLA's Content/<name>/; it holds that map's bundle zip,
-    extracted carla/ + sumo/, and generated tl_table.csv. Kept outside FIXS/ so
+    extracted carla/ + sumo/. Kept outside FIXS/ so
     `initialize` (which wipes FIXS/) never deletes it.
 
     Everything under here is RE-CREATABLE: downloaded, extracted, or derived from
