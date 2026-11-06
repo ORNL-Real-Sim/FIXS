@@ -1,9 +1,5 @@
 """
-import_vehicle.py - install a vehicle from the vehicle library into a CARLA source build.
-
-The counterpart of import_map.py for vehicles (FIXS#470). The library stores one bundle
-per vehicle (vehicle.yaml + the rig prep_vehicle.py made); this fetches it, builds the
-blueprint in the Unreal editor, and registers it so `vehicle.<make>.<model>` spawns.
+import_vehicle.py - install a vehicle from the vehicle library into CARLA (FIXS#470).
 
   python Carla/import_vehicle.py                          pick from the library catalog
   python Carla/import_vehicle.py --vehicle ev6            by id or model name
@@ -11,23 +7,14 @@ blueprint in the Unreal editor, and registers it so `vehicle.<make>.<model>` spa
   python Carla/import_vehicle.py --list                   catalog + what is installed here
   python Carla/import_vehicle.py --uninstall ev6          unregister + delete its assets
   python Carla/import_vehicle.py --verify ev6 --port 2000 spawn-and-drive check on a server
+  python Carla/import_vehicle.py --cook out.tar.gz        source build: cook every registered vehicle
+  python Carla/import_vehicle.py --cooked <tar.gz>        packaged build: install a cook you have
 
-Writes /Game/FIXS/Vehicles/<Asset>/ and /Game/FIXS/Vehicles/_Shared/ (outside
-/Game/Carla, which CARLA's updaters own), and edits ONE stock asset: the VehicleFactory
-`Vehicles` array gets (or loses) this vehicle's entry, after a backup under
-~/.fixs/vehicles/_factory_backup/. A CARLA update that replaces Content/Carla drops the
-entry; re-run with --register-only to put it back.
-
-Shared installs: other CARLA servers or editors running from the same install hold the
-factory open and the save would fail. This refuses (listing them) unless --wait is
-given, and never stops a process.
-
-Packaged CARLA has no editor, so it installs a COOK instead: a source build makes it
-with --cook, the library publishes it beside the bundle (<id>_cooked_windows.tar.gz), and
-on a packaged build --vehicle fetches and extracts it (Carla/vehicles/cooked.py).
-
-  python Carla/import_vehicle.py --cook out.tar.gz        source: cook every registered vehicle
-  python Carla/import_vehicle.py --cooked <tar.gz>        packaged: install a cook you have
+A source build builds the blueprint in the Unreal editor under /Game/FIXS/Vehicles/ and
+adds it to VehicleFactory, after a backup under ~/.fixs/vehicles/_factory_backup/. A
+packaged build installs the library's cook instead. Either refuses while another CARLA
+process uses the same install, and never stops one. After a CARLA content update,
+re-run with --register-only.
 """
 import argparse
 import datetime
