@@ -580,6 +580,11 @@ options by name. `null` drops one, `""` passes a bare one, and `-carla-rpc-port`
 `-game` stay FIXS's. The front doors forward both flags through `COSIM_CARLA_ARGS` /
 `COSIM_SUMO_ARGS`, since their values start with `-`.
 
+run_cosim starts CARLA with `-ExecCmds=r.DistanceFieldAO 0`. With distance-field AO on, a
+moving car leaves a trail of dark dashes on the road behind it in any camera (#480). Unreal reads
+only the first `-ExecCmds`, so to add your own console commands, repeat that one in the same
+option: `--carla-args "\"-ExecCmds=r.DistanceFieldAO 0, t.MaxFPS 20\""`.
+
 `--start` is passed explicitly as `true`/`false` rather than omitted, because omitting
 it does not turn it off &mdash; a cfg declaring `<start value="t"/>` (roosevelt's does)
 would start stepping anyway, which is why `SumoSetup.AutoStart: false` used to do
