@@ -339,6 +339,36 @@ outside the manifest's tolerance (`--allow-mismatch` records it instead). Upload
 and the cook as release assets and add a `vehicles` entry (`id`, `title`, `release`,
 `asset`, `sha256`) to the library's `catalog.json`.
 
+Prep reads the model as downloaded; the manifest says how to take it apart:
+
+- **Wheels** (`source.wheels`, one of): `detect` finds four wheel-sized top-level groups;
+  `nodes` names the four top-level groups; `parts` lists, per wheel, the nodes that rotate
+  with it (tire, rim, rotor, hub), at any depth. Everything else, calipers included,
+  stays on the body.
+- **Name patterns.** Material keys (`paint`, `glass`, `light_glass`, `look[].match`,
+  `wheel_slots[].match`, `plate.match`) and node keys (`wheels.parts`, `node_slots[].nodes`)
+  take a plain string, `{exact: name}` or `{regex: pattern}`. A plain string is a substring
+  for material roles and looks, the exact name for `plate.match` and node keys. `exact` and
+  `regex` (Python `re.search`) are tried on the full material name and on it with `strip`
+  removed. Node patterns ignore Blender's `.001` suffix on duplicate names, and match a mesh
+  if they match it or any parent.
+- **`plate.match`** takes a list when the plates use several materials.
+- **`node_slots`** gives named nodes their own slot whatever their material:
+  `{nodes: [...], slot: Name, role: opaque|glass|light_glass|paint, <look keys>}`.
+
+```yaml
+source:
+  wheels:
+    parts:
+      front_left: [{regex: "^Car_(12|13|17)$"}]   # one entry per wheel
+      ...
+materials:
+  glass: [{exact: Windows}]                     # not ..._WindowsTrims
+  node_slots:
+    - {nodes: [Car_107, Car_126], slot: RoofGlass, role: opaque, color: [8, 8, 10]}
+  plate: {match: [Material-447368, Material-447369], texture: plate/T_Plate.png}
+```
+
 ## Traffic lights (maps without dynamic signals)
 
 If a map's OpenDRIVE has no dynamic signals, CARLA spawns no `traffic.traffic_light`
