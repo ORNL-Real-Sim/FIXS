@@ -1840,6 +1840,9 @@ def wait_for_port(host, port, timeout=180, proc=None, cfg=None):
 # dials, and -game is what runs the source editor as a server.
 CARLA_CONTRACT = ("-carla-rpc-port", "-game")
 
+# Console commands run at startup; an app or --carla-args giving its own -ExecCmds replaces these.
+CARLA_EXEC_CMDS = "-ExecCmds=r.DistanceFieldAO 0"
+
 
 def parse_carla_args(text):
     """'-quality-level=Low -RenderOffScreen' -> {'-quality-level': 'Low', '-RenderOffScreen': ''}."""
@@ -1898,6 +1901,8 @@ def _carla_command(cfg, port, render_offscreen, quality_level=None, level=None):
         cmd += ["-game", f"-carla-rpc-port={port}", *env.EDITOR_LAUNCH_FLAGS]
     if quality_level:
         cmd.append(f"-quality-level={quality_level}")  # Low is much cheaper to render
+    # Distance-field AO's frame history leaves dark copies of a moving car on the road (#480).
+    cmd.append(CARLA_EXEC_CMDS)
     if render_offscreen:
         cmd.append("-RenderOffScreen")  # headless, no display (Linux/CI)
     else:
