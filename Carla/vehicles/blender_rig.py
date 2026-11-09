@@ -104,10 +104,12 @@ def rig(work, out_fbx, decimate):
         json.dump(stats, fh, indent=1)
 
 
-def _top(ob):
-    while ob.parent is not None:
+def _path(ob):
+    names = []
+    while ob is not None:
+        names.insert(0, ob.name)
         ob = ob.parent
-    return ob.name
+    return names
 
 
 def _material_info(mat, tex_dir):
@@ -180,7 +182,8 @@ def dump(model, fmt, work):
             arrays["p%d" % i] = co[tri_v[sel]].astype(np.float32)
             arrays["n%d" % i] = nrm[tri_l[sel]].astype(np.float32)
             arrays["t%d" % i] = uv[tri_l[sel]].astype(np.float32)
-            chunks.append({"group": _top(ob), "material": key})
+            path = _path(ob)
+            chunks.append({"group": path[0], "path": path, "material": key})
         ev.to_mesh_clear()
     os.makedirs(work, exist_ok=True)
     np.savez_compressed(os.path.join(work, "dump.npz"), **arrays)
