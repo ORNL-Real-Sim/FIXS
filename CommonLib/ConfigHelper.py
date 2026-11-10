@@ -532,7 +532,7 @@ class ConfigHelper:
         return node.get(name, default)
 
 
-    RIG_LIMITS = ("StartTimeout", "StopTimeout", "StepTimeout", "MaxMisses")
+    RIG_LIMITS = ("StartTimeout", "StopTimeout", "StepTimeout", "MaxMisses", "EmergencyCode")
 
     def parseRigLimits(self, node):
         """XilSetup.Rig: only the limits written, checked; UdpRig holds the defaults."""
@@ -546,6 +546,11 @@ class ConfigHelper:
                              % (", ".join(unknown), ", ".join(self.RIG_LIMITS)))
         limits = {}
         for key, value in node.items():
+            if key == "EmergencyCode":
+                if not isinstance(value, bool):
+                    raise SystemExit("ERROR: XilSetup.Rig.EmergencyCode must be true or false, got %r" % (value,))
+                limits[key] = value
+                continue
             try:
                 value = int(value) if key == "MaxMisses" else float(value)
             except (TypeError, ValueError):

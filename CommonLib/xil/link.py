@@ -272,11 +272,13 @@ class TcpLink(object):
 # run start and stop, for a rig answering in lockstep (#473)
 # --------------------------------------------------------------------------- #
 #: Control codes, carried in the packet's speed slot: a commanded speed is never negative.
-#: Host -> rig: (START, v0) ramp to v0 and start logging; (STOP, 0) the car goes back to the rig.
+#: Host -> rig: (START, v0) ramp to v0 and start logging; (STOP, 0) the car goes back to the rig;
+#: (EMERGENCY, a) this step only, brake toward rest at the car's hardest rate, a the braking
+#: asked for (opt-in: XilSetup.Rig.EmergencyCode; otherwise the step is sent as (0, a)).
 #: Rig -> host: (HELLO, 0) on start-up; (START, v) settled at v; (STOP, v) released at v (0 once at rest);
-#: (FAULT, v) fault or e-stop.
-HELLO, START, STOP, FAULT = -1, -2, -3, -4
-_NAMES = {HELLO: 'HELLO', START: 'START', STOP: 'STOP', FAULT: 'FAULT'}
+#: (FAULT, v) fault or e-stop. An EMERGENCY step is answered with the speed, like any step.
+HELLO, START, STOP, FAULT, EMERGENCY = -1, -2, -3, -4, -5
+_NAMES = {HELLO: 'HELLO', START: 'START', STOP: 'STOP', FAULT: 'FAULT', EMERGENCY: 'EMERGENCY'}
 
 
 def code(speed):
@@ -335,7 +337,8 @@ class UdpRig(object):
 
     def __init__(self, ip, port=REFERENCE_PORT, reply_port=MEASUREMENT_PORT,
                  step_timeout_s=1.0, max_misses=5, start_timeout_s=0.0,
-                 stop_timeout_s=60.0, resend_s=1.0, log=_say, clock=time.monotonic):
+                 stop_timeout_s=60.0, resend_s=1.0, emergency_code=False, log=_say,
+                 clock=time.monotonic):
         self.peer = (ip, int(port))
         self.reply_port = int(reply_port)
         self.step_timeout_s = float(step_timeout_s)
@@ -343,6 +346,8 @@ class UdpRig(object):
         self.start_timeout_s = float(start_timeout_s)
         self.stop_timeout_s = float(stop_timeout_s)
         self.resend_s = float(resend_s)
+        #: Send an emergency step as EMERGENCY; False sends it as (0, aref), for a rig without the code.
+        self.emergency_code = bool(emergency_code)
         self._log = log
         self._clock = clock
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -358,7 +363,8 @@ class UdpRig(object):
         """A rig at XilSetup's ip and port, with XilSetup.Rig's limits: ``fixs.config.get('xil')``."""
         limits = dict(xil.get('rig') or {})
         for key, name in (('StartTimeout', 'start_timeout_s'), ('StopTimeout', 'stop_timeout_s'),
-                          ('StepTimeout', 'step_timeout_s'), ('MaxMisses', 'max_misses')):
+                          ('StepTimeout', 'step_timeout_s'), ('MaxMisses', 'max_misses'),
+                          ('EmergencyCode', 'emergency_code')):
             if key in limits:
                 options.setdefault(name, limits[key])
         return cls(xil['ip'], xil['port'], reply_port, **options)
@@ -436,12 +442,15 @@ class UdpRig(object):
         self._log('[rig] ready at %.2f m/s' % v)
         return v
 
-    def exchange(self, vref, aref, dt):
+    def exchange(self, vref, aref, dt, emergency=False):
         """Send one command and return the speed the rig reached, or None if it did not answer."""
         if not self.started:
             self.start(0.0)
         self._drain()
-        self._send(max(0.0, float(vref)), float(aref))
+        if emergency and self.emergency_code:
+            self._send(EMERGENCY, float(aref))
+        else:
+            self._send(0.0 if emergency else max(0.0, float(vref)), float(aref))
         deadline = self._clock() + self.step_timeout_s if self.step_timeout_s > 0 else float('inf')
         while True:
             got = self._recv(deadline - self._clock())

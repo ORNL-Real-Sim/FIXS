@@ -14,7 +14,7 @@ import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..')))
 
-from CommonLib.xil.link import (FAULT, HELLO, START, STOP, RigError,  # noqa: E402
+from CommonLib.xil.link import (EMERGENCY, FAULT, HELLO, START, STOP, RigError,  # noqa: E402
                                 UdpRig, code, pack, unpack)
 
 
@@ -291,9 +291,61 @@ def test_the_yaml_rig_block_is_checked():
     parse = ConfigHelper().parseRigLimits
     assert parse(None) == {}
     assert parse({'StopTimeout': 90, 'MaxMisses': '3'}) == {'StopTimeout': 90.0, 'MaxMisses': 3}
+    assert parse({'EmergencyCode': True}) == {'EmergencyCode': True}
+    with pytest.raises(SystemExit, match='true or false'):
+        parse({'EmergencyCode': 'yes'})
     with pytest.raises(SystemExit, match='has no StopTimout'):
         parse({'StopTimout': 90})
     with pytest.raises(SystemExit, match='>= 0'):
         parse({'StartTimeout': -1})
     with pytest.raises(SystemExit, match='mapping'):
         parse(60)
+
+
+@pytest.mark.parametrize('opt_in, sent', [(False, (0.0, -3.5)), (True, (EMERGENCY, -3.5))])
+def test_an_emergency_step_is_a_code_only_for_a_rig_that_knows_it(opt_in, sent):
+    fake, rig = _rig(lambda s, a: [(START, 0.0)] if code(s) == START else [(4.0, 0.0)],
+                     emergency_code=opt_in)
+    try:
+        rig.start(0.0)
+        assert rig.exchange(6.0, -3.5, 0.05, emergency=True) == pytest.approx(4.0)
+        assert rig.exchange(6.0, 0.5, 0.05) == pytest.approx(4.0)
+        assert fake.got[1] == pytest.approx(sent)
+        assert fake.got[2] == pytest.approx((6.0, 0.5))
+    finally:
+        rig.close()
+        fake.stop()
+
+
+def test_from_config_takes_the_emergency_opt_in():
+    rig = UdpRig.fromConfig({'ip': '127.0.0.1', 'port': 5010, 'rig': {'EmergencyCode': True}},
+                            _free_udp_port(), log=lambda m: None)
+    try:
+        assert rig.emergency_code
+    finally:
+        rig.close()
+
+
+def test_the_robot_brakes_harder_only_when_it_has_an_emergency_brake():
+    from CommonLib.xil.driver import RobotDriver
+    from CommonLib.xil.dynosim import Dyno, DynoSim
+    from CommonLib.xil.vehicle import Vehicle
+
+    def decel(emergency_decel, emergency):
+        sim = DynoSim(Vehicle(mass_kg=2100.0), Dyno(),
+                      RobotDriver(max_accel_mps2=2.0, max_decel_mps2=2.0,
+                                  emergency_decel_mps2=emergency_decel))
+        for _ in range(300):
+            sim.step(12.0, 0.05)
+        v0 = sim.speed
+        for _ in range(20):
+            sim.step(0.0, 0.05, a_ref=-3.5, emergency=emergency)
+        v1 = sim.speed
+        for _ in range(20):
+            sim.step(0.0, 0.05, a_ref=-3.5, emergency=emergency)
+        return v1 - sim.speed                              # over the second second of braking
+
+    normal = decel(None, True)
+    assert normal < 2.3                                   # no emergency brake: the envelope holds
+    assert decel(3.5, False) == pytest.approx(normal)     # not told: no different
+    assert decel(3.5, True) == pytest.approx(3.5, abs=0.4)

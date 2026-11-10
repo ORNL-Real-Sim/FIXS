@@ -196,7 +196,7 @@ def test_the_run_records_what_drove_it(scenario, tmp_path):
     assert 'shape=pedals' in first
     assert 'kv=0.33' in first
     assert 'exchange=<lambda>' in first
-    assert 'comfortDecel=2' in first   # the limits are recorded too
+    assert 'comfortDecel=1.5' in first   # the limits are recorded too
 
 
 # -- the law itself, which is pure arithmetic and needs no simulator ---------
@@ -788,9 +788,44 @@ def test_reference_returns_the_agents_speed_and_the_acceleration_that_goes_with_
     vRef, aRef = d.reference(SimpleNamespace(throttle=0.3, brake=0.0))
     assert vRef == pytest.approx(9.8)
     assert aRef == pytest.approx(-1.0)
+    assert not d.emergency
     vRef, aRef = d.reference(SimpleNamespace(throttle=0.0, brake=0.5))   # emergency stop
     assert vRef == 0.0
-    assert aRef == pytest.approx(1.0 - 10.0 / 0.1)
+    assert aRef == pytest.approx(-d.limits.commitDecel)   # the car's hardest braking, never more
+    assert d.emergency
+
+
+def test_the_acceleration_asked_for_stays_inside_the_car():
+    d = _build(driver(xil=lambda vref, aref, dt: vref))
+    d.feedVref, d.feedAref, d.feedStep = 5.0, 0.0, 0.1
+    assert d._arefFor(15.0) == pytest.approx(d.limits.carAccel)
+    assert d._arefFor(0.0) == pytest.approx(-d.limits.commitDecel)
+    assert (d.limits.carAccel, d.limits.commitDecel, d.limits.comfortDecel) == (2.0, 3.5, 1.5)
+
+
+def test_an_exchange_that_takes_emergency_is_told():
+    got = []
+
+    def exchange(vref, aref, dt, emergency=False):
+        got.append(emergency)
+        return vref
+
+    d = _build(driver(xil=exchange))
+    d.exchange(5.0, 0.0)
+    d.emergency = True
+    d.exchange(0.0, -3.5)
+    assert got == [False, True]
+    plain = _build(driver(xil=lambda vref, aref, dt: vref))
+    plain.emergency = True
+    assert plain.exchange(0.0, -3.5) == 0.0          # one without the keyword is called as before
+
+
+@pytest.mark.parametrize('zeroIsStop, fed, expected', [
+    (False, 0.0, None), (False, 6.0, 6.0), (False, -1.0, None),
+    (True, 0.0, 0.0), (True, 6.0, 6.0), (True, -1.0, None)])
+def test_a_zero_advisory_is_a_stop_once_the_app_says_so(zeroIsStop, fed, expected):
+    d = _build(driver(zeroIsStop=zeroIsStop))
+    assert d.advisoryOf(_passiveEgo(speedDesired=fed, feedAge=0.0)) == expected
 
 
 def test_exchange_hands_the_dyno_the_acceleration_it_is_given():
@@ -878,3 +913,13 @@ def test_a_failed_start_is_not_retried_every_step(scenario):
 def test_a_non_callable_rig_hook_is_refused_at_the_call(kw):
     with pytest.raises(TypeError):
         driver(xil=lambda v, dt: v, **{kw: 3})
+
+
+def test_a_leader_or_a_bar_at_exactly_zero_is_there_not_absent():
+    d = _build(driver())
+    assert d.leaderCeiling(_passiveEgo(precedingVehicleDistance=0.0, precedingVehicleSpeed=0.0)) == 0.0
+    assert d.leaderCeiling(_passiveEgo(precedingVehicleDistance=-1.0)) > 100.0
+    import CommonLib.fixs._driver as m
+    if m.SIGNAL_SOURCE == 'fixs':
+        red = _passiveEgo(signalLightColor=1, signalLightDistance=0.0, speed=3.0)
+        assert d.signalCeiling(red) == 0.0
