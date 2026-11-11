@@ -19,12 +19,13 @@ SKIP_DIRS = {"__pycache__", ".git", "yaml-cpp", "libsumo", "libcarla",
              "ProprietaryFiles", "node_modules", ".venv"}
 
 #: import name -> the distribution that provides it, where they differ.
-DIST = {"yaml": "pyyaml", "cv2": "opencv-python", "PIL": "pillow", "websocket": "websocket-client"}
+DIST = {"yaml": "pyyaml", "cv2": "opencv-python", "PIL": "pillow", "websocket": "websocket-client", "collada": "pycollada"}
 
 #: Imports neither spec carries, and why.
 EXEMPT = {
     "carla": "installed by carla_env_setup.ensure_carla()",
     "unreal": "provided by the Unreal Editor, not pip-installable",
+    "bpy": "provided by Blender, which runs Carla/vehicles/blender_rig.py",
 }
 
 

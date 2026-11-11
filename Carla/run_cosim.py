@@ -1096,6 +1096,8 @@ def _claim_slot(args, config_yaml):
 
 
 RUN_RECORD = "fixs_run.json"
+#: --run-info FILE: where _record_run also writes the record, for the caller to keep.
+_RUN_INFO = None
 STACK_YAML_COPY = "stack_config.yaml"
 
 
@@ -1117,6 +1119,8 @@ def _record_run(user_yaml, stack_yaml):
                   "stack_yaml": os.path.abspath(stack_yaml),
                   "stack_yaml_copy": STACK_YAML_COPY, "stack_yaml_sha256": digest}
         run_registry._write_json_atomic(os.path.join(_RUN.dir, RUN_RECORD), record)
+        if _RUN_INFO:
+            run_registry._write_json_atomic(_RUN_INFO, record)
     except OSError as exc:
         print(f"[cosim] could not write the run record ({exc}).")
 
@@ -1840,6 +1844,9 @@ def wait_for_port(host, port, timeout=180, proc=None, cfg=None):
 # dials, and -game is what runs the source editor as a server.
 CARLA_CONTRACT = ("-carla-rpc-port", "-game")
 
+# Console commands run at startup; an app or --carla-args giving its own -ExecCmds replaces these.
+CARLA_EXEC_CMDS = "-ExecCmds=r.DistanceFieldAO 0"
+
 
 def parse_carla_args(text):
     """'-quality-level=Low -RenderOffScreen' -> {'-quality-level': 'Low', '-RenderOffScreen': ''}."""
@@ -1898,6 +1905,8 @@ def _carla_command(cfg, port, render_offscreen, quality_level=None, level=None):
         cmd += ["-game", f"-carla-rpc-port={port}", *env.EDITOR_LAUNCH_FLAGS]
     if quality_level:
         cmd.append(f"-quality-level={quality_level}")  # Low is much cheaper to render
+    # Distance-field AO's frame history leaves dark copies of a moving car on the road (#480).
+    cmd.append(CARLA_EXEC_CMDS)
     if render_offscreen:
         cmd.append("-RenderOffScreen")  # headless, no display (Linux/CI)
     else:
@@ -2504,6 +2513,23 @@ def resolve_tl_table(sumocfg, force=False, cache_name=None):
 # engine / carla / sumo always have one (the yaml, carla.json, the built-ins), so
 # they start filled in and are edited only if you ask for them.
 MUST_ANSWER = ("app", "map", "config")
+
+
+def _ensure_ego_vehicle(args, cfg, config_yaml):
+    """Offer to import a library ego vehicle the local CARLA lacks (FIXS#470)."""
+    if args.sumo_only or cfg is None or cfg.get("mode") not in ("source", "packaged"):
+        return
+    if not config_yaml or not os.path.isfile(config_yaml) or not scenario_has_carla(config_yaml):
+        return
+    bp_id = (get_yaml_scalar(config_yaml, "CarlaSetup", "EgoBlueprint") or "").strip("'\"")
+    if not bp_id:
+        return
+    import import_vehicle
+    state = import_vehicle.ensure_for_run(bp_id, cfg["carla_root"], cfg["mode"],
+                                          ue4_root=cfg.get("ue4_root"),
+                                          interactive=_interactive(args), ask=_ask)
+    if state in ("installed", "imported"):
+        print(f"[cosim] ego vehicle {bp_id}: {state} in this CARLA")
 
 
 def _interactive(args):
@@ -3192,6 +3218,18 @@ def _scope_config(rec, ctx):
     staged = {os.path.normcase(os.path.abspath(s["path"])) for s in ctx.get("staged") or []}
     if os.path.normcase(os.path.abspath(chosen)) in staged:
         rec["config_scope"] = "app"
+        return
+    # The yaml as apps.json names it (relative to the app folder, or the repo file itself)
+    # means its staged copy, which is what the run reads.
+    app = ctx.get("app")
+    names = {os.path.normcase(os.path.abspath(chosen))}
+    if app and not os.path.isabs(chosen):
+        names.add(os.path.normcase(os.path.abspath(
+            os.path.join(app_catalog.app_dir(app), *chosen.replace("\\", "/").split("/")))))
+    for s in ctx.get("staged") or []:
+        if os.path.normcase(os.path.abspath(s["source"])) in names:
+            rec["config"], rec["config_scope"] = s["path"], "app"
+            return
 
 
 def _apply_cli(rec, args):
@@ -4310,7 +4348,8 @@ def declared_engine(staged, config_yaml):
     return None
 
 
-def main():
+def build_parser():
+    """The engine's options. fixs.batch checks a Run against it, so options live only here."""
     ap = _Parser(description=__doc__,
                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--app", default=None,
@@ -4604,7 +4643,22 @@ def main():
     ap.add_argument("--sumo-no-start", action="store_true",
                     help="[cpp] launch sumo-gui but omit --start, so it opens loaded "
                          "and waits for you to press Play (overrides SumoSetup.AutoStart)")
+    ap.add_argument("--app-args", default=None, metavar="ARGS",
+                    help="the app's own options, as one string (e.g. \"--egoDepart 29400\"); "
+                         "handed to its launch command as COSIM_APP_ARGS")
+    ap.add_argument("--run-info", default=None, metavar="FILE",
+                    help="also write this run's record (run id, port slot, ports, yaml) to "
+                         "FILE; the run dir holding fixs_run.json is removed when the run ends")
+    return ap
+
+
+def main():
+    ap = build_parser()
     args = ap.parse_args()
+    if args.app_args is not None:
+        os.environ["COSIM_APP_ARGS"] = args.app_args
+    global _RUN_INFO
+    _RUN_INFO = os.path.abspath(args.run_info) if args.run_info else None
     # --reimport PATH parses as a string in args.reimport; split it out here so
     # every OTHER site in this file - there are over a dozen - can go on reading
     # args.reimport as the plain bool it has always been.
@@ -5042,6 +5096,9 @@ def main():
             if ans.startswith("y"):
                 args.reimport = True
                 resolved = None
+
+    # A library ego vehicle (CarlaSetup.EgoBlueprint) must be in this CARLA before it launches.
+    _ensure_ego_vehicle(args, cfg, args.config or (setup or {}).get("config"))
 
     # The application starts HERE: after the last question this script asks, and
     # before anything reaches for a map bundle.

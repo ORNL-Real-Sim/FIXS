@@ -14,7 +14,10 @@ little-endian float32, 8 bytes, references on :5010 and measurements on :5011.
 Steer is carried because the packet carries it; nothing here acts on it, because
 this bench is longitudinal.
 
-UDP is free-running with no handshake. The newest datagram wins and nothing
+``UdpRig`` is the lockstep alternative for a rig that answers every command
+once, with START/STOP codes in the speed slot (see ``HELLO``..``FAULT``).
+
+UdpLink is free-running with no handshake. The newest datagram wins and nothing
 blocks. TCP costs a connection and gives back delivery and ordering; it never
 blocks either, so a run starts before the far end is listening. A caller that
 has gone stale decides for itself what to do about it -- "keep the last value"
@@ -22,6 +25,8 @@ and "fall back to your own reference" are both right somewhere, so the link does
 not choose.
 """
 
+import math
+import os
 import socket
 import struct
 import time
@@ -262,3 +267,247 @@ class TcpLink(object):
     recv_measurement = recv
     reference_age = age
     measurement_age = age
+
+
+# --------------------------------------------------------------------------- #
+# run start and stop, for a rig answering in lockstep (#473)
+# --------------------------------------------------------------------------- #
+#: Control codes, carried in the packet's speed slot: a commanded speed is never negative.
+#: Host -> rig: (START, v0) ramp to v0 and start logging; (STOP, 0) the car goes back to the rig;
+#: (EMERGENCY, a) this step only, brake toward rest at the car's hardest rate, a the braking
+#: asked for (opt-in: XilSetup.Rig.EmergencyCode; otherwise the step is sent as (0, a)).
+#: Rig -> host: (HELLO, 0) on start-up; (START, v) settled at v; (STOP, v) released at v (0 once at rest);
+#: (FAULT, v) fault or e-stop. An EMERGENCY step is answered with the speed, like any step.
+HELLO, START, STOP, FAULT, EMERGENCY = -1, -2, -3, -4, -5
+_NAMES = {HELLO: 'HELLO', START: 'START', STOP: 'STOP', FAULT: 'FAULT', EMERGENCY: 'EMERGENCY'}
+
+
+def code(speed):
+    """The control code in a packet's speed slot, or None if it is a speed.
+
+    Codes are exact negative whole numbers. Anything else is a speed, so a rig
+    may report -0.01 m/s of sensor noise without it reading as a code.
+    """
+    speed = float(speed)
+    if not (speed < 0 and math.isfinite(speed) and speed.is_integer()):
+        return None
+    return int(speed)
+
+
+def codeName(c):
+    return _NAMES.get(c, 'code %s' % c)
+
+
+class RigError(RuntimeError):
+    """The rig reported a fault, restarted mid-run, or stopped answering."""
+
+
+def _say(msg):
+    print(msg, flush=True)
+
+
+#: The rig's events, one timestamped line each, in the run folder (FIXS_RUN_DIR).
+EVENTS_FILE = 'dyno_events.txt'
+#: While waiting on START or STOP, say so this often [s].
+REMIND_S = 30.0
+#: A STOP answered below this speed [m/s] is "at rest"; above it, the rig has taken the car moving.
+AT_REST_MPS = 0.05
+
+
+def _minutes(s):
+    return '%d s' % s if s < 120 else '%.0f min' % (s / 60.0)
+
+
+class UdpRig(object):
+    """The simulator end of a rig that answers each command once (lockstep).
+
+        rig = UdpRig(ip, 5010, 5011)
+        rig.start(v0)                    # until the rig says it has settled at v0
+        speed = rig.exchange(vref, aref, dt)
+        rig.stop()                       # until the rig says it is at rest
+
+    START and STOP are resent every ``resend_s`` until answered; the rig answers a
+    repeat by acknowledging again. A rig must also ramp down on its own when no
+    packet arrives for a few seconds, since a killed process never sends STOP.
+
+    The rig answers STOP once FIXS no longer controls the car: at rest after its own
+    ramp-down, or at once when a driver takes over. Its program may exit after that
+    and start again for the next run; START waits for it, and its hello cuts the wait.
+
+    A limit of 0 is no limit: START waits for the rig as long as it takes, which is
+    the default because the run is paused meanwhile.
+    """
+
+    def __init__(self, ip, port=REFERENCE_PORT, reply_port=MEASUREMENT_PORT,
+                 step_timeout_s=1.0, max_misses=5, start_timeout_s=0.0,
+                 stop_timeout_s=60.0, resend_s=1.0, emergency_code=False, log=_say,
+                 events=None, clock=time.monotonic):
+        self.peer = (ip, int(port))
+        self.reply_port = int(reply_port)
+        self.step_timeout_s = float(step_timeout_s)
+        self.max_misses = int(max_misses)
+        self.start_timeout_s = float(start_timeout_s)
+        self.stop_timeout_s = float(stop_timeout_s)
+        self.resend_s = float(resend_s)
+        #: Send an emergency step as EMERGENCY; False sends it as (0, aref), for a rig without the code.
+        self.emergency_code = bool(emergency_code)
+        self._log = log
+        #: Where every event is also appended; default the run folder's EVENTS_FILE, if there is one.
+        run_dir = os.environ.get('FIXS_RUN_DIR')
+        self.events = events if events is not None else (
+            os.path.join(run_dir, EVENTS_FILE) if run_dir else None)
+        self._clock = clock
+        self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._sock.bind(('', self.reply_port))
+        self.started = False
+        #: The speed the rig settled at on START, and steps it did not answer.
+        self.startSpeed = None
+        self.misses = 0
+        self._missRun = 0
+
+    @classmethod
+    def fromConfig(cls, xil, reply_port=MEASUREMENT_PORT, **options):
+        """A rig at XilSetup's ip and port, with XilSetup.Rig's limits: ``fixs.config.get('xil')``."""
+        limits = dict(xil.get('rig') or {})
+        for key, name in (('StartTimeout', 'start_timeout_s'), ('StopTimeout', 'stop_timeout_s'),
+                          ('StepTimeout', 'step_timeout_s'), ('MaxMisses', 'max_misses'),
+                          ('EmergencyCode', 'emergency_code')):
+            if key in limits:
+                options.setdefault(name, limits[key])
+        return cls(xil['ip'], xil['port'], reply_port, **options)
+
+    def _note(self, msg):
+        """Report an event, and keep it in the events file."""
+        self._log(msg)
+        if self.events:
+            try:
+                with open(self.events, 'a', encoding='utf-8') as f:
+                    f.write('%s  %s\n' % (time.strftime('%H:%M:%S'), msg))
+            except OSError:
+                pass
+
+    def _send(self, speed, second):
+        try:
+            self._sock.sendto(pack(speed, second), self.peer)
+        except OSError:
+            pass
+
+    def _drain(self):
+        """Drop whatever is queued: a late answer belongs to an earlier command."""
+        self._sock.setblocking(False)
+        try:
+            while True:
+                self._sock.recvfrom(64)
+        except OSError:
+            pass
+        finally:
+            self._sock.setblocking(True)
+
+    def _recv(self, timeout):
+        """The next whole packet within `timeout` s as (speed, second), or None."""
+        deadline = self._clock() + timeout
+        while True:
+            left = deadline - self._clock()
+            if left <= 0:
+                return None
+            self._sock.settimeout(None if math.isinf(left) else left)
+            try:
+                data, _ = self._sock.recvfrom(64)
+            except socket.timeout:
+                return None
+            except ConnectionResetError:    # Windows: an earlier send found no rig listening
+                continue
+            if len(data) >= PACKET_SIZE:
+                return unpack(data)
+
+    def _request(self, which, value, timeout):
+        """Send (which, value) until the rig acknowledges it; the ack's value, or None on timeout (0: none)."""
+        begun = self._clock()
+        deadline = begun + timeout if timeout > 0 else float('inf')
+        remind = begun + REMIND_S
+        self._drain()
+        while self._clock() < deadline:
+            if self._clock() >= remind:
+                self._note('[rig] still waiting for the rig to answer %s (%s)'
+                          % (codeName(which), _minutes(self._clock() - begun)))
+                remind += REMIND_S
+            self._send(which, value)
+            resend_at = min(deadline, self._clock() + self.resend_s)
+            while True:
+                got = self._recv(resend_at - self._clock())
+                if got is None:
+                    break
+                c = code(got[0])
+                if c == which:
+                    return got[1]
+                if c == FAULT:
+                    raise RigError('rig %s:%d reported a fault (%g) during %s'
+                                   % (self.peer + (got[1], codeName(which))))
+                if c == HELLO:
+                    break                   # it has just come up: ask again now
+        return None
+
+    def start(self, v0=0.0):
+        """Ask the rig to ramp to `v0` m/s; return the speed it settled at."""
+        v0 = max(0.0, float(v0))
+        self._note('[rig] START: ramp to %.2f m/s (%s:%d)' % ((v0,) + self.peer))
+        v = self._request(START, v0, self.start_timeout_s)
+        if v is None:                       # only with a StartTimeout
+            raise RigError('rig %s:%d did not answer START in %.0f s'
+                           % (self.peer + (self.start_timeout_s,)))
+        self.started, self.startSpeed = True, v
+        self._note('[rig] ready at %.2f m/s' % v)
+        return v
+
+    def exchange(self, vref, aref, dt, emergency=False):
+        """Send one command and return the speed the rig reached, or None if it did not answer."""
+        if not self.started:
+            self.start(0.0)
+        self._drain()
+        if emergency and self.emergency_code:
+            self._send(EMERGENCY, float(aref))
+        else:
+            self._send(0.0 if emergency else max(0.0, float(vref)), float(aref))
+        deadline = self._clock() + self.step_timeout_s if self.step_timeout_s > 0 else float('inf')
+        while True:
+            got = self._recv(deadline - self._clock())
+            if got is None:
+                break
+            c = code(got[0])
+            if c is None:                   # a speed, slightly negative ones included
+                self._missRun = 0
+                return got[0]
+            if c == FAULT:
+                raise RigError('rig %s:%d reported a fault (%g)' % (self.peer + (got[1],)))
+            if c == HELLO:
+                raise RigError('rig %s:%d restarted mid-run' % self.peer)
+            # a late START/STOP acknowledgement: keep waiting for this step's answer
+        self.misses += 1
+        self._missRun += 1
+        if self.max_misses and self._missRun >= self.max_misses:
+            raise RigError('rig %s:%d did not answer %d steps in a row'
+                           % (self.peer + (self._missRun,)))
+        return None
+
+    def stop(self):
+        """Hand the car back to the rig; the speed it answered at, or None. Never raises."""
+        if not self.started:
+            return None
+        self.started = False
+        self._note('[rig] STOP: the car goes back to the rig')
+        try:
+            v = self._request(STOP, 0.0, self.stop_timeout_s)
+        except RigError as exc:
+            self._note('[rig] %s' % exc)
+            return None
+        if v is None:
+            self._note('[rig] no STOP answer in %.0f s; the rig must ramp down on its own timeout'
+                      % self.stop_timeout_s)
+        elif abs(v) < AT_REST_MPS:
+            self._note('[rig] at rest (%.2f m/s)' % v)
+        else:
+            self._note('[rig] released at %.2f m/s: the rig has the car' % v)
+        return v
+
+    def close(self):
+        self._sock.close()

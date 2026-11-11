@@ -123,10 +123,10 @@ class DynoSim(object):
 
     # -- running -----------------------------------------------------------
 
-    def step(self, v_ref, dt, a_ref=None):
+    def step(self, v_ref, dt, a_ref=None, emergency=False):
         """The driver chases v_ref. Read ``throttle``/``brake`` for what it did.
-        ``a_ref``, the acceleration command, goes to the driver's hold."""
-        throttle, brake = self.driver.step(v_ref, self.speed, dt, a_ref)
+        ``a_ref``, the acceleration command, goes to the driver's hold; ``emergency`` to its emergency brake."""
+        throttle, brake = self.driver.step(v_ref, self.speed, dt, a_ref, emergency)
         return self.step_pedals(throttle, brake, dt)
 
     def step_pedals(self, throttle, brake, dt):

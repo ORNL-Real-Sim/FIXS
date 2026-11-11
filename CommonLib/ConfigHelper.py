@@ -33,6 +33,22 @@ PLOT_MEASURED = ("steerAngle", "throttle", "brake")
 #: PlotSetup.Plots[].Panels: prefix of a series an in-process controller supplies with fixs.plot.put().
 PLOT_APP_PREFIX = "app."
 
+
+def parseEgoColor(value):
+    """CarlaSetup.EgoColor as CARLA's "R,G,B" attribute string; "" when unset."""
+    if value is None or value == "":
+        return ""
+    parts = value if isinstance(value, (list, tuple)) else str(value).replace(" ", "").split(",")
+    try:
+        rgb = [int(p) for p in parts]
+    except (TypeError, ValueError):
+        rgb = []
+    if len(rgb) != 3 or not all(0 <= c <= 255 for c in rgb) or any(isinstance(p, bool) for p in parts):
+        raise SystemExit("ERROR: CarlaSetup.EgoColor must be \"R,G,B\" or [R, G, B] with integers "
+                         "0..255, got %r" % (value,))
+    return ",".join(str(c) for c in rgb)
+
+
 class ConfigHelper:
     def __init__(self):
         # Initialize the s_mapTypeValues
@@ -115,6 +131,7 @@ class ConfigHelper:
             raise SystemExit(
                 "ERROR: XilSetup.Transport must be one of inprocess|udp|tcp, got '%s'"
                 % self.Xil_setup["Transport"])
+        self.Xil_setup["Rig"] = self.parseRigLimits(xil_node.get("Rig"))
         # The ego speed SUMO is given (virenv | xil) and applications receive (traffic | xil).
         for key, allowed in (("SpeedToTraffic", ("virenv", "xil")), ("SpeedToApplication", ("traffic", "xil"))):
             value = self.parserString(xil_node, key, allowed[0]).strip().lower()
@@ -193,6 +210,12 @@ class ConfigHelper:
         # #325: the user controller, as a path relative to where the run was
         # launched.
         self.Carla_setup["EgoBlueprint"] = self.parserString(carla_node, "EgoBlueprint", "vehicle.tesla.model3")
+        # #470: only a yaml that names EgoBlueprint gives a mirrored (Dynamics: traffic) ego that model.
+        self.Carla_setup["EgoBlueprintSet"] = bool(carla_node.get("EgoBlueprint"))
+        # #470: "R,G,B" for the blueprint's `color` attribute; "" leaves CARLA's pick.
+        self.Carla_setup["EgoColor"] = parseEgoColor(carla_node.get("EgoColor"))
+        # #470: a library vehicle's vehicle.yaml; "" = the one import_vehicle.py installed for EgoBlueprint.
+        self.Carla_setup["EgoVehicleManifest"] = str(self.parserString(carla_node, "EgoVehicleManifest", "") or "")
         self.Carla_setup["EgoSpawnPose"] = [float(v) for v in (carla_node.get("EgoSpawnPose") or [])]
         self.Carla_setup["EgoRoutePoints"] = [(float(pt[0]), float(pt[1]))
                                               for pt in (carla_node.get("EgoRoutePoints") or [])]
@@ -508,6 +531,34 @@ class ConfigHelper:
     def parserStringVector(self, node, name, default):
         return node.get(name, default)
 
+
+    RIG_LIMITS = ("StartTimeout", "StopTimeout", "StepTimeout", "MaxMisses", "EmergencyCode")
+
+    def parseRigLimits(self, node):
+        """XilSetup.Rig: only the limits written, checked; UdpRig holds the defaults."""
+        if node is None:
+            return {}
+        if not isinstance(node, dict):
+            raise SystemExit("ERROR: XilSetup.Rig must be a mapping of %s" % ", ".join(self.RIG_LIMITS))
+        unknown = sorted(set(node) - set(self.RIG_LIMITS))
+        if unknown:
+            raise SystemExit("ERROR: XilSetup.Rig has no %s; it takes %s"
+                             % (", ".join(unknown), ", ".join(self.RIG_LIMITS)))
+        limits = {}
+        for key, value in node.items():
+            if key == "EmergencyCode":
+                if not isinstance(value, bool):
+                    raise SystemExit("ERROR: XilSetup.Rig.EmergencyCode must be true or false, got %r" % (value,))
+                limits[key] = value
+                continue
+            try:
+                value = int(value) if key == "MaxMisses" else float(value)
+            except (TypeError, ValueError):
+                raise SystemExit("ERROR: XilSetup.Rig.%s must be a number, got %r" % (key, value))
+            if value < 0:
+                raise SystemExit("ERROR: XilSetup.Rig.%s must be >= 0 (0 = no limit), got %r" % (key, value))
+            limits[key] = value
+        return limits
 
     def parseVehicleSubscription(self, node, name, default=[]):
         # Process each subscription in the list
