@@ -24,6 +24,8 @@ dependencies:
     # Carla/VirEnv/CarlaViews.py camera windows and recordings, CarlaHud.py.
     - opencv-python
     - pillow
+    # Carla/obs_recorder.py talks to OBS over its WebSocket.
+    - websocket-client
     # Pinned to the SUMO version in dependencies.yaml, as pyproject.toml is.
     - traci==1.22.0
     - sumolib==1.22.0

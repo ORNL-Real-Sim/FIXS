@@ -19,7 +19,7 @@ SKIP_DIRS = {"__pycache__", ".git", "yaml-cpp", "libsumo", "libcarla",
              "ProprietaryFiles", "node_modules", ".venv"}
 
 #: import name -> the distribution that provides it, where they differ.
-DIST = {"yaml": "pyyaml", "cv2": "opencv-python", "PIL": "pillow"}
+DIST = {"yaml": "pyyaml", "cv2": "opencv-python", "PIL": "pillow", "websocket": "websocket-client"}
 
 #: Imports neither spec carries, and why.
 EXEMPT = {
