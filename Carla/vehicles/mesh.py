@@ -1,12 +1,14 @@
 """Source model -> vehicle parts (body + four wheels) in the CARLA vehicle frame.
 
 Frame of everything this returns: metres, +X forward, +Y left, +Z up, origin at the
-ground under the centre of the bounding box. A "chunk" is the triangles of one top-level
-group of the source model in one material: dict(group, material, P, N, UV), with P and N
-shaped (n, 3, 3) and UV (n, 3, 2).
+ground under the centre of the bounding box. A "chunk" is the triangles of one mesh node
+of the source model in one material: dict(group, path, material, P, N, UV), where group is
+the top-level group, path the node names from there down to the mesh, P and N shaped
+(n, 3, 3) and UV (n, 3, 2).
 """
 
 import os
+import re
 
 import numpy as np
 
@@ -45,15 +47,15 @@ def read_collada(path):
 
     chunks = []
 
-    def walk(node, M, top):
+    def walk(node, M, top, path):
         if isinstance(node, Node):
             name = node.xmlnode.get("name") or node.id or ""
             # SketchUp wraps everything in one or two root nodes; groups below them are the parts
             t = top if top is not None else (name if name not in ("SketchUp", "group_0") else None)
             for ch in node.children:
-                walk(ch, M @ node.matrix, t)
+                walk(ch, M @ node.matrix, t, path + [name])
         elif isinstance(node, NodeNode):
-            walk(node.node, M, top)
+            walk(node.node, M, top, path)
         elif isinstance(node, GeometryNode):
             matmap = {mn.symbol: (mn.target.id if mn.target is not None else mn.symbol)
                       for mn in node.materials}
@@ -78,12 +80,12 @@ def read_collada(path):
                     UV = np.zeros(P.shape[:2] + (2,))
                 if flip:  # a mirroring transform reverses winding
                     P, N, UV = P[:, ::-1], N[:, ::-1], UV[:, ::-1]
-                chunks.append({"group": top or "root",
+                chunks.append({"group": top or "root", "path": path,
                                "material": matmap.get(prim.material, prim.material),
                                "P": P * unit, "N": N, "UV": UV})
 
     for n in dae.scene.nodes:
-        walk(n, np.eye(4), None)
+        walk(n, np.eye(4), None, [])
     if not chunks:
         raise MeshError("{} holds no triangles".format(path))
     return chunks, materials
@@ -97,7 +99,8 @@ def read_npz_dump(npz_path, json_path):
     data = np.load(npz_path)
     chunks = []
     for i, c in enumerate(meta["chunks"]):
-        chunks.append({"group": c["group"], "material": c["material"],
+        chunks.append({"group": c["group"], "path": c.get("path") or [c["group"]],
+                       "material": c["material"],
                        "P": data["p%d" % i].reshape(-1, 3, 3).astype(float),
                        "N": data["n%d" % i].reshape(-1, 3, 3).astype(float),
                        "UV": data["t%d" % i].reshape(-1, 3, 2).astype(float)})
@@ -182,6 +185,49 @@ def find_wheels(boxes, spec):
     return out
 
 
+def _path_of(chunk):
+    return chunk.get("path") or [chunk["group"]]
+
+
+def wheel_of_chunks(chunks, spec):
+    """(corner or None per chunk, {corner: (lo, hi, label, node names)}) for the four wheels."""
+    if "parts" not in spec:
+        boxes = group_boxes(chunks)
+        groups = find_wheels(boxes, spec)
+        return ([groups.get(c["group"]) for c in chunks],
+                {corner: boxes[g] + (g, None) for g, corner in groups.items()})
+    hits = {corner: set() for corner in spec["parts"]}
+    used = set()
+    of = []
+    for c in chunks:
+        path = _path_of(c)
+        mine = set()
+        for corner, pats in spec["parts"].items():
+            for i, pat in enumerate(pats):
+                found = [n for n in path if node_name_matches(pat, n)]
+                if found:
+                    mine.add(corner)
+                    hits[corner].update(found)
+                    used.add((corner, i))
+        if len(mine) > 1:
+            raise MeshError("node {} matches source.wheels.parts of {}".format(
+                "/".join(path), sorted(mine)))
+        of.append(mine.pop() if mine else None)
+    for corner, pats in spec["parts"].items():
+        for i, pat in enumerate(pats):
+            if (corner, i) not in used:
+                raise MeshError("source.wheels.parts.{} {!r} matches no mesh node".format(corner, pat))
+    out = {}
+    for corner in BONE_OF:
+        P = np.concatenate([c["P"].reshape(-1, 3) for c, w in zip(chunks, of) if w == corner])
+        lo, hi = bbox(P)
+        at = corner_of((lo + hi) / 2)
+        if at != corner:
+            raise MeshError("source.wheels.parts.{} sits at the {} corner of the model".format(corner, at))
+        out[corner] = (lo, hi, corner, sorted(hits[corner]))
+    return of, out
+
+
 # ---------------------------------------------------------------- faces
 
 def dedupe(P, N, UV, keep, cabin_centre):
@@ -210,6 +256,36 @@ def dedupe(P, N, UV, keep, cabin_centre):
     return P[idx], N[idx], UV[idx]
 
 
+def fit_plates(P, size_m, standoff=0.004):
+    """Resize each plate quad (front, rear) in its own plane to `size_m` = [width, height].
+
+    The plate texture spans the quad's UVs, so this sets the size the plate is drawn at.
+    `standoff` lifts it off the bumper so the larger quad does not sink into it."""
+    P = np.array(P, dtype=float)
+    out = P.copy()
+    for side in (P[:, :, 0].mean(1) >= 0, P[:, :, 0].mean(1) < 0):
+        if not side.any():
+            continue
+        q = P[side].reshape(-1, 3)
+        c0 = (q.min(0) + q.max(0)) / 2
+        normal = np.linalg.svd(q - q.mean(0))[2][2]
+        if normal[0] * c0[0] < 0:
+            normal = -normal
+        lat = np.array([0.0, 1.0, 0.0]) - normal[1] * normal
+        lat /= np.linalg.norm(lat)
+        up = np.cross(normal, lat)
+        if up[2] < 0:
+            up = -up
+        a, b = (q - c0) @ lat, (q - c0) @ up
+        sa = size_m[0] / max(np.ptp(a), 1e-9)
+        sb = size_m[1] / max(np.ptp(b), 1e-9)
+        mid_a, mid_b = (a.max() + a.min()) / 2, (b.max() + b.min()) / 2
+        new = (c0 + np.outer((a - mid_a) * sa + mid_a, lat) + np.outer((b - mid_b) * sb + mid_b, up)
+               + standoff * normal)
+        out[side] = new.reshape(-1, 3, 3)
+    return out
+
+
 # ---------------------------------------------------------------- materials
 
 PLATE_SLOT = "M_LicensePlate"
@@ -221,12 +297,45 @@ def _stripped(name, materials_cfg):
     return name.strip("_")
 
 
+def _as_list(v):
+    return v if isinstance(v, list) else ([] if v is None else [v])
+
+
+def _form_matches(pattern, candidates):
+    """{exact: s} / {regex: r} against any of `candidates`."""
+    (form, s), = pattern.items()
+    if form == "exact":
+        return s in candidates
+    return any(re.search(s, n) for n in candidates)
+
+
+def material_matches(pattern, name, materials_cfg, plain="substring"):
+    """Whether a manifest material pattern names material `name`.
+
+    A plain string keeps its key's meaning: a substring of the name, or for the plate
+    (plain="exact") the name with or without `strip`. {exact} and {regex} test both."""
+    candidates = (name, _stripped(name, materials_cfg))
+    if isinstance(pattern, dict):
+        return _form_matches(pattern, candidates)
+    return pattern in candidates if plain == "exact" else pattern in name
+
+
+def node_name_matches(pattern, name):
+    """Whether a node pattern (plain string = exact name) names node `name`.
+
+    Blender's .001 suffix on a duplicate name is ignored."""
+    candidates = (name, re.sub(r"\.\d{3}$", "", name))
+    if isinstance(pattern, dict):
+        return _form_matches(pattern, candidates)
+    return pattern in candidates
+
+
 def role_of(name, materials_cfg):
     plate = materials_cfg.get("plate")
-    if plate and plate.get("match") in (name, _stripped(name, materials_cfg)):
+    if plate and any(material_matches(p, name, materials_cfg, "exact") for p in _as_list(plate.get("match"))):
         return "plate"
     for role in ("paint", "light_glass", "glass"):
-        if any(s in name for s in materials_cfg.get(role) or []):
+        if any(material_matches(p, name, materials_cfg) for p in materials_cfg.get(role) or []):
             return role
     return "opaque"
 
@@ -242,13 +351,14 @@ def slot_name(name, role, materials_cfg):
 
 
 def _clean_look(look):
-    return {k: v for k, v in look.items() if k not in ("match", "slot", "texture") and v is not None}
+    return {k: v for k, v in look.items()
+            if k not in ("match", "slot", "texture", "nodes", "role") and v is not None}
 
 
 def look_for(name, materials_cfg):
-    """The first `materials.look` entry whose match is in `name`, else {}."""
+    """The first `materials.look` entry whose match names `name`, else {}."""
     for look in materials_cfg.get("look") or []:
-        if look.get("match") and look["match"] in name:
+        if look.get("match") and material_matches(look["match"], name, materials_cfg):
             return _clean_look(look)
     return {}
 
@@ -256,8 +366,16 @@ def look_for(name, materials_cfg):
 def wheel_slot_for(name, materials_cfg):
     """The `materials.wheel_slots` entry for a material on a wheel bone, or None."""
     for ws in materials_cfg.get("wheel_slots") or []:
-        if ws.get("match") and ws["match"] in name:
+        if ws.get("match") and material_matches(ws["match"], name, materials_cfg):
             return ws
+    return None
+
+
+def node_slot_for(path, materials_cfg):
+    """The first `materials.node_slots` entry naming a node on `path`, or None."""
+    for ns in materials_cfg.get("node_slots") or []:
+        if any(node_name_matches(p, n) for p in ns["nodes"] for n in path):
+            return ns
     return None
 
 
@@ -270,38 +388,53 @@ def build_parts(chunks, materials, m):
     meta: {parts, wheels, slots, slot_info, size}.
     """
     src, mats_cfg = m["source"], m["materials"]
-    boxes = group_boxes(chunks)
-    wheel_groups = find_wheels(boxes, src["wheels"])
+    wheel_of, wheel_boxes = wheel_of_chunks(chunks, src["wheels"])
     allP = np.concatenate([c["P"].reshape(-1, 3) for c in chunks])
     lo, hi = allP.min(0), allP.max(0)
     cabin = np.array([0.0, 0.0, (hi[2] - lo[2]) / 2])
 
     wheels = {}
-    for g, corner in wheel_groups.items():
-        wlo, whi = boxes[g]
-        wheels[BONE_OF[corner]] = {"bone": BONE_OF[corner], "group": g,
+    for corner, (wlo, whi, label, nodes) in wheel_boxes.items():
+        wheels[BONE_OF[corner]] = {"bone": BONE_OF[corner], "group": label,
                                    "centre": ((wlo + whi) / 2).tolist(), "size": (whi - wlo).tolist()}
+        if nodes is not None:
+            wheels[BONE_OF[corner]]["nodes"] = nodes
+
+    for i, ns in enumerate(mats_cfg.get("node_slots") or []):
+        for pat in ns["nodes"]:
+            if not any(node_name_matches(pat, n) for c in chunks for n in _path_of(c)):
+                raise MeshError("materials.node_slots[{}] {!r} matches no mesh node".format(i, pat))
 
     parts, slot_info = {}, {}
-    for c in chunks:
+    for c, corner in zip(chunks, wheel_of):
         info = materials.get(c["material"]) or {"name": str(c["material"]),
                                                 "color": [0.8, 0.8, 0.8, 1.0], "texture": None}
         name = info["name"]
         role = role_of(name, mats_cfg)
+        ns = node_slot_for(_path_of(c), mats_cfg)
+        if ns is not None and ns.get("role"):
+            role = ns["role"]
         slot = slot_name(name, role, mats_cfg)
         keep = "both" if role == "paint" else ("outward" if role in ("glass", "light_glass") else "first")
         if not src["dedupe_twins"]:
             keep = "both"
         P, N, UV = dedupe(c["P"], c["N"], c["UV"], keep, cabin)
-        bone = BONE_OF[wheel_groups[c["group"]]] if c["group"] in wheel_groups else BASE_BONE
+        if role == "plate" and (mats_cfg["plate"] or {}).get("size_m"):
+            P = fit_plates(P, mats_cfg["plate"]["size_m"])
+        bone = BONE_OF[corner] if corner else BASE_BONE
         look = look_for(name, mats_cfg)
-        ws = wheel_slot_for(name, mats_cfg) if bone != BASE_BONE and role == "opaque" else None
+        ws = (wheel_slot_for(name, mats_cfg)
+              if ns is None and bone != BASE_BONE and role == "opaque" else None)
         if ws is not None:
             slot, look = "M_" + ws["slot"], _clean_look(ws)
         texture = info.get("texture")
         if role == "plate":
             look = _clean_look(mats_cfg["plate"])
             texture = mats_cfg["plate"].get("texture") or texture
+        if ns is not None:
+            if role != "paint":
+                slot = "M_" + ns["slot"]
+            look = _clean_look(ns) or look
         k = (bone, slot)
         if k in parts:
             parts[k] = tuple(np.concatenate([a, b]) for a, b in zip(parts[k], (P, N, UV)))

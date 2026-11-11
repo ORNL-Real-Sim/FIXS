@@ -34,6 +34,8 @@ CARLA_WHEEL_ORDER = ("front_left", "front_right", "rear_left", "rear_right")
 AXES = ("+x", "-x", "+y", "-y", "+z", "-z")
 FORMATS = {".dae": "collada", ".fbx": "fbx", ".glb": "gltf", ".gltf": "gltf", ".obj": "obj"}
 MATERIAL_ROLES = ("paint", "glass", "light_glass")
+NODE_SLOT_ROLES = MATERIAL_ROLES + ("opaque",)
+PATTERN_FORMS = ("exact", "regex")
 BASE_TYPES = ("car", "truck", "van", "motorcycle", "bicycle", "bus")
 DIFFERENTIALS = ("limited_slip_4w", "limited_slip_front_drive", "limited_slip_rear_drive",
                  "open_4w", "open_front_drive", "open_rear_drive")
@@ -191,6 +193,36 @@ class _Checker:
             return None
         return list(v)
 
+    def pattern(self, key, v, strip=False):
+        """A name pattern: a plain string (the key's default matching), or {exact: s} / {regex: r}."""
+        if isinstance(v, str) and v.strip():
+            return v.strip() if strip else v
+        if isinstance(v, dict) and len(v) == 1:
+            (form, s), = v.items()
+            if form in PATTERN_FORMS and isinstance(s, str) and s:
+                if form == "regex":
+                    try:
+                        re.compile(s)
+                    except re.error as exc:
+                        self.err(key, "regex {!r} does not compile: {}".format(s, exc))
+                        return None
+                return {form: s}
+        self.err(key, "must be a non-empty string, {{exact: <name>}} or {{regex: <pattern>}}, got {!r}"
+                 .format(v))
+        return None
+
+    def patterns(self, block, prefix, key, required=True, non_empty=True):
+        v = self.value(block, prefix, key, required)
+        if v is None:
+            return [] if not required else None
+        if not isinstance(v, list):
+            v = [v]
+        if non_empty and not v:
+            self.err(prefix + key, "must not be empty")
+            return None
+        out = [self.pattern("{}{}[{}]".format(prefix, key, i), x) for i, x in enumerate(v)]
+        return None if None in out else out
+
     def vec(self, block, prefix, key, n, required=True):
         v = self.value(block, prefix, key, required)
         if v is None:
@@ -329,7 +361,18 @@ def _source(c, raw):
     wd = c.section(src, "wheels", required=False) if isinstance(src, dict) else None
     out["wheels"] = None
     if wd is not None:
-        if "nodes" in wd:
+        if "parts" in wd and ("nodes" in wd or "detect" in wd):
+            c.err(p + "wheels", "give parts, nodes or detect, not several")
+        elif "parts" in wd:
+            parts = wd["parts"]
+            if not isinstance(parts, dict) or set(parts) != set(CARLA_WHEEL_ORDER):
+                c.err(p + "wheels.parts", "must map each of {} to node-name patterns".format(
+                    CARLA_WHEEL_ORDER))
+            else:
+                pats = {k: c.patterns(parts, p + "wheels.parts.", k) for k in CARLA_WHEEL_ORDER}
+                if None not in pats.values():
+                    out["wheels"] = {"parts": pats}
+        elif "nodes" in wd:
             nodes = wd["nodes"]
             if not isinstance(nodes, dict) or set(nodes) != set(CARLA_WHEEL_ORDER) or not all(
                     isinstance(v, str) and v for v in nodes.values()):
@@ -345,9 +388,9 @@ def _source(c, raw):
                     "diameter_m": c.range_(det, p + "wheels.detect.", "diameter_m"),
                     "width_m": c.range_(det, p + "wheels.detect.", "width_m")}}
         else:
-            c.err(p + "wheels", "needs either nodes: {...} or detect: {diameter_m, width_m}")
+            c.err(p + "wheels", "needs parts: {...}, nodes: {...} or detect: {diameter_m, width_m}")
     elif isinstance(src, dict):
-        c.err(p + "wheels", "required: how prep finds the four wheels (nodes or detect)")
+        c.err(p + "wheels", "required: how prep finds the four wheels (parts, nodes or detect)")
     return out
 
 
@@ -366,35 +409,60 @@ def _look(c, item, q):
 def _materials(c, raw):
     mat = c.section(raw, "materials")
     p = "materials."
-    out = {"paint": c.strings(mat, p, "paint") or [],
-           "glass": c.strings(mat, p, "glass", required=False, non_empty=False) or [],
-           "light_glass": c.strings(mat, p, "light_glass", required=False, non_empty=False) or [],
+    out = {"paint": c.patterns(mat, p, "paint") or [],
+           "glass": c.patterns(mat, p, "glass", required=False, non_empty=False) or [],
+           "light_glass": c.patterns(mat, p, "light_glass", required=False, non_empty=False) or [],
            "strip": c.strings(mat, p, "strip", required=False, non_empty=False) or [],
-           "look": [], "wheel_slots": [], "plate": None}
+           "look": [], "wheel_slots": [], "node_slots": [], "plate": None}
     for i, item in enumerate((mat or {}).get("look") or []):
         q = "{}look[{}].".format(p, i)
         if not isinstance(item, dict):
             c.err(q[:-1], "must be a mapping")
             continue
-        out["look"].append(dict(_look(c, item, q), match=c.string(item, q, "match")))
+        out["look"].append(dict(_look(c, item, q), match=_one_pattern(c, item, q, "match")))
     # a source material's triangles on the wheels split into their own slot (e.g. rims)
     for i, item in enumerate((mat or {}).get("wheel_slots") or []):
         q = "{}wheel_slots[{}].".format(p, i)
         if not isinstance(item, dict):
             c.err(q[:-1], "must be a mapping")
             continue
-        out["wheel_slots"].append(dict(_look(c, item, q), match=c.string(item, q, "match"),
+        out["wheel_slots"].append(dict(_look(c, item, q), match=_one_pattern(c, item, q, "match"),
                                        slot=c.string(item, q, "slot", pattern=r"[A-Za-z0-9_]+")))
+    # named nodes' triangles split into their own slot, whatever their material
+    for i, item in enumerate((mat or {}).get("node_slots") or []):
+        q = "{}node_slots[{}].".format(p, i)
+        if not isinstance(item, dict):
+            c.err(q[:-1], "must be a mapping")
+            continue
+        role = c.string(item, q, "role", required=False)
+        if role is not None and role not in NODE_SLOT_ROLES:
+            c.err(q + "role", "must be one of {}, got {!r}".format(NODE_SLOT_ROLES, role))
+        if role == "paint":
+            if item.get("slot") is not None:
+                c.err(q + "slot", "not allowed with role paint: paint is always the Bodywork_Mat slot")
+            slot = None
+        else:
+            slot = c.string(item, q, "slot", pattern=r"[A-Za-z0-9_]+")
+        out["node_slots"].append(dict(_look(c, item, q), nodes=c.patterns(item, q, "nodes"),
+                                      role=role, slot=slot))
     plate = (mat or {}).get("plate")
     if plate is not None:
         q = p + "plate."
         if not isinstance(plate, dict):
             c.err(q[:-1], "must be a mapping")
         else:
-            # match is the exact source material name, so a generic word cannot catch other slots
-            out["plate"] = dict(_look(c, plate, q), match=c.string(plate, q, "match"),
-                                texture=c.string(plate, q, "texture", required=False))
+            # a plain match is the exact source material name, so a generic word cannot catch other slots
+            size = c.vec(plate, q, "size_m", 2, required=False)
+            if size is not None and not (0.05 <= min(size) and max(size) <= 1.0):
+                c.err(q + "size_m", "must be [width, height] in metres, each 0.05-1.0, got {}".format(size))
+            out["plate"] = dict(_look(c, plate, q), match=c.patterns(plate, q, "match"),
+                                texture=c.string(plate, q, "texture", required=False), size_m=size)
     return out
+
+
+def _one_pattern(c, item, q, key):
+    v = c.value(item, q, key)
+    return None if v is None else c.pattern(q + key, v, strip=True)
 
 
 def _dimensions(c, raw):

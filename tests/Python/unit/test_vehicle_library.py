@@ -323,16 +323,25 @@ def test_owned_and_installed_ids_follow_receipts(tmp_path, monkeypatch):
 # ---------------------------------------------------------------- shared installs
 
 def test_instances_on_install_matches_only_this_install():
+    win = os.name == "nt"
+    base = r"C:\src_ext" if win else "/opt/src_ext"
+    sep = "\\" if win else "/"
+
+    def at(*parts):
+        return sep.join((base,) + parts)
+
     procs = [
-        {"pid": 1, "name": "UE4Editor.exe", "exe": r"C:\UE\Engine\Binaries\Win64\UE4Editor.exe",
-         "cmd": r'"C:\UE\UE4Editor.exe" "C:\src_ext\Carla\Unreal\CarlaUE4\CarlaUE4.uproject" -game'},
-        {"pid": 2, "name": "UE4Editor.exe", "exe": "", "cmd": r"UE4Editor.exe C:\src_ext\Carla2\Unreal\x.uproject"},
-        {"pid": 3, "name": "CarlaUE4-Win64-Shipping.exe", "exe": r"C:\src_ext\Carla\Dist\CarlaUE4.exe", "cmd": ""},
-        {"pid": 4, "name": "python.exe", "exe": "", "cmd": r"python C:\src_ext\Carla\PythonAPI\x.py"},
+        {"pid": 1, "name": "UE4Editor.exe", "exe": sep.join((base, "UE", "UE4Editor.exe")),
+         "cmd": '"{}" "{}" -game'.format(sep.join((base, "UE", "UE4Editor.exe")),
+                                          at("Carla", "Unreal", "CarlaUE4", "CarlaUE4.uproject"))},
+        {"pid": 2, "name": "UE4Editor.exe", "exe": "", "cmd": "UE4Editor.exe " + at("Carla2", "Unreal", "x.uproject")},
+        {"pid": 3, "name": "CarlaUE4-Win64-Shipping.exe", "exe": at("Carla", "Dist", "CarlaUE4.exe"), "cmd": ""},
+        {"pid": 4, "name": "python.exe", "exe": "", "cmd": "python " + at("Carla", "PythonAPI", "x.py")},
     ]
-    hits = install_guard.instances_on_install(procs, r"C:/src_ext/Carla")
+    root = at("Carla").replace("\\", "/")
+    hits = install_guard.instances_on_install(procs, root)
     assert [p["pid"] for p in hits] == [1, 3]
-    assert install_guard.instances_on_install(procs, r"C:/src_ext/Carla", exclude_pids=(1, 3)) == []
+    assert install_guard.instances_on_install(procs, root, exclude_pids=(1, 3)) == []
 
 
 def test_file_in_use_is_false_for_a_free_file(tmp_path):
@@ -593,6 +602,35 @@ def test_plate_and_wheel_slots_get_their_own_slots():
     assert "M_Tyre" not in info                      # every tyre triangle sits on a wheel bone
 
 
+def _plate_quad(x, w, h, tilt_deg):
+    """Two triangles of a w x h plate at x, leaning back by tilt_deg."""
+    t = np.radians(tilt_deg)
+    up = np.array([np.sign(x) * np.sin(t), 0.0, np.cos(t)])
+    c = np.array([x, 0.0, 0.6])
+    a, b, cc, d = (c + sy * w / 2 * np.array([0, 1.0, 0]) + sz * h / 2 * up
+                   for sy, sz in ((-1, -1), (1, -1), (1, 1), (-1, 1)))
+    return np.array([[a, b, cc], [a, cc, d]])
+
+
+def test_plates_are_resized_in_their_own_plane():
+    P = np.concatenate([_plate_quad(-2.3, 0.347, 0.125, 12.0), _plate_quad(2.36, 0.347, 0.125, 0.0)])
+    out = mesh.fit_plates(P, [0.305, 0.152])
+    for side in (out[:2], out[2:]):
+        q = side.reshape(-1, 3)
+        assert np.ptp(q[:, 1]) == pytest.approx(0.305, abs=1e-6)
+        assert np.linalg.norm(q[2] - q[1]) == pytest.approx(0.152, abs=1e-6)   # along the leaning side
+    assert out[:2, :, 0].mean() < -2.3 and out[2:, :, 0].mean() > 2.36          # lifted off the bumper
+
+
+def test_plate_size_is_checked():
+    raw = copy.deepcopy(MANIFEST)
+    raw["materials"]["plate"] = {"match": "Plate", "size_m": [0.305, 0.152]}
+    assert vm.validate(raw, "v.yaml")["materials"]["plate"]["size_m"] == [0.305, 0.152]
+    raw["materials"]["plate"]["size_m"] = [305, 152]
+    with pytest.raises(vm.ManifestError):
+        vm.validate(raw, "v.yaml")
+
+
 def test_plate_match_is_exact_not_a_substring():
     cfg = {"plate": {"match": "material"}, "strip": ["_Car_"]}
     assert mesh.role_of("material", cfg) == "plate"
@@ -618,3 +656,156 @@ def test_fit_circle():
     pts = [(3 + 5 * _m.cos(a / 10), -2 + 5 * _m.sin(a / 10)) for a in range(40)]
     r, resid = verify.fit_circle(pts)
     assert r == pytest.approx(5.0) and resid < 1e-9
+
+
+# ---------------------------------------------------------------- #481: wheel parts, patterns, node slots
+
+CORNERS = (("FL", 0.75, -1.3), ("FR", -0.75, -1.3), ("RL", 0.75, 1.3), ("RR", -0.75, 1.3))
+
+
+def nested_car():
+    """Every part under one root, as a 3D Warehouse GLB: a wheel is a tire, a rim and a caliper node."""
+    chunks = []
+
+    def add(node, mat, lo, hi, mesh_node="Geom3D"):
+        P, N, UV = _box(lo, hi)
+        chunks.append({"group": "Root", "path": ["Root", "Assembly", node, mesh_node],
+                       "material": mat, "P": P, "N": N, "UV": UV})
+    add("Part_1", "Car_Body", (-0.9, -2.0, 0.2), (0.9, 2.0, 1.5))
+    add("Part_2", "Car_Windows", (-0.7, -1.0, 1.2), (0.7, 0.5, 1.45))
+    add("Part_3", "Car_Windows", (-0.5, 0.0, 1.5), (0.5, 0.8, 1.52))          # roof glass
+    add("Part_4", "Car_WindowsTrims", (-0.72, -1.02, 1.18), (0.72, 0.52, 1.2))
+    add("Plate_F", "Material-1", (-0.15, -2.01, 0.4), (0.15, -2.0, 0.5))
+    add("Plate_R", "Material-2", (-0.15, 2.0, 0.4), (0.15, 2.01, 0.5))
+    for i, (tag, x, y) in enumerate(CORNERS):
+        add("Tire_" + tag, "Car_Tires", (x - 0.11, y - 0.35, 0.0), (x + 0.11, y + 0.35, 0.7),
+            "Geom3D" if not i else "Geom3D.%03d" % i)
+        add("Rim_" + tag, "Car_Rims", (x - 0.08, y - 0.25, 0.1), (x + 0.08, y + 0.25, 0.6))
+        add("Caliper_" + tag, "Car_Calipers", (x - 0.05, y - 0.1, 0.4), (x + 0.05, y + 0.1, 0.55))
+    mats = {k: {"name": k, "color": [0.1, 0.2, 0.3, 1.0], "texture": None}
+            for k in {c["material"] for c in chunks}}
+    return chunks, mats
+
+
+def nested_manifest(**materials):
+    raw = copy.deepcopy(MANIFEST)
+    raw["source"]["wheels"] = {"parts": {
+        corner: ["Tire_" + tag, {"regex": "^Rim_" + tag + "$"}]
+        for corner, tag in zip(vm.CARLA_WHEEL_ORDER, ("FL", "FR", "RL", "RR"))}}
+    raw["materials"] = {"paint": ["_Body"], "glass": [{"exact": "Windows"}], "strip": ["Car_"],
+                        "plate": {"match": ["Material-1", "Material-2"]}}
+    raw["materials"].update(materials)
+    return vm.validate(raw, "v.yaml")
+
+
+def build_nested(m, chunks=None):
+    chunks, mats = (chunks, nested_car()[1]) if chunks is not None else nested_car()
+    return mesh.build_parts(mesh.to_vehicle_frame(chunks, 1.0, "-y", "+z"), mats, m)
+
+
+def test_new_manifest_keys_validate():
+    m = nested_manifest(node_slots=[{"nodes": ["Part_3"], "slot": "RoofGlass", "role": "opaque",
+                                     "color": [8, 8, 10], "roughness": 0.1}])
+    assert m["source"]["wheels"]["parts"]["front_left"] == ["Tire_FL", {"regex": "^Rim_FL$"}]
+    assert m["materials"]["glass"] == [{"exact": "Windows"}]
+    assert m["materials"]["plate"]["match"] == ["Material-1", "Material-2"]
+    ns = m["materials"]["node_slots"][0]
+    assert (ns["nodes"], ns["slot"], ns["role"], ns["color"]) == (["Part_3"], "RoofGlass", "opaque", [8, 8, 10])
+    assert validated()["materials"]["paint"] == ["Body"]          # plain strings stay plain strings
+
+
+@pytest.mark.parametrize("change, key", [
+    ({"glass": [{"regex": "(unclosed"}]}, "materials.glass[0]"),
+    ({"glass": [{"exact": "a", "regex": "b"}]}, "materials.glass[0]"),
+    ({"paint": [{"glob": "*"}]}, "materials.paint[0]"),
+    ({"look": [{"match": {"exact": ""}}]}, "materials.look[0].match"),
+    ({"node_slots": [{"nodes": ["A"], "role": "chrome", "slot": "X"}]}, "materials.node_slots[0].role"),
+    ({"node_slots": [{"nodes": ["A"], "role": "paint", "slot": "X"}]}, "materials.node_slots[0].slot"),
+    ({"node_slots": [{"nodes": ["A"]}]}, "materials.node_slots[0].slot"),
+    ({"node_slots": [{"slot": "X"}]}, "materials.node_slots[0].nodes"),
+    ({"plate": {"match": []}}, "materials.plate.match"),
+])
+def test_bad_patterns_and_node_slots_are_named(change, key):
+    raw = copy.deepcopy(MANIFEST)
+    raw["materials"].update(change)
+    with pytest.raises(vm.ManifestError, match=key.replace("[", r"\[").replace("]", r"\]")):
+        vm.validate(raw, "v.yaml")
+
+
+def test_wheel_parts_are_complete_and_alone():
+    raw = copy.deepcopy(MANIFEST)
+    raw["source"]["wheels"] = {"parts": {"front_left": ["a"]}}
+    with pytest.raises(vm.ManifestError, match="source.wheels.parts"):
+        vm.validate(raw, "v.yaml")
+    raw["source"]["wheels"] = {"parts": {k: ["a"] for k in vm.CARLA_WHEEL_ORDER},
+                               "detect": {"diameter_m": [0.5, 0.9], "width_m": [0.1, 0.4]}}
+    with pytest.raises(vm.ManifestError, match="not several"):
+        vm.validate(raw, "v.yaml")
+
+
+def test_material_pattern_forms():
+    cfg = {"strip": ["Car_"]}
+    assert mesh.material_matches("Windows", "Car_WindowsTrims", cfg)            # plain: substring
+    assert not mesh.material_matches({"exact": "Windows"}, "Car_WindowsTrims", cfg)
+    assert mesh.material_matches({"exact": "Windows"}, "Car_Windows", cfg)       # name without strip
+    assert mesh.material_matches({"exact": "Car_Windows"}, "Car_Windows", cfg)   # or the full name
+    assert mesh.material_matches({"regex": "Windows$"}, "Car_Windows", cfg)
+    assert not mesh.material_matches({"regex": "Windows$"}, "Car_WindowsTrims", cfg)
+    assert mesh.role_of("Car_WindowsTrims", {"glass": [{"exact": "Windows"}], "strip": ["Car_"]}) == "opaque"
+    plates = {"plate": {"match": ["Material-1", {"regex": "^Plate"}]}}
+    assert [mesh.role_of(n, plates) for n in ("Material-1", "Plate_R", "Material-12")] == \
+        ["plate", "plate", "opaque"]                                               # plain plate match stays exact
+
+
+def test_node_pattern_forms():
+    assert mesh.node_name_matches("Geom3D", "Geom3D.004")                         # Blender's duplicate suffix
+    assert not mesh.node_name_matches("Rim", "Rim_FL")                            # plain: exact name
+    assert mesh.node_name_matches({"regex": "^Rim_"}, "Rim_FL")
+
+
+def test_wheels_by_parts_from_a_nested_tree():
+    arrays, meta = build_nested(nested_manifest())
+    w = {x["bone"]: x for x in meta["wheels"]}
+    assert w["Wheel_Front_Left"]["nodes"] == ["Rim_FL", "Tire_FL"]
+    assert w["Wheel_Front_Left"]["centre"][0] > 0 and w["Wheel_Front_Left"]["centre"][1] > 0
+    assert mesh.measure(meta)["wheelbase_m"] == pytest.approx(2.6)
+    tris = {(p["bone"], p["slot"]): p["tris"] for p in meta["parts"]}
+    assert tris[("Wheel_Rear_Right", "M_Tires")] == 12 and tris[("Wheel_Rear_Right", "M_Rims")] == 12
+    assert tris[("Vehicle_Base", "M_Calipers")] == 48                           # calipers stay on the body
+    assert ("Wheel_Front_Left", "M_Calipers") not in tris
+    roles = {s["slot"]: s["role"] for s in meta["slot_info"]}
+    assert roles["M_Windows"] == "glass" and roles["M_WindowsTrims"] == "opaque"
+    assert roles["M_LicensePlate"] == "plate" and tris[("Vehicle_Base", "M_LicensePlate")] == 24
+
+
+def test_wheel_parts_errors():
+    chunks, _ = nested_car()
+    m = nested_manifest()
+    m["source"]["wheels"]["parts"]["front_left"].append("Nope")
+    with pytest.raises(mesh.MeshError, match="Nope"):
+        build_nested(m, chunks)
+    m = nested_manifest()
+    m["source"]["wheels"]["parts"]["front_right"].append("Tire_FL")
+    with pytest.raises(mesh.MeshError, match="matches source.wheels.parts of"):
+        build_nested(m, chunks)
+    m = nested_manifest()
+    parts = m["source"]["wheels"]["parts"]
+    parts["front_left"], parts["rear_right"] = parts["rear_right"], parts["front_left"]
+    with pytest.raises(mesh.MeshError, match="rear_right corner"):
+        build_nested(m, chunks)
+
+
+def test_node_slot_splits_a_shared_material():
+    m = nested_manifest(node_slots=[{"nodes": ["Part_3"], "slot": "RoofGlass", "role": "opaque",
+                                     "color": [8, 8, 10], "roughness": 0.12}])
+    arrays, meta = build_nested(m)
+    info = {s["slot"]: s for s in meta["slot_info"]}
+    tris = {(p["bone"], p["slot"]): p["tris"] for p in meta["parts"]}
+    assert info["M_RoofGlass"]["role"] == "opaque"
+    assert info["M_RoofGlass"]["look"] == {"color": [8, 8, 10], "roughness": 0.12}
+    assert info["M_RoofGlass"]["source_material"] == "Car_Windows"
+    assert info["M_Windows"]["role"] == "glass"
+    assert tris[("Vehicle_Base", "M_RoofGlass")] == 12 and tris[("Vehicle_Base", "M_Windows")] == 12
+    m = nested_manifest(node_slots=[{"nodes": ["Part_9"], "slot": "X"}])
+    with pytest.raises(mesh.MeshError, match="Part_9"):
+        build_nested(m)

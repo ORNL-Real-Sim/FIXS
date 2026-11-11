@@ -203,7 +203,27 @@ def test_missing_library_vehicle_is_offered_or_stops_the_run(tmp_path, iv, monke
 
 
 def test_unknown_blueprint_is_named_as_such(tmp_path, iv, monkeypatch):
-    monkeypatch.setattr(catalog, "fetch_catalog", lambda repo: ([], None))
+    monkeypatch.setattr(catalog, "fetch_catalog", lambda repo: (
+        [{"id": EV6, "release": "ev6", "asset": EV6 + ".zip", "title": "EV6"}], repo))
     with pytest.raises(SystemExit) as e:
         iv.ensure_for_run("vehicle.tesla.modle3", str(tmp_path), "source", interactive=True)
     assert "neither a stock" in str(e.value)
+
+
+def test_unreachable_library_says_so(tmp_path, iv, monkeypatch):
+    monkeypatch.setattr(catalog, "fetch_catalog", lambda repo: ([], None))
+    with pytest.raises(SystemExit) as e:
+        iv.ensure_for_run(EV6, str(tmp_path), "source", interactive=True)
+    assert "could not be read" in str(e.value) and "gh auth login" in str(e.value)
+
+
+def test_failed_download_stops_with_a_message(iv, monkeypatch):
+    monkeypatch.setattr(catalog, "fetch_catalog", lambda repo: (
+        [{"id": EV6, "release": "ev6", "asset": EV6 + ".zip", "title": "EV6"}], repo))
+
+    def fail(*a, **k):
+        raise catalog.CatalogError("`gh release download` failed (rc=1)")
+    monkeypatch.setattr(catalog, "download", fail)
+    with pytest.raises(SystemExit) as e:
+        iv.bundle_from_library("ORNL-Real-Sim/VehicleDynamicsLibrary", EV6)
+    assert "failed (rc=1)" in str(e.value)

@@ -1444,6 +1444,30 @@ def test_carla_args_null_drops_and_contract_is_kept(tmp_path):
     assert "-carla-rpc-port=2000" in cmd and "-carla-rpc-port=3000" not in cmd
 
 
+def test_carla_starts_with_distance_field_ao_off(tmp_path):
+    """Both launch modes turn r.DistanceFieldAO off (#480)."""
+    root = str(tmp_path / "carla")
+    _make_packaged(root)
+    packaged = run_cosim._carla_command({"mode": "packaged", "carla_root": root}, 2000, False)
+    carla_root, ue4_root, _, _ = _make_source(tmp_path)
+    source = run_cosim._carla_command(
+        {"mode": "source", "carla_root": carla_root, "ue4_root": ue4_root}, 2000, True)
+    for cmd in (packaged, source):
+        assert cmd.count("-ExecCmds=r.DistanceFieldAO 0") == 1
+
+
+def test_carla_exec_cmds_are_replaced_not_doubled(tmp_path):
+    """Unreal reads the first -ExecCmds only, so an app's or --carla-args' replaces the default."""
+    root = str(tmp_path / "carla")
+    _make_packaged(root)
+    base = run_cosim._carla_command({"mode": "packaged", "carla_root": root}, 2000, False)
+    cmd, _ = run_cosim.resolve_carla_args(base, None, '"-ExecCmds=r.DistanceFieldAO 0, t.MaxFPS 20"')
+    assert [c for c in cmd if c.lower().startswith("-execcmds")] == [
+        "-ExecCmds=r.DistanceFieldAO 0, t.MaxFPS 20"]
+    cmd, _ = run_cosim.resolve_carla_args(base, {"id": "a", "carla_args": {"-ExecCmds": None}}, None)
+    assert not any(c.lower().startswith("-execcmds") for c in cmd)
+
+
 def test_sumo_args_from_the_command_line():
     """--sumo-args lands over the app's sumo_args; negative values and bare flags parse."""
     assert run_cosim.parse_sumo_args("--time-to-teleport -1 --no-warnings") == {
