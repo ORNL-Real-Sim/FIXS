@@ -375,6 +375,16 @@ def _parents():
     return {p: pp for p, pp, _ in _procs()}
 
 
+def descendants(pid):
+    """`pid` and every process under it."""
+    parents, fam, todo = _parents(), set(), [pid]
+    while todo:
+        p = todo.pop()
+        fam.add(p)
+        todo += [c for c, pp in parents.items() if pp == p and c not in fam]
+    return fam
+
+
 def run_family(pid):
     """Pids started by the run_cosim that started `pid`: this run's CARLA, sumo-gui, bridge."""
     parents = _parents()
@@ -427,6 +437,20 @@ def sumo_crop(h):
     x, y, w, hh = max(canvases, key=lambda r: r[2] * r[3])
     x, y = x - o.x, y - o.y
     return x, y, c.right - x - w, c.bottom - y - hh
+
+
+def fill_crop(h, crop, w, hh):
+    """`crop` widened on two sides so what is left of h's client area has a w x hh panel's shape."""
+    c = wt.RECT()
+    u.GetClientRect(wt.HWND(h), ctypes.byref(c))
+    cw, ch = c.right - crop[0] - crop[2], c.bottom - crop[1] - crop[3]
+    if cw <= 0 or ch <= 0:
+        return crop
+    if cw * hh > ch * w:
+        cut = (cw - ch * w / hh) / 2
+        return round(crop[0] + cut), crop[1], round(crop[2] + cut), crop[3]
+    cut = (ch - cw * hh / w) / 2
+    return crop[0], round(crop[1] + cut), crop[2], round(crop[3] + cut)
 
 
 def size_sumo(h, w, hh):
@@ -554,7 +578,10 @@ def layout(scene, title, panels, wins, urls=None):
         if (urls or {}).get(p.key):
             scene.browser(p.key, urls[p.key], p.x, p.y, p.w, p.h)
             continue
-        crop = sumo_crop(wins[p.key][0]) if p.key == "sumo" and wins.get(p.key) else (0, 0, 0, 0)
+        crop = (0, 0, 0, 0)
+        if p.key == "sumo" and wins.get(p.key):
+            # A sumo-gui opened mid-recording keeps its own shape: fill the panel, centred on the ego.
+            crop = fill_crop(wins[p.key][0], sumo_crop(wins[p.key][0]), p.w, p.h)
         scene.window(p.key, wins.get(p.key), p.x, p.y, p.w, p.h, crop)
     scene.text("title", title, 24, 10, size=26)
     for p in panels:
@@ -607,8 +634,8 @@ def retime(src, dst, pairs, fps=30):
 # ---- the recorder process ------------------------------------------------------------
 
 def record(scene_name, prefix, title, panels, finders, pid, out_dir, ready, over, build=None, tick=None,
-           urls=None, clock=None):
-    """Record this run until `over()` or `pid` exits.
+           urls=None, clock=None, tail_s=0.0, family=None, follow=False):
+    """Record this run until `over()` or `pid` exits; with `tail_s`, up to that long past its exit.
 
     finders: {panel key: predicate(title, class, exe)}, FINDERS plus the app's own.
     ready(): True once recording should start; over(): True once it should stop.
@@ -616,6 +643,9 @@ def record(scene_name, prefix, title, panels, finders, pid, out_dir, ready, over
     urls(): {panel key: page} shown as browser sources instead of windows.
     clock(): the sim time or None; with it, out_dir/obs_recording_clock.csv logs (seconds into the
     video, sim time), from which this file's command line writes the video at sim speed.
+    family(): the pids whose windows may be captured (default: run_family(pid)).
+    follow: while recording, re-capture a panel whose window closed or was replaced (one
+    recording across several runs).
     """
     u.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))  # real pixels: window sizes match OBS's canvas
     tag = f"[{os.environ.get('FIXS_RUN_ID') or 'rec %d' % pid}]"
@@ -627,22 +657,42 @@ def record(scene_name, prefix, title, panels, finders, pid, out_dir, ready, over
         ws, spare, lock = open_obs()
         prev_scene = call(ws, "GetCurrentProgramScene").get("currentProgramSceneName")
         next_scan = 0.0
-        while alive(pid):
+        gone = None                                 # when `pid` exited, for tail_s
+        captured = None                             # the windows the scene shows, for `follow`
+
+        def compose():
+            scene = Scene(ws, scene_name, prefix)
+            layout(scene, title, panels, wins, urls() if urls else {})
+            if build:
+                build(scene, wins)
+            scene.finish()
+            return tuple((n, wins[n][0] if n in wins else None) for n in finders)
+
+        while True:
+            if not alive(pid):
+                gone = gone or time.time()
+                if not recording or time.time() - gone >= tail_s:
+                    break
             if tick:
                 tick()
             start = not recording and not busy and ready()
             # A fresh scan before the layout, so a window that opened since the last one is in it.
             if start or time.time() >= next_scan:
                 # Only this run's windows, so another co-sim's CARLA or sumo-gui is never captured.
-                family = run_family(pid)
+                pids = family() if family else run_family(pid)
                 for n, pred in finders.items():
                     w = wins.get(n)
                     if not (w and u.IsWindow(w[0])):
-                        w = find(pred, family)
+                        w = find(pred, pids)
                     if w:
                         if u.IsIconic(w[0]):
                             u.ShowWindow(w[0], 4)  # SW_SHOWNOACTIVATE: OBS can't capture a minimised window
                         wins[n] = tag_title(w, tag)
+                    else:
+                        wins.pop(n, None)
+                if follow and recording and captured != tuple((n, wins[n][0] if n in wins else None)
+                                                              for n in finders):
+                    captured = compose()
                 if sumo_panel and wins.get("sumo") and not recording:
                     # Put back before it closes, since sumo-gui saves its size then.
                     if sumo_rect is None:
@@ -667,13 +717,9 @@ def record(scene_name, prefix, title, panels, finders, pid, out_dir, ready, over
                     continue
                 pages = urls() if urls else {}
                 for p in panels:
-                    if not wins.get(p.key) and not pages.get(p.key):
+                    if not wins.get(p.key) and not pages.get(p.key) and not follow:
                         log(f"no {p.key} window started by this run; that panel stays empty")
-                scene = Scene(ws, scene_name, prefix)
-                layout(scene, title, panels, wins, pages)
-                if build:
-                    build(scene, wins)
-                scene.finish()
+                captured = compose()
                 call(ws, "SetCurrentProgramScene", {"sceneName": scene_name})
                 # Written straight into out_dir, so a killed run still keeps its video there.
                 prev_dir = call(ws, "GetRecordDirectory")["recordDirectory"]
@@ -696,7 +742,7 @@ def record(scene_name, prefix, title, panels, finders, pid, out_dir, ready, over
                 out = call(ws, "StopRecord")["outputPath"]
             except Exception as e:
                 log(f"OBS StopRecord failed: {e}")
-        if sumo_rect and u.IsWindow(wins["sumo"][0]):
+        if sumo_rect and wins.get("sumo") and u.IsWindow(wins["sumo"][0]):
             place(wins["sumo"][0], *sumo_rect)
         if prev_dir and not spare:
             try:
