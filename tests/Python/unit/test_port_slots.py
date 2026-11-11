@@ -547,3 +547,13 @@ def test_a_slot_with_a_dyno_waiting_is_not_taken_by_another_rung(registry, rung2
     f = ps.discover(rung2)
     assert "UDP port 20170" in run_cosim._slot_busy(f, 1, False, True)
     assert run_cosim._slot_busy(f, 2, False, True) is None
+
+
+def test_writing_the_same_slot_yaml_again_while_it_is_open_succeeds(rung2, tmp_path):
+    """run_cosim writes the slot yaml twice; the app may hold the first copy open (#473)."""
+    dst = str(tmp_path / "run" / "config_rung2.yaml")
+    ps.write_slot_yaml(rung2, dst, 3, "eco-1")
+    with open(dst, encoding="utf-8") as held:
+        assert ps.write_slot_yaml(rung2, dst, 3, "eco-1")[1337] == 20300
+        held.read()
+    assert not [p for p in os.listdir(tmp_path / "run") if p.endswith(".tmp")]

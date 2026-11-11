@@ -139,6 +139,24 @@ VehicleSubscription:
 | SignalSubscription | list | [] | Signal subscriptions for XIL. |
 | DetectorSubscription | list | [] | Detector subscriptions for XIL. |
 | Transport | string | inprocess | `inprocess`: FIXS's simulated dyno (`fixs.xil.dynosim()`). `udp`: the application talks to its own rig at the first VehicleSubscription's ip and port; FIXS opens no socket. `tcp`: reserved. |
+| Rig | mapping | (none) | `udp` only: how long the controller waits on the rig, and whether it sends EMERGENCY. Leave it out for the defaults below; 0 is no limit. |
+
+`XilSetup.Rig`, read by `UdpRig.fromConfig(fixs.config.get('xil'))`:
+
+| Key | Default | Notes |
+| --- | --- | --- |
+| StartTimeout | 0 | Seconds to wait for the rig to answer START. The run is paused at ego entry meanwhile, so the default waits as long as it takes, saying so every 30 s. |
+| StopTimeout | 60 | Seconds to wait for the rig to answer STOP; then the controller exits and the rig, or its driver, has the car. |
+| StepTimeout | 1 | Seconds to wait for the answer to each command during the run. |
+| MaxMisses | 5 | Unanswered commands in a row that end the run with an error. |
+| EmergencyCode | false | `true` for a rig that knows the EMERGENCY code (-5): a step on which CARLA's agent brakes for an emergency is sent as `(-5, aref)`, and the rig brakes toward rest at the car's hardest rate. `false` sends it as an ordinary `(0, aref)`, with aref at most the car's braking limit. |
+
+```yaml
+XilSetup:
+  Transport: udp
+  Rig:
+    StopTimeout: 120     # a driver ramps down by hand
+```
 
 When the application layer is disabled but XIL is enabled, the interface automatically reuses the XIL vehicle subscriptions to seed outbound traffic.
 
