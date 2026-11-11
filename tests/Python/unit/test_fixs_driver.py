@@ -791,16 +791,20 @@ def test_reference_returns_the_agents_speed_and_the_acceleration_that_goes_with_
     assert not d.emergency
     vRef, aRef = d.reference(SimpleNamespace(throttle=0.0, brake=0.5))   # emergency stop
     assert vRef == 0.0
-    assert aRef == pytest.approx(-d.limits.commitDecel)   # the car's hardest braking, never more
+    assert aRef == pytest.approx(1.0 + (0.0 - 10.0) / 0.1)   # no rig limits set: unbounded
     assert d.emergency
 
 
-def test_the_acceleration_asked_for_stays_inside_the_car():
+def test_the_acceleration_asked_for_is_bounded_only_by_limits_the_app_sets():
     d = _build(driver(xil=lambda vref, aref, dt: vref))
     d.feedVref, d.feedAref, d.feedStep = 5.0, 0.0, 0.1
-    assert d._arefFor(15.0) == pytest.approx(d.limits.carAccel)
-    assert d._arefFor(0.0) == pytest.approx(-d.limits.commitDecel)
-    assert (d.limits.carAccel, d.limits.commitDecel) == (2.0, 3.5)
+    assert (d.limits.carAccel, d.limits.carDecel) == (None, None)
+    assert d._arefFor(15.0) == pytest.approx(100.0)
+    d = _build(driver(xil=lambda vref, aref, dt: vref, limits=Limits(carAccel=2.0, carDecel=3.5)))
+    d.feedVref, d.feedAref, d.feedStep = 5.0, 0.0, 0.1
+    assert d._arefFor(15.0) == pytest.approx(2.0)
+    assert d._arefFor(0.0) == pytest.approx(-3.5)
+    assert 'carDecel=3.5' in str(d.limits) and 'carAccel=2' in str(d.limits)
 
 
 def test_an_exchange_that_takes_emergency_is_told():

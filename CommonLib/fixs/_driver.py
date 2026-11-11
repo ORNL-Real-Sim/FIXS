@@ -251,21 +251,22 @@ class Limits(object):
 
         fixs.driver(limits=Limits(comfortDecel=1.0))
 
-    comfortDecel is the braking every stop is planned with; commitDecel and carAccel
-    are the car's own limits (ORNL's EV6: 3.5 braking, 2.0 acceleration), and aRef
-    never asks for more.
+    comfortDecel is the braking every stop is planned with; commitDecel decides a
+    yellow. carAccel and carDecel bound the aRef sent to a rig; None (the default)
+    is no bound, since they belong to the rig and the app sets them.
     """
 
-    __slots__ = ('comfortDecel', 'stopMargin', 'commitDecel', 'leaderMargin', 'carAccel')
+    __slots__ = ('comfortDecel', 'stopMargin', 'commitDecel', 'leaderMargin', 'carAccel', 'carDecel')
 
     def __init__(self, comfortDecel=2.0, stopMargin=2.0,
-                 commitDecel=3.5, leaderMargin=2.0, carAccel=2.0):
+                 commitDecel=4.0, leaderMargin=2.0, carAccel=None, carDecel=None):
         self.comfortDecel, self.stopMargin = comfortDecel, stopMargin
         self.commitDecel, self.leaderMargin = commitDecel, leaderMargin
-        self.carAccel = carAccel
+        self.carAccel, self.carDecel = carAccel, carDecel
 
     def __str__(self):
-        return ','.join('%s=%g' % (n, getattr(self, n)) for n in self.__slots__)
+        return ','.join('%s=%s' % (n, 'none' if getattr(self, n) is None else '%g' % getattr(self, n))
+                        for n in self.__slots__)
 
     def __repr__(self):
         return 'Limits(%s)' % self
@@ -518,7 +519,11 @@ class Controller:
         if self.feedVref is None:
             return 0.0
         a = self.feedAref + (vRef - self.feedVref) / self.feedStep
-        return max(-self.limits.commitDecel, min(self.limits.carAccel, a))
+        if self.limits.carAccel is not None:
+            a = min(self.limits.carAccel, a)
+        if self.limits.carDecel is not None:
+            a = max(-self.limits.carDecel, a)
+        return a
 
     def build(self):
         """Built on the first controlled tick, not in __init__: the traffic
