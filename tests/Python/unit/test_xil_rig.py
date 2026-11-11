@@ -349,3 +349,13 @@ def test_the_robot_brakes_harder_only_when_it_has_an_emergency_brake():
     assert normal < 2.3                                   # no emergency brake: the envelope holds
     assert decel(3.5, False) == pytest.approx(normal)     # not told: no different
     assert decel(3.5, True) == pytest.approx(3.5, abs=0.4)
+
+
+def test_rig_events_go_to_the_run_folder(tmp_path, monkeypatch):
+    monkeypatch.setenv('FIXS_RUN_DIR', str(tmp_path))
+    rig = UdpRig('127.0.0.1', 1, 0, log=lambda msg: None)
+    rig._note('[rig] ready at 0.00 m/s')
+    lines = (tmp_path / 'dyno_events.txt').read_text(encoding='utf-8').splitlines()
+    assert len(lines) == 1 and lines[0].endswith('[rig] ready at 0.00 m/s')
+    monkeypatch.delenv('FIXS_RUN_DIR')
+    assert UdpRig('127.0.0.1', 1, 0, log=lambda msg: None).events is None

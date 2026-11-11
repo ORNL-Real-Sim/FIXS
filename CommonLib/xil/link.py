@@ -26,6 +26,7 @@ not choose.
 """
 
 import math
+import os
 import socket
 import struct
 import time
@@ -305,6 +306,8 @@ def _say(msg):
     print(msg, flush=True)
 
 
+#: The rig's events, one timestamped line each, in the run folder (FIXS_RUN_DIR).
+EVENTS_FILE = 'dyno_events.txt'
 #: While waiting on START or STOP, say so this often [s].
 REMIND_S = 30.0
 #: A STOP answered below this speed [m/s] is "at rest"; above it, the rig has taken the car moving.
@@ -338,7 +341,7 @@ class UdpRig(object):
     def __init__(self, ip, port=REFERENCE_PORT, reply_port=MEASUREMENT_PORT,
                  step_timeout_s=1.0, max_misses=5, start_timeout_s=0.0,
                  stop_timeout_s=60.0, resend_s=1.0, emergency_code=False, log=_say,
-                 clock=time.monotonic):
+                 events=None, clock=time.monotonic):
         self.peer = (ip, int(port))
         self.reply_port = int(reply_port)
         self.step_timeout_s = float(step_timeout_s)
@@ -349,6 +352,10 @@ class UdpRig(object):
         #: Send an emergency step as EMERGENCY; False sends it as (0, aref), for a rig without the code.
         self.emergency_code = bool(emergency_code)
         self._log = log
+        #: Where every event is also appended; default the run folder's EVENTS_FILE, if there is one.
+        run_dir = os.environ.get('FIXS_RUN_DIR')
+        self.events = events if events is not None else (
+            os.path.join(run_dir, EVENTS_FILE) if run_dir else None)
         self._clock = clock
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._sock.bind(('', self.reply_port))
@@ -368,6 +375,16 @@ class UdpRig(object):
             if key in limits:
                 options.setdefault(name, limits[key])
         return cls(xil['ip'], xil['port'], reply_port, **options)
+
+    def _note(self, msg):
+        """Report an event, and keep it in the events file."""
+        self._log(msg)
+        if self.events:
+            try:
+                with open(self.events, 'a', encoding='utf-8') as f:
+                    f.write('%s  %s\n' % (time.strftime('%H:%M:%S'), msg))
+            except OSError:
+                pass
 
     def _send(self, speed, second):
         try:
@@ -411,7 +428,7 @@ class UdpRig(object):
         self._drain()
         while self._clock() < deadline:
             if self._clock() >= remind:
-                self._log('[rig] still waiting for the rig to answer %s (%s)'
+                self._note('[rig] still waiting for the rig to answer %s (%s)'
                           % (codeName(which), _minutes(self._clock() - begun)))
                 remind += REMIND_S
             self._send(which, value)
@@ -433,13 +450,13 @@ class UdpRig(object):
     def start(self, v0=0.0):
         """Ask the rig to ramp to `v0` m/s; return the speed it settled at."""
         v0 = max(0.0, float(v0))
-        self._log('[rig] START: ramp to %.2f m/s (%s:%d)' % ((v0,) + self.peer))
+        self._note('[rig] START: ramp to %.2f m/s (%s:%d)' % ((v0,) + self.peer))
         v = self._request(START, v0, self.start_timeout_s)
         if v is None:                       # only with a StartTimeout
             raise RigError('rig %s:%d did not answer START in %.0f s'
                            % (self.peer + (self.start_timeout_s,)))
         self.started, self.startSpeed = True, v
-        self._log('[rig] ready at %.2f m/s' % v)
+        self._note('[rig] ready at %.2f m/s' % v)
         return v
 
     def exchange(self, vref, aref, dt, emergency=False):
@@ -477,19 +494,19 @@ class UdpRig(object):
         if not self.started:
             return None
         self.started = False
-        self._log('[rig] STOP: the car goes back to the rig')
+        self._note('[rig] STOP: the car goes back to the rig')
         try:
             v = self._request(STOP, 0.0, self.stop_timeout_s)
         except RigError as exc:
-            self._log('[rig] %s' % exc)
+            self._note('[rig] %s' % exc)
             return None
         if v is None:
-            self._log('[rig] no STOP answer in %.0f s; the rig must ramp down on its own timeout'
+            self._note('[rig] no STOP answer in %.0f s; the rig must ramp down on its own timeout'
                       % self.stop_timeout_s)
         elif abs(v) < AT_REST_MPS:
-            self._log('[rig] at rest (%.2f m/s)' % v)
+            self._note('[rig] at rest (%.2f m/s)' % v)
         else:
-            self._log('[rig] released at %.2f m/s: the rig has the car' % v)
+            self._note('[rig] released at %.2f m/s: the rig has the car' % v)
         return v
 
     def close(self):

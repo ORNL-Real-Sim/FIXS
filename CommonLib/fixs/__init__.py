@@ -131,8 +131,15 @@ def _driverInstance():
     return instance()
 
 
+def _driverLimits(**limits):
+    """fixs.driver.limits(carAccel=2.0, carDecel=3.5): a Limits for fixs.driver.set(limits=...)."""
+    from CommonLib.fixs._driver import Limits
+    return Limits(**limits)
+
+
 driver.set = _driverSet
 driver.instance = _driverInstance
+driver.limits = _driverLimits
 
 
 _F32 = struct.Struct('<f')
