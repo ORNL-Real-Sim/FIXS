@@ -253,14 +253,13 @@ class Limits(object):
 
     comfortDecel is the braking every stop is planned with; commitDecel and carAccel
     are the car's own limits (ORNL's EV6: 3.5 braking, 2.0 acceleration), and aRef
-    never asks for more. leaderMargin keeps a queued ego outside CARLA's agent's
-    5 m emergency-stop distance (SUMO's minGap plus this).
+    never asks for more.
     """
 
     __slots__ = ('comfortDecel', 'stopMargin', 'commitDecel', 'leaderMargin', 'carAccel')
 
-    def __init__(self, comfortDecel=1.5, stopMargin=2.0,
-                 commitDecel=3.5, leaderMargin=4.0, carAccel=2.0):
+    def __init__(self, comfortDecel=2.0, stopMargin=2.0,
+                 commitDecel=3.5, leaderMargin=2.0, carAccel=2.0):
         self.comfortDecel, self.stopMargin = comfortDecel, stopMargin
         self.commitDecel, self.leaderMargin = commitDecel, leaderMargin
         self.carAccel = carAccel

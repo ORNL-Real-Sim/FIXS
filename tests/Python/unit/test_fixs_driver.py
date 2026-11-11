@@ -196,7 +196,7 @@ def test_the_run_records_what_drove_it(scenario, tmp_path):
     assert 'shape=pedals' in first
     assert 'kv=0.33' in first
     assert 'exchange=<lambda>' in first
-    assert 'comfortDecel=1.5' in first   # the limits are recorded too
+    assert 'comfortDecel=2' in first   # the limits are recorded too
 
 
 # -- the law itself, which is pure arithmetic and needs no simulator ---------
@@ -800,7 +800,7 @@ def test_the_acceleration_asked_for_stays_inside_the_car():
     d.feedVref, d.feedAref, d.feedStep = 5.0, 0.0, 0.1
     assert d._arefFor(15.0) == pytest.approx(d.limits.carAccel)
     assert d._arefFor(0.0) == pytest.approx(-d.limits.commitDecel)
-    assert (d.limits.carAccel, d.limits.commitDecel, d.limits.comfortDecel) == (2.0, 3.5, 1.5)
+    assert (d.limits.carAccel, d.limits.commitDecel) == (2.0, 3.5)
 
 
 def test_an_exchange_that_takes_emergency_is_told():
