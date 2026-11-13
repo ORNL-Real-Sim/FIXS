@@ -310,8 +310,6 @@ def _say(msg):
 EVENTS_FILE = 'dyno_events.txt'
 #: While waiting on START or STOP, say so this often [s].
 REMIND_S = 30.0
-#: A STOP answered below this speed [m/s] is "at rest"; above it, the rig has taken the car moving.
-AT_REST_MPS = 0.05
 
 
 def _minutes(s):
@@ -324,7 +322,7 @@ class UdpRig(object):
         rig = UdpRig(ip, 5010, 5011)
         rig.start(v0)                    # until the rig says it has settled at v0
         speed = rig.exchange(vref, aref, dt)
-        rig.stop()                       # until the rig says it is at rest
+        rig.stop()                       # until the rig answers STOP
 
     START and STOP are resent every ``resend_s`` until answered; the rig answers a
     repeat by acknowledging again. A rig must also ramp down on its own when no
@@ -503,10 +501,8 @@ class UdpRig(object):
         if v is None:
             self._note('[rig] no STOP answer in %.0f s; the rig must ramp down on its own timeout'
                       % self.stop_timeout_s)
-        elif abs(v) < AT_REST_MPS:
-            self._note('[rig] at rest (%.2f m/s)' % v)
         else:
-            self._note('[rig] released at %.2f m/s: the rig has the car' % v)
+            self._note('[rig] STOP answered (%.2f m/s)' % v)
         return v
 
     def close(self):
