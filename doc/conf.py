@@ -2,10 +2,13 @@
 import os, sys
 from datetime import datetime
 sys.path.insert(0, os.path.abspath(".."))
+sys.path.insert(0, os.path.abspath("_ext"))
 # Project information
 project = "Real-Sim"
-author = "Real-Sim Team " 
-release = "0.10"  # version string
+author = "Real-Sim Team "
+# The version RTD is building (v0.9.1-alpha, stable, latest). RTD clones
+# shallow and without tags, so git describe can't answer this there.
+release = os.environ.get("READTHEDOCS_VERSION_NAME", "local")
 root_doc = "index" # ensure doc/index.md or doc/index.rst exists
 
 #General configuration
@@ -13,11 +16,18 @@ extensions = [
     "myst_parser",          # enable Markdown (MyST)
     "sphinx.ext.autodoc",   # pull in docstrings
     "sphinx.ext.napoleon",  # Google/NumPy style docstrings
-     "sphinx.ext.viewcode"    
+     "sphinx.ext.viewcode",
+    "repo_links",           # links out of doc/ -> GitHub at the built commit
+    "single_title",         # one top-level heading per page (else: extra nav entries)
 ]
 
+repo_links_github = "https://github.com/ORNL-Real-Sim/FIXS"
+
 templates_path = ["_templates"]
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+# Internal design documents: kept in the repo, not published as reader docs.
+exclude_patterns = ["_build", "Thumbs.db", ".DS_Store",
+                    "156_drivingsim_dll_design_proposal.md", "gui-design/**",
+                    "xil/CarlaDynoCoupling.md", "xil/DynoDataChecks.md"]
 
 # Recognize both .rst and .md files
 source_suffix = {
@@ -39,9 +49,9 @@ myst_heading_anchors = 5
 #Options for HTML output
 html_theme = "sphinx_rtd_theme"
 html_theme_options = {
-    "collapse_navigation": False,
+    "collapse_navigation": True,    # expand only the page being read
     "sticky_navigation": True,
     "includehidden": True,        
-    "navigation_depth": 4,        # <-- ensure depth is enough for your nesting
+    "navigation_depth": 2,        # page title + its ## sections
 }
 

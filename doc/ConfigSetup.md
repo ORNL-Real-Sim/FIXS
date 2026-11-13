@@ -10,6 +10,7 @@ The Real-Sim interface is configured through YAML files (for example `config.yam
 | --- | --- | --- | --- |
 | EnableRealSim | bool | true | Master switch for the interface. |
 | EnableVerboseLog | bool | false | Enables detailed logging in TrafficLayer and companion tools. |
+| EnableTimingReport | bool | false | TrafficLayer prints one line every 10 s of simulation time: wall ms per tick, the real-time factor, the split into SUMO step / reading SUMO / clients / writing SUMO, and each client's share with its relayed TraCI calls. A whole-run line follows at the end. Off, TrafficLayer still warns once per client whose relayed TraCI calls take more than 10% of the tick. |
 | SimulationEndTime | double | 90000 | End time (seconds). Large default keeps the session open until external shutdown. |
 | EnableExternalDynamics | bool | false | When true, SUMO speed updates use `setPreviousSpeed` so acceleration limits are respected. |
 | VehicleMessageField | string list | All supported fields | Controls which vehicle fields are exchanged. Provide a subset if bandwidth is a concern. Must include `id`, `speed`, and one of `speedDesired` or `accelerationDesired`. |
@@ -72,6 +73,7 @@ silently ignored.
 | SumoConfigFile | string | `""` | Path to `.sumocfg` used when auto-launching. Relative paths resolved against config file directory. |
 | NumClients | int | 1 | Number of SUMO clients negotiated during auto-launch. |
 | RuntimeLibraryPath | string | `""` | Optional override for the SUMO runtime directory (DLL/.so path). |
+| EnableTraciRelay | bool | false | Lets a client run TraCI commands on TrafficLayer's connection through `import fixs.sumo.traci as traci`. SUMO with a libtraci build only; rejected at startup otherwise. Experimental, so off by default — see `SUMOdoc.md`. |
 | EnableGuiFollow | bool | false | sumo-gui tracks `GuiCenteredViewId` whenever it is in the network, the counterpart of `CarlaSetup.EnableSpectatorFollow`. No effect on headless `sumo`; TrafficLayer prints one line and carries on. |
 | GuiCenteredViewId | string | `"ego"` | Vehicle id sumo-gui follows. |
 | GuiZoom | double | 600 | sumo-gui zoom (%) set when following starts; changing it in the GUI afterwards is kept. |
@@ -110,6 +112,13 @@ On Windows the resolved folder is supplied to `SetDllDirectory`. On Linux the fo
 **DetectorSubscription** supports:
 - `detector`: Subscribe by detector pattern. Attributes: `pattern`, `name`, or `id` (list).
 
+A subscription's `ip` is the address its client dials to reach TrafficLayer. When every such
+address in the config is local (`127.x`, `localhost`) — subscription `ip`s in ApplicationSetup
+and XilSetup, `CarMakerIP`, `CarlaClientIP` and `CarMakerSetup.TrafficLayerIP` — TrafficLayer
+listens on 127.0.0.1 only, so Windows Firewall does not prompt. Any other address makes it
+listen on all interfaces, which a client on another computer needs; TrafficLayer prints which
+one it chose at startup.
+
 Example subscription block:
 
 ```yaml
@@ -130,6 +139,24 @@ VehicleSubscription:
 | SignalSubscription | list | [] | Signal subscriptions for XIL. |
 | DetectorSubscription | list | [] | Detector subscriptions for XIL. |
 | Transport | string | inprocess | `inprocess`: FIXS's simulated dyno (`fixs.xil.dynosim()`). `udp`: the application talks to its own rig at the first VehicleSubscription's ip and port; FIXS opens no socket. `tcp`: reserved. |
+| Rig | mapping | (none) | `udp` only: how long the controller waits on the rig, and whether it sends EMERGENCY. Leave it out for the defaults below; 0 is no limit. |
+
+`XilSetup.Rig`, read by `UdpRig.fromConfig(fixs.config.get('xil'))`:
+
+| Key | Default | Notes |
+| --- | --- | --- |
+| StartTimeout | 0 | Seconds to wait for the rig to answer START. The run is paused at ego entry meanwhile, so the default waits as long as it takes, saying so every 30 s. |
+| StopTimeout | 60 | Seconds to wait for the rig to answer STOP; then the controller exits and the rig, or its driver, has the car. |
+| StepTimeout | 1 | Seconds to wait for the answer to each command during the run. |
+| MaxMisses | 5 | Unanswered commands in a row that end the run with an error. |
+| EmergencyCode | false | `true` for a rig that knows the EMERGENCY code (-5): a step on which CARLA's agent brakes for an emergency is sent as `(-5, aref)`, and the rig brakes toward rest at the car's hardest rate. `false` sends it as an ordinary `(0, aref)`, with aref at most the car's braking limit. |
+
+```yaml
+XilSetup:
+  Transport: udp
+  Rig:
+    StopTimeout: 120     # a driver ramps down by hand
+```
 
 When the application layer is disabled but XIL is enabled, the interface automatically reuses the XIL vehicle subscriptions to seed outbound traffic.
 
@@ -187,7 +214,7 @@ There is no `KeepRoute` key here: the keepRoute bitmask for an externally driven
 | SUMO | — | The type id of the `Vehicle::add` that inserts the ego: by TrafficLayer at the first step of a CarMaker run, and when it injects a CARLA physics ego the scenario did not declare. An ego the scenario already declares keeps its own type. |
 | VISSIM (DSProxy) | The VISSIM vehicle type | Read as the VISSIM vehicle type number. Empty, non-numeric or ≤ 0 gives 100, the network's car type. |
 | CarMaker | CarMaker's own vehicle | Sent as the `type` of the ego record. The CarMaker library never spawns the ego as a traffic object. |
-| CARLA | `CarlaSetup.EgoBlueprint` (default `vehicle.tesla.model3`) when CARLA owns the ego | Sent as the `type` of the ego record. With `Dynamics: traffic` the ego is mirrored like any other vehicle, by the rules below. |
+| CARLA | `CarlaSetup.EgoBlueprint` (default `vehicle.tesla.model3`) when CARLA owns the ego | Sent as the `type` of the ego record. With `Dynamics: traffic` the ego is mirrored like any other vehicle, by the rules below, unless the yaml sets `CarlaSetup.EgoBlueprint` (Python bridge). |
 
 Every vehicle CarMaker or CARLA mirrors from the traffic simulator — including an ego another client drives — is chosen by the `vehicleClass` field of its record (SUMO's `vClass`), not by its type:
 
@@ -224,6 +251,7 @@ Still accepted so older configs run unchanged. An `EgoSetup` key wins over its l
 | EgoType | string | — | Legacy; use `EgoSetup.Type`. See [Legacy ego keys](#legacy-ego-keys). |
 | SynchronizeTrafficSignal | bool | false | If enabled, subscribes to all signal controllers for synchronization. |
 | TrafficSignalPort | int | 2444 or inferred | Port for signal data. Inferred from SignalSubscription if available. |
+| MaxVehiclesSent | int | 100 | SUMO only. Most vehicles sent to CarMaker per step, nearest to the ego first; `-1` sends every subscribed vehicle. Keep it at or below the number of `RS_C*`/`RS_T*` traffic objects in the TestRun: CarMaker gives slots first-come, so a vehicle sent beyond the pool may take a slot a nearer one needed. TrafficLayer prints one warning the first time the cap drops vehicles. |
 
 ## CarlaSetup
 
@@ -242,6 +270,9 @@ Still accepted so older configs run unchanged. An `EgoSetup` key wins over its l
 | CarlaTimeStep | double | 0 (= the FIXS feed) | CARLA world step, i.e. `fixed_delta_seconds`. Must be the FIXS feed period or an exact divisor of it (0.1 / 0.05 / 0.025 / 0.02 / 0.01): the exchange boundary is tested on the feed grid, so a tick that does not divide it never lands on one and the bridge would exchange nothing. Finer than the feed makes the bridge interpolate traffic — position **and** heading — across the sub-steps, exactly as the CarMaker host does at 0.001 s. |
 | TrafficRefreshRate | double | 0 (= every tick) | How often traffic poses are **re-applied**. Same meaning as the CarMakerSetup key above; **not** the feed period. Must be ≥ `CarlaTimeStep` and have a whole reciprocal. Coarser than the tick = fewer `ApplyBatch` calls on a heavy scene while physics and sensors still run at the tick rate. |
 | InterestedIds | string list | `["ego"]` | Vehicle IDs that receive mirrored CARLA updates. Should be subset of VehicleSubscription. |
+| EgoBlueprint | string | `"vehicle.tesla.model3"` | Blueprint of the ego. A physics ego (`EgoSetup.Dynamics: virenv`) always uses it. A mirrored ego (`Dynamics: traffic`) uses it only when the yaml sets this key; otherwise it is drawn from the vehicle-class pools like any other vehicle (Python bridge; `VirCarlaEnv.exe` keeps the pools). A library vehicle installed with `Carla/import_vehicle.py` is named here like a stock one, e.g. `vehicle.kia.ev6`; `run_cosim` checks before launch that the local CARLA has it and offers to import it if not. |
+| EgoColor | string or list | `""` (the blueprint's own pick) | Paint of the ego, `"R,G,B"` or `[R, G, B]`, integers 0..255; anything else is refused at startup. Applied through the blueprint's `color` attribute, to a physics ego and to a mirrored ego. Python bridge only. |
+| EgoVehicleManifest | string | `""` | The `vehicle.yaml` of a library vehicle, relative to where the run is started. Empty: the manifest `import_vehicle.py` installed for `EgoBlueprint` (`~/.fixs/vehicles/<id>/bundle/vehicle.yaml`), if there is one. When a manifest applies, a physics ego gets its `physics` and `wheels` values through `apply_physics_control` right after spawning; values the manifest leaves out keep the blueprint's. A stock blueprint has no manifest and is unaffected. A manifest whose `id` is not `EgoBlueprint` is refused. Python bridge only. |
 
 > **The FIXS feed period is not configurable.** It is 0.1 s (`fixs::kFeedPeriodS` in
 > `CommonLib/FixsProtocol.h`): every VirEnvCore host tests its send/recv boundary
@@ -281,11 +312,11 @@ ViewSetup:
 | --- | --- | --- | --- |
 | Name | all | the Type | Unique across the list. Camera windows and added sumo-gui views are titled `FIXS view: <Name>`. |
 | Simulator | all | `carla` | `carla` or `sumo`. |
-| Type | all | carla `chase`, sumo `follow` | carla `spectator`: the CARLA window itself, a top-down snap (at most one). carla `bev` / `chase` / `driver`: an RGB camera rigidly attached to Target, in its own window. sumo `follow`: tracks Target. sumo `fixed`: shows Boundary. |
+| Type | all | carla `chase`, sumo `follow` | carla `spectator`: the CARLA window itself, a top-down snap (at most one). carla `bev` / `chase` / `driver`: an RGB camera on Target (rigidly attached, but for a north-up `bev`), in its own window. sumo `follow`: tracks Target. sumo `fixed`: shows Boundary. |
 | Target | all but sumo `fixed` | `"ego"` | Vehicle id. A camera attaches when the vehicle exists, re-attaches if it is respawned, and waits while it is gone. |
 | Enable | all | true | |
 | Height | carla `spectator`, `bev` | 50 | Metres above the target. |
-| AlignYaw | carla `spectator` | false | Rotate the view with the target's heading. A `bev` camera always turns with the target. |
+| AlignYaw | carla `spectator`, `bev` | spectator false, bev true | Rotate the view with the target's heading. A `bev` with `AlignYaw: false` keeps north (SUMO's +y) at the top, as sumo-gui does. |
 | Offset | carla `bev`, `chase`, `driver` | bev `[0, 0, Height]`, chase `[-6.5, 0, 2.8]`, driver `[0.5, 0, 1.5]` | Camera position in the target's frame, metres: x forward, y right, z up. |
 | Pitch | carla `bev`, `chase`, `driver` | bev -90, chase -12, driver -5 | Degrees; negative looks down. |
 | Size | carla cameras | `[960, 540]` | Image and window size, pixels. |
@@ -329,6 +360,48 @@ the extra render pass on the CARLA server, which shows up in the bridge's
 `world.tick` timing row; lower it with `SensorTick`, a smaller `Size`, or fewer
 cameras. At shutdown the bridge prints each camera's callback, draw and encode cost.
 Closing a camera window removes that camera unless it is also recording.
+
+## PlotSetup
+
+Live Plotly plots fed by the Python bridge, each in a bare browser window titled
+`FIXS plot: <Name>`: stacked panels of the last `Window` seconds, one per entry in
+`Panels`. A panel lists its series as `[command, actual, ...]`: the first is drawn
+dashed, the rest solid, so a panel reads as command against response. The panels share
+a time axis in seconds since the plot's first sample. TrafficLayer ignores this section.
+
+```yaml
+PlotSetup:
+  Plots:
+    - Name: ego                              # window "FIXS plot: ego"
+      Target: ego
+      Size: [760, 480]
+      Window: 60                             # seconds shown
+      Panels:
+        - [speedDesired, speed]              # title, unit and legend from the series names
+        - Series: [steerAngleDesired, steerAngle]
+          Title: Front wheel angle
+          Labels: [command, actual]
+        - Series: [app.laneTarget, app.lateralOffset]
+          Title: Lateral offset
+          Unit: m                            # app.<name> values have no unit of their own
+```
+
+A series is one of:
+
+- a field of the target's FIXS record listed in `VehicleMessageField`. For the ego this is
+  the record the embedded controller writes, so `steerAngleDesired` and the pedals are its
+  command;
+- `steerAngle`, `throttle`, `brake`: what PhysX applied to a physics ego that tick
+  (`steerAngle` is the mean of the front wheels' angles);
+- `app.<name>`: a value an embedded controller sets with `fixs.plot.put(name, value)`.
+  `fixs.plot.mark(label)` draws a labelled line at the current time on every plot.
+
+Steer angles are shown in degrees. The bridge keeps about two samples per pixel of
+`Size` width and serves them on a local port; the page polls at 10 Hz. The window is
+Edge or Chrome in app mode, `Size` pixels; without either, open the printed address in
+any browser. In a `run_cosim` run, `<run dir>/plots.json` lists each plot's address and
+`clock` (the sim time), so a recorder can show a plot as an OBS browser source. Plotly
+comes from the installed `plotly` package, else its CDN. Needs the Python engine.
 
 ## Port slots: several co-sims on one machine
 
@@ -550,6 +623,9 @@ CarMakerSetup:
     # Synchronize traffic signals with CarMaker
     SynchronizeTrafficSignal: true
     TrafficSignalPort: 2444
+
+    # Most vehicles sent to CarMaker per step, nearest to ego first (-1 = all)
+    MaxVehiclesSent: 100
 
 # =============================================================================
 # CARLA Setup (Virtual Environment Co-simulation)

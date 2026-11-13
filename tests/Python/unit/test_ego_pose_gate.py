@@ -46,6 +46,12 @@ class _Actor:
         import carla
         return carla.Vector3D(0.0, 0.0, 0.0)
 
+    def get_light_state(self):
+        return self._carla.VehicleLightState.NONE
+
+    def get_control(self):
+        return self._carla.VehicleControl()
+
 
 def _backendWithSpawnedEgo():
     b = CarlaBackend.__new__(CarlaBackend)

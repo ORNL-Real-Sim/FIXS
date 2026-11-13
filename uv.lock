@@ -36,12 +36,14 @@ dependencies = [
     { name = "pillow" },
     { name = "plotly" },
     { name = "protobuf" },
+    { name = "pycollada" },
     { name = "pygame" },
     { name = "pytest" },
     { name = "pyyaml" },
     { name = "shapely" },
     { name = "sumolib" },
     { name = "traci" },
+    { name = "websocket-client" },
 ]
 
 [package.metadata]
@@ -54,12 +56,14 @@ requires-dist = [
     { name = "pillow" },
     { name = "plotly" },
     { name = "protobuf" },
+    { name = "pycollada" },
     { name = "pygame" },
     { name = "pytest" },
     { name = "pyyaml" },
     { name = "shapely" },
-    { name = "sumolib", specifier = ">=1.22" },
-    { name = "traci", specifier = ">=1.22" },
+    { name = "sumolib", specifier = "==1.22.0" },
+    { name = "traci", specifier = "==1.22.0" },
+    { name = "websocket-client" },
 ]
 
 [[package]]
@@ -245,6 +249,19 @@ wheels = [
 ]
 
 [[package]]
+name = "pycollada"
+version = "0.9.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "python-dateutil" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/5a/8d/52a5364a17eb96129962cae8d3ee7658775e085ad0ba38388684ad5944e9/pycollada-0.9.3.tar.gz", hash = "sha256:c34d6dcf0fe2eba5896f71c96d37a1c0fe1a61f08440fa0cfcec3dc2895d3302", size = 110826, upload-time = "2026-01-24T15:45:23.625Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/07/86/f1f61b7a0701f9d1299e5293d083318019f91021a4d449f94d59dbe024e4/pycollada-0.9.3-py3-none-any.whl", hash = "sha256:636e6496f60987586db82455ea7bbd9ade775e8181c6590c83b698b6cd53a9f5", size = 129206, upload-time = "2026-01-24T15:45:22.182Z" },
+]
+
+[[package]]
 name = "pygame"
 version = "2.6.1"
 source = { registry = "https://pypi.org/simple" }
@@ -354,11 +371,11 @@ wheels = [
 
 [[package]]
 name = "sumolib"
-version = "1.27.1"
+version = "1.22.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/92/9e/fc02e2202b93ecfa3559afa972a5ac50c644a50c51412bdb52f9f76e279e/sumolib-1.27.1.tar.gz", hash = "sha256:0ceaeeb5c9913d8e38e998263e33702c1ed43829d9f961bb3a591d94fbe87018", size = 142135, upload-time = "2026-06-25T09:50:50.978Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d7/6f/efae14870acce20d7cab4171fde1378a1df3d8379307e02b4dde4a6922db/sumolib-1.22.0.tar.gz", hash = "sha256:55f5578bea6c9dd960790f8e89c87913f23514111472feac1d747bd0d891013e", size = 93643, upload-time = "2025-02-05T09:26:35.191Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/67/1f/216675079166eec8ae21b22db31e35d524799d26df1eadcc8746053586ba/sumolib-1.27.1-py2.py3-none-any.whl", hash = "sha256:2cc63e75de8db9219ab1a742a4f8870d1d2199881dcc006a0afbcdbb1e463796", size = 236203, upload-time = "2026-06-25T09:50:49.816Z" },
+    { url = "https://files.pythonhosted.org/packages/6a/bf/686c7577d9baaaec105ed75e7a245b79c7640cef570075f643a64dd80ae6/sumolib-1.22.0-py3-none-any.whl", hash = "sha256:22a1b0ecdaf2fa6a99df8ce0dfff50fbe56fd571002db70f5d2a1feb6b8a6d2c", size = 150909, upload-time = "2025-02-05T09:26:31.484Z" },
 ]
 
 [[package]]
@@ -372,14 +389,14 @@ wheels = [
 
 [[package]]
 name = "traci"
-version = "1.27.1"
+version = "1.22.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "sumolib" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/24/63/3b0b1405396f12d977fbe50fe77196a6f8896143ecd75f85283bfdac42af/traci-1.27.1.tar.gz", hash = "sha256:9f5ccc66e02db316c078a3b010fea1c40510f0cb8434a2155bfe6248e9058787", size = 103403, upload-time = "2026-06-25T09:50:59.876Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/fa/98/fec9616a11d66b2f516affec513035d657ea0b44c8a6060b3b4d10c01181/traci-1.22.0.tar.gz", hash = "sha256:ed5651b7e58bde3ed086ced8e5dc5cc8fb5dd5f951cf3b0d10a635678a7718f1", size = 94596, upload-time = "2025-02-05T09:26:37.017Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/61/26/59f5b3ebdf57efbc45a89d47e95fdbe0d7349cb52e13be1d37722e97413e/traci-1.27.1-py2.py3-none-any.whl", hash = "sha256:b4f4fb1cd145461c318aa62df16cfd48494a46631a8c3b62348b901def670c9e", size = 138897, upload-time = "2026-06-25T09:50:58.734Z" },
+    { url = "https://files.pythonhosted.org/packages/39/37/385dc7473230e0ef3a43d5437e1d727ebdf8a8cc500791becae87f533e2b/traci-1.22.0-py3-none-any.whl", hash = "sha256:7d18009eb45bc56409a0edf7c5e5bae477a72c5d022d0da0739f611dcf9bba77", size = 126362, upload-time = "2025-02-05T09:26:33.112Z" },
 ]
 
 [[package]]
@@ -398,4 +415,13 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/e4/31/3d74fa778a63b98b7374323befcc0be5ab3bd94afd4096a0124e7379152c/tzdata-2026.4.tar.gz", hash = "sha256:f1b8bd365d8d210c55353f4d7f8d6d8561c0ba50d704b700d195a9424bba0d79", size = 199350, upload-time = "2026-09-12T12:56:03.251Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f9/bc/8737e8d54cf51106118039b83f485a4783112fab49ea9d044b234978a46e/tzdata-2026.4-py2.py3-none-any.whl", hash = "sha256:c2169a8b0a7a5e9674da5a135ccdfb2b3e671b333ed9fed17b41f73c34476e81", size = 347494, upload-time = "2026-09-12T12:56:01.67Z" },
+]
+
+[[package]]
+name = "websocket-client"
+version = "1.9.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/d8/cb/a5abcc2891249f393827c650c6296660ce40374ac22d99ab9aea41f9d2a2/websocket_client-1.9.2.tar.gz", hash = "sha256:0fcb57545848be86992e128218fd96dd87a6769ffdb1a968dff79632b85604d0", size = 84110, upload-time = "2026-08-31T14:08:40.964Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d5/d2/cc4dc1271e464942db7ee278baae2daa99ee77cb2af744025c04da585a3e/websocket_client-1.9.2-py3-none-any.whl", hash = "sha256:e1a673830a9c7bfa47b1cd3d5e4178f4c9651d80a4eab02c9c23a1c3ec6250ce", size = 95786, upload-time = "2026-08-31T14:08:39.899Z" },
 ]

@@ -107,8 +107,10 @@ set(TRAFFICLAYER_SOURCES
     CommonLib/ConfigHelper.cpp
     CommonLib/MsgHelper.cpp
     CommonLib/SocketHelper.cpp
+    CommonLib/TraciRelay.cpp
     CommonLib/TrafficHelper.cpp
     CommonLib/XilGuard.cpp
+    CommonLib/libsumo/foreign/tcpip/storage.cpp
     TrafficLayer/TrafficLayer/mainTrafficLayer.cpp)
 
 if(FIXS_ENABLE_DSPROXY)
@@ -128,7 +130,9 @@ target_include_directories(TrafficLayer PRIVATE
     # search and the Linux build would silently embed the Windows run's version.
     "${CMAKE_CURRENT_BINARY_DIR}/generated"
     "${CMAKE_CURRENT_SOURCE_DIR}/CommonLib"
-    "${FIXS_LIBTRACI_INCLUDE_DIR}")
+    "${FIXS_LIBTRACI_INCLUDE_DIR}"
+    # <foreign/tcpip/storage.h> and <config.h> live beside libtraci.h, as the vcxproj has it.
+    "${FIXS_LIBTRACI_INCLUDE_DIR}/libsumo")
 
 target_link_libraries(TrafficLayer PRIVATE
     yaml-cpp

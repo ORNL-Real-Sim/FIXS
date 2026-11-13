@@ -14,6 +14,7 @@ dir, so two runs of one yaml do not write the same files.
 """
 import os
 import re
+import time
 
 SLOT_BASE = 20000
 SLOT_STRIDE = 100
@@ -250,8 +251,20 @@ def write_slot_yaml(src, dst, k, run_id, keep_carla=False):
             raise SlotError(f"{role} ports are {after.get(role)} after the rewrite, "
                             f"expected {expect} (a port list this rewrite cannot read?)")
     os.makedirs(os.path.dirname(os.path.abspath(dst)), exist_ok=True)
+    try:
+        with open(dst, encoding="utf-8", newline="") as f:
+            if f.read() == text:
+                return mapping                  # written already, and maybe open in the app
+    except OSError:
+        pass
     tmp = f"{dst}.{os.getpid()}.tmp"
     with open(tmp, "w", encoding="utf-8", newline="") as f:
         f.write(text)
+    for _ in range(20):
+        try:
+            os.replace(tmp, dst)
+            return mapping
+        except PermissionError:
+            time.sleep(0.05)                    # a reader has it open (Windows)
     os.replace(tmp, dst)
     return mapping

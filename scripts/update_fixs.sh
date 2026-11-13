@@ -15,6 +15,12 @@
 #    update_fixs.sh --root /path/to/app                    # pick interactively
 #    update_fixs.sh --root /path/to/app --version v0.9.0   # a specific release
 #    update_fixs.sh --root . --repo my-fork/FIXS
+#    update_fixs.sh --root /tmp/t --zip ./fixs-build-v0.9.1-alpha-linux-x86_64.zip --version v0.9.1-alpha
+#    update_fixs.sh --list                                 # installable releases, then exit
+#
+#  --zip installs a build zip already on disk instead of downloading one;
+#  release.yml uses it to test the bundle it just packed BEFORE publishing it
+#  (#273). Everything after the download runs unchanged.
 #
 #  Installs into <root>/FIXS. Requires bash, curl, unzip. No git, no GitHub CLI,
 #  no auth - FIXS is public.
@@ -28,6 +34,8 @@ VERSION=""
 REPO="ORNL-Real-Sim/FIXS"
 SELF_REF=""            # the ref this copy came from; enables the hand-off below
 DEFAULT_VERSION=""     # the app's preferred channel, offered as the Enter-default
+ZIP_FILE=""            # a build zip on disk to install instead of a release asset
+LIST_ONLY=0            # print the releases the picker would offer, then exit
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -36,10 +44,17 @@ while [[ $# -gt 0 ]]; do
         --repo)            REPO="$2";            shift 2 ;;
         --self-ref)        SELF_REF="$2";        shift 2 ;;
         --default-version) DEFAULT_VERSION="$2"; shift 2 ;;
+        --zip)             ZIP_FILE="$2";        shift 2 ;;
+        --list)            LIST_ONLY=1;          shift   ;;
         *) echo "[ERROR] unknown argument: $1" >&2; exit 1 ;;
     esac
 done
-[[ -n "$ROOT" ]] || { echo "[ERROR] --root is required." >&2; exit 1; }
+[[ -n "$ROOT" || "$LIST_ONLY" == 1 ]] || { echo "[ERROR] --root is required." >&2; exit 1; }
+if [[ -n "$ZIP_FILE" ]]; then
+    [[ -n "$VERSION" ]] || { echo "[ERROR] --zip needs --version: it is what FIXS_VERSION.txt records." >&2; exit 1; }
+    [[ -f "$ZIP_FILE" ]] || { echo "[ERROR] --zip: no such file: $ZIP_FILE" >&2; exit 1; }
+    ZIP_FILE="$(cd "$(dirname "$ZIP_FILE")" && pwd)/$(basename "$ZIP_FILE")"
+fi
 
 # git is deliberately NOT required. It used to be, for a sparse clone of
 # CommonLib/libsumo/bin; #238 deleted that path from git and moved the runtime to
@@ -48,9 +63,11 @@ for tool in curl unzip; do
     command -v "$tool" >/dev/null 2>&1 || { echo "[ERROR] '$tool' is required but not on PATH." >&2; exit 1; }
 done
 
-ROOT="$(cd "$ROOT" && pwd)"
-OUTPUT_DIR="$ROOT/FIXS"
-VERSION_FILE="$OUTPUT_DIR/FIXS_VERSION.txt"
+if [[ -n "$ROOT" ]]; then
+    ROOT="$(cd "$ROOT" && pwd)"
+    OUTPUT_DIR="$ROOT/FIXS"
+    VERSION_FILE="$OUTPUT_DIR/FIXS_VERSION.txt"
+fi
 API="https://api.github.com/repos/$REPO"
 DEPS_TAG="fixs-native-deps"     # rolling release carrying the packed native runtimes
 CURL=(curl -fsSL -H 'User-Agent: fixs-fetch' -H 'Accept: application/vnd.github+json')
@@ -158,14 +175,20 @@ sha256_of() {
     else echo ""; fi
 }
 
-get_asset() {  # get_asset <url> <dest> - download and verify against the .sha256 sidecar
-    local url="$1" dest="$2" expected actual
+get_asset() {  # get_asset <url> <dest> <required 0|1> - download and verify against the .sha256 sidecar
+    # <required>=1 says the release LISTS that sidecar, so failing to fetch or
+    # check it is fatal (#273). Only a release that lists none - published before
+    # #204 added them - is installed unverified, with a warning. A MISMATCH is
+    # always fatal: that is a corrupt or tampered download.
+    local url="$1" dest="$2" required="$3" expected actual
     curl -fsSL -H 'User-Agent: fixs-fetch' -o "$dest" "$url"
-    # A missing/unreachable sidecar warns and proceeds (older assets may predate
-    # them); a MISMATCH is always fatal - that is a corrupt or tampered download.
     if expected="$(curl -fsSL "$url.sha256" 2>/dev/null | awk '{print tolower($1); exit}')" && [[ -n "$expected" ]]; then
         actual="$(sha256_of "$dest")"
         if [[ -z "$actual" ]]; then
+            if [[ "$required" == 1 ]]; then
+                echo "[ERROR] no sha256sum/shasum on PATH to verify $(basename "$url") against its published .sha256." >&2
+                exit 1
+            fi
             echo "  [warn] no sha256sum/shasum on PATH - proceeding WITHOUT verification." >&2
         elif [[ "$expected" != "$actual" ]]; then
             echo "[ERROR] checksum mismatch for $(basename "$url"): expected $expected, got $actual" >&2
@@ -173,9 +196,16 @@ get_asset() {  # get_asset <url> <dest> - download and verify against the .sha25
         else
             echo "    checksum OK ($actual)"
         fi
+    elif [[ "$required" == 1 ]]; then
+        echo "[ERROR] the release lists $(basename "$url").sha256 but it could not be fetched." >&2
+        exit 1
     else
-        echo "  [warn] could not fetch $(basename "$url").sha256 - proceeding WITHOUT verification." >&2
+        echo "  [warn] the release publishes no $(basename "$url").sha256 (it predates them) - proceeding WITHOUT verification." >&2
     fi
+}
+
+lists_sidecar() {  # lists_sidecar <url> <file of listed urls> -> 1 if <url>.sha256 is listed, else 0
+    grep -qxF "$1.sha256" "$2" && echo 1 || echo 0
 }
 
 # ---------------------------------------------------------------------------
@@ -184,6 +214,13 @@ get_asset() {  # get_asset <url> <dest> - download and verify against the .sha25
 # INVARIANT: --version given => never prompt, never hand off. That is what bounds
 # the hand-off below to a single step and makes an infinite bounce impossible.
 # ---------------------------------------------------------------------------
+if [[ "$LIST_ONLY" == 1 ]]; then
+    # What the picker offers, without the prompt, so CI can check the filter
+    # against the real release list (#273).
+    installable_releases | cut -f1
+    exit 0
+fi
+
 if [[ -z "$VERSION" ]]; then
     LIST="$(installable_releases)"
     [[ -n "$LIST" ]] || { echo "[ERROR] No installable FIXS release at $REPO (none carries a 'fixs-build-*.zip')." >&2; exit 1; }
@@ -211,85 +248,96 @@ if [[ -z "$VERSION" ]]; then
     fi
 fi
 
-RELEASE_JSON="$TMP_DIR/release.json"
-"${CURL[@]}" "$API/releases/tags/$VERSION" -o "$RELEASE_JSON" \
-    || { echo "[ERROR] Could not find FIXS release '$VERSION' at $REPO." >&2; exit 1; }
+if [[ -n "$ZIP_FILE" ]]; then
+    # A local zip has no release behind it: nothing to resolve, nothing to
+    # verify against. Only the fields the rest of the script reads.
+    ASSET_NAME="$(basename "$ZIP_FILE")"
+    SHA="local"; PUBLISHED_AT="(local zip)"; PRERELEASE="false"
+else
+    RELEASE_JSON="$TMP_DIR/release.json"
+    "${CURL[@]}" "$API/releases/tags/$VERSION" -o "$RELEASE_JSON" \
+        || { echo "[ERROR] Could not find FIXS release '$VERSION' at $REPO." >&2; exit 1; }
 
-# ---------------------------------------------------------------------------
-# Pick ONE build bundle, by the same two rules #306 applied to the native-deps
-# assets -- because the same trap is one level up here. This was
-# 'fixs-build-.*\.zip$ | head -n1', and the moment a release carries both
-#
-#     fixs-build-v0.9.0-alpha-windows-x86_64.zip
-#     fixs-build-v0.9.0-alpha-linux-x86_64.zip
-#
-# that pattern matches both and head -n1 picks whichever GitHub lists first --
-# installing Linux binaries on Windows, or the reverse, with no complaint. The
-# platform is known ($PLATFORM_TAG); use it.
-#
-#   1. Prefer the platform-qualified name, then fall back to the legacy
-#      unqualified one, so releases published before the split still install.
-#   2. Never take the first of several. Two candidates means the release is
-#      ambiguous: say so and stop.
-# ---------------------------------------------------------------------------
-BUILD_URLS=()
-while IFS= read -r _u; do
-    [[ -n "$_u" ]] && BUILD_URLS+=("$_u")
-done < <(grep -o '"browser_download_url":[[:space:]]*"[^"]*"' "$RELEASE_JSON" \
-         | sed 's/.*"\(https[^"]*\)".*/\1/' | grep -E 'fixs-build-.*\.zip$')
-# Guarded before the loop: expanding an empty array under `set -u` is itself an
-# error on bash < 4.4, and that trace would replace the real diagnosis.
-[[ "${#BUILD_URLS[@]}" -gt 0 ]] \
-    || { echo "[ERROR] Release '$VERSION' carries no 'fixs-build-*.zip' and cannot be installed." >&2; exit 1; }
+    # ---------------------------------------------------------------------------
+    # Pick ONE build bundle, by the same two rules #306 applied to the native-deps
+    # assets -- because the same trap is one level up here. This was
+    # 'fixs-build-.*\.zip$ | head -n1', and the moment a release carries both
+    #
+    #     fixs-build-v0.9.0-alpha-windows-x86_64.zip
+    #     fixs-build-v0.9.0-alpha-linux-x86_64.zip
+    #
+    # that pattern matches both and head -n1 picks whichever GitHub lists first --
+    # installing Linux binaries on Windows, or the reverse, with no complaint. The
+    # platform is known ($PLATFORM_TAG); use it.
+    #
+    #   1. Prefer the platform-qualified name, then fall back to the legacy
+    #      unqualified one, so releases published before the split still install.
+    #   2. Never take the first of several. Two candidates means the release is
+    #      ambiguous: say so and stop.
+    # ---------------------------------------------------------------------------
+    BUILD_URLS=()
+    while IFS= read -r _u; do
+        [[ -n "$_u" ]] && BUILD_URLS+=("$_u")
+    done < <(grep -o '"browser_download_url":[[:space:]]*"[^"]*"' "$RELEASE_JSON" \
+             | sed 's/.*"\(https[^"]*\)".*/\1/' | grep -E 'fixs-build-.*\.zip$')
+    # Guarded before the loop: expanding an empty array under `set -u` is itself an
+    # error on bash < 4.4, and that trace would replace the real diagnosis.
+    [[ "${#BUILD_URLS[@]}" -gt 0 ]] \
+        || { echo "[ERROR] Release '$VERSION' carries no 'fixs-build-*.zip' and cannot be installed." >&2; exit 1; }
 
-# Pass 1 takes the platform-qualified name. Pass 2 accepts a legacy unqualified
-# one, but only after excluding every name that carries SOME platform tag --
-# otherwise 'fixs-build-.*\.zip' would match the other platform's bundle and we
-# would be back to picking by luck.
-select_build_asset() {   # uses BUILD_URLS + PLATFORM_TAG, sets ASSET_URL
-    local rx u b
-    local -a hits
-    ASSET_URL=""
-    # The legacy fallback is offered to WINDOWS only. Every unqualified bundle
-    # ever published was built on Windows and holds .exe files, so accepting one
-    # on Linux would install a tree with no runnable binary in it and report
-    # success. Windows keeps installing today's releases untouched.
-    local -a patterns=("^fixs-build-.*-${PLATFORM_TAG}\.zip$")
-    [[ "$PLATFORM_TAG" == "windows-x86_64" ]] && patterns+=("^fixs-build-.*\.zip$")
-    for rx in "${patterns[@]}"; do
-        hits=()
-        for u in "${BUILD_URLS[@]}"; do
-            b="${u##*/}"
-            if [[ "$rx" == "^fixs-build-.*\.zip$" ]]; then
-                case "$b" in *-windows-x86_64.zip|*-linux-x86_64.zip|*-macos-x86_64.zip) continue ;; esac
+    # Pass 1 takes the platform-qualified name. Pass 2 accepts a legacy unqualified
+    # one, but only after excluding every name that carries SOME platform tag --
+    # otherwise 'fixs-build-.*\.zip' would match the other platform's bundle and we
+    # would be back to picking by luck.
+    select_build_asset() {   # uses BUILD_URLS + PLATFORM_TAG, sets ASSET_URL
+        local rx u b
+        local -a hits
+        ASSET_URL=""
+        # The legacy fallback is offered to WINDOWS only. Every unqualified bundle
+        # ever published was built on Windows and holds .exe files, so accepting one
+        # on Linux would install a tree with no runnable binary in it and report
+        # success. Windows keeps installing today's releases untouched.
+        local -a patterns=("^fixs-build-.*-${PLATFORM_TAG}\.zip$")
+        [[ "$PLATFORM_TAG" == "windows-x86_64" ]] && patterns+=("^fixs-build-.*\.zip$")
+        for rx in "${patterns[@]}"; do
+            hits=()
+            for u in "${BUILD_URLS[@]}"; do
+                b="${u##*/}"
+                if [[ "$rx" == "^fixs-build-.*\.zip$" ]]; then
+                    case "$b" in *-windows-x86_64.zip|*-linux-x86_64.zip|*-macos-x86_64.zip) continue ;; esac
+                fi
+                [[ "$b" =~ $rx ]] && hits+=("$u")
+            done
+            if [[ "${#hits[@]}" -eq 1 ]]; then ASSET_URL="${hits[0]}"; return 0; fi
+            if [[ "${#hits[@]}" -gt 1 ]]; then
+                echo "[ERROR] Release carries ${#hits[@]} build bundles for $PLATFORM_TAG:" >&2
+                printf '        %s\n' "${hits[@]##*/}" >&2
+                echo "        nothing says which to install. Retire the stale one." >&2
+                return 1
             fi
-            [[ "$b" =~ $rx ]] && hits+=("$u")
         done
-        if [[ "${#hits[@]}" -eq 1 ]]; then ASSET_URL="${hits[0]}"; return 0; fi
-        if [[ "${#hits[@]}" -gt 1 ]]; then
-            echo "[ERROR] Release carries ${#hits[@]} build bundles for $PLATFORM_TAG:" >&2
-            printf '        %s\n' "${hits[@]##*/}" >&2
-            echo "        nothing says which to install. Retire the stale one." >&2
-            return 1
-        fi
-    done
-    echo "[ERROR] no build bundle for $PLATFORM_TAG (looked for" >&2
-    echo "        fixs-build-<ver>-$PLATFORM_TAG.zip, then fixs-build-<ver>.zip):" >&2
-    printf '        %s\n' "${BUILD_URLS[@]##*/}" >&2
-    return 1
-}
-select_build_asset || exit 1
-ASSET_NAME="$(basename "$ASSET_URL")"
-SHA="$(json_field "$RELEASE_JSON" target_commitish)"
-PUBLISHED_AT="$(json_field "$RELEASE_JSON" published_at)"
-PRERELEASE="$(grep -o '"prerelease":[[:space:]]*[a-z]*' "$RELEASE_JSON" | head -n1 | grep -o 'true\|false')"
+        echo "[ERROR] no build bundle for $PLATFORM_TAG (looked for" >&2
+        echo "        fixs-build-<ver>-$PLATFORM_TAG.zip, then fixs-build-<ver>.zip):" >&2
+        printf '        %s\n' "${BUILD_URLS[@]##*/}" >&2
+        return 1
+    }
+    select_build_asset || exit 1
+    ASSET_NAME="$(basename "$ASSET_URL")"
+    SHA="$(json_field "$RELEASE_JSON" target_commitish)"
+    PUBLISHED_AT="$(json_field "$RELEASE_JSON" published_at)"
+    PRERELEASE="$(grep -o '"prerelease":[[:space:]]*[a-z]*' "$RELEASE_JSON" | head -n1 | grep -o 'true\|false')"
+fi
 
 # State the resolution in full. A rolling tag's asset is named after the nearest
 # annotated tag plus a git-describe suffix, so 'latest' unpacks a zip called
 # fixs-build-v0.9.0-alpha-1-g65f2970d.zip - which reads like the alpha was
 # installed instead of what was asked for. Printing tag + commit + asset together
 # is what makes the two distinguishable.
-echo "=== Fetching the FIXS build from $REPO (public, no auth) ==="
+if [[ -n "$ZIP_FILE" ]]; then
+    echo "=== Installing a local FIXS build zip ==="
+else
+    echo "=== Fetching the FIXS build from $REPO (public, no auth) ==="
+fi
 echo "  release:   $VERSION$([[ "$PRERELEASE" == "true" ]] && echo '  (rolling prerelease - always re-fetched)')"
 echo "  commit:    ${SHA:0:7}"
 echo "  asset:     $ASSET_NAME"
@@ -301,7 +349,7 @@ echo "  into:      $OUTPUT_DIR"
 # current. This reads the 'prerelease' flag rather than hardcoding which tags are
 # rolling - the hardcoded list this replaces agreed with the flag only by
 # coincidence, and would have skipped a re-fetch for any newly named channel.
-if [[ -f "$VERSION_FILE" && "$PRERELEASE" != "true" ]]; then
+if [[ -z "$ZIP_FILE" && -f "$VERSION_FILE" && "$PRERELEASE" != "true" ]]; then
     current="$(head -n1 "$VERSION_FILE" | tr -d '[:space:]')"
     if [[ "$current" == "$VERSION" ]]; then
         echo "FIXS $VERSION is already installed (delete $VERSION_FILE to force)."
@@ -310,9 +358,16 @@ if [[ -f "$VERSION_FILE" && "$PRERELEASE" != "true" ]]; then
 fi
 
 # --- The build zip ---------------------------------------------------------
-ZIP_PATH="$TMP_DIR/$ASSET_NAME"
-echo "Downloading $ASSET_NAME ..."
-get_asset "$ASSET_URL" "$ZIP_PATH"
+if [[ -n "$ZIP_FILE" ]]; then
+    ZIP_PATH="$ZIP_FILE"
+    echo "Installing the local $ASSET_NAME (no download, no checksum) ..."
+else
+    ZIP_PATH="$TMP_DIR/$ASSET_NAME"
+    grep -o '"browser_download_url":[[:space:]]*"[^"]*"' "$RELEASE_JSON" \
+        | sed 's/.*"\(https[^"]*\)"$/\1/' > "$TMP_DIR/release_urls.txt"
+    echo "Downloading $ASSET_NAME ..."
+    get_asset "$ASSET_URL" "$ZIP_PATH" "$(lists_sidecar "$ASSET_URL" "$TMP_DIR/release_urls.txt")"
+fi
 
 echo "Extracting to $OUTPUT_DIR ..."
 # The Windows-packed zip ships some directories without their EXECUTE bit (e.g.
@@ -423,7 +478,8 @@ select_native_asset() {   # <component> <version-or-empty>
 select_native_asset libsumo "$SUMO_VER" || exit 1
 DEP_URL="$SELECTED_URL"
 echo "  downloading ${DEP_URL##*/} ..."
-get_asset "$DEP_URL" "$TMP_DIR/libsumo.zip"
+printf '%s\n' "${DEP_URLS[@]}" > "$TMP_DIR/deps_urls.txt"
+get_asset "$DEP_URL" "$TMP_DIR/libsumo.zip" "$(lists_sidecar "$DEP_URL" "$TMP_DIR/deps_urls.txt")"
 # Extracting into CommonLib/ reproduces the <component>/bin layout the
 # executables already search; any future runtime asset lands the same way.
 set +e
@@ -458,7 +514,7 @@ if [[ "$PRERELEASE" == "true" ]]; then STAMP="$VERSION ($PUBLISHED_AT)"; else ST
 cat > "$VERSION_FILE" <<EOF
 $STAMP
 Fetched: $(date '+%Y-%m-%d %H:%M:%S')
-Source: $REPO
+Source: ${ZIP_FILE:-$REPO}
 Commit: ${SHA:0:7}
 Zip: $ASSET_NAME
 EOF

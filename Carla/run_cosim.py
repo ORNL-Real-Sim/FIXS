@@ -39,6 +39,7 @@ import sys
 import time
 import traceback
 import urllib.request
+import xml.etree.ElementTree as ET
 
 import app_catalog
 import carla_env_setup as env
@@ -1095,6 +1096,8 @@ def _claim_slot(args, config_yaml):
 
 
 RUN_RECORD = "fixs_run.json"
+#: --run-info FILE: where _record_run also writes the record, for the caller to keep.
+_RUN_INFO = None
 STACK_YAML_COPY = "stack_config.yaml"
 
 
@@ -1116,6 +1119,8 @@ def _record_run(user_yaml, stack_yaml):
                   "stack_yaml": os.path.abspath(stack_yaml),
                   "stack_yaml_copy": STACK_YAML_COPY, "stack_yaml_sha256": digest}
         run_registry._write_json_atomic(os.path.join(_RUN.dir, RUN_RECORD), record)
+        if _RUN_INFO:
+            run_registry._write_json_atomic(_RUN_INFO, record)
     except OSError as exc:
         print(f"[cosim] could not write the run record ({exc}).")
 
@@ -1748,13 +1753,38 @@ def _unreal_log_dir(cfg):
     return d if os.path.isdir(d) else None
 
 
-def report_unreal_crash(cfg):
-    """Print the newest Unreal log's fatal lines, and its path.
+def _unreal_crash_report(cfg, pid, since):
+    """(path, error, modules) of the crash report Unreal wrote for `pid` at or after
+    `since`, or None. The exception is only there: the log just stops."""
+    d = _unreal_log_dir(cfg)
+    crashes = os.path.join(os.path.dirname(d), "Crashes") if d else None
+    if pid is None or not crashes or not os.path.isdir(crashes):
+        return None
+    reports = [os.path.join(crashes, sub, "CrashContext.runtime-xml")
+               for sub in os.listdir(crashes)]
+    reports = [p for p in reports if os.path.isfile(p) and os.path.getmtime(p) >= since]
+    for path in sorted(reports, key=os.path.getmtime, reverse=True):
+        try:
+            props = ET.parse(path).getroot().find("RuntimeProperties")
+        except (ET.ParseError, OSError):
+            continue
+        if props is None or (props.findtext("ProcessId") or "").strip() != str(pid):
+            continue
+        modules = []
+        for frame in (props.findtext("PCallStack") or "").split():
+            if frame.startswith("UE4Editor-") and frame not in modules:
+                modules.append(frame)
+        return path, (props.findtext("ErrorMessage") or "").strip(), modules[:3]
+    return None
 
-    A CARLA that dies during LoadMap leaves everything needed to diagnose it in
-    that file - the map it was loading and the exception - while the console says
-    only that a port did not open. Reading three greps out of it here is the
-    difference between a one-line answer and an afternoon.
+
+def report_unreal_crash(cfg, pid=None, since=0.0):
+    """Print the newest Unreal log's fatal lines and its path, then the exception
+    from Unreal's crash report for `pid`, if it wrote one.
+
+    A CARLA that dies during LoadMap leaves everything needed to diagnose it on
+    disk while the console says only that a port did not open. Reading it here is
+    the difference between a one-line answer and an afternoon.
     """
     d = _unreal_log_dir(cfg)
     if not d:
@@ -1776,6 +1806,14 @@ def report_unreal_crash(cfg):
                 or "Unhandled Exception" in ln)]
     for ln in keep[-6:]:
         print(f"[cosim]   | {ln.strip()}")
+    report = _unreal_crash_report(cfg, pid, since)
+    if report:
+        path, error, modules = report
+        print(f"[cosim]   Unreal crashed: {error or 'no message'}"
+              + (f" (in {', '.join(modules)})" if modules else ""))
+        print(f"[cosim]   its crash report: {path}")
+        print("[cosim]   A LoadMap line above names what was loading when the engine "
+              "crashed, not what crashed it.")
 
 
 def wait_for_port(host, port, timeout=180, proc=None, cfg=None):
@@ -1785,7 +1823,8 @@ def wait_for_port(host, port, timeout=180, proc=None, cfg=None):
     compiling shaders at second 179 are the same to a socket poll, and reporting
     both as a timeout sends you to wait longer for something that is not running.
     """
-    deadline = time.time() + timeout
+    started = time.time()
+    deadline = started + timeout
     while time.time() < deadline:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.settimeout(2)
@@ -1794,7 +1833,8 @@ def wait_for_port(host, port, timeout=180, proc=None, cfg=None):
         if proc is not None and proc.poll() is not None:
             print(f"[cosim] the CARLA server exited ({proc.returncode}) before "
                   f"opening port {port} - it did not time out, it stopped.")
-            report_unreal_crash(cfg)
+            # `proc` was launched just before this call, so its report is not older.
+            report_unreal_crash(cfg, proc.pid, started - 5)
             return False
         time.sleep(2)
     return False
@@ -1803,6 +1843,9 @@ def wait_for_port(host, port, timeout=180, proc=None, cfg=None):
 # Server options no app or flag may change: the RPC port is the one the scenario yaml
 # dials, and -game is what runs the source editor as a server.
 CARLA_CONTRACT = ("-carla-rpc-port", "-game")
+
+# Console commands run at startup; an app or --carla-args giving its own -ExecCmds replaces these.
+CARLA_EXEC_CMDS = "-ExecCmds=r.DistanceFieldAO 0"
 
 
 def parse_carla_args(text):
@@ -1862,6 +1905,8 @@ def _carla_command(cfg, port, render_offscreen, quality_level=None, level=None):
         cmd += ["-game", f"-carla-rpc-port={port}", *env.EDITOR_LAUNCH_FLAGS]
     if quality_level:
         cmd.append(f"-quality-level={quality_level}")  # Low is much cheaper to render
+    # Distance-field AO's frame history leaves dark copies of a moving car on the road (#480).
+    cmd.append(CARLA_EXEC_CMDS)
     if render_offscreen:
         cmd.append("-RenderOffScreen")  # headless, no display (Linux/CI)
     else:
@@ -2151,7 +2196,7 @@ def _is_carla_process(name):
 
 _INTERPRETERS = ("python", "pythonw", "python3", "py")
 _STACK_NAMES = ("trafficlayer", "vircarlaenv", "sumo", "sumo-gui")
-_STACK_CMDS = ("virenv/mainvircarla.py", "virenv\mainvircarla.py",
+_STACK_CMDS = ("virenv/mainvircarla.py", "virenv\\mainvircarla.py",
                "run_synchronization.py")
 
 
@@ -2187,7 +2232,7 @@ def _running_processes():
 def _cosim_leftovers(app_id=None, include_carla=False):
     """[(pid, name, cmdline)] from an earlier co-sim. Never us or our parent."""
     if app_id:
-        marks = (f"apps/{app_id}/", f"apps\{app_id}\\")
+        marks = (f"apps/{app_id}/", f"apps\\{app_id}\\")
     else:
         try:
             root = os.path.join(app_catalog.app_root(), "apps").lower()
@@ -2468,6 +2513,23 @@ def resolve_tl_table(sumocfg, force=False, cache_name=None):
 # engine / carla / sumo always have one (the yaml, carla.json, the built-ins), so
 # they start filled in and are edited only if you ask for them.
 MUST_ANSWER = ("app", "map", "config")
+
+
+def _ensure_ego_vehicle(args, cfg, config_yaml):
+    """Offer to import a library ego vehicle the local CARLA lacks (FIXS#470)."""
+    if args.sumo_only or cfg is None or cfg.get("mode") not in ("source", "packaged"):
+        return
+    if not config_yaml or not os.path.isfile(config_yaml) or not scenario_has_carla(config_yaml):
+        return
+    bp_id = (get_yaml_scalar(config_yaml, "CarlaSetup", "EgoBlueprint") or "").strip("'\"")
+    if not bp_id:
+        return
+    import import_vehicle
+    state = import_vehicle.ensure_for_run(bp_id, cfg["carla_root"], cfg["mode"],
+                                          ue4_root=cfg.get("ue4_root"),
+                                          interactive=_interactive(args), ask=_ask)
+    if state in ("installed", "imported"):
+        print(f"[cosim] ego vehicle {bp_id}: {state} in this CARLA")
 
 
 def _interactive(args):
@@ -3156,6 +3218,18 @@ def _scope_config(rec, ctx):
     staged = {os.path.normcase(os.path.abspath(s["path"])) for s in ctx.get("staged") or []}
     if os.path.normcase(os.path.abspath(chosen)) in staged:
         rec["config_scope"] = "app"
+        return
+    # The yaml as apps.json names it (relative to the app folder, or the repo file itself)
+    # means its staged copy, which is what the run reads.
+    app = ctx.get("app")
+    names = {os.path.normcase(os.path.abspath(chosen))}
+    if app and not os.path.isabs(chosen):
+        names.add(os.path.normcase(os.path.abspath(
+            os.path.join(app_catalog.app_dir(app), *chosen.replace("\\", "/").split("/")))))
+    for s in ctx.get("staged") or []:
+        if os.path.normcase(os.path.abspath(s["source"])) in names:
+            rec["config"], rec["config_scope"] = s["path"], "app"
+            return
 
 
 def _apply_cli(rec, args):
@@ -4274,7 +4348,8 @@ def declared_engine(staged, config_yaml):
     return None
 
 
-def main():
+def build_parser():
+    """The engine's options. fixs.batch checks a Run against it, so options live only here."""
     ap = _Parser(description=__doc__,
                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--app", default=None,
@@ -4568,7 +4643,22 @@ def main():
     ap.add_argument("--sumo-no-start", action="store_true",
                     help="[cpp] launch sumo-gui but omit --start, so it opens loaded "
                          "and waits for you to press Play (overrides SumoSetup.AutoStart)")
+    ap.add_argument("--app-args", default=None, metavar="ARGS",
+                    help="the app's own options, as one string (e.g. \"--egoDepart 29400\"); "
+                         "handed to its launch command as COSIM_APP_ARGS")
+    ap.add_argument("--run-info", default=None, metavar="FILE",
+                    help="also write this run's record (run id, port slot, ports, yaml) to "
+                         "FILE; the run dir holding fixs_run.json is removed when the run ends")
+    return ap
+
+
+def main():
+    ap = build_parser()
     args = ap.parse_args()
+    if args.app_args is not None:
+        os.environ["COSIM_APP_ARGS"] = args.app_args
+    global _RUN_INFO
+    _RUN_INFO = os.path.abspath(args.run_info) if args.run_info else None
     # --reimport PATH parses as a string in args.reimport; split it out here so
     # every OTHER site in this file - there are over a dozen - can go on reading
     # args.reimport as the plain bool it has always been.
@@ -5006,6 +5096,9 @@ def main():
             if ans.startswith("y"):
                 args.reimport = True
                 resolved = None
+
+    # A library ego vehicle (CarlaSetup.EgoBlueprint) must be in this CARLA before it launches.
+    _ensure_ego_vehicle(args, cfg, args.config or (setup or {}).get("config"))
 
     # The application starts HERE: after the last question this script asks, and
     # before anything reaches for a map bundle.
@@ -5511,9 +5604,11 @@ def main():
                     print(f"[cosim] placing traffic lights for '{target_map}' before launch ...")
                     _tell_peer(ctl_sock, "place_tls",
                                f"placing traffic lights for '{target_map}'")
+                    # A legacy placement leaves no fingerprint, so the next run that
+                    # fetches the props re-places it.
                     place_tls.place_tls(target_map, tl_table, carla_root=cfg["carla_root"],
                                         ue4_root=cfg.get("ue4_root"), force=args.reimport,
-                                        bundle_dirs=bundle_dirs)
+                                        bundle_dirs=bundle_dirs, allow_legacy=True)
                 else:
                     print(f"[cosim] note: traffic lights not placed for '{target_map}'. Run "
                           f"place_tls (or --reimport) to add them, else no TL sync.")

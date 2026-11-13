@@ -247,7 +247,8 @@ def test_ownership_follows_a_leased_child_to_its_descendants(procs, registry):
             hit = rr.Ownership().of(grand)
             assert hit is not None and hit[0].id == run.id
             assert hit[1]["pid"] == mid.pid
-            assert rr.Ownership().of(_sleeper(procs).pid) is None
+            # Not a child of this process: that is the run's owner, so its children are the run's.
+            assert rr.Ownership().of(os.getppid()) is None
         finally:
             _kill_hard(grand)
     finally:

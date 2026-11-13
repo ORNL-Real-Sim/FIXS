@@ -249,7 +249,7 @@ This compiles the Carla UE4 plugin and the `CarlaUE4Editor` target (long the fir
 
 ---
 
-#### Issue 7 — `Permission denied` creating content directories
+### Issue 7 — `Permission denied` creating content directories
 
 The build fails late with:
 

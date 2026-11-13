@@ -1,0 +1,68 @@
+name: Python env (environment.yml)
+
+# Builds the env from environment.yml alone and runs the shipped Python in it.
+# No path filter: release.yml skips Python-only PRs, and those are the ones this is for.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [dev, main, 'dev_v*', 'beta_v*']
+  push:
+    branches: [main, 'dev_v*', 'beta_v*']
+
+jobs:
+  env:
+    name: env from environment.yml + unit tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash -el {0}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            Carla
+            CommonLib
+            tests/Python
+            environment.yml
+
+      # Miniforge: no Anaconda terms-of-service prompt on the spec's `defaults` channel.
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          environment-file: environment.yml
+          activate-environment: realsim
+
+      # carla_env_setup's own list; carla is not in it (ensure_carla installs it).
+      - name: The env imports what the co-sim needs
+        run: |
+          python - <<'EOF'
+          import importlib, sys
+          sys.path.insert(0, "Carla")
+          import carla_env_setup as s
+          bad = []
+          for m in s.CHECKED_MODULES:
+              try:
+                  importlib.import_module(m)
+              except Exception as e:
+                  bad.append(f"{m}: {e!r}")
+          print("checked:", ", ".join(s.CHECKED_MODULES))
+          if bad:
+              sys.exit("cannot import:\n  " + "\n  ".join(bad))
+          EOF
+
+      # -W error fails on invalid escape sequences; -f recompiles what the step above cached.
+      # No slashes in -x: MSYS bash rewrites them on Windows.
+      - name: Byte-compile the shipped Python
+        run: python -W error -m compileall -f -q -x 'yaml-cpp|libsumo|libcarla' Carla CommonLib
+
+      # As carla_env_setup.ensure_carla does after the env exists; the unit tests import it.
+      - name: Add the carla client
+        run: python -m pip install carla==0.9.15
+
+      - name: Unit tests
+        run: python -m pytest tests/Python/unit -q

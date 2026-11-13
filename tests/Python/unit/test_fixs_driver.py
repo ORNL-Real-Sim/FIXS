@@ -788,9 +788,48 @@ def test_reference_returns_the_agents_speed_and_the_acceleration_that_goes_with_
     vRef, aRef = d.reference(SimpleNamespace(throttle=0.3, brake=0.0))
     assert vRef == pytest.approx(9.8)
     assert aRef == pytest.approx(-1.0)
+    assert not d.emergency
     vRef, aRef = d.reference(SimpleNamespace(throttle=0.0, brake=0.5))   # emergency stop
     assert vRef == 0.0
-    assert aRef == pytest.approx(1.0 - 10.0 / 0.1)
+    assert aRef == pytest.approx(1.0 + (0.0 - 10.0) / 0.1)   # no rig limits set: unbounded
+    assert d.emergency
+
+
+def test_the_acceleration_asked_for_is_bounded_only_by_limits_the_app_sets():
+    d = _build(driver(xil=lambda vref, aref, dt: vref))
+    d.feedVref, d.feedAref, d.feedStep = 5.0, 0.0, 0.1
+    assert (d.limits.carAccel, d.limits.carDecel) == (None, None)
+    assert d._arefFor(15.0) == pytest.approx(100.0)
+    d = _build(driver(xil=lambda vref, aref, dt: vref, limits=Limits(carAccel=2.0, carDecel=3.5)))
+    d.feedVref, d.feedAref, d.feedStep = 5.0, 0.0, 0.1
+    assert d._arefFor(15.0) == pytest.approx(2.0)
+    assert d._arefFor(0.0) == pytest.approx(-3.5)
+    assert 'carDecel=3.5' in str(d.limits) and 'carAccel=2' in str(d.limits)
+
+
+def test_an_exchange_that_takes_emergency_is_told():
+    got = []
+
+    def exchange(vref, aref, dt, emergency=False):
+        got.append(emergency)
+        return vref
+
+    d = _build(driver(xil=exchange))
+    d.exchange(5.0, 0.0)
+    d.emergency = True
+    d.exchange(0.0, -3.5)
+    assert got == [False, True]
+    plain = _build(driver(xil=lambda vref, aref, dt: vref))
+    plain.emergency = True
+    assert plain.exchange(0.0, -3.5) == 0.0          # one without the keyword is called as before
+
+
+@pytest.mark.parametrize('zeroIsStop, fed, expected', [
+    (False, 0.0, None), (False, 6.0, 6.0), (False, -1.0, None),
+    (True, 0.0, 0.0), (True, 6.0, 6.0), (True, -1.0, None)])
+def test_a_zero_advisory_is_a_stop_once_the_app_says_so(zeroIsStop, fed, expected):
+    d = _build(driver(zeroIsStop=zeroIsStop))
+    assert d.advisoryOf(_passiveEgo(speedDesired=fed, feedAge=0.0)) == expected
 
 
 def test_exchange_hands_the_dyno_the_acceleration_it_is_given():
@@ -814,3 +853,77 @@ def test_the_exchange_says_what_it_takes_by_its_arguments():
     assert driver(xil=xil.dynosim().exchange)._EXCHANGE_TAKES_AREF is True
     with pytest.raises(TypeError):
         driver(xil=lambda vref: vref)
+
+
+# -- a rig's start and stop: xilStart / xilStop (#473) ---------------------
+
+@pytest.mark.parametrize('scenario', [False], indirect=True)
+def test_xil_start_gets_the_ego_speed_once_before_the_first_exchange(scenario):
+    calls = []
+
+    def mine(ego, dt):
+        drv = fixs.driver.instance()
+        drv.exchange(7.0)
+        drv.exchange(7.0)
+
+    d = _build(driver(xil=lambda v, dt: calls.append(('x', v)) or v,
+                      xilStart=lambda v0: calls.append(('start', v0)), control=mine))
+    d.control(_FakeEgo(), 0.05)
+    d.control(_FakeEgo(), 0.05)
+    assert calls == [('start', 4.0)] + [('x', 7.0)] * 4
+
+
+@pytest.mark.parametrize('scenario', [False], indirect=True)
+def test_xil_stop_runs_at_shutdown_only_if_the_rig_was_started(scenario):
+    stops = []
+    d = _build(driver(xil=lambda v, dt: v, xilStart=lambda v0: None,
+                      xilStop=lambda: stops.append(1)))
+    d.shutdown()
+    assert stops == []                      # never started: nothing to ramp down
+    d = _build(driver(xil=lambda v, dt: v, xilStart=lambda v0: None,
+                      xilStop=lambda: stops.append(1)))
+    d.exchange(5.0)
+    d.shutdown()
+    assert stops == [1]
+
+
+@pytest.mark.parametrize('scenario', [False], indirect=True)
+def test_a_failing_xil_stop_does_not_stop_the_shutdown(scenario, capsys):
+    def boom():
+        raise RuntimeError('rig gone')
+    d = _build(driver(xil=lambda v, dt: v, xilStart=lambda v0: None, xilStop=boom))
+    d.exchange(5.0)
+    d.shutdown()
+    assert 'xilStop failed: rig gone' in capsys.readouterr().out
+    with pytest.raises(fixs.FixsError):
+        fixs.driver.instance()
+
+
+@pytest.mark.parametrize('scenario', [False], indirect=True)
+def test_a_failed_start_is_not_retried_every_step(scenario):
+    tries = []
+
+    def start(v0):
+        tries.append(v0)
+        raise RuntimeError('no rig')
+    d = _build(driver(xil=lambda v, dt: v, xilStart=start))
+    with pytest.raises(RuntimeError):
+        d.exchange(5.0)
+    d.exchange(5.0)
+    assert len(tries) == 1
+
+
+@pytest.mark.parametrize('kw', ['xilStart', 'xilStop'])
+def test_a_non_callable_rig_hook_is_refused_at_the_call(kw):
+    with pytest.raises(TypeError):
+        driver(xil=lambda v, dt: v, **{kw: 3})
+
+
+def test_a_leader_or_a_bar_at_exactly_zero_is_there_not_absent():
+    d = _build(driver())
+    assert d.leaderCeiling(_passiveEgo(precedingVehicleDistance=0.0, precedingVehicleSpeed=0.0)) == 0.0
+    assert d.leaderCeiling(_passiveEgo(precedingVehicleDistance=-1.0)) > 100.0
+    import CommonLib.fixs._driver as m
+    if m.SIGNAL_SOURCE == 'fixs':
+        red = _passiveEgo(signalLightColor=1, signalLightDistance=0.0, speed=3.0)
+        assert d.signalCeiling(red) == 0.0

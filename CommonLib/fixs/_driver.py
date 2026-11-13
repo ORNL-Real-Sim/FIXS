@@ -33,7 +33,8 @@ YOUR OWN STEP, using as much of this driver as you want::
 
     def my_control(ego, dt):
         drv = fixs.driver.instance()          # the driver FIXS built for this run
-        target = min(drv.advisoryOf(ego) or drv.fallbackSpeed,
+        advisory = drv.advisoryOf(ego)
+        target = min(drv.fallbackSpeed if advisory is None else advisory,
                      drv.signalCeiling(ego), drv.leaderCeiling(ego))
         ...
 
@@ -243,23 +244,29 @@ USE_ADVISORY = True
 SIGNAL_SOURCE = 'fixs'
 
 class Limits(object):
-    """How close the driver lets the ego come to a bar or a leader.
+    """How close the driver lets the ego come to a bar or a leader, and how hard it may drive.
 
     Policy, not tuning -- so it is set in code where a diff shows it, never on
     a yaml line where a change nobody reviews can move how hard the ego brakes.
 
-        fixs.driver(limits=Limits(comfortDecel=1.5))
+        fixs.driver(limits=Limits(comfortDecel=1.0))
+
+    comfortDecel is the braking every stop is planned with; commitDecel decides a
+    yellow. carAccel and carDecel bound the aRef sent to a rig; None (the default)
+    is no bound, since they belong to the rig and the app sets them.
     """
 
-    __slots__ = ('comfortDecel', 'stopMargin', 'commitDecel', 'leaderMargin')
+    __slots__ = ('comfortDecel', 'stopMargin', 'commitDecel', 'leaderMargin', 'carAccel', 'carDecel')
 
     def __init__(self, comfortDecel=2.0, stopMargin=2.0,
-                 commitDecel=4.0, leaderMargin=2.0):
+                 commitDecel=4.0, leaderMargin=2.0, carAccel=None, carDecel=None):
         self.comfortDecel, self.stopMargin = comfortDecel, stopMargin
         self.commitDecel, self.leaderMargin = commitDecel, leaderMargin
+        self.carAccel, self.carDecel = carAccel, carDecel
 
     def __str__(self):
-        return ','.join('%s=%g' % (n, getattr(self, n)) for n in self.__slots__)
+        return ','.join('%s=%s' % (n, 'none' if getattr(self, n) is None else '%g' % getattr(self, n))
+                        for n in self.__slots__)
 
     def __repr__(self):
         return 'Limits(%s)' % self
@@ -295,7 +302,7 @@ _NO_LEADER = -1.0
 
 #: The options fixs.driver(**options) and fixs.driver.set(**options) take.
 _OPTION_NAMES = frozenset({'shape', 'loop', 'tuning', 'limits', 'idealSpeedTracking',
-                           'startInGear', 'referenceMode', 'feedStep'})
+                           'startInGear', 'referenceMode', 'feedStep', 'zeroIsStop'})
 #: Set by fixs.driver.set(); every driver built afterwards starts from these.
 _DEFAULTS = {}
 
@@ -347,6 +354,7 @@ def _options(config, overrides=None):
     opt.idealSpeedTracking = bool(
         over.get('idealSpeedTracking', IDEAL_SPEED_TRACKING))
     opt.startInGear = bool(over.get('startInGear', False))
+    opt.zeroIsStop = bool(over.get('zeroIsStop', False))
     opt.feedStep = float(over.get('feedStep', FEED_STEP))
     return opt
 
@@ -358,6 +366,11 @@ class Controller:
     _EXCHANGE = None
     #: True for an exchange(vref, aref, dt), False for exchange(vref, dt).
     _EXCHANGE_TAKES_AREF = False
+    #: True for an exchange that also takes emergency=: told when the reference is an emergency stop.
+    _EXCHANGE_TAKES_EMERGENCY = False
+    #: xilStart(v0) before the first exchange, xilStop() at shutdown. None: not called.
+    _XIL_START = None
+    _XIL_STOP = None
     _OPTIONS = None
     #: The user's control(ego, dt), run in place of default(). None runs default().
     _CONTROL = None
@@ -385,6 +398,11 @@ class Controller:
         self.dt = float(config.get('CarlaTimeStep') or 0.1)
         self.fallbackSpeed = float(config.get('EgoTargetSpeed') or 8.33)
         self.useAdvisory = USE_ADVISORY
+        #: True: an advisory of 0 is a stop and only a negative one is none. False: anything
+        #: <= 0.01 is none, for a feed that is the traffic simulator's own speed (no app).
+        self.zeroIsStop = opt.zeroIsStop
+        #: The last reference was the agent's emergency stop.
+        self.emergency = False
         self.agent = None
         #: TELEPORT. EgoSetup.Dynamics: traffic -- the traffic simulator
         #: integrates the ego and no CARLA actor is spawned, so there is nothing
@@ -417,6 +435,9 @@ class Controller:
         self.misses = 0
         #: What the bench last achieved. None until it has answered once.
         self.vDyno = None
+        #: The ego's speed this step, handed to xilStart as the rig's initial speed.
+        self._egoSpeed = 0.0
+        self._xilStarted = False
 
         # Map and route planner are built at start-up, not on the first
         # controlled tick (FIXS#373). Skipped without a bridge (unit tests) and
@@ -456,7 +477,13 @@ class Controller:
         Those ticks are counted, because a run that ends with many of them did
         not test what it claims to have tested.
         """
-        if self._EXCHANGE_TAKES_AREF:
+        if self._XIL_START is not None and not self._xilStarted:
+            self._xilStarted = True         # set first: a failed start is not retried every step
+            self._XIL_START(self._egoSpeed)
+        if self._EXCHANGE_TAKES_EMERGENCY:
+            reached = self._exchange(vRef, self._arefFor(vRef) if aRef is None else aRef, self.dt,
+                                     emergency=self.emergency)
+        elif self._EXCHANGE_TAKES_AREF:
             reached = self._exchange(vRef, self._arefFor(vRef) if aRef is None else aRef, self.dt)
         else:
             reached = self._exchange(vRef, self.dt)
@@ -491,7 +518,12 @@ class Controller:
         """The acceleration that goes with vRef: the feed's, plus whatever this driver changed the speed by."""
         if self.feedVref is None:
             return 0.0
-        return self.feedAref + (vRef - self.feedVref) / self.feedStep
+        a = self.feedAref + (vRef - self.feedVref) / self.feedStep
+        if self.limits.carAccel is not None:
+            a = min(self.limits.carAccel, a)
+        if self.limits.carDecel is not None:
+            a = max(-self.limits.carDecel, a)
+        return a
 
     def build(self):
         """Built on the first controlled tick, not in __init__: the traffic
@@ -546,6 +578,7 @@ class Controller:
         """FIXS calls this every step: the control passed to fixs.driver(), else default()."""
         if dt > 0:
             self.dt = dt
+        self._egoSpeed = max(0.0, float(getattr(ego, 'speed', 0.0) or 0.0))
         self.elapsed += dt
         self.steps += 1
         if self._CONTROL is not None:
@@ -689,7 +722,10 @@ class Controller:
         """
         if float(getattr(ego, 'feedAge', 0.0) or 0.0) <= 1e-9:
             v = self._readFeed(ego)
-            self.advisory = v if v > 0.01 else None
+            if self.zeroIsStop:
+                self.advisory = max(0.0, v) if v >= 0.0 else None
+            else:
+                self.advisory = v if v > 0.01 else None
         if not self.useAdvisory:
             return None
         return self.advisory
@@ -710,7 +746,7 @@ class Controller:
         if SIGNAL_SOURCE != 'fixs':
             return _NO_LIMIT
         colour = int(getattr(ego, 'signalLightColor', 0) or 0)
-        dist = float(getattr(ego, 'signalLightDistance', -1.0) or -1.0)
+        dist = _field(ego, 'signalLightDistance', -1.0)
         if dist < 0.0 or colour not in (_RED, _YELLOW, _RED_YELLOW):
             return _NO_LIMIT
         v = float(getattr(ego, 'speed', 0.0) or 0.0)
@@ -728,8 +764,7 @@ class Controller:
         its leader 175 m away while the agent's sweep had the real obstacle at
         5.6 m. Two sources, both kept: this one sees far, the sweep sees sideways.
         """
-        gap = float(getattr(ego, 'precedingVehicleDistance', _NO_LEADER)
-                    or _NO_LEADER)
+        gap = _field(ego, 'precedingVehicleDistance', _NO_LEADER)
         if abs(gap - _NO_LEADER) < 1e-6:
             return _NO_LIMIT
         if gap < 0.0:
@@ -804,7 +839,8 @@ class Controller:
         aRef is the eco controller's acceleration (feedAref), plus the change the
         caps and the agent made to its speed (vRef - feedVref) over one feed step.
         """
-        if self.isEmergencyStop(control):
+        self.emergency = self.isEmergencyStop(control)
+        if self.emergency:
             vRef = 0.0
         else:
             vRef = max(0.0, self.agent.get_local_planner()._target_speed / 3.6)
@@ -818,6 +854,11 @@ class Controller:
         global _instance
         if _instance is self:
             _instance = None
+        if self._XIL_STOP is not None and self._xilStarted:
+            try:
+                self._XIL_STOP()
+            except Exception as exc:          # shutdown must finish: report and go on
+                print('[driver] xilStop failed: %s' % exc, flush=True)
         if self.log is not None:
             self.log.close()
             self.log = None
@@ -898,7 +939,8 @@ def _oldNames(exchange, usercontrol, xil, control):
     return xil, control
 
 
-def driver(exchange=None, *, xil=None, control=None, usercontrol=None, **options):
+def driver(exchange=None, *, xil=None, control=None, usercontrol=None,
+           xilStart=None, xilStop=None, **options):
     """-> class -- the controller the scenario should name.
 
     ``xil(vref, dt) -> mps`` is yours: a speed goes in, the speed your dyno
@@ -907,6 +949,11 @@ def driver(exchange=None, *, xil=None, control=None, usercontrol=None, **options
     passes through untouched; those are counted and reported. Omit it and
     nothing is in the loop. For the simulated cell, pass
     ``fixs.xil.dynosim().exchange``.
+
+    ``xilStart(v0)`` is called once, before the first exchange, with the ego's
+    speed at that step: a rig ramps to it before the run goes on. ``xilStop()``
+    is called at shutdown, handing the car back to the rig. Both are optional;
+    :class:`CommonLib.xil.link.UdpRig` has all three.
 
     ``control(ego, dt)`` is your own step, called in place of :meth:`Controller.default`.
     It reaches this driver through :func:`instance` when it wants any of it.
@@ -922,13 +969,18 @@ def driver(exchange=None, *, xil=None, control=None, usercontrol=None, **options
     ``--command-shape`` still wins over all of them, being nearer the run.
     """
     xil, control = _oldNames(exchange, usercontrol, xil, control)
-    for name, fn in (('xil', xil), ('control', control)):
+    for name, fn in (('xil', xil), ('control', control),
+                     ('xilStart', xilStart), ('xilStop', xilStop)):
         if fn is not None and not callable(fn):
             raise TypeError('fixs.driver(%s=): %r is not callable' % (name, fn))
     cls = type('Controller', (Controller,),
                dict(_EXCHANGE=staticmethod(xil) if xil else None,
                     _EXCHANGE_TAKES_AREF=_takesAref(xil) if xil else False,
+                    _EXCHANGE_TAKES_EMERGENCY=bool(xil) and _takesAref(xil)
+                    and 'emergency' in inspect.signature(xil).parameters,
                     _CONTROL=staticmethod(control) if control else None,
+                    _XIL_START=staticmethod(xilStart) if xilStart else None,
+                    _XIL_STOP=staticmethod(xilStop) if xilStop else None,
                     _OPTIONS=dict(_DEFAULTS, **options)))
     _BUILT.append(cls)
     return cls
@@ -970,6 +1022,12 @@ def _isEmergencyStop(control, maxBrake):
     the branch that returns before the local planner runs.
     """
     return control.throttle <= 1e-6 and control.brake >= maxBrake - 1e-6
+
+
+def _field(ego, name, default):
+    """A numeric wire field, `default` only when it is missing: 0.0 is a distance, not an absence."""
+    v = getattr(ego, name, None)
+    return default if v is None else float(v)
 
 
 def _stopBy(metres, decel):

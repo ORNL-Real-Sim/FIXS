@@ -1182,7 +1182,7 @@ def test_place_tls_noop_when_marker_present(monkeypatch, tmp_path, capsys):
                                  "ue4_root": str(tmp_path / "ue4")})
     monkeypatch.setattr(place_tls.subprocess, "call",
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("editor launched!")))
-    assert place_tls.place_tls("RP_Ver0529", str(table)) == 0
+    assert place_tls.place_tls("RP_Ver0529", str(table), allow_legacy=True) == 0
     assert "already placed" in capsys.readouterr().out
 
 
@@ -1442,6 +1442,30 @@ def test_carla_args_null_drops_and_contract_is_kept(tmp_path):
     cmd, _ = run_cosim.resolve_carla_args(base, app, None)
     assert "-windowed" not in cmd
     assert "-carla-rpc-port=2000" in cmd and "-carla-rpc-port=3000" not in cmd
+
+
+def test_carla_starts_with_distance_field_ao_off(tmp_path):
+    """Both launch modes turn r.DistanceFieldAO off (#480)."""
+    root = str(tmp_path / "carla")
+    _make_packaged(root)
+    packaged = run_cosim._carla_command({"mode": "packaged", "carla_root": root}, 2000, False)
+    carla_root, ue4_root, _, _ = _make_source(tmp_path)
+    source = run_cosim._carla_command(
+        {"mode": "source", "carla_root": carla_root, "ue4_root": ue4_root}, 2000, True)
+    for cmd in (packaged, source):
+        assert cmd.count("-ExecCmds=r.DistanceFieldAO 0") == 1
+
+
+def test_carla_exec_cmds_are_replaced_not_doubled(tmp_path):
+    """Unreal reads the first -ExecCmds only, so an app's or --carla-args' replaces the default."""
+    root = str(tmp_path / "carla")
+    _make_packaged(root)
+    base = run_cosim._carla_command({"mode": "packaged", "carla_root": root}, 2000, False)
+    cmd, _ = run_cosim.resolve_carla_args(base, None, '"-ExecCmds=r.DistanceFieldAO 0, t.MaxFPS 20"')
+    assert [c for c in cmd if c.lower().startswith("-execcmds")] == [
+        "-ExecCmds=r.DistanceFieldAO 0, t.MaxFPS 20"]
+    cmd, _ = run_cosim.resolve_carla_args(base, {"id": "a", "carla_args": {"-ExecCmds": None}}, None)
+    assert not any(c.lower().startswith("-execcmds") for c in cmd)
 
 
 def test_sumo_args_from_the_command_line():

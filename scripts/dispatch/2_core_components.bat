@@ -85,6 +85,13 @@ if /I "%RUN_MODE%"=="standalone" (
     >>"%LOG_SUMMARY%" echo ----------------------
 )
 
+REM TraciRelay.cpp declares two libtraci members locally; check the DLL exports them.
+powershell -ExecutionPolicy Bypass -NoProfile -File "%DISPATCH_DIR%check_libtraci_symbols.ps1"
+if errorlevel 1 (
+    call :TrackFailure "libtraci symbol check (TraCI relay)"
+    set "BUILD_RESULT=1"
+)
+
 REM Build TrafficLayer
 for %%C in (%STANDALONE_CONFIGS%) do (
     call :BuildSolution "TrafficLayer (%%C)" ".\TrafficLayer\TrafficLayer.sln" "/p:Configuration=%%C"

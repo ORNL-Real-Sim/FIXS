@@ -129,7 +129,7 @@ CarlaSetup:
     # whether or not enable Carla (default: false)
     EnableCosimulation: true
     
-	EnableVerboseLog: false
+    EnableVerboseLog: false
     # whether or not enable external control
     # if set to true, the sumo vehicles will be updated according to the carla vehicles' state
     # if set to false, the carla will be only visualizing the sumo vehicles

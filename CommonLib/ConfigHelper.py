@@ -28,6 +28,26 @@ VIEW_TYPES = {
 }
 #: ViewSetup.Views[].Overlay: the HUD elements a carla camera view can draw.
 VIEW_OVERLAY = ("signal", "speed", "pedals", "advisory")
+#: PlotSetup.Plots[].Panels: series the bridge measures itself, besides the ego's message fields.
+PLOT_MEASURED = ("steerAngle", "throttle", "brake")
+#: PlotSetup.Plots[].Panels: prefix of a series an in-process controller supplies with fixs.plot.put().
+PLOT_APP_PREFIX = "app."
+
+
+def parseEgoColor(value):
+    """CarlaSetup.EgoColor as CARLA's "R,G,B" attribute string; "" when unset."""
+    if value is None or value == "":
+        return ""
+    parts = value if isinstance(value, (list, tuple)) else str(value).replace(" ", "").split(",")
+    try:
+        rgb = [int(p) for p in parts]
+    except (TypeError, ValueError):
+        rgb = []
+    if len(rgb) != 3 or not all(0 <= c <= 255 for c in rgb) or any(isinstance(p, bool) for p in parts):
+        raise SystemExit("ERROR: CarlaSetup.EgoColor must be \"R,G,B\" or [R, G, B] with integers "
+                         "0..255, got %r" % (value,))
+    return ",".join(str(c) for c in rgb)
+
 
 class ConfigHelper:
     def __init__(self):
@@ -42,6 +62,7 @@ class ConfigHelper:
         self.Carla_setup = defaultdict(lambda: None)
         self.DataLog_setup = defaultdict(lambda: None)
         self.View_setup = defaultdict(lambda: None)
+        self.Plot_setup = defaultdict(lambda: None)
         # The document as written, before defaults were applied. Every section
         # above is a defaultdict filled in with fallbacks, so it cannot answer
         # "did the author actually say this?" -- and for some keys that is the
@@ -60,6 +81,7 @@ class ConfigHelper:
         simulation_node = config.get("SimulationSetup", {})
         self.simulation_setup["EnableRealSim"] = self.parserFlag(simulation_node, "EnableRealSim", True)
         self.simulation_setup["EnableVerboseLog"] = self.parserFlag(simulation_node, "EnableVerboseLog", False)
+        self.simulation_setup["EnableTimingReport"] = self.parserFlag(simulation_node, "EnableTimingReport", False)
         self.simulation_setup["SimulationEndTime"] = self.parserDouble(simulation_node, "SimulationEndTime", 90000)
         self.simulation_setup["EnableExternalDynamics"] = self.parserFlag(simulation_node, "EnableExternalDynamics", False)
         self.simulation_setup["SelectedTrafficSimulator"] = self.parserString(simulation_node, "SelectedTrafficSimulator", "SUMO")
@@ -78,6 +100,8 @@ class ConfigHelper:
         self.Sumo_setup["LaneChangeMode"] = sumo_node.get("LaneChangeMode", -1)
         # Apply the configured modes to the ego on network entry even if no client commands it.
         self.Sumo_setup["EgoModesOnEntry"] = self.parserFlag(sumo_node, "EgoModesOnEntry", False)
+        # Lets a client run TraCI commands on TrafficLayer's connection; parity with ConfigHelper.cpp.
+        self.Sumo_setup["EnableTraciRelay"] = self.parserFlag(sumo_node, "EnableTraciRelay", False)
         # Consumed by run_cosim.py (not the C++ engine): whether it launches SUMO
         # itself, or waits for the user to start it. Parity with SumoSetup.AutoStart
         # in ConfigHelper.cpp. Default true.
@@ -107,12 +131,21 @@ class ConfigHelper:
             raise SystemExit(
                 "ERROR: XilSetup.Transport must be one of inprocess|udp|tcp, got '%s'"
                 % self.Xil_setup["Transport"])
+        self.Xil_setup["Rig"] = self.parseRigLimits(xil_node.get("Rig"))
         # The ego speed SUMO is given (virenv | xil) and applications receive (traffic | xil).
         for key, allowed in (("SpeedToTraffic", ("virenv", "xil")), ("SpeedToApplication", ("traffic", "xil"))):
             value = self.parserString(xil_node, key, allowed[0]).strip().lower()
             if value not in allowed:
                 raise SystemExit("ERROR: XilSetup.%s must be one of %s, got '%s'" % (key, "|".join(allowed), value))
             self.Xil_setup[key] = value
+
+        # CarMaker Setup: MaxVehiclesSent only, parity with ConfigHelper.cpp (-1 = no cap).
+        cm_node = config.get("CarMakerSetup", {}) or {}
+        self.CarMaker_setup["MaxVehiclesSent"] = self.parserInteger(cm_node, "MaxVehiclesSent", 100)
+        if self.CarMaker_setup["MaxVehiclesSent"] == 0 or self.CarMaker_setup["MaxVehiclesSent"] < -1:
+            raise SystemExit(
+                "ERROR: CarMakerSetup.MaxVehiclesSent must be -1 (no cap) or a positive count, got %d"
+                % self.CarMaker_setup["MaxVehiclesSent"])
 
         # Carla Setup
         carla_node = config.get("CarlaSetup", {})
@@ -177,6 +210,12 @@ class ConfigHelper:
         # #325: the user controller, as a path relative to where the run was
         # launched.
         self.Carla_setup["EgoBlueprint"] = self.parserString(carla_node, "EgoBlueprint", "vehicle.tesla.model3")
+        # #470: only a yaml that names EgoBlueprint gives a mirrored (Dynamics: traffic) ego that model.
+        self.Carla_setup["EgoBlueprintSet"] = bool(carla_node.get("EgoBlueprint"))
+        # #470: "R,G,B" for the blueprint's `color` attribute; "" leaves CARLA's pick.
+        self.Carla_setup["EgoColor"] = parseEgoColor(carla_node.get("EgoColor"))
+        # #470: a library vehicle's vehicle.yaml; "" = the one import_vehicle.py installed for EgoBlueprint.
+        self.Carla_setup["EgoVehicleManifest"] = str(self.parserString(carla_node, "EgoVehicleManifest", "") or "")
         self.Carla_setup["EgoSpawnPose"] = [float(v) for v in (carla_node.get("EgoSpawnPose") or [])]
         self.Carla_setup["EgoRoutePoints"] = [(float(pt[0]), float(pt[1]))
                                               for pt in (carla_node.get("EgoRoutePoints") or [])]
@@ -299,6 +338,59 @@ class ConfigHelper:
         # ViewSetup -- parity with the ViewSetup section in ConfigHelper.cpp.
         self.View_setup["Views"] = self._parseViews(config.get("ViewSetup", {}) or {})
 
+        # PlotSetup -- live plot windows drawn by the Python bridge; the C++ parse has no use for it.
+        self.Plot_setup["Plots"] = self._parsePlots(config.get("PlotSetup", {}) or {})
+
+    def _parsePlots(self, node):
+        """PlotSetup.Plots: windows of stacked time panels; each panel is [command, actual, ...]
+        or {Series: [command, actual, ...], Title, Unit, Labels}."""
+        declared = node.get("Plots") or []
+        if not isinstance(declared, list):
+            raise SystemExit("ERROR: PlotSetup.Plots must be a list of plots")
+        fields = set(self.simulation_setup["VehicleMessageField"] or [])
+        plots = []
+        for i, p in enumerate(declared):
+            where = "PlotSetup.Plots[%d]" % i
+            if not isinstance(p, dict):
+                raise SystemExit("ERROR: %s must be a mapping" % where)
+            panels = [self._parsePlotPanel(where, x) for x in (p.get("Panels") or [])]
+            if not panels:
+                raise SystemExit("ERROR: %s.Panels must be a non-empty list of panels" % where)
+            for name in (n for panel in panels for n in panel["Series"]):
+                if not (name in fields or name in PLOT_MEASURED or name.startswith(PLOT_APP_PREFIX)):
+                    raise SystemExit("ERROR: %s: series '%s' is not in VehicleMessageField, not one of %s, "
+                                     "and not %s<name>" % (where, name, "|".join(PLOT_MEASURED), PLOT_APP_PREFIX))
+            size = p.get("Size", [760, 480])
+            if not (isinstance(size, list) and len(size) == 2 and min(int(x) for x in size) > 0):
+                raise SystemExit("ERROR: %s.Size must be two positive pixel counts" % where)
+            plots.append({
+                "Name": str(p.get("Name", "plot%d" % i)),
+                "Target": str(p.get("Target", "ego")),
+                "Enable": self.parserFlag(p, "Enable", True),
+                "Size": [int(x) for x in size],
+                "Window": float(p.get("Window", 60.0)),
+                "Panels": panels,
+            })
+        names = [p["Name"] for p in plots]
+        if len(set(names)) != len(names):
+            raise SystemExit("ERROR: PlotSetup.Plots: give each plot its own Name")
+        return [p for p in plots if p["Enable"]]
+
+    @staticmethod
+    def _parsePlotPanel(where, x):
+        """One panel as {Series, Title, Unit, Labels}; '' and [] mean derived from the series."""
+        if isinstance(x, list):
+            x = {"Series": x}
+        series = x.get("Series") if isinstance(x, dict) else None
+        if not (isinstance(series, list) and series):
+            raise SystemExit("ERROR: %s.Panels: a panel is a non-empty series list, or a mapping with one "
+                             "in Series" % where)
+        labels = [str(n) for n in x.get("Labels") or []]
+        if labels and len(labels) != len(series):
+            raise SystemExit("ERROR: %s.Panels: Labels needs one label per series" % where)
+        return {"Series": [str(n) for n in series], "Title": str(x.get("Title") or ""),
+                "Unit": str(x.get("Unit") or ""), "Labels": labels}
+
     def _parseViews(self, view_node):
         declared = view_node.get("Views") or []
         if not isinstance(declared, list):
@@ -385,7 +477,7 @@ class ConfigHelper:
             "Offset": floats("Offset", 3, mountOffset),
             "Pitch": float(node.get("Pitch", mountPitch)),
             "Height": height,
-            "AlignYaw": self.parserFlag(node, "AlignYaw", False),
+            "AlignYaw": self.parserFlag(node, "AlignYaw", vtype == "bev"),
             "Zoom": float(node.get("Zoom", 600.0)),
             "Boundary": floats("Boundary", 4, []),
             "Display": self.parserFlag(node, "Display", True),
@@ -422,6 +514,7 @@ class ConfigHelper:
         self.Carla_setup.clear()
         self.DataLog_setup.clear()
         self.View_setup.clear()
+        self.Plot_setup.clear()
 
     def parserFlag(self, node, name, default=False):
         return node.get(name, default) in ['true', True]
@@ -438,6 +531,34 @@ class ConfigHelper:
     def parserStringVector(self, node, name, default):
         return node.get(name, default)
 
+
+    RIG_LIMITS = ("StartTimeout", "StopTimeout", "StepTimeout", "MaxMisses", "EmergencyCode")
+
+    def parseRigLimits(self, node):
+        """XilSetup.Rig: only the limits written, checked; UdpRig holds the defaults."""
+        if node is None:
+            return {}
+        if not isinstance(node, dict):
+            raise SystemExit("ERROR: XilSetup.Rig must be a mapping of %s" % ", ".join(self.RIG_LIMITS))
+        unknown = sorted(set(node) - set(self.RIG_LIMITS))
+        if unknown:
+            raise SystemExit("ERROR: XilSetup.Rig has no %s; it takes %s"
+                             % (", ".join(unknown), ", ".join(self.RIG_LIMITS)))
+        limits = {}
+        for key, value in node.items():
+            if key == "EmergencyCode":
+                if not isinstance(value, bool):
+                    raise SystemExit("ERROR: XilSetup.Rig.EmergencyCode must be true or false, got %r" % (value,))
+                limits[key] = value
+                continue
+            try:
+                value = int(value) if key == "MaxMisses" else float(value)
+            except (TypeError, ValueError):
+                raise SystemExit("ERROR: XilSetup.Rig.%s must be a number, got %r" % (key, value))
+            if value < 0:
+                raise SystemExit("ERROR: XilSetup.Rig.%s must be >= 0 (0 = no limit), got %r" % (key, value))
+            limits[key] = value
+        return limits
 
     def parseVehicleSubscription(self, node, name, default=[]):
         # Process each subscription in the list

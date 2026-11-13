@@ -11,7 +11,7 @@ The figures below illustrate the system architecture and the message flow betwee
 
 ---
 
-# 1. Co-Simulation Model Overview
+## 1. Co-Simulation Model Overview
 
 The following figure shows the overall structure of the co-simulation framework used in this project.  
 It illustrates how the traffic simulation layer, control layer, and high-fidelity vehicle model interact with each other.
@@ -20,7 +20,7 @@ It illustrates how the traffic simulation layer, control layer, and high-fidelit
 
 ---
 
-# 2. Final model message Flow
+## 2. Final model message Flow
 
 This figure illustrates the **Final and ideal message flow** for the co-simulation framework.
 
@@ -37,7 +37,7 @@ This design represents the **target architecture** for fully consistent trafficâ
 
 ---
 
-# 3. Current Implementation
+## 3. Current Implementation
 
 The following diagram shows the **current implementation** used in the project.
 
@@ -58,7 +58,7 @@ For implementation details, please refer to the Python control code.
 
 ---
 
-# 4. Baseline Model
+## 4. Baseline Model
 
 The baseline model represents a simplified configuration used for comparison with the proposed co-simulation framework.
 
@@ -71,7 +71,7 @@ This configuration is used as a **reference case** for evaluating the impact of 
 
 ---
 
-# Notes
+## Notes
 
 This document provides a high-level overview of the simulation architecture.  
 More detailed explanations of each component and interface will be added in future updates.

@@ -1,6 +1,7 @@
 #include "ConfigHelper.h"
 #include "PlatformCompat.h"   // #65: windows.h/shlwapi live behind this now
 #include <algorithm>
+#include <cctype>
 
 using namespace std;
 
@@ -62,6 +63,19 @@ ConfigHelper::ConfigHelper() {
 }
 
 int ConfigHelper::getConfig(string configName) {
+	// #295: a yaml-cpp exception (unreadable file, wrong value type, a required
+	// key read without a presence check) used to escape uncaught and abort the
+	// process with 0xC0000409 and nothing printed. Report it and fail instead.
+	try {
+		return parseConfig(configName);
+	}
+	catch (const YAML::Exception& e) {
+		printf("\nERROR: could not parse config %s\n       %s\n", configName.c_str(), e.what());
+		return -1;
+	}
+}
+
+int ConfigHelper::parseConfig(string configName) {
 #ifdef UNICODE
 
 	//DWORD  retval = 0;
@@ -149,6 +163,7 @@ int ConfigHelper::getConfig(string configName) {
 		SimulationSetup.EnableVerboseLog = false;
 		if (!SuppressDefaultMessages) printf("\nWill disable verbose log as default!\n");
 	}
+	SimulationSetup.EnableTimingReport = node["EnableTimingReport"] ? parserFlag(node, "EnableTimingReport") : false;
 	// SubEgoOnly (FIXS #158 Stage B+). Default true preserves legacy FIXS
 	// DriverModel behavior; set to false in the par-file to enable the
 	// per-tick send/recv path that the DSProxy + DriverModel relay needs.
@@ -269,10 +284,27 @@ int ConfigHelper::getConfig(string configName) {
 		exit(-1);
 	}
 
+	// #295: EnableApplicationLayer and EnableXil say which client layer this
+	// config serves, so they are required and have no default. Name the missing
+	// key here; parserFlag on an absent key throws a yaml-cpp error that says
+	// only "bad conversion".
+	auto hasRequiredFlag = [](YAML::Node section, const char* sectionName, const char* key) {
+		if (section && section[key]) {
+			return true;
+		}
+		printf("\nERROR: config has no %s.%s\n"
+			"       Both ApplicationSetup.EnableApplicationLayer and XilSetup.EnableXil must be set (true or false).\n",
+			sectionName, key);
+		return false;
+	};
+
 	// ===========================================================================
 	// 			READ Application Setup section
 	// ===========================================================================
 	node.reset(config["ApplicationSetup"]);
+	if (!hasRequiredFlag(node, "ApplicationSetup", "EnableApplicationLayer")) {
+		return -1;
+	}
 	ApplicationSetup.EnableApplicationLayer = parserFlag(node, "EnableApplicationLayer");
 	parserIntegerVector(node, "ApplicationPort", ApplicationSetup.ApplicationPort);
 
@@ -287,7 +319,9 @@ int ConfigHelper::getConfig(string configName) {
 	// 			READ XIL Setup section
 	// ===========================================================================
 	node.reset(config["XilSetup"]);
-
+	if (!hasRequiredFlag(node, "XilSetup", "EnableXil")) {
+		return -1;
+	}
 	XilSetup.EnableXil = parserFlag(node, "EnableXil");
 
 	if (node["AsServer"]) {
@@ -546,6 +580,13 @@ int ConfigHelper::getConfig(string configName) {
 		SocketPort2SubscriptionList_um[CarMakerSetup.TrafficSignalPort].SignalList.subAllSignalFlag = true;
 	}
 
+	CarMakerSetup.MaxVehiclesSent = parserInteger(node, "MaxVehiclesSent", 100);
+	if (CarMakerSetup.MaxVehiclesSent == 0 || CarMakerSetup.MaxVehiclesSent < -1) {
+		printf("ERROR: CarMakerSetup.MaxVehiclesSent must be -1 (no cap) or a positive count, got %d\n",
+			CarMakerSetup.MaxVehiclesSent);
+		exit(-1);
+	}
+
 	// ===========================================================================
 	// 			READ Sumo Setup Section
 	// ===========================================================================
@@ -593,6 +634,12 @@ int ConfigHelper::getConfig(string configName) {
 	}
 	else {
 		SumoSetup.EgoKeepRoute = 6;
+	}
+	if (node["EnableTraciRelay"]) {
+		SumoSetup.EnableTraciRelay = parserFlag(node, "EnableTraciRelay");
+	}
+	else {
+		SumoSetup.EnableTraciRelay = false;
 	}
 	if (node["EnableAutoLaunch"]) {
 		SumoSetup.EnableAutoLaunch = parserFlag(node, "EnableAutoLaunch");
@@ -998,7 +1045,39 @@ int ConfigHelper::getConfig(string configName) {
 	// ===========================================================================
 	parseViewSetup(config["ViewSetup"]);
 
+	// A subscription with no ip counts as remote, so it keeps listening on all interfaces.
+	{
+		bool allLocal = true;
+		const Subscription_t* subLists[] = {
+			&ApplicationSetup.VehicleSubscription, &ApplicationSetup.SignalSubscription,
+			&ApplicationSetup.DetectorSubscription, &XilSetup.VehicleSubscription,
+			&XilSetup.SignalSubscription, &XilSetup.DetectorSubscription };
+		for (const Subscription_t* subs : subLists) {
+			for (const auto& sub : *subs) {
+				const auto& ips = std::get<2>(sub);
+				if (ips.empty()) allLocal = false;
+				for (const auto& ip : ips) allLocal = allLocal && isLoopbackAddress(ip);
+			}
+		}
+		allLocal = allLocal && isLoopbackAddress(CarMakerSetup.CarMakerIP)
+			&& isLoopbackAddress(CarlaSetup.CarlaClientIP);
+		// The CarMaker side dials this key when set (CarMaker/RealSimSetCarMakerConfig.py).
+		YAML::Node cmNode = config["CarMakerSetup"];
+		if (cmNode && cmNode["TrafficLayerIP"]) {
+			allLocal = allLocal && isLoopbackAddress(parserString(cmNode, "TrafficLayerIP"));
+		}
+		ClientsAllLocal = allLocal;
+	}
+
 	return 0;
+}
+
+bool ConfigHelper::isLoopbackAddress(const std::string& addr) {
+	std::string a = addr;
+	a.erase(0, a.find_first_not_of(" \t"));
+	a.erase(a.find_last_not_of(" \t") + 1);
+	std::transform(a.begin(), a.end(), a.begin(), [](unsigned char c) { return (char)std::tolower(c); });
+	return a == "localhost" || a == "::1" || a.rfind("127.", 0) == 0;
 }
 
 namespace {

@@ -201,6 +201,11 @@ class VirEnvCore:
         brake = bool((lightIndicators >> 3) & 1)
         return brake, indL, indR
 
+    @staticmethod
+    def encodeLightBits(brake, indL, indR):
+        """(bool, bool, bool) -> int -- decodeLightBits the other way."""
+        return int(brake) * 8 + int(indL) * 2 + int(indR)
+
     # ----------------------------------------------------------- lifecycle
     def initialization(self, configPath, signalTablePath):
         """(string, string) -> (int, string) -- validate, load signals, connect.
@@ -490,7 +495,7 @@ class VirEnvCore:
                 VehDataSend.distanceTravel = 0.0
                 VehDataSend.speedDesired = ego.speed
                 VehDataSend.accelerationDesired = 0.0
-                VehDataSend.lightIndicators = int(ego.brake) * 8 + int(ego.indL) * 2 + int(ego.indR)
+                VehDataSend.lightIndicators = self.encodeLightBits(ego.brake, ego.indL, ego.indR)
 
         if haveEgo:
             self.Msg_c.VehDataSend_um.setdefault(0, []).append(VehDataSend)

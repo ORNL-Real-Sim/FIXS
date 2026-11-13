@@ -35,6 +35,9 @@ struct SimulationSetup_t {
 
 	bool EnableVerboseLog;
 
+	// Prints TrafficLayer's per-tick wall time, by phase and by client, every 10 s of sim time.
+	bool EnableTimingReport = false;
+
 	// FIXS DriverModel "ego only" mode (issue #158 Stage B+).
 	//   true  (default, legacy):  DriverModel does per-vehicle send/recv
 	//                             inside the MOVE_DRIVER callback when the
@@ -150,6 +153,9 @@ struct CarMakerSetup_t {
 
 	int TrafficSignalPort;
 
+	// nearest-to-ego vehicles sent per step; -1 = all
+	int MaxVehiclesSent;
+
 };
 
 struct CarlaSetup_t {
@@ -251,6 +257,9 @@ struct SumoSetup_t {
 	// keepRoute bitmask for the mirror's moveToXY, for every ego owner (#305).
 	// https://sumo.dlr.de/docs/TraCI/Change_Vehicle_State.html#move_to_xy
 	int EgoKeepRoute;
+
+	// Lets a client run TraCI commands on TrafficLayer's connection (`import fixs.sumo.traci`). Off by default.
+	bool EnableTraciRelay;
 
 	// Auto-launch SUMO configuration
 	bool EnableAutoLaunch;
@@ -417,6 +426,11 @@ public:
 	// so it can see both layers' egos without touching message routing.
 	std::unordered_set <std::string> WarmUpEgoIds;
 
+	// True when every address a client is told to dial TrafficLayer at is loopback,
+	// so TrafficLayer can listen on 127.0.0.1 only (no Windows Firewall prompt).
+	bool ClientsAllLocal = false;
+	static bool isLoopbackAddress(const std::string& addr);
+
 	// subscription abstraction, these variables are raw configuration specs
 	// users can use these raw specs to create their own subscription containers for different usages
 	SimulationSetup_t SimulationSetup;
@@ -455,6 +469,8 @@ public:
 	void resetConfig();
 
 private:
+	int parseConfig(std::string configName);
+
 	void popErrorMessageBox(std::string message, std::string title);
 
 	void extractSubscriptionAttributes(YAML::Node attnode, std::string type, std::string att, SubAttMap_t& attMap);

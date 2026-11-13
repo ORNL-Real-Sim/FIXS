@@ -125,6 +125,8 @@ class CarlaBackend(IVirEnvBackend):
         self._bpLib = None
         self._map = None                 # cached for the z-alignment guard
         self._egoActor = None            # EgoMode >= 1: the CARLA-driven ego
+        #: (vehId, blueprint id or '', color or '') for an ego the traffic simulator drives (#470)
+        self._mirroredEgo = None
         #: True between spawning the ego and CARLA's first snapshot of it. The
         #: actor exists on the client the instant try_spawn_actor returns, but
         #: its transform reads the ORIGIN until a tick delivers a snapshot --
@@ -349,8 +351,13 @@ class CarlaBackend(IVirEnvBackend):
             self._sumoTransformOf(spawnPose), _kDefaultExtent)
         carlaTf.location.z += _kSpawnOffsetZ
 
-        bpId = vType if self._useVType else \
-            BridgeHelper.map_Sumo_vClass_to_Carla_blueprintId(vClass, vehId)
+        mirroredEgo = self._mirroredEgo if vehId and self._mirroredEgo and \
+            vehId == self._mirroredEgo[0] else None
+        if mirroredEgo and mirroredEgo[1]:
+            bpId = mirroredEgo[1]
+        else:
+            bpId = vType if self._useVType else \
+                BridgeHelper.map_Sumo_vClass_to_Carla_blueprintId(vClass, vehId)
         try:
             bp = self._bpLib.find(bpId)
         except (IndexError, RuntimeError):
@@ -358,11 +365,13 @@ class CarlaBackend(IVirEnvBackend):
         if bp is None:
             self.logError('Blueprint not found: %s' % bpId)
             return kNoHandle
+        if mirroredEgo and mirroredEgo[2] and bp.has_attribute('color'):
+            bp.set_attribute('color', mirroredEgo[2])
 
         # A parked spare of the SAME blueprint is this vehicle, already made. The
         # pose it is parked at is as transient as a spawn transform: setVehiclePose
         # corrects both in this same step, before world.tick.
-        actor = self._takeSpare(bpId)
+        actor = None if mirroredEgo else self._takeSpare(bpId)
         if actor is None:
             actor = self._world.try_spawn_actor(bp, carlaTf)
             if actor is None:
@@ -471,6 +480,12 @@ class CarlaBackend(IVirEnvBackend):
             self._lastEgoPose = (out.x, out.y, out.z, out.heading)
         out.grade = sTf.rotation.pitch * math.pi / 180.0
         out.speed = math.sqrt(vel.x * vel.x + vel.y * vel.y)
+        # The lights a controller set on the ego, and its brake as applied: SUMO shows them
+        # when VehicleMessageField has lightIndicators.
+        lights = int(self._egoActor.get_light_state())
+        out.indL = bool(lights & int(carla.VehicleLightState.LeftBlinker))
+        out.indR = bool(lights & int(carla.VehicleLightState.RightBlinker))
+        out.brake = self._egoActor.get_control().brake > 0.0
         return True
 
     def noteWorldTicked(self):
@@ -667,8 +682,17 @@ class CarlaBackend(IVirEnvBackend):
         return self._lastApplied.get(h)
 
     # --- L0+ ego ownership (EgoMode >= 1) ----------------------------------
-    def spawnEgo(self, blueprintId, spawnPose, tmPort):
-        """Spawn the ego with PHYSICS ON. The driver is wired separately."""
+    def setMirroredEgo(self, vehId, blueprintId='', color=''):
+        """Show the traffic-driven ego `vehId` as `blueprintId` (if given) in `color` (if given)."""
+        self._mirroredEgo = (vehId, blueprintId, color) if (blueprintId or color) else None
+
+    def spawnEgo(self, blueprintId, spawnPose, tmPort, color='', physics=None):
+        """Spawn the ego with PHYSICS ON. The driver is wired separately.
+
+        ``color`` is CarlaSetup.EgoColor ("R,G,B" or ""); ``physics`` a library
+        vehicle's manifest physics plan (Carla/vehicles/manifest.physics_plan), applied
+        right after spawning.
+        """
         if self._world is None:
             return kNoHandle
         if self._bpLib is None:
@@ -680,6 +704,12 @@ class CarlaBackend(IVirEnvBackend):
         if bp is None:
             self.logError('Ego blueprint not found: %s' % blueprintId)
             return kNoHandle
+        if color:
+            if bp.has_attribute('color'):
+                bp.set_attribute('color', color)
+            else:
+                print('WARNING: %s has no color attribute; CarlaSetup.EgoColor ignored'
+                      % blueprintId, file=sys.stderr)
 
         tf = BridgeHelper.map_transfrom_Sumo_to_Carla(
             self._sumoTransformOf(spawnPose), _kDefaultExtent)
@@ -691,8 +721,15 @@ class CarlaBackend(IVirEnvBackend):
             return kNoHandle
         self._egoActor = actor
         self._egoActor.set_simulate_physics(True)     # full PhysX: tire contact, dynamics
+        if physics:
+            from Carla.vehicles.manifest import apply_physics
+            pc = actor.get_physics_control()
+            applied = apply_physics(pc, physics, carla)
+            actor.apply_physics_control(pc)
+            print('L0 ego physics from the vehicle manifest: %s' % ', '.join(applied))
         self._egoAwaitingSnapshot = True             # no pose until CARLA ticks
-        print('L0 ego spawned: %s actor %d (physics ON)' % (blueprintId, actor.id))
+        print('L0 ego spawned: %s actor %d (physics ON)%s'
+              % (blueprintId, actor.id, ', color %s' % color if color else ''))
         return int(actor.id)
 
     def enableEgoTM(self, tmPort, targetSpeedMps):
