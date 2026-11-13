@@ -250,14 +250,14 @@ def test_a_hello_from_a_rig_that_just_came_up_gets_start_again_at_once():
         fake.stop()
 
 
-def test_stop_answered_while_moving_is_a_release_to_the_driver():
+def test_stop_answered_while_moving_is_logged_as_answered():
     said = []
     fake, rig = _rig(lambda s, a: [(START, 0.0)] if code(s) == START else [(STOP, 4.0)])
     rig._log = said.append
     try:
         rig.start(0.0)
         assert rig.stop() == pytest.approx(4.0)
-        assert any('released at 4.00 m/s' in m for m in said)
+        assert any('STOP answered (4.00 m/s)' in m for m in said)
     finally:
         rig.close()
         fake.stop()
