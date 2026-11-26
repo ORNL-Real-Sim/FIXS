@@ -27,6 +27,7 @@ jobs:
           sparse-checkout: |
             Carla
             CommonLib
+            scripts/cosim
             tests/Python
             environment.yml
 
@@ -58,7 +59,7 @@ jobs:
       # -W error fails on invalid escape sequences; -f recompiles what the step above cached.
       # No slashes in -x: MSYS bash rewrites them on Windows.
       - name: Byte-compile the shipped Python
-        run: python -W error -m compileall -f -q -x 'yaml-cpp|libsumo|libcarla' Carla CommonLib
+        run: python -W error -m compileall -f -q -x 'yaml-cpp|libsumo|libcarla' Carla CommonLib scripts/cosim
 
       # As carla_env_setup.ensure_carla does after the env exists; the unit tests import it.
       - name: Add the carla client
