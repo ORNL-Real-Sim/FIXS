@@ -107,6 +107,18 @@ def test_the_bench_holds_the_speed_it_is_given():
         d.close()
 
 
+def test_the_bench_steers_to_the_angle_it_is_given():
+    """The steering robot reaches the commanded steering-wheel angle at its rate limit (#388)."""
+    d = fixsxil.dynosim(steering={'rate_dps': 200.0, 'tau_s': 0.0})
+    try:
+        assert d.steer(90.0, 0.05) == pytest.approx(10.0)
+        for _ in range(40):
+            got = d.steer(90.0, 0.05)
+        assert got == pytest.approx(90.0)
+    finally:
+        d.close()
+
+
 # ------------------------------------------ the bench, on either integrator
 
 def test_dynamics_xil_is_refused(tmp_path):

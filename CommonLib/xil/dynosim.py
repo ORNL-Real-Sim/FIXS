@@ -9,8 +9,9 @@ radius.
 
     sim.step(v_ref, dt)                   the driver chases a speed reference
     sim.step_pedals(throttle, brake, dt)  you work the pedal yourself
+    sim.steer(ref_deg, dt)                the steering robot turns the wheel
 
-Both return a State. The first is what the wire carries -- a speed reference in,
+The first two return a State, steer the angle reached. The first is what the wire carries -- a speed reference in,
 the speed achieved out -- and the gap between those two is the point: a
 pass-through always delivers what was asked, a dyno does not.
 """
@@ -18,7 +19,7 @@ pass-through always delivers what was asked, a dyno does not.
 import math
 from collections import namedtuple
 
-from .driver import RobotDriver
+from .driver import RobotDriver, SteeringRobot
 from .vehicle import Vehicle
 
 __all__ = ['Dyno', 'DynoSim', 'State', 'FL', 'FR', 'RL', 'RR', 'NWHEEL']
@@ -91,12 +92,13 @@ def _oppose(cap, motion, applied, inertia, dt):
 
 
 class DynoSim(object):
-    """A Vehicle on a Dyno, driven by a RobotDriver. No threads, no clock."""
+    """A Vehicle on a Dyno, driven by a RobotDriver and steered by a SteeringRobot. No threads, no clock."""
 
-    def __init__(self, vehicle=None, dyno=None, driver=None):
+    def __init__(self, vehicle=None, dyno=None, driver=None, steering=None):
         self.vehicle = vehicle or Vehicle()
         self.dyno = dyno or Dyno()
         self.driver = driver or RobotDriver()
+        self.steering = steering or SteeringRobot()
 
         v, d = self.vehicle, self.dyno
         r = v.driveline.wheel_radius_m
@@ -144,8 +146,14 @@ class DynoSim(object):
             state = advance(throttle, brake, h)
         return state._replace(substeps=n)
 
+    def steer(self, ref_deg, dt):
+        """The steering robot chases ref_deg; returns the steering-wheel angle reached [deg].
+        Independent of the speed: the car is held on the rollers."""
+        return self.steering.step(ref_deg, dt)
+
     def reset(self, speed=0.0):
         v = self.vehicle
+        self.steering.reset()
         self.time = 0.0
         self.speed = speed
         self.omega = [speed / v.driveline.wheel_radius_m] * NWHEEL
