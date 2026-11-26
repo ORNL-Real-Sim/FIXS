@@ -40,6 +40,12 @@ class _Ego:
     def get_velocity(self):
         return self._carla.Vector3D(self.vx, 0.0, 0.0)
 
+    def get_light_state(self):
+        return self._carla.VehicleLightState.NONE
+
+    def get_control(self):
+        return self._carla.VehicleControl()
+
 
 def _backend(guard=True, release=0.5):
     b = CarlaBackend.__new__(CarlaBackend)

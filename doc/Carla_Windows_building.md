@@ -1,4 +1,4 @@
-## CARLA 0.9.15 Windows Build Guide
+# CARLA 0.9.15 Windows Build Guide
 
 This document provides a practical guide for building CARLA 0.9.15 on Windows.
 
@@ -235,5 +235,3 @@ Ensure the following packages are installed specifically for Python 3.10, not ju
 ```
 py -3.10 -m pip install setuptools wheel "numpy<2.0.0"
 ```
-
----

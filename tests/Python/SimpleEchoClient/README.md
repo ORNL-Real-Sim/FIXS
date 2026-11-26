@@ -82,8 +82,8 @@ each delivers to the client:
 
 Before the #176 fix, `all` was dead code on the SUMO path (`subscribeAllVehicle` parsed
 but never consumed) so it delivered **0** vehicles. After the fix it delivers the whole
-network, giving the stable ordering `all > radius > ego_only`. (The cap is
-`N_MAX_VEH = 100` in `TrafficHelper.h`; this loop holds ~30 on its lanes.)
+network, giving the stable ordering `all > radius > ego_only`. (No send cap applies on
+this path; `CarMakerSetup.MaxVehiclesSent` limits CarMaker co-sim only.)
 
 Run directly (resolve the realsim python first):
 ```bash

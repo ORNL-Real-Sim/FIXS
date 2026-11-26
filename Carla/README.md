@@ -30,9 +30,13 @@ Carla/                        <- self-contained co-sim component (shipped in the
   app_catalog.py              the apps/ manifest contract for FIXS application repos
   run_profile.py              named run setups (~/.fixs/run_profiles.json) + review loop
   props.py                    placement props and their manifest, from the map library
+  import_vehicle.py           install a vehicle from the vehicle library into CARLA
+  prep_vehicle.py             turn a vehicle bundle's source model into its rigged FBX
+  vehicles/                   vehicle.yaml schema, catalog, mesh prep, editor/Blender scripts
   doctor.py                   check this machine can run a co-sim, before it tries
   peer.py                     control channel between the halves of a distributed co-sim
   set_spectator_view.py       point the CARLA spectator at a scene (top-down, or --follow)
+  obs_recorder.py             record a run with OBS: an app's panels over this run's windows
   load_opendrive_world.py     mesh an .xodr into a server - no map package, no cook;
                               --launch starts the configured CARLA first, through
                               run_cosim's launcher
@@ -266,6 +270,106 @@ cooked content aside and imports fresh - CARLA's `ImportAssets` cooks cleanly in
 an empty destination but often fails to *replace* existing content; the backup is
 restored if the cook fails, so a working map is never lost.
 
+## Vehicles from the vehicle library
+
+A custom ego vehicle (first: the ORNL dyno car, a 2023 Kia EV6) is installed like a map.
+The private library [ORNL-Real-Sim/VehicleDynamicsLibrary](https://github.com/ORNL-Real-Sim/VehicleDynamicsLibrary)
+lists its vehicles in `catalog.json` and ships each one as a release asset; reading it
+needs `gh` logged in with access. `--repo`, or `vehicle_repo=` in the application's
+`fixs_sources.txt`, picks another library. Downloads and install receipts live in
+`~/.fixs/vehicles/` (`FIXS_VEHICLE_CACHE` moves it).
+
+```
+python Carla/import_vehicle.py --vehicle ev6    # by id or model name; no argument: pick from the catalog
+python Carla/import_vehicle.py --bundle <zip|dir>
+python Carla/import_vehicle.py --list
+python Carla/import_vehicle.py --uninstall ev6
+python Carla/import_vehicle.py --verify ev6 --port 2000   # spawn-and-drive check, on a server you own
+```
+
+Then name it in the scenario yaml:
+
+```yaml
+CarlaSetup:
+  EgoBlueprint: vehicle.kia.ev6
+  EgoColor: "150,20,30"        # optional; any R,G,B
+```
+
+A physics ego (`EgoSetup.Dynamics: virenv`) also gets the manifest's physics after it
+spawns; see [ConfigSetup.md](../doc/ConfigSetup.md#carlasetup). Background traffic never
+uses a library vehicle.
+
+**run_cosim checks it first.** A stock vehicle passes. A library vehicle this CARLA lacks
+is offered for import (`[Y/n]`) when someone is at the run; an unattended run stops with
+the command to type. An id that is neither stock nor in the catalog stops the run.
+
+**Source build.** The install runs the Unreal editor once to build the blueprint under
+`/Game/FIXS/Vehicles/`, then adds its entry to CARLA's `VehicleFactory`, the only stock
+asset it changes, after a backup in `~/.fixs/vehicles/_factory_backup/`. It refuses to run
+while another CARLA server or editor uses the same install, and never stops one. A CARLA
+content update drops the entry: re-run with `--register-only`. The chassis collision
+body is the stock Tesla's (UE 4.26 Python cannot edit it); the bounding box and wheels
+come from the vehicle's own mesh.
+
+**Packaged CARLA** has no editor, so it installs a cook made on a source build:
+
+```
+python Carla/import_vehicle.py --cook vehicle.kia.ev6_cooked_windows.tar.gz   # on a source build
+python Carla/import_vehicle.py --vehicle ev6       # packaged: fetch the library's cook and install it
+python Carla/import_vehicle.py --cooked <tar.gz>   # packaged: a cook you have
+python Carla/import_vehicle.py --uninstall ev6     # packaged: back to the stock factory
+```
+
+A cook carries every library vehicle registered in that source build, so installing one
+replaces the packaged build's library vehicles rather than adding to them. It must come
+from the same CARLA version.
+
+### Preparing a bundle (library maintainers)
+
+A bundle is a folder with `vehicle.yaml` (schema in `vehicles/manifest.py`), a
+`README.md` with the model's credit and licence, and the source model under `source/`.
+
+```
+python Carla/prep_vehicle.py <bundle_dir>                         # writes <bundle_dir>/rig/
+python Carla/prep_vehicle.py <bundle_dir> --no-prep --pack vehicle.kia.ev6.zip
+```
+
+`prep_vehicle.py` scales and orients the model, separates the wheels, rigs it to CARLA's
+vehicle skeleton, and stops if length, height, wheelbase, track or wheel radius is
+outside the manifest's tolerance (`--allow-mismatch` records it instead). Upload the zip
+and the cook as release assets and add a `vehicles` entry (`id`, `title`, `release`,
+`asset`, `sha256`) to the library's `catalog.json`.
+
+Prep reads the model as downloaded; the manifest says how to take it apart:
+
+- **Wheels** (`source.wheels`, one of): `detect` finds four wheel-sized top-level groups;
+  `nodes` names the four top-level groups; `parts` lists, per wheel, the nodes that rotate
+  with it (tire, rim, rotor, hub), at any depth. Everything else, calipers included,
+  stays on the body.
+- **Name patterns.** Material keys (`paint`, `glass`, `light_glass`, `look[].match`,
+  `wheel_slots[].match`, `plate.match`) and node keys (`wheels.parts`, `node_slots[].nodes`)
+  take a plain string, `{exact: name}` or `{regex: pattern}`. A plain string is a substring
+  for material roles and looks, the exact name for `plate.match` and node keys. `exact` and
+  `regex` (Python `re.search`) are tried on the full material name and on it with `strip`
+  removed. Node patterns ignore Blender's `.001` suffix on duplicate names, and match a mesh
+  if they match it or any parent.
+- **`plate.match`** takes a list when the plates use several materials.
+- **`node_slots`** gives named nodes their own slot whatever their material:
+  `{nodes: [...], slot: Name, role: opaque|glass|light_glass|paint, <look keys>}`.
+
+```yaml
+source:
+  wheels:
+    parts:
+      front_left: [{regex: "^Car_(12|13|17)$"}]   # one entry per wheel
+      ...
+materials:
+  glass: [{exact: Windows}]                     # not ..._WindowsTrims
+  node_slots:
+    - {nodes: [Car_107, Car_126], slot: RoofGlass, role: opaque, color: [8, 8, 10]}
+  plate: {match: [Material-447368, Material-447369], texture: plate/T_Plate.png}
+```
+
 ## Traffic lights (maps without dynamic signals)
 
 If a map's OpenDRIVE has no dynamic signals, CARLA spawns no `traffic.traffic_light`
@@ -277,6 +381,11 @@ editor) and writes a marker so it isn't repeated:
 python Carla/place_tls.py --map-config apps/roosevelt/roosevelt_map.txt \
                           --tl-table apps/roosevelt/Roosevelt_Sumo_Scenario/traffic_light_table.csv
 ```
+
+The head blueprint and z offset come from `placement.yaml`: the map bundle's own if
+it ships one, else the map library's shared one, which `place_tls.py` fetches into
+`~/.fixs/props` as `run_cosim.py` does. If neither can be found it refuses; pass
+`--legacy-placement` to place with the built-in pre-manifest values instead.
 
 A re-import wipes the map's content (and the marker), so the lights are re-placed
 automatically on the next run.
@@ -351,6 +460,10 @@ The tree splits on **can FIXS re-create this?**, not on which entity produced it
     _generic/...                     a run with no application selected
   maps/                          <- RE-CREATABLE. Safe to delete to reclaim disk.
     <map>/{<bundle>.zip, carla/, sumo/, tl_table.csv}
+  vehicles/                      <- library vehicles (import_vehicle.py)
+    <id>/bundle/vehicle.yaml         the manifest the bridge applies for EgoBlueprint <id>
+    <id>/install.json                receipt: what was installed where, factory entry or not
+    _factory_backup/                 VehicleFactory.uasset copies taken before each edit
 ```
 
 `~/.fixs/apps/<app>/` mirrors `apps/<app>/` in the repo: one folder per
@@ -461,6 +574,23 @@ python run_cosim.py --no-launch --map RP_Ver0529 \
 - Large map assets (FBX / cooked content) are **not** stored here - the tests use
   stock Town01; application maps ship separately.
 
+### Recording a run with OBS
+
+`obs_recorder.py` is the library an application's recorder calls (`run_cosim.bat --record`
+in an application repo): it lays the app's panels over this run's own CARLA, sumo-gui and
+plot windows and records them into the run's folder. Windows only.
+
+- Install [OBS Studio](https://obsproject.com) 28 or newer and, in OBS, tick
+  **Tools &rarr; WebSocket Server Settings &rarr; Enable WebSocket server** (port 4455).
+  The recorder reads the password from OBS's own settings; for an OBS elsewhere set
+  `OBS_WS_URL` and `OBS_WS_PASSWORD`.
+- A run uses the OBS that is open. When another run is recording with it, it is
+  recording by hand, or none is open, the run starts an OBS of its own (`--portable`,
+  settings under `<OBS install>/config`, WebSocket ports 4456&ndash;4475) and closes it at
+  the end, so runs side by side are each recorded. Set `OBS_EXE` if OBS is not running
+  and not in `Program Files`.
+- A run that cannot record says so in its console: `*** THIS RUN IS NOT RECORDED ... ***`.
+
 ### Timestep & speed
 There is no shared timestep any more &mdash; there are **three** cadences, and only one
 of them is yours to choose:
@@ -497,6 +627,11 @@ The CARLA server gets the same treatment: `carla_args` in `apps.json` (e.g.
 options by name. `null` drops one, `""` passes a bare one, and `-carla-rpc-port` /
 `-game` stay FIXS's. The front doors forward both flags through `COSIM_CARLA_ARGS` /
 `COSIM_SUMO_ARGS`, since their values start with `-`.
+
+run_cosim starts CARLA with `-ExecCmds=r.DistanceFieldAO 0`. With distance-field AO on, a
+moving car leaves a trail of dark dashes on the road behind it in any camera (#480). Unreal reads
+only the first `-ExecCmds`, so to add your own console commands, repeat that one in the same
+option: `--carla-args "\"-ExecCmds=r.DistanceFieldAO 0, t.MaxFPS 20\""`.
 
 `--start` is passed explicitly as `true`/`false` rather than omitted, because omitting
 it does not turn it off &mdash; a cfg declaring `<start value="t"/>` (roosevelt's does)

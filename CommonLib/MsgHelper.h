@@ -14,6 +14,7 @@ This MsgHelper Class is dedicated to handling the messages.
 
 #ifndef RS_DSPACE
 #include "ConfigHelper.h"
+#include "TraciRelay.h"
 #else
 #include <stdio.h>
 #endif
@@ -39,14 +40,22 @@ public:
 	void depackTrafficLightData(char* buffer, TrafficLightData_t* TrafficLightData);
 	void packDetectorData(const TlsDetector_t& DetectorData, char* buffer, int* iByte);
 	void depackDetectorData(char* buffer, int msgSize, TlsDetector_t* DetectorData);
+#ifndef RS_DSPACE
+	// One relayed TraCI command or reply may span several records of one message; `more` marks all but the last.
+	void packTraciRequest(const TraciRequest_t& req, const unsigned char* chunk, int chunkLen,
+	                      bool more, char* buffer, int* iByte);
+	void depackTraciRequest(char* buffer, int bodySize, TraciRequest_t* req, bool* more);
+	void packTraciResponse(uint8_t status, const unsigned char* chunk, int chunkLen,
+	                       bool more, char* buffer, int* iByte);
+#endif
 
-	// #87: record sizes for the send-side size pass, so total_msg_size can be written
-	// into the 9-byte header BEFORE the body is streamed out in chunks. Each runs the
-	// matching pack*() with a NULL buffer (measure, don't write) -- one traversal serves
-	// both sizing and packing, so the two cannot drift apart.
+	// Record sizes for the send-side size pass: each runs its pack*() with a NULL buffer.
 	int vehRecordSize(const VehFullData_t& VehFullData);
 	int tlsRecordSize(const TrafficLightData_t& TrafficLightData);
 	int detRecordSize(const TlsDetector_t& DetectorData);
+#ifndef RS_DSPACE
+	int traciResponseRecordSize(int chunkLen);
+#endif
 
 	void clearRecvStorage();
 	void clearSendStorage();

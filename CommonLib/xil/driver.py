@@ -29,7 +29,7 @@ class RobotDriver(object):
 
     def __init__(self, kp=0.45, ki=0.25, max_throttle=1.0, max_brake=1.0,
                  standstill_ref_mps=0.05, standstill_brake=0.3,
-                 max_accel_mps2=None, max_decel_mps2=None,
+                 max_accel_mps2=None, max_decel_mps2=None, emergency_decel_mps2=None,
                  stop_speed_mps=0.0, stop_accel_mps2=0.0, delay_s=0.0,
                  actuator=None, mode='speed', kp_accel=0.05, ki_accel=0.5,
                  accel_filter_s=0.1):
@@ -60,6 +60,9 @@ class RobotDriver(object):
         #: the same vehicle.
         self.max_accel_mps2 = max_accel_mps2
         self.max_decel_mps2 = max_decel_mps2
+        #: Braking on an emergency step: the car's hardest, past the envelope. None is off,
+        #: a robot that is never told and treats the step as any other.
+        self.emergency_decel_mps2 = emergency_decel_mps2
         self._ramp = None
         self.standstill_ref_mps = standstill_ref_mps
         self.standstill_brake = standstill_brake
@@ -90,6 +93,8 @@ class RobotDriver(object):
     #: setpoint itself: without it, a ramp advancing past a vehicle that cannot
     #: keep up accumulates a lead it later spends all at once.
     _WINDUP_BAND = 0.2
+    #: The same on an emergency step: room for the brake to build to the emergency rate.
+    _EMERGENCY_BAND = 0.5
 
     def reset(self):
         self.integral = 0.0
@@ -103,17 +108,25 @@ class RobotDriver(object):
         if hasattr(self.actuator, 'reset'):
             self.actuator.reset()
 
-    def step(self, v_ref, v_measured, dt, a_ref=None):
+    def step(self, v_ref, v_measured, dt, a_ref=None, emergency=False):
         """Returns (throttle, brake), each in [0, 1], never both positive,
         unless an ``actuator`` says otherwise.
 
         ``a_ref`` is the acceleration command: the reference in accel mode,
-        otherwise read only by the hold. With ``delay_s`` set, this is the command of ``delay_s`` ago, and
+        otherwise read only by the hold. ``emergency``: brake to rest at
+        ``emergency_decel_mps2``, if set. With ``delay_s`` set, this is the command of ``delay_s`` ago, and
         (0, 0) until there is one; ``pedal`` stays the command just made.
         """
         if dt <= 0.0:
             raise ValueError('dt must be positive')
-        command = self._command(v_ref, v_measured, dt, a_ref)
+        decel, band = self.max_decel_mps2, self._WINDUP_BAND
+        if emergency and self.emergency_decel_mps2 is not None:
+            v_ref, a_ref = 0.0, -self.emergency_decel_mps2
+            self.max_decel_mps2, self._WINDUP_BAND = self.emergency_decel_mps2, self._EMERGENCY_BAND
+        try:
+            command = self._command(v_ref, v_measured, dt, a_ref)
+        finally:
+            self.max_decel_mps2, self._WINDUP_BAND = decel, band
         if self.delay_s > 0.0:
             self._sent.append((self._clock, command))
             due = self._clock - self.delay_s + 1e-9
