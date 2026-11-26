@@ -54,6 +54,22 @@ foreach ($a in $Asset) {
 }
 $assetNames = (@($ZipName) + @($Asset | ForEach-Object { Split-Path -Leaf $_ })) -join ', '
 
+# Checksum sidecar, in sha256sum's "<hex>  <name>" form, which update_fixs.ps1
+# and update_fixs.sh verify every download against (#204). Written as plain
+# ASCII: Windows PowerShell's Set-Content would prepend a BOM to the hex.
+# One per asset, the main zip and every -Asset alike.
+$ShaPaths = @()
+$shaNotes = @()
+foreach ($f in @($ZipPath) + @($Asset | ForEach-Object { (Resolve-Path -LiteralPath $_).Path })) {
+    $name = Split-Path -Leaf $f
+    $sha = (Get-FileHash $f -Algorithm SHA256).Hash.ToLower()
+    [System.IO.File]::WriteAllText("$f.sha256", "$sha  $name`n", [System.Text.Encoding]::ASCII)
+    $ShaPaths += "$f.sha256"
+    $shaNotes += "- SHA-256 ${name}: $sha"
+    Write-Host "SHA-256 ${name}: $sha"
+}
+$shaNotes = $shaNotes -join "`n"
+
 # Check gh CLI is available
 if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
     Write-Error "GitHub CLI (gh) is required. Install from https://cli.github.com/"
@@ -68,7 +84,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # Get commit info for release notes
-$commit = git rev-parse --short HEAD 2>$null
+$commit = git rev-parse HEAD 2>$null
 $branch = git rev-parse --abbrev-ref HEAD 2>$null
 $msg = git log -1 --pretty=%s 2>$null
 $date = Get-Date -Format 'yyyy-MM-dd HH:mm'
@@ -80,6 +96,7 @@ FIXS Build - $date
 - Commit: $commit ($msg)
 - Zip: $assetNames
 - Front door: FIXS.bat / FIXS.sh (download either to integrate a new repo)
+$shaNotes
 "@
 
 # The front door ships as a LOOSE asset alongside the zip, so integrating a new
@@ -116,7 +133,7 @@ if ($Rolling -or $Tag -eq 'latest') {
     if (-not $Title) {
         $Title = if ($Tag -eq 'latest') { 'Latest Dev Build' } else { "Rolling build: $Tag" }
     }
-    gh release create $Tag $ZipPath @Asset @FrontDoor @targetArgs `
+    gh release create $Tag $ZipPath @Asset @FrontDoor @ShaPaths @targetArgs `
         --prerelease `
         --title $Title `
         --notes $notes
@@ -132,7 +149,7 @@ if ($Rolling -or $Tag -eq 'latest') {
     }
 
     if (-not $Title) { $Title = "FIXS $Tag" }
-    gh release create $Tag $ZipPath @Asset @FrontDoor @targetArgs `
+    gh release create $Tag $ZipPath @Asset @FrontDoor @ShaPaths @targetArgs `
         --title $Title `
         --notes $notes
 }

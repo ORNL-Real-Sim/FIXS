@@ -52,4 +52,26 @@ inline bool onFeedBoundary(double simTime, double tol) {
     return (d < 0.0 ? -d : d) < tol;
 }
 
+// Record types: the byte after each record's size. 1-63 are data, pushed one way;
+// 128 and up are RPC, where the sender waits for an answer on the same socket.
+static constexpr int kMsgVehicle       = 1;
+static constexpr int kMsgTrafficLight  = 2;
+static constexpr int kMsgDetector      = 3;
+static constexpr int kMsgRpcFirst      = 128;
+static constexpr int kMsgTraciRequest  = 128;   // a relayed TraCI command
+static constexpr int kMsgTraciResponse = 129;   // its reply
+
+// Status byte at the head of a kMsgTraciResponse record.
+static constexpr int kTraciOk      = 0;   // body: the reply, positioned as traci's parsers read it
+static constexpr int kTraciError   = 1;   // body: SUMO's own error text
+static constexpr int kTraciRefused = 2;   // body: why FIXS does not relay this command
+
+// varID of a kMsgTraciRequest that is a relayed subscription, not a TraCI command.
+// cmdID CMD_SUBSCRIBE_*_VARIABLE: place or drop one; cmdID CMD_SIMSTEP: this tick's results.
+static constexpr int kTraciSubscriptionVar = -2;
+
+// Largest payload per record, so record plus header stays within MAX_RECORD_SIZE.
+static constexpr int kTraciReqChunk = 7800;   // header is at most 267 bytes
+static constexpr int kTraciRspChunk = 8000;   // header is 9 bytes
+
 }  // namespace fixs

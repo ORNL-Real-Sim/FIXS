@@ -8,9 +8,12 @@ import struct
 
 
 class MessageType:
+    """Record types; the C++ side is CommonLib/FixsProtocol.h. 1-63 data, 128 and up RPC."""
     vehicle_data = 1
     traffic_light_data = 2
     detector_data = 3
+    traci_request = 128
+    traci_response = 129
 
 #   VehicleMessageField: [id, type, vehicleClass, speed, acceleration, positionX, positionY, positionZ, heading,
 #     color, linkId, laneId, distanceTravel, speedDesired, grade, length, width, height]

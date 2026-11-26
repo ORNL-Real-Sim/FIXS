@@ -15,6 +15,12 @@
 .PARAMETER NoBackup
     Skip backup creation (not recommended).
 
+.PARAMETER Variant
+    Which CarMaker build the User.c belongs to; it sets the SimCore.State gate in
+    User_TestRun_Start_atEnd. Auto (default) reads it from the folder: src ->
+    Office, src_cm4sl / src_tm4sl -> CM4SL. Pass Office or CM4SL for any other
+    folder. An already-patched Office User.c with the CM4SL gate is corrected.
+
 .EXAMPLE
     # Interactive GUI mode
     .\patch_user_c.ps1
@@ -34,6 +40,10 @@
 .EXAMPLE
     # Patch without backup
     .\patch_user_c.ps1 -FilePath "User.c" -NoBackup
+
+.EXAMPLE
+    # User.c outside a src / src_cm4sl folder
+    .\patch_user_c.ps1 -FilePath "C:\tmp\User.c" -Variant Office
 #>
 
 [CmdletBinding()]
@@ -43,7 +53,10 @@ param(
 
     [switch]$DryRun,
 
-    [switch]$NoBackup
+    [switch]$NoBackup,
+
+    [ValidateSet('Auto', 'Office', 'CM4SL')]
+    [string]$Variant = 'Auto'
 )
 
 # =============================================================================
@@ -118,13 +131,28 @@ $TESTRUN_START_REALSIM_CODE = @'
     // ===========================================================================
     // 			 RealSim
     // ===========================================================================
-    if (VirEnv_isVeryFirstStep && SimCore.State >= SCState_Start) {
+__RS_GATE__
         VirEnv_initialization(VirEnv_c, RS_configFile, RS_signalTable);
     }
     // ===========================================================================
     // ===========================================================================
 #endif
 
+'@
+
+# CM4SL only reaches SCState_Start at User_TestRun_Start_atEnd.
+$GATE_CM4SL = @'
+    if (VirEnv_isVeryFirstStep && SimCore.State >= SCState_Start) {
+'@
+
+$GATE_OFFICE = @'
+    // Office GUI also fires this hook at SCState_Start in a preprocessing pass; initialising there deadlocks.
+    // Headless (-screen) builds stay at SCState_Start here and define RS_HEADLESS.
+#ifdef RS_HEADLESS
+    if (VirEnv_isVeryFirstStep && SimCore.State >= SCState_Start) {
+#else
+    if (VirEnv_isVeryFirstStep && SimCore.State >= SCState_StartWait) {
+#endif
 '@
 
 $USER_CALC_REALSIM_CODE = @'
@@ -163,6 +191,16 @@ function Test-AlreadyPatched {
     param([string]$Content)
 
     return ($Content -match '#define REALSIM') -or ($Content -match 'VirEnv_Wrapper\.h')
+}
+
+function Get-UserCVariant {
+    param([string]$Path)
+
+    $dir = Split-Path (Resolve-Path $Path).Path -Parent
+    $name = Split-Path $dir -Leaf
+    if ($name -eq 'src') { return 'Office' }
+    if ($name -match '^src_[ct]m4sl$') { return 'CM4SL' }
+    return $null
 }
 
 function Get-FileDialog {
@@ -294,10 +332,21 @@ function Patch-UserInit {
 }
 
 function Patch-UserTestRunStartAtEnd {
-    param([string]$Content)
+    param([string]$Content, [string]$Variant)
+
+    $gate = if ($Variant -eq 'Office') { $GATE_OFFICE } else { $GATE_CM4SL }
 
     # Check if already patched - look specifically within User_TestRun_Start_atEnd function
     if ($Content -match '(?s)int\s+User_TestRun_Start_atEnd\s*\(void\)\s*\{[^}]*VirEnv_initialization[^}]*\}') {
+        $block = $Matches[0]
+        $startGate = [regex]'[ \t]*if \(VirEnv_isVeryFirstStep && SimCore\.State >= SCState_Start\) \{'
+        # An Office User.c patched with the CM4SL gate: swap in the Office gate.
+        if ($Variant -eq 'Office' -and $block -notmatch 'SCState_StartWait' -and $startGate.IsMatch($block)) {
+            $matchStart = $Content.IndexOf($block)
+            $fixed = $startGate.Replace($block, $gate, 1)
+            $newContent = $Content.Substring(0, $matchStart) + $fixed + $Content.Substring($matchStart + $block.Length)
+            return @{Content=$newContent; Success=$true; AlreadyPresent=$false; Repaired=$true}
+        }
         return @{Content=$Content; Success=$true; AlreadyPresent=$true}
     }
 
@@ -310,7 +359,8 @@ function Patch-UserTestRunStartAtEnd {
         $matchStart = $Content.IndexOf($Matches[0])
         $matchEnd = $matchStart + $Matches[0].Length
 
-        $newContent = $Content.Substring(0, $matchStart) + $beforeReturn + "`n" + $TESTRUN_START_REALSIM_CODE + "    " + $returnStatement + $Content.Substring($matchEnd)
+        $code = $TESTRUN_START_REALSIM_CODE.Replace('__RS_GATE__', $gate)
+        $newContent = $Content.Substring(0, $matchStart) + $beforeReturn + "`n" + $code + "    " + $returnStatement + $Content.Substring($matchEnd)
         return @{Content=$newContent; Success=$true; AlreadyPresent=$false}
     }
 
@@ -372,7 +422,8 @@ function Invoke-PatchUserC {
     param(
         [string]$Path,
         [switch]$DryRun,
-        [switch]$CreateBackup
+        [switch]$CreateBackup,
+        [string]$Variant = 'Auto'
     )
 
     # Validate file
@@ -391,7 +442,18 @@ function Invoke-PatchUserC {
         }
     }
 
+    if ($Variant -eq 'Auto') {
+        $Variant = Get-UserCVariant -Path $Path
+        if (-not $Variant) {
+            return @{
+                Success = $false
+                Message = "Cannot tell Office (src) from CM4SL (src_cm4sl) by folder; rerun with -Variant Office or -Variant CM4SL"
+            }
+        }
+    }
+
     Write-Host "`nProcessing: $Path" -ForegroundColor Cyan
+    Write-Host "  Variant: $Variant" -ForegroundColor Cyan
 
     # Read file
     try {
@@ -449,10 +511,12 @@ function Invoke-PatchUserC {
         $patchesFailed += "User_Init"
     }
 
-    $result = Patch-UserTestRunStartAtEnd -Content $content
+    $result = Patch-UserTestRunStartAtEnd -Content $content -Variant $Variant
     $content = $result.Content
     if ($result.Success -and $result.AlreadyPresent) {
         $patchesAlreadyPresent += "User_TestRun_Start_atEnd"
+    } elseif ($result.Repaired) {
+        $patchesApplied += "User_TestRun_Start_atEnd (Office gate corrected)"
     } elseif ($result.Success) {
         $patchesApplied += "User_TestRun_Start_atEnd"
     } else {
@@ -618,7 +682,7 @@ if ($filesToPatch.Count -eq 0) {
 # Process files
 $results = @()
 foreach ($file in $filesToPatch) {
-    $result = Invoke-PatchUserC -Path $file -DryRun:$DryRun -CreateBackup:(-not $NoBackup)
+    $result = Invoke-PatchUserC -Path $file -DryRun:$DryRun -CreateBackup:(-not $NoBackup) -Variant $Variant
     $results += [PSCustomObject]@{
         File = $file
         Success = $result.Success
@@ -631,7 +695,7 @@ Write-Host "`n$("=" * 70)" -ForegroundColor Cyan
 Write-Host "SUMMARY" -ForegroundColor Cyan
 Write-Host "=" * 70 -ForegroundColor Cyan
 
-$successCount = ($results | Where-Object Success).Count
+$successCount = @($results | Where-Object Success).Count
 
 foreach ($result in $results) {
     $status = if ($result.Success) { "[OK]" } else { "[FAIL]" }

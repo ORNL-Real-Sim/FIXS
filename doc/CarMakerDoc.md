@@ -40,7 +40,7 @@ Please start with reading through the documentation, and playwith included Examp
 - VirtrualEnvironment.lib
 
 To simplify CarMaker project build process, we will build a library called VirtrualEnvironment.lib that contains all the
-required helper functions. Open [VirtualEnvironment.sln](..%2FVirtualEnvironment%2FVirtualEnvironment.sln)
+required helper functions. Open [VirtualEnvironment.sln](../VirtualEnvironment/VirtualEnvironment.sln)
 inside the VirtualEnvironment folder using Visual Studio 2022. in Visual Studio 2022, find the solution explorer window on the right of the screen, right click the _VirtualEnvironment_, select _Properties_,
 Then in the Property Page, find C/C++ -> General -> Additional Include Directories. Edit the carmaker version if necessary. And make sure yaml-cpp are included:
 ![VirtualEvn_cppsetup.png](img/VirtualEvn_cppsetup.png)
@@ -173,7 +173,7 @@ User_Init (void)
     return 0;
 }
 ```
-- Modify User_TestRun_Start_atEnd
+- Modify User_TestRun_Start_atEnd. The `SimCore.State` gate depends on the variant. In **src** (office), CarMaker also calls this hook at `SCState_Start` during a preprocessing pass, and starting FIXS there opens a second connection that TrafficLayer never services, so the co-sim hangs. Office therefore gates on `SCState_StartWait`. Headless (`-screen`) office builds never get past `SCState_Start` here, so they must be built with `RS_HEADLESS` defined. In **src_cm4sl**, the state only reaches `SCState_Start`, so replace the `#ifdef RS_HEADLESS ... #endif` lines below with the single `SCState_Start` line. `CarMaker/patch_user_c.ps1` picks the variant from the folder name, or you can pass `-Variant Office|CM4SL`.
 ```c++
 int
 User_TestRun_Start_atEnd (void)
@@ -186,7 +186,11 @@ User_TestRun_Start_atEnd (void)
     // ===========================================================================
     // 			 RealSim 
     // ===========================================================================	   
+#ifdef RS_HEADLESS
     if (VirEnv_isVeryFirstStep && SimCore.State >= SCState_Start) {
+#else
+    if (VirEnv_isVeryFirstStep && SimCore.State >= SCState_StartWait) {
+#endif
         VirEnv_initialization(VirEnv_c, RS_configFile, RS_signalTable);
     }
     // ===========================================================================
@@ -401,6 +405,10 @@ CarMakerSetup:
     SynchronizeTrafficSignal: true
 
     TrafficSignalPort: 2444    
+
+    # most vehicles sent to CarMaker per step, nearest to the ego first (default 100, -1 = all).
+    # keep it at or below the number of RS_C*/RS_T* traffic objects in the TestRun
+    MaxVehiclesSent: 100
 ```
 Note, in dSPACE implementation, CarMakerIP should be the IP of the host PC.
 

@@ -58,15 +58,16 @@ class _Dyno:
         self.link = LocalLink()
         self.misses = 0
 
-    def exchange(self, vref, aref, dt):
+    def exchange(self, vref, aref, dt, emergency=False):
         """Step the bench once by dt and return the speed it reached.
 
         vref is the speed command (m/s); aref the acceleration command (m/s^2),
         read only by the robot driver's hold (``stop_speed_mps``/``stop_accel_mps2``).
+        emergency: the robot brakes at ``emergency_decel_mps2`` if it has one, else ignores it.
         """
         self.link.send_reference(vref)
         reference = self.link.recv_reference()
-        self.sim.step(reference[0] if reference else 0.0, dt, a_ref=aref)
+        self.sim.step(reference[0] if reference else 0.0, dt, a_ref=aref, emergency=emergency)
         self.link.send_measurement(self.sim.speed)
         got = self.link.recv_measurement()
         if got is None:

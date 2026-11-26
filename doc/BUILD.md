@@ -273,15 +273,19 @@ FIXS releases are produced by a GitHub Actions pipeline (`.github/workflows/rele
 - **Public source → built on the hosted runner every push** (`windows-2022`, matching the VS 2022 generator; `windows-latest` ships VS 2026 and is incompatible): yaml-cpp, `TrafficLayer.exe`, `CoordMerge.exe`, `VirtualEnvironment.lib` (SDK-free on the 0.9.0 train, #174), and all `Carla/` + `CommonLib` Python. No private submodule, no token.
 - **Licensed-toolchain source → built manually on a licensed workstation**: the VISSIM DriverModel DLLs, CarMaker executables + CM4SL MEX, dSPACE libraries, and the MATLAB MEX. These need installed proprietary toolchains, so the hosted runner cannot build them. They ship as a prebuilt **bundle** that CI overlays into the build.
 
-The hosted path is made proprietary-aware by the `RS_FIXS_AUTOMATION` environment flag, which tells `dispatch.bat` to skip the licensed steps (3 / 4a / 4b / 5) and consume the downloaded bundle instead.
+The hosted path is made proprietary-aware by the `RS_FIXS_AUTOMATION` environment flag, which tells `dispatch.bat` to skip the licensed steps (VISSIM 3 / CarMaker 5a / dSPACE 5b / MEX 6) and consume the downloaded bundle instead.
 
 ### Rolling release channels
 
-| Branch | Rolling prerelease | Permanent release |
-|--------|--------------------|-------------------|
-| `main` | `stable` | `vX.Y.Z` from `VERSION`, once per version |
-| `beta_vX.Y.Z` | `vX.Y.Z-beta` | — |
-| `dev_vX.Y.Z` | `vX.Y.Z-alpha` | — |
+| Branch | Rolling prerelease | Permanent release | Notes |
+|--------|--------------------|-------------------|-------|
+| `main` | `stable` | `vX.Y.Z` from `VERSION`, once per version | release tier |
+| `beta_vX.Y.Z` | `vX.Y.Z-beta` | — | test tier |
+| `dev_vX.Y.Z` | `vX.Y.Z-alpha` | — | dev tier (e.g. `dev_v0.9.0` → `v0.9.0-alpha`, SDK-free VirtualEnvironment, #174) |
+
+`scripts/dispatch/release_channel.ps1` owns this mapping. Each channel also has a
+Read the Docs version under the same name (see the Developer Guide's documentation
+section).
 
 On every push to a release branch the pipeline builds the public core, overlays the matching proprietary bundle, packs one canonical zip, and (re)publishes the rolling prerelease anchored to that commit. Pull requests build + package only (no publish), and upload the zip as a workflow artifact for inspection.
 

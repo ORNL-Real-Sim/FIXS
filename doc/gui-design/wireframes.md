@@ -116,5 +116,3 @@ While in simulation setup, after clicking advanced Vehicle Fields, this box will
 
 **Purpose:**  
 Generates a ready-to-use `config.yaml` file based on user inputs, eliminating the need for manual configuration.
-
----

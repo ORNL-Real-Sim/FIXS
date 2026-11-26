@@ -35,6 +35,7 @@ from CommonLib.VirEnv.FixsProtocol import kFeedPeriodS, onFeedBoundary   # noqa:
 from CommonLib.VirEnv.EgoControllerHost import (                        # noqa: E402
     loadController, runController)
 from CommonLib.VirEnv.IVirEnvBackend import EgoState, Pose, kNoHandle    # noqa: E402
+from CommonLib.VirEnv.PlotView import PlotWindows                        # noqa: E402
 from CommonLib.VirEnv.VirEnvCore import VirEnvCore                       # noqa: E402
 
 if __package__:
@@ -152,6 +153,19 @@ def _spectatorTransform(tf, height, alignYaw):
     return carla.Transform(loc, carla.Rotation(-90.0, yaw, 0.0))
 
 
+def resolveEgoPhysics(blueprintId, manifestPath=''):
+    """The manifest physics plan of a library ego blueprint (#470), or None for a stock one."""
+    from Carla.vehicles.manifest import ManifestError, for_blueprint, physics_plan
+    try:
+        m, path = for_blueprint(blueprintId, manifestPath)
+    except ManifestError as exc:
+        raise SystemExit('ERROR: %s' % exc)
+    if m is None:
+        return None
+    print('Ego %s: physics from %s' % (blueprintId, path))
+    return physics_plan(m)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(
         prog='mainVirCarla',
@@ -219,6 +233,8 @@ def main(argv=None):
     deferEgoSpawn = virEnvOwnsEgo and len(cs['EgoSpawnPose']) < 4
 
     interestedIds = set(cs['InterestedIds'] or [])
+    egoPhysics = (resolveEgoPhysics(cs['EgoBlueprint'], cs['EgoVehicleManifest'])
+                  if virEnvOwnsEgo else None)
 
     client = carla.Client(cs['CarlaServerIP'], cs['CarlaServerPort'])
     client.set_timeout(10.0)
@@ -243,6 +259,9 @@ def main(argv=None):
     # EgoMode >= 1: Carla OWNS the ego -- the core must never spawn or teleport the
     # traffic simulator's echo of it, which is the injected shadow of this actor.
     core.egoId_ = egoId if virEnvOwnsEgo else ''
+    if not virEnvOwnsEgo:
+        backend.setMirroredEgo(egoId, cs['EgoBlueprint'] if cs['EgoBlueprintSet'] else '',
+                               cs['EgoColor'])
     core.egoType_ = ''
     core.trafficLayerIP_ = cs['CarlaClientIP']
     core.vehDataPort_ = cs['CarlaClientPort']
@@ -296,6 +315,7 @@ def main(argv=None):
                   "No physics ego is spawned.")
     lastAdvisory = cs['EgoTargetSpeed']
     views = CarlaViews(world, config.View_setup['Views'], carlaStep)
+    plots = PlotWindows(config.Plot_setup['Plots'] or [])
     for v in config.View_setup['Views']:
         if v['Simulator'] == 'carla' and v['Type'] == 'spectator' and not v['Implied']:
             print("ViewSetup '%s': the CARLA window follows '%s' (%s)" % (
@@ -306,6 +326,28 @@ def main(argv=None):
             return backend.egoActor()
         h = core.mappedVehicles().get(target)
         return None if h is None else backend.actorOf(h)
+
+    def _plotSample(target):
+        """PlotSetup values for ``target``: its record (with the controller's command for the ego),
+        what PhysX applied to a physics ego, and the controller's fixs.plot values."""
+        from CommonLib import fixs as _fixs
+        out = {}
+        try:
+            rec = _fixs.vehicle.get(target)
+        except Exception:
+            rec = core.Msg_c.VehDataRecv_um.get(target)
+        if rec is not None:
+            for name in config.simulation_setup['VehicleMessageField'] or []:
+                v = getattr(rec, name, None)
+                if isinstance(v, (int, float)):
+                    out[name] = float(v)
+        if virEnvOwnsEgo and target == egoId and backend.egoActor() is not None:
+            ego = backend.egoActor()
+            ctl = ego.get_control()
+            wheels = (carla.VehicleWheelLocation.FL_Wheel, carla.VehicleWheelLocation.FR_Wheel)
+            out['steerAngle'] = math.radians(sum(ego.get_wheel_steer_angle(w) for w in wheels) / 2.0)
+            out['throttle'], out['brake'] = ctl.throttle, ctl.brake
+        return out
 
     def _hudSample(target):
         """The HUD's values for ``target`` at the frame just ticked; None where there is no data."""
@@ -343,7 +385,8 @@ def main(argv=None):
             sp = Pose(x=cs['EgoSpawnPose'][0], y=cs['EgoSpawnPose'][1],
                       z=cs['EgoSpawnPose'][2], headingDeg=cs['EgoSpawnPose'][3])
             if not _bringUpEgo(cs, backend, egoDriver, world, virEnvOwnsEgo,
-                               useFixsDriver, useWireActuation, useEmbedded, sp, True):
+                               useFixsDriver, useWireActuation, useEmbedded, sp, True,
+                               egoPhysics):
                 return -1
             egoIsUp = True
         elif deferEgoSpawn:
@@ -396,7 +439,7 @@ def main(argv=None):
                           % (egoId, simTime, sp.x, sp.y, sp.z, sp.headingDeg))
                     if not _bringUpEgo(cs, backend, egoDriver, world, virEnvOwnsEgo,
                                        useFixsDriver, useWireActuation,
-                                       useEmbedded, sp, False):
+                                       useEmbedded, sp, False, egoPhysics):
                         break
                     egoIsUp = True
 
@@ -522,6 +565,14 @@ def main(argv=None):
                 _t0 = time.monotonic()
                 views.sampleHud(frameId, _hudSample)
                 phase["views"] += time.monotonic() - _t0
+            if plots.active():
+                from CommonLib.fixs import plot as _appPlot
+                appValues, appMarks = _appPlot.take()
+                sample = {}
+                for target in plots.targets():
+                    sample[target] = _plotSample(target)
+                    sample[target].update(('app.' + k, v) for k, v in appValues.items())
+                plots.add(simTime, sample, appMarks)
 
             # SUMO <-> CARLA elevation audit, once per exchange. Here rather than
             # inside setVehiclePose because it asks whether the two MAPS agree,
@@ -556,6 +607,7 @@ def main(argv=None):
                         d.positionX, d.positionY, d.positionZ = es.x, es.y, es.z
                         d.heading = es.heading
                         d.grade = es.grade
+                        d.lightIndicators = VirEnvCore.encodeLightBits(es.brake, es.indL, es.indR)
                         core.Msg_c.VehDataSend_um.setdefault(0, []).append(d)
                         if dataLog.isOpen() and logWanted(d.id):
                             dataLog.logVehicle(simTime, d)
@@ -686,11 +738,22 @@ def main(argv=None):
             dataLog.close()
         if poseLog is not None:
             poseLog.close()
+        # Before the views close, so a dyno the controller holds ramps down on camera.
+        if embedded is not None:
+            embedded, _closing = None, embedded
+            _closing.shutdown()
         views.close()
+        plots.close()
         if virEnvOwnsEgo:
             backend.destroyEgo()
     finally:
+        if embedded is not None:
+            try:
+                embedded.shutdown()
+            except Exception as exc:
+                print('Ego controller shutdown failed: %s' % exc)
         views.close()
+        plots.close()
         core.shutdown()
         settings = world.get_settings()
         if settings.synchronous_mode:
@@ -700,7 +763,7 @@ def main(argv=None):
 
 
 def _bringUpEgo(cs, backend, egoDriver, world, virEnvOwnsEgo, useFixsDriver,
-                useWireActuation, useEmbedded, sp, settleOutOfBand):
+                useWireActuation, useEmbedded, sp, settleOutOfBand, egoPhysics=None):
     """Spawn the ego at `sp` and wire whichever driver owns it. -> bool
 
     Peer of the ``bringUpEgo`` lambda in mainVirCarla.cpp:282, and callable from
@@ -717,7 +780,8 @@ def _bringUpEgo(cs, backend, egoDriver, world, virEnvOwnsEgo, useFixsDriver,
     there advances Carla past the feed and desyncs every mirrored vehicle. A
     deferred ego therefore settles inside the co-sim ticks instead.
     """
-    if backend.spawnEgo(cs['EgoBlueprint'], sp, cs['TrafficManagerPort']) == kNoHandle:
+    if backend.spawnEgo(cs['EgoBlueprint'], sp, cs['TrafficManagerPort'],
+                        color=cs['EgoColor'], physics=egoPhysics) == kNoHandle:
         print('ego spawn failed', file=sys.stderr)
         return False
 

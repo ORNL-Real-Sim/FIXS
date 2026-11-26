@@ -1,0 +1,37 @@
+name: Docs
+
+# Builds the Read the Docs site on every PR that can change it, with warnings as
+# errors, so a broken link or a bad toctree entry fails here instead of on RTD
+# after merge. Same Python and requirements as .readthedocs.yml. (#137)
+#
+# Publishing is not done here: RTD builds each channel (stable, vX.Y.Z-alpha,
+# vX.Y.Z-beta) when release.yml publishes it - see the docs-publish job there.
+
+# No paths filter: doc/ links into the rest of the repo (tests/, CarMaker/,
+# CLAUDE.md, ...), so moving or deleting a file anywhere can dangle a docs link.
+# An allow-list would silently miss the next directory someone links to; the
+# build is ~1 min, so it just runs.
+on:
+  pull_request:
+    branches: [dev, main, 'dev_v*', 'beta_v*']
+
+jobs:
+  sphinx:
+    runs-on: ubuntu-latest
+    steps:
+      # Depth 1 but the whole tree: the link rewriter checks that each target
+      # exists. ~230 MB; history (the ~1 GB part) is not needed.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install doc requirements
+        run: python -m pip install -r doc/requirements_doc.txt
+
+      - name: Build (warnings are errors)
+        run: python -m sphinx -T -W --keep-going -b html doc _build/html

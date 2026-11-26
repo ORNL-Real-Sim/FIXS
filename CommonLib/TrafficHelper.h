@@ -114,6 +114,8 @@ public:
 	bool edgeHasSubscribed = false;
 	bool pointHasSubscribed = false;
 	bool allVehicleHasSubscribed = false;
+	// The vehicles already in the network have been taken in by the entry subscriptions.
+	bool presentVehiclesSubscribed = false;
 	std::vector <bool> vehicleHasSubscribed_v;
 
 
@@ -307,11 +309,15 @@ private:
 	SignalSubscriptionFlags_t SignalSubscriptionFlags;
 	DetectorSubscriptionFlags_t DetectorSubscriptionFlags;
 
+	// What TrafficLayer subscribed itself; a relayed script's subscriptions share libtraci's results.
+	std::unordered_set<std::string> ownSignalId_us;
+	std::unordered_set<std::string> ownDetectorId_us;
+
 	const double SUB_CONT_TIME_THLD = 1; // has to be in for 10 seconds
 
 	const double SIM_STEP = 0.1;
 
-	const int N_MAX_VEH = 100;
+	bool sendCapWarned = false;
 };
 
 
