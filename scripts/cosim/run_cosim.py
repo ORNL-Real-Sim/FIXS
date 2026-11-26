@@ -2530,6 +2530,8 @@ def _ensure_ego_vehicle(args, cfg, config_yaml):
     bp_id = (get_yaml_scalar(config_yaml, "CarlaSetup", "EgoBlueprint") or "").strip("'\"")
     if not bp_id:
         return
+    if CARLA_DIR not in sys.path:
+        sys.path.insert(0, CARLA_DIR)        # import_vehicle and vehicles/ live in Carla/
     import import_vehicle
     state = import_vehicle.ensure_for_run(bp_id, cfg["carla_root"], cfg["mode"],
                                           ue4_root=cfg.get("ue4_root"),
